@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PGPASSWORD=admin123 psql:*)",
+      "Bash(uploads/.gitkeep)",
+      "Bash(exports/.gitkeep)",
+      "Bash(python -m venv:*)",
+      "Bash(./venv/Scripts/pip install:*)",
+      "Bash(../venv/Scripts/alembic upgrade head)",
+      "Bash(./venv/Scripts/alembic:*)",
+      "Bash(../venv/Scripts/uvicorn:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(npm create:*)",
+      "Bash(npm run dev:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(..venvScriptspython -c \"import pyshp; import shapefile; import geojson; print(''All dependencies OK'')\")",
+      "Bash(.venvScriptspip list)",
+      "Bash(./venv/Scripts/pip:*)",
+      "Bash(../venv/Scripts/python:*)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0ODUyNDczZS02Y2I5LTQ0MjItOTFiOS1hYThkNTlkMzllODMiLCJlbWFpbCI6Im5ld3VzZXJAZXhhbXBsZS5jb20iLCJleHAiOjE3NjkxNTQ3NjEsInR5cGUiOiJhY2Nlc3MifQ.1VtGk_RvURWUt-T4yke0liQqLYSyVlEKcC569Y-5Dj0\")",
+      "Bash(../venv/Scripts/alembic revision -m \"add_forest_name_block_name_to_calculations\")",
+      "Bash(python:*)",
+      "Bash(npm --version)",
+      "Bash(../venv/Scripts/alembic revision:*)",
+      "Bash(dir:*)",
+      "Bash(..venvScriptsuvicorn app.main:app --host 0.0.0.0 --port 8001)",
+      "Bash(timeout:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nBackup: Working state before implementing background raster analysis\n\nCurrent state:\n- Frontend and backend servers running successfully\n- File upload working (KML, GeoJSON, Shapefile)\n- Map visualization with portrait/landscape orientation\n- Area calculation and block detection implemented\n- Analysis service structured but not yet triggered\n\nNext: Enable background raster analysis processing\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
