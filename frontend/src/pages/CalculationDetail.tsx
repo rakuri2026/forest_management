@@ -118,9 +118,14 @@ export default function CalculationDetail() {
   const loadCalculation = async () => {
     try {
       setLoading(true);
+      console.log('Loading calculation:', id);
       const data = await forestApi.getCalculation(id!);
+      console.log('Calculation data loaded:', data);
+      console.log('Result data keys:', data.result_data ? Object.keys(data.result_data) : 'null');
+      console.log('Blocks:', data.result_data?.blocks);
       setCalculation(data);
     } catch (err: any) {
+      console.error('Error loading calculation:', err);
       setError(err.response?.data?.detail || 'Failed to load calculation');
     } finally {
       setLoading(false);
@@ -184,6 +189,16 @@ export default function CalculationDetail() {
   const blocks = calculation.result_data?.blocks || [];
   const totalBlocks = calculation.result_data?.total_blocks || 1;
   const processingInfo = calculation.result_data?.processing_info || {};
+
+  // Debug logging
+  console.log('Rendering CalculationDetail:', {
+    calculationId: calculation.id,
+    forestName: calculation.forest_name,
+    hasResultData: !!calculation.result_data,
+    blocksCount: blocks.length,
+    totalBlocks,
+    resultDataKeys: calculation.result_data ? Object.keys(calculation.result_data) : []
+  });
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
@@ -298,6 +313,616 @@ export default function CalculationDetail() {
           </div>
         )}
 
+        {/* Whole Forest Analysis Section */}
+        <div className="p-6 border-t border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis</h2>
+          <div className="border border-gray-300 rounded-lg bg-white shadow-sm">
+            {/* Forest Header */}
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900">
+                {calculation.forest_name} - Complete Forest Summary
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Total Area: {calculation.result_data?.area_hectares?.toFixed(2)} hectares
+                {totalBlocks > 1 && ` (${totalBlocks} blocks)`}
+              </p>
+            </div>
+
+            {/* Forest Analysis Table */}
+            <div className="p-6">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {/* Area */}
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Total Area</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                      {calculation.result_data?.area_hectares?.toFixed(2)} ha
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {(calculation.result_data?.area_sqm || 0).toLocaleString()} m²
+                    </td>
+                  </tr>
+
+                  {/* Elevation */}
+                  {calculation.result_data?.elevation_mean_m !== undefined && calculation.result_data?.elevation_mean_m !== null && calculation.result_data?.elevation_mean_m > -32000 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Elevation</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        {calculation.result_data?.elevation_mean_m.toFixed(1)} m (mean)
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Min: {calculation.result_data?.elevation_min_m?.toFixed(0)} m, Max: {calculation.result_data?.elevation_max_m?.toFixed(0)} m
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Slope */}
+                  {calculation.result_data?.slope_dominant_class && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Slope</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          calculation.result_data?.slope_dominant_class === 'flat' ? 'bg-blue-100 text-blue-800' :
+                          calculation.result_data?.slope_dominant_class === 'gentle' ? 'bg-green-100 text-green-800' :
+                          calculation.result_data?.slope_dominant_class === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
+                          calculation.result_data?.slope_dominant_class === 'steep' ? 'bg-orange-100 text-orange-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {calculation.result_data?.slope_dominant_class}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.slope_percentages &&
+                          Object.entries(calculation.result_data?.slope_percentages)
+                            .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Aspect */}
+                  {calculation.result_data?.aspect_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Aspect (Orientation)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize font-semibold">
+                        {calculation.result_data?.aspect_dominant}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.aspect_percentages &&
+                          Object.entries(calculation.result_data?.aspect_percentages)
+                            .map(([dir, pct]: [string, any]) => `${dir}: ${pct.toFixed(1)}%`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Canopy Height */}
+                  {calculation.result_data?.canopy_dominant_class && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Canopy Structure</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        {calculation.result_data?.canopy_dominant_class.replace('_', ' ')}
+                        {calculation.result_data?.canopy_mean_m !== undefined && (
+                          <span className="text-xs text-gray-500 ml-2">
+                            ({calculation.result_data?.canopy_mean_m.toFixed(1)}m avg)
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.canopy_percentages &&
+                          Object.entries(calculation.result_data?.canopy_percentages)
+                            .map(([cls, pct]: [string, any]) => `${cls.replace('_', ' ')}: ${pct.toFixed(1)}%`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Above Ground Biomass */}
+                  {calculation.result_data?.agb_total_mg !== undefined && calculation.result_data?.agb_total_mg !== null && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Above Ground Biomass (AGB)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        {calculation.result_data?.agb_total_mg.toLocaleString()} Mg
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.agb_mean_mg_ha?.toFixed(2)} Mg/ha (mean per hectare)
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Carbon Stock */}
+                  {calculation.result_data?.carbon_stock_mg !== undefined && calculation.result_data?.carbon_stock_mg !== null && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        {calculation.result_data?.carbon_stock_mg.toLocaleString()} Mg
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        50% of total biomass
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Health */}
+                  {calculation.result_data?.forest_health_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Health</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          calculation.result_data?.forest_health_dominant === 'excellent' ? 'bg-green-100 text-green-800' :
+                          calculation.result_data?.forest_health_dominant === 'good' ? 'bg-green-100 text-green-700' :
+                          calculation.result_data?.forest_health_dominant === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
+                          calculation.result_data?.forest_health_dominant === 'poor' ? 'bg-orange-100 text-orange-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {calculation.result_data?.forest_health_dominant}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.forest_health_percentages &&
+                          Object.entries(calculation.result_data?.forest_health_percentages)
+                            .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Type */}
+                  {calculation.result_data?.forest_type_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Type</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                          {calculation.result_data?.forest_type_dominant}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.forest_type_percentages &&
+                          Object.entries(calculation.result_data?.forest_type_percentages)
+                            .map(([type, pct]: [string, any]) => `${type}: ${pct.toFixed(1)}%`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Land Cover */}
+                  {calculation.result_data?.landcover_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                          {calculation.result_data?.landcover_dominant}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.landcover_percentages &&
+                          Object.entries(calculation.result_data?.landcover_percentages)
+                            .map(([cover, pct]: [string, any]) => `${cover}: ${pct.toFixed(1)}%`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Loss */}
+                  {calculation.result_data?.forest_loss_hectares !== undefined && calculation.result_data?.forest_loss_hectares !== null && calculation.result_data?.forest_loss_hectares >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Loss (2001-2023)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                          {calculation.result_data?.forest_loss_hectares.toFixed(2)} ha
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.forest_loss_by_year &&
+                          Object.entries(calculation.result_data?.forest_loss_by_year)
+                            .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                            .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Gain */}
+                  {calculation.result_data?.forest_gain_hectares !== undefined && calculation.result_data?.forest_gain_hectares !== null && calculation.result_data?.forest_gain_hectares >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Gain (2000-2012)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                          {calculation.result_data?.forest_gain_hectares.toFixed(2)} ha
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Net forest gain over 12-year period
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Fire Loss */}
+                  {calculation.result_data?.fire_loss_hectares !== undefined && calculation.result_data?.fire_loss_hectares !== null && calculation.result_data?.fire_loss_hectares >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Fire Loss (2001-2023)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
+                          {calculation.result_data?.fire_loss_hectares.toFixed(2)} ha
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.fire_loss_by_year &&
+                          Object.entries(calculation.result_data?.fire_loss_by_year)
+                            .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                            .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Temperature */}
+                  {calculation.result_data?.temperature_mean_c !== undefined && calculation.result_data?.temperature_mean_c !== null && calculation.result_data?.temperature_mean_c > -100 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Temperature</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        {calculation.result_data?.temperature_mean_c.toFixed(1)} °C (mean)
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Min (coldest month): {calculation.result_data?.temperature_min_c?.toFixed(1)} °C
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Precipitation */}
+                  {calculation.result_data?.precipitation_mean_mm !== undefined && calculation.result_data?.precipitation_mean_mm !== null && calculation.result_data?.precipitation_mean_mm >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Precipitation</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        {calculation.result_data?.precipitation_mean_mm.toFixed(0)} mm/year
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Annual total precipitation
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Soil Texture */}
+                  {calculation.result_data?.soil_texture && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                          {calculation.result_data?.soil_texture}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.soil_properties &&
+                          Object.entries(calculation.result_data?.soil_properties)
+                            .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
+                            .join(', ')
+                        }
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Block-wise Analysis */}
+        {blocks.length > 0 && (
+          <div className="p-6 border-t border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Detailed Block-wise Analysis</h2>
+            <div className="space-y-6">
+              {blocks.map((block: any, index: number) => (
+                <div key={index} className="border border-gray-300 rounded-lg bg-white shadow-sm">
+                  {/* Block Header */}
+                  <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-bold text-gray-900">
+                      Block #{index + 1}: {block.block_name}
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Area: {parseFloat(block.area_hectares || 0).toFixed(2)} hectares
+                    </p>
+                  </div>
+
+                  {/* Block Analysis Table */}
+                  <div className="p-6">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {/* Elevation */}
+                        {block.elevation_mean_m !== undefined && block.elevation_mean_m !== null && block.elevation_mean_m > -32000 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Elevation</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              {block.elevation_mean_m.toFixed(1)} m (mean)
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Min: {block.elevation_min_m?.toFixed(0)} m, Max: {block.elevation_max_m?.toFixed(0)} m
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Slope */}
+                        {block.slope_dominant_class && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Slope</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                block.slope_dominant_class === 'flat' ? 'bg-blue-100 text-blue-800' :
+                                block.slope_dominant_class === 'gentle' ? 'bg-green-100 text-green-800' :
+                                block.slope_dominant_class === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
+                                block.slope_dominant_class === 'steep' ? 'bg-orange-100 text-orange-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {block.slope_dominant_class}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.slope_percentages &&
+                                Object.entries(block.slope_percentages)
+                                  .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Aspect */}
+                        {block.aspect_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Aspect</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize font-semibold">
+                              {block.aspect_dominant}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.aspect_percentages &&
+                                Object.entries(block.aspect_percentages)
+                                  .map(([dir, pct]: [string, any]) => `${dir}: ${pct.toFixed(1)}%`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Canopy Height */}
+                        {block.canopy_dominant_class && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Canopy Structure</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              {block.canopy_dominant_class.replace('_', ' ')}
+                              {block.canopy_mean_m !== undefined && (
+                                <span className="text-xs text-gray-500 ml-2">
+                                  ({block.canopy_mean_m.toFixed(1)}m avg)
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.canopy_percentages &&
+                                Object.entries(block.canopy_percentages)
+                                  .map(([cls, pct]: [string, any]) => `${cls.replace('_', ' ')}: ${pct.toFixed(1)}%`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Above Ground Biomass */}
+                        {block.agb_total_mg !== undefined && block.agb_total_mg !== null && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Above Ground Biomass</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              {block.agb_total_mg.toLocaleString()} Mg
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.agb_mean_mg_ha?.toFixed(2)} Mg/ha (mean per hectare)
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Carbon Stock */}
+                        {block.carbon_stock_mg !== undefined && block.carbon_stock_mg !== null && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              {block.carbon_stock_mg.toLocaleString()} Mg
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              50% of total biomass
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Health */}
+                        {block.forest_health_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Health</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                block.forest_health_dominant === 'excellent' ? 'bg-green-100 text-green-800' :
+                                block.forest_health_dominant === 'good' ? 'bg-green-100 text-green-700' :
+                                block.forest_health_dominant === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
+                                block.forest_health_dominant === 'poor' ? 'bg-orange-100 text-orange-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {block.forest_health_dominant}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.forest_health_percentages &&
+                                Object.entries(block.forest_health_percentages)
+                                  .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Type */}
+                        {block.forest_type_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Type</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                {block.forest_type_dominant}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.forest_type_percentages &&
+                                Object.entries(block.forest_type_percentages)
+                                  .map(([type, pct]: [string, any]) => `${type}: ${pct.toFixed(1)}%`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Land Cover */}
+                        {block.landcover_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                                {block.landcover_dominant}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.landcover_percentages &&
+                                Object.entries(block.landcover_percentages)
+                                  .map(([cover, pct]: [string, any]) => `${cover}: ${pct.toFixed(1)}%`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Loss */}
+                        {block.forest_loss_hectares !== undefined && block.forest_loss_hectares !== null && block.forest_loss_hectares >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Loss (2001-2023)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                                {block.forest_loss_hectares.toFixed(2)} ha
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.forest_loss_by_year &&
+                                Object.entries(block.forest_loss_by_year)
+                                  .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                                  .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Gain */}
+                        {block.forest_gain_hectares !== undefined && block.forest_gain_hectares !== null && block.forest_gain_hectares >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Gain (2000-2012)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                {block.forest_gain_hectares.toFixed(2)} ha
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Net forest gain over 12-year period
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Fire Loss */}
+                        {block.fire_loss_hectares !== undefined && block.fire_loss_hectares !== null && block.fire_loss_hectares >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Fire Loss (2001-2023)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
+                                {block.fire_loss_hectares.toFixed(2)} ha
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.fire_loss_by_year &&
+                                Object.entries(block.fire_loss_by_year)
+                                  .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                                  .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Temperature */}
+                        {block.temperature_mean_c !== undefined && block.temperature_mean_c !== null && block.temperature_mean_c > -100 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Temperature</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              {block.temperature_mean_c.toFixed(1)} °C (mean)
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Min (coldest month): {block.temperature_min_c?.toFixed(1)} °C
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Precipitation */}
+                        {block.precipitation_mean_mm !== undefined && block.precipitation_mean_mm !== null && block.precipitation_mean_mm >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Precipitation</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              {block.precipitation_mean_mm.toFixed(0)} mm/year
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Annual total precipitation
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Soil Texture */}
+                        {block.soil_texture && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                {block.soil_texture}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.soil_properties &&
+                                Object.entries(block.soil_properties)
+                                  .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
+                                  .join(', ')
+                              }
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Additional Information */}
         <div className="px-6 pb-6">
           <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-3">
@@ -339,6 +964,7 @@ export default function CalculationDetail() {
               </div>
             )}
           </dl>
+        </div>
 
         {/* Map Section */}
         {calculation.geometry && (
@@ -425,7 +1051,6 @@ export default function CalculationDetail() {
             </div>
           </div>
         )}
-        </div>
       </div>
     </div>
   );

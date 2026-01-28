@@ -4,6 +4,7 @@ Forest management API endpoints
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
+from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional, List
 from uuid import UUID
 import json
@@ -22,9 +23,8 @@ from ..schemas.forest import (
 )
 from ..utils.auth import get_current_active_user, require_super_admin
 from ..services.file_processor import process_uploaded_file
+from ..services.analysis import analyze_forest_boundary
 from shapely.geometry import mapping
-# Analysis service not yet implemented
-# from ..services.analysis import analyze_forest_boundary
 
 
 router = APIRouter()
@@ -281,22 +281,47 @@ async def upload_forest_boundary(
     db.commit()
     db.refresh(calculation)
 
-    # Start analysis in background (temporarily disabled)
-    # try:
-    #     result_data, processing_time = await analyze_forest_boundary(calculation.id, db)
-    #
-    #     calculation.result_data = result_data
-    #     calculation.processing_time_seconds = processing_time
-    #     calculation.status = CalculationStatus.COMPLETED
-    #     calculation.completed_at = func.now()
-    #
-    #     db.commit()
-    #     db.refresh(calculation)
-    #
-    # except Exception as e:
-    #     calculation.status = CalculationStatus.FAILED
-    #     calculation.error_message = str(e)
-    #     db.commit()
+    # Start analysis in background
+    try:
+        # Run raster analysis on the uploaded boundary
+        print(f"Starting analysis for calculation {calculation.id}")
+        analysis_results, processing_time = await analyze_forest_boundary(calculation.id, db)
+        print(f"Analysis completed with {len(analysis_results)} keys")
+
+        # Merge analysis results with existing block data using SQL JSONB operators
+        # Use CAST syntax instead of :: to avoid parameter binding conflict
+        update_query = text("""
+            UPDATE public.calculations
+            SET
+                result_data = result_data || CAST(:analysis_data AS jsonb),
+                processing_time_seconds = :processing_time,
+                status = :status,
+                completed_at = NOW()
+            WHERE id = :calc_id
+        """)
+
+        print(f"Executing UPDATE with {len(json.dumps(analysis_results))} bytes of data")
+        result = db.execute(update_query, {
+            "analysis_data": json.dumps(analysis_results),
+            "processing_time": processing_time,
+            "status": "COMPLETED",
+            "calc_id": str(calculation.id)
+        })
+        print(f"UPDATE affected {result.rowcount} rows")
+
+        db.commit()
+        print("Commit successful")
+        db.refresh(calculation)
+        print(f"Refreshed calculation, result_data has {len(calculation.result_data)} keys")
+
+    except Exception as e:
+        calculation.status = CalculationStatus.FAILED
+        calculation.error_message = str(e)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis failed: {str(e)}"
+        )
 
     # Get geometry as GeoJSON
     geojson_query = db.query(
