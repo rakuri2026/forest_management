@@ -233,86 +233,6 @@ export default function CalculationDetail() {
           )}
         </div>
 
-        {/* Blocks Table Section */}
-        {blocks.length > 0 && (
-          <div className="p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Forest Blocks</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Block #
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Forest Name
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Block Name
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Area (ha)
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      UTM Zone
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {blocks.map((block: any, index: number) => {
-                    // Use pre-calculated area in hectares (accurate UTM calculation from backend)
-                    const areaHa = block.area_hectares ? parseFloat(block.area_hectares).toFixed(2) : '0.00';
-
-                    // Determine UTM zone based on centroid longitude
-                    // Nepal: 80-84°E = Zone 44N (32644), 84-88°E = Zone 45N (32645)
-                    const lon = block.centroid?.lon || 0;
-                    const utmZone = lon >= 84 ? '45N (EPSG:32645)' : '44N (EPSG:32644)';
-
-                    return (
-                      <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {index + 1}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          <div className="font-medium">{calculation.forest_name}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          <div className="font-medium">{block.block_name}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-mono">
-                          {areaHa}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-center">
-                          {utmZone}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                            Ready
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot className="bg-gray-50">
-                  <tr>
-                    <td colSpan={3} className="px-6 py-3 text-sm font-semibold text-gray-900">
-                      Total ({blocks.length} blocks)
-                    </td>
-                    <td className="px-6 py-3 text-sm font-semibold text-gray-900 text-right font-mono">
-                      {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.area_hectares || 0), 0).toFixed(2)} ha
-                    </td>
-                    <td colSpan={2}></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        )}
-
         {/* Whole Forest Analysis Section */}
         <div className="p-6 border-t border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis</h2>
@@ -349,6 +269,19 @@ export default function CalculationDetail() {
                       {(calculation.result_data?.area_sqm || 0).toLocaleString()} m²
                     </td>
                   </tr>
+
+                  {/* Extent */}
+                  {calculation.result_data?.whole_forest_extent && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        N: {calculation.result_data.whole_forest_extent.N.toFixed(7)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 font-mono">
+                        S: {calculation.result_data.whole_forest_extent.S.toFixed(7)}, E: {calculation.result_data.whole_forest_extent.E.toFixed(7)}, W: {calculation.result_data.whole_forest_extent.W.toFixed(7)}
+                      </td>
+                    </tr>
+                  )}
 
                   {/* Elevation */}
                   {calculation.result_data?.elevation_mean_m !== undefined && calculation.result_data?.elevation_mean_m !== null && calculation.result_data?.elevation_mean_m > -32000 && (
@@ -649,6 +582,22 @@ export default function CalculationDetail() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
+                        {/* Extent */}
+                        {block.extent && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              Extent
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600 font-mono">
+                              <div>N: {block.extent.N.toFixed(7)}</div>
+                              <div>S: {block.extent.S.toFixed(7)}</div>
+                              <div>E: {block.extent.E.toFixed(7)}</div>
+                              <div>W: {block.extent.W.toFixed(7)}</div>
+                            </td>
+                          </tr>
+                        )}
+
                         {/* Elevation */}
                         {block.elevation_mean_m !== undefined && block.elevation_mean_m !== null && block.elevation_mean_m > -32000 && (
                           <tr className="hover:bg-gray-50">

@@ -58,6 +58,24 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
     area_data = calculate_area(calculation_id, db)
     results.update(area_data)
 
+    # 1b. Calculate whole forest extent (bounding box)
+    extent_query = text("""
+        SELECT
+            ST_YMax(ST_Envelope(boundary_geom)) as north,
+            ST_YMin(ST_Envelope(boundary_geom)) as south,
+            ST_XMax(ST_Envelope(boundary_geom)) as east,
+            ST_XMin(ST_Envelope(boundary_geom)) as west
+        FROM calculations WHERE id = :calc_id
+    """)
+    whole_extent = db.execute(extent_query, {"calc_id": str(calculation_id)}).first()
+    if whole_extent:
+        results["whole_forest_extent"] = {
+            "N": round(float(whole_extent.north), 7),
+            "S": round(float(whole_extent.south), 7),
+            "E": round(float(whole_extent.east), 7),
+            "W": round(float(whole_extent.west), 7)
+        }
+
     # 2. Raster analysis on whole boundary
     raster_results = await analyze_rasters(calculation_id, db)
     results.update(raster_results)
@@ -100,6 +118,23 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
     block_wkt = wkt_result.wkt
 
     block_results = {}
+
+    # Calculate bounding box extent for this block
+    extent_query = text("""
+        SELECT
+            ST_YMax(ST_Envelope(ST_GeomFromText(:wkt, 4326))) as north,
+            ST_YMin(ST_Envelope(ST_GeomFromText(:wkt, 4326))) as south,
+            ST_XMax(ST_Envelope(ST_GeomFromText(:wkt, 4326))) as east,
+            ST_XMin(ST_Envelope(ST_GeomFromText(:wkt, 4326))) as west
+    """)
+    extent_result = db.execute(extent_query, {"wkt": block_wkt}).first()
+    if extent_result:
+        block_results["extent"] = {
+            "N": round(float(extent_result.north), 7),
+            "S": round(float(extent_result.south), 7),
+            "E": round(float(extent_result.east), 7),
+            "W": round(float(extent_result.west), 7)
+        }
 
     # Run all raster analyses on this block's geometry
     # 1. DEM - Elevation
