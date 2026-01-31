@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     EXPORT_DIR: str = "./exports"
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8001"
 
     # Application
     APP_NAME: str = "Community Forest Management System"

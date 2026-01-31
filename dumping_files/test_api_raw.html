@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>Raw API Response Test</h1>
+    <button onclick="testAPI()">Test API Call</button>
+    <pre id="output"></pre>
+
+    <script>
+        async function testAPI() {
+            const calcId = 'e771aa41-7bcf-48d8-b1ec-d1a06e17df41';
+            const token = prompt('Enter your access token (or leave blank to try without auth):');
+
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (token && token.trim()) {
+                headers['Authorization'] = `Bearer ${token.trim()}`;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:8004/api/forests/calculations/${calcId}`, {
+                    headers: headers
+                });
+
+                const data = await response.json();
+
+                const output = {
+                    status: response.status,
+                    hasResultData: !!data.result_data,
+                    topLevelSlope: data.result_data?.slope_dominant_class,
+                    topLevelAspect: data.result_data?.aspect_dominant,
+                    topLevelForestType: data.result_data?.forest_type_dominant,
+                    blocksCount: data.result_data?.blocks?.length,
+                    block0Slope: data.result_data?.blocks?.[0]?.slope_dominant_class,
+                    block0Aspect: data.result_data?.blocks?.[0]?.aspect_dominant,
+                    block0Area: data.result_data?.blocks?.[0]?.area_hectares,
+                    fullResponse: data
+                };
+
+                document.getElementById('output').textContent = JSON.stringify(output, null, 2);
+            } catch (error) {
+                document.getElementById('output').textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

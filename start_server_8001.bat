@@ -11,6 +11,9 @@ echo Activating virtual environment...
 call venv\Scripts\activate
 echo.
 
+REM Disable Python output buffering
+set PYTHONUNBUFFERED=1
+
 REM Start the server on port 8001
 echo ========================================
 echo Starting FastAPI server on port 8001...
@@ -20,5 +23,5 @@ echo ========================================
 echo.
 
 cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+..\venv\Scripts\python -u -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 cd ..

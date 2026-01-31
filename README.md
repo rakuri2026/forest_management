@@ -1,4 +1,4 @@
-# Community Forest Management System
+ Management System
 
 A comprehensive web-based GIS application for managing and analyzing community forest data in Nepal.
 

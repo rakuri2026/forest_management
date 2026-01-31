@@ -114,6 +114,14 @@ export const forestApi = {
     const response = await api.get<Calculation>(`/api/forests/calculations/${id}`);
     return response.data;
   },
+
+  updateResultData: async (id: string, data: Record<string, any>): Promise<void> => {
+    await api.patch(`/api/forests/calculations/${id}/result-data`, data);
+  },
+
+  deleteCalculation: async (id: string): Promise<void> => {
+    await api.delete(`/api/forests/calculations/${id}`);
+  },
 };
 
 export default api;

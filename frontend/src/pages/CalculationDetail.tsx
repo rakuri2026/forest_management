@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { forestApi } from '../services/api';
 import type { Calculation } from '../types';
+import { EditableCell } from '../components/EditableCell';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -185,6 +186,96 @@ export default function CalculationDetail() {
     );
   }
 
+  // Handler to save a whole-forest field
+  const handleSaveWholeForest = async (key: string, newValue: string) => {
+    const numericKeys = [
+      'elevation_mean_m', 'elevation_min_m', 'elevation_max_m',
+      'temperature_mean_c', 'temperature_min_c',
+      'precipitation_mean_mm',
+      'agb_total_mg', 'agb_mean_mg_ha', 'carbon_stock_mg',
+      'forest_loss_hectares', 'forest_gain_hectares', 'fire_loss_hectares',
+      'canopy_mean_m', 'area_hectares', 'area_sqm'
+    ];
+    const val: any = numericKeys.includes(key) ? parseFloat(newValue) : newValue;
+    await forestApi.updateResultData(calculation.id, { [key]: val });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, [key]: val }
+    } : prev);
+  };
+
+  // Handler to save a block-level field
+  const handleSaveBlock = async (blockIndex: number, key: string, newValue: string) => {
+    const numericKeys = [
+      'elevation_mean_m', 'elevation_min_m', 'elevation_max_m',
+      'temperature_mean_c', 'temperature_min_c',
+      'precipitation_mean_mm',
+      'agb_total_mg', 'agb_mean_mg_ha', 'carbon_stock_mg',
+      'forest_loss_hectares', 'forest_gain_hectares', 'fire_loss_hectares',
+      'canopy_mean_m', 'area_hectares', 'area_sqm'
+    ];
+    const val: any = numericKeys.includes(key) ? parseFloat(newValue) : newValue;
+    const updatedBlocks = [...(calculation.result_data?.blocks || [])];
+    updatedBlocks[blockIndex] = { ...updatedBlocks[blockIndex], [key]: val };
+    await forestApi.updateResultData(calculation.id, { blocks: updatedBlocks });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, blocks: updatedBlocks }
+    } : prev);
+  };
+
+  // Handler to save a block extent field
+  const handleSaveBlockExtent = async (blockIndex: number, direction: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedBlocks = [...(calculation.result_data?.blocks || [])];
+    updatedBlocks[blockIndex] = {
+      ...updatedBlocks[blockIndex],
+      extent: { ...updatedBlocks[blockIndex].extent, [direction]: val }
+    };
+    await forestApi.updateResultData(calculation.id, { blocks: updatedBlocks });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, blocks: updatedBlocks }
+    } : prev);
+  };
+
+  // Handler to save whole forest extent field
+  const handleSaveWholeExtent = async (direction: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedExtent = { ...calculation.result_data?.whole_forest_extent, [direction]: val };
+    await forestApi.updateResultData(calculation.id, { whole_forest_extent: updatedExtent });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, whole_forest_extent: updatedExtent }
+    } : prev);
+  };
+
+  // Handler to save whole forest percentages
+  const handleSaveWholePercentages = async (key: string, className: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedPercentages = { ...calculation.result_data?.[key], [className]: val };
+    await forestApi.updateResultData(calculation.id, { [key]: updatedPercentages });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, [key]: updatedPercentages }
+    } : prev);
+  };
+
+  // Handler to save block percentages
+  const handleSaveBlockPercentages = async (blockIndex: number, key: string, className: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedBlocks = [...(calculation.result_data?.blocks || [])];
+    updatedBlocks[blockIndex] = {
+      ...updatedBlocks[blockIndex],
+      [key]: { ...updatedBlocks[blockIndex][key], [className]: val }
+    };
+    await forestApi.updateResultData(calculation.id, { blocks: updatedBlocks });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, blocks: updatedBlocks }
+    } : prev);
+  };
+
   // Extract blocks from result_data
   const blocks = calculation.result_data?.blocks || [];
   const totalBlocks = calculation.result_data?.total_blocks || 1;
@@ -275,10 +366,12 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        N: {calculation.result_data.whole_forest_extent.N.toFixed(7)}
+                        <EditableCell value={calculation.result_data.whole_forest_extent.N} displayValue={"N: " + calculation.result_data.whole_forest_extent.N.toFixed(7)} onSave={(v) => handleSaveWholeExtent('N', v)} className="font-mono" />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 font-mono">
-                        S: {calculation.result_data.whole_forest_extent.S.toFixed(7)}, E: {calculation.result_data.whole_forest_extent.E.toFixed(7)}, W: {calculation.result_data.whole_forest_extent.W.toFixed(7)}
+                        <EditableCell value={calculation.result_data.whole_forest_extent.S} displayValue={"S: " + calculation.result_data.whole_forest_extent.S.toFixed(7)} onSave={(v) => handleSaveWholeExtent('S', v)} className="font-mono" />{", "}
+                        <EditableCell value={calculation.result_data.whole_forest_extent.E} displayValue={"E: " + calculation.result_data.whole_forest_extent.E.toFixed(7)} onSave={(v) => handleSaveWholeExtent('E', v)} className="font-mono" />{", "}
+                        <EditableCell value={calculation.result_data.whole_forest_extent.W} displayValue={"W: " + calculation.result_data.whole_forest_extent.W.toFixed(7)} onSave={(v) => handleSaveWholeExtent('W', v)} className="font-mono" />
                       </td>
                     </tr>
                   )}
@@ -288,10 +381,11 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Elevation</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        {calculation.result_data?.elevation_mean_m.toFixed(1)} m (mean)
+                        <EditableCell value={calculation.result_data.elevation_mean_m} displayValue={calculation.result_data.elevation_mean_m.toFixed(1) + " m (mean)"} onSave={(v) => handleSaveWholeForest('elevation_mean_m', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        Min: {calculation.result_data?.elevation_min_m?.toFixed(0)} m, Max: {calculation.result_data?.elevation_max_m?.toFixed(0)} m
+                        Min: <EditableCell value={calculation.result_data.elevation_min_m} displayValue={calculation.result_data.elevation_min_m?.toFixed(0)} onSave={(v) => handleSaveWholeForest('elevation_min_m', v)} />{" m, Max: "}
+                        <EditableCell value={calculation.result_data.elevation_max_m} displayValue={calculation.result_data.elevation_max_m?.toFixed(0)} onSave={(v) => handleSaveWholeForest('elevation_max_m', v)} />{" m"}
                       </td>
                     </tr>
                   )}
@@ -301,21 +395,16 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Slope</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          calculation.result_data?.slope_dominant_class === 'flat' ? 'bg-blue-100 text-blue-800' :
-                          calculation.result_data?.slope_dominant_class === 'gentle' ? 'bg-green-100 text-green-800' :
-                          calculation.result_data?.slope_dominant_class === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
-                          calculation.result_data?.slope_dominant_class === 'steep' ? 'bg-orange-100 text-orange-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {calculation.result_data?.slope_dominant_class}
-                        </span>
+                        <EditableCell value={calculation.result_data.slope_dominant_class} onSave={(v) => handleSaveWholeForest('slope_dominant_class', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.slope_percentages &&
-                          Object.entries(calculation.result_data?.slope_percentages)
-                            .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
-                            .join(', ')
+                          Object.entries(calculation.result_data.slope_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                            <span key={cls}>
+                              {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('slope_percentages', cls, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.slope_percentages).length - 1 && ', '}
+                            </span>
+                          ))
                         }
                       </td>
                     </tr>
@@ -326,13 +415,16 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Aspect (Orientation)</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize font-semibold">
-                        {calculation.result_data?.aspect_dominant}
+                        <EditableCell value={calculation.result_data.aspect_dominant} onSave={(v) => handleSaveWholeForest('aspect_dominant', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.aspect_percentages &&
-                          Object.entries(calculation.result_data?.aspect_percentages)
-                            .map(([dir, pct]: [string, any]) => `${dir}: ${pct.toFixed(1)}%`)
-                            .join(', ')
+                          Object.entries(calculation.result_data.aspect_percentages).map(([dir, pct]: [string, any], idx: number) => (
+                            <span key={dir}>
+                              {dir}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('aspect_percentages', dir, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.aspect_percentages).length - 1 && ', '}
+                            </span>
+                          ))
                         }
                       </td>
                     </tr>
@@ -343,18 +435,21 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Canopy Structure</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        {calculation.result_data?.canopy_dominant_class.replace('_', ' ')}
+                        <EditableCell value={calculation.result_data.canopy_dominant_class} onSave={(v) => handleSaveWholeForest('canopy_dominant_class', v)} />
                         {calculation.result_data?.canopy_mean_m !== undefined && (
                           <span className="text-xs text-gray-500 ml-2">
-                            ({calculation.result_data?.canopy_mean_m.toFixed(1)}m avg)
+                            (<EditableCell value={calculation.result_data.canopy_mean_m} displayValue={calculation.result_data.canopy_mean_m.toFixed(1)} onSave={(v) => handleSaveWholeForest('canopy_mean_m', v)} />m avg)
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.canopy_percentages &&
-                          Object.entries(calculation.result_data?.canopy_percentages)
-                            .map(([cls, pct]: [string, any]) => `${cls.replace('_', ' ')}: ${pct.toFixed(1)}%`)
-                            .join(', ')
+                          Object.entries(calculation.result_data.canopy_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                            <span key={cls}>
+                              {cls.replace('_', ' ')}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('canopy_percentages', cls, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.canopy_percentages).length - 1 && ', '}
+                            </span>
+                          ))
                         }
                       </td>
                     </tr>
@@ -365,10 +460,10 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Above Ground Biomass (AGB)</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        {calculation.result_data?.agb_total_mg.toLocaleString()} Mg
+                        <EditableCell value={calculation.result_data.agb_total_mg} displayValue={calculation.result_data.agb_total_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveWholeForest('agb_total_mg', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        {calculation.result_data?.agb_mean_mg_ha?.toFixed(2)} Mg/ha (mean per hectare)
+                        <EditableCell value={calculation.result_data.agb_mean_mg_ha} displayValue={calculation.result_data.agb_mean_mg_ha?.toFixed(2)} onSave={(v) => handleSaveWholeForest('agb_mean_mg_ha', v)} /> Mg/ha (mean per hectare)
                       </td>
                     </tr>
                   )}
@@ -378,7 +473,7 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        {calculation.result_data?.carbon_stock_mg.toLocaleString()} Mg
+                        <EditableCell value={calculation.result_data.carbon_stock_mg} displayValue={calculation.result_data.carbon_stock_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveWholeForest('carbon_stock_mg', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         50% of total biomass
@@ -391,21 +486,16 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Health</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          calculation.result_data?.forest_health_dominant === 'excellent' ? 'bg-green-100 text-green-800' :
-                          calculation.result_data?.forest_health_dominant === 'good' ? 'bg-green-100 text-green-700' :
-                          calculation.result_data?.forest_health_dominant === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
-                          calculation.result_data?.forest_health_dominant === 'poor' ? 'bg-orange-100 text-orange-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {calculation.result_data?.forest_health_dominant}
-                        </span>
+                        <EditableCell value={calculation.result_data.forest_health_dominant} onSave={(v) => handleSaveWholeForest('forest_health_dominant', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.forest_health_percentages &&
-                          Object.entries(calculation.result_data?.forest_health_percentages)
-                            .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
-                            .join(', ')
+                          Object.entries(calculation.result_data.forest_health_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                            <span key={cls}>
+                              {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('forest_health_percentages', cls, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.forest_health_percentages).length - 1 && ', '}
+                            </span>
+                          ))
                         }
                       </td>
                     </tr>
@@ -416,15 +506,16 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Type</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                          {calculation.result_data?.forest_type_dominant}
-                        </span>
+                        <EditableCell value={calculation.result_data.forest_type_dominant} onSave={(v) => handleSaveWholeForest('forest_type_dominant', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.forest_type_percentages &&
-                          Object.entries(calculation.result_data?.forest_type_percentages)
-                            .map(([type, pct]: [string, any]) => `${type}: ${pct.toFixed(1)}%`)
-                            .join(', ')
+                          Object.entries(calculation.result_data.forest_type_percentages).map(([type, pct]: [string, any], idx: number) => (
+                            <span key={type}>
+                              {type}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('forest_type_percentages', type, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.forest_type_percentages).length - 1 && ', '}
+                            </span>
+                          ))
                         }
                       </td>
                     </tr>
@@ -435,15 +526,16 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                          {calculation.result_data?.landcover_dominant}
-                        </span>
+                        <EditableCell value={calculation.result_data.landcover_dominant} onSave={(v) => handleSaveWholeForest('landcover_dominant', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.landcover_percentages &&
-                          Object.entries(calculation.result_data?.landcover_percentages)
-                            .map(([cover, pct]: [string, any]) => `${cover}: ${pct.toFixed(1)}%`)
-                            .join(', ')
+                          Object.entries(calculation.result_data.landcover_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                            <span key={cover}>
+                              {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('landcover_percentages', cover, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.landcover_percentages).length - 1 && ', '}
+                            </span>
+                          ))
                         }
                       </td>
                     </tr>
@@ -454,16 +546,18 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Loss (2001-2023)</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                          {calculation.result_data?.forest_loss_hectares.toFixed(2)} ha
-                        </span>
+                        <EditableCell value={calculation.result_data.forest_loss_hectares} displayValue={calculation.result_data.forest_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveWholeForest('forest_loss_hectares', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.forest_loss_by_year &&
-                          Object.entries(calculation.result_data?.forest_loss_by_year)
+                          Object.entries(calculation.result_data.forest_loss_by_year)
                             .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
-                            .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
-                            .join(', ')
+                            .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                              <span key={year}>
+                                {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveWholePercentages('forest_loss_by_year', year, v)} className="inline" />
+                                {idx < arr.length - 1 && ', '}
+                              </span>
+                            ))
                         }
                       </td>
                     </tr>
@@ -474,9 +568,7 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Gain (2000-2012)</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                          {calculation.result_data?.forest_gain_hectares.toFixed(2)} ha
-                        </span>
+                        <EditableCell value={calculation.result_data.forest_gain_hectares} displayValue={calculation.result_data.forest_gain_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveWholeForest('forest_gain_hectares', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         Net forest gain over 12-year period
@@ -489,16 +581,18 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Fire Loss (2001-2023)</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
-                          {calculation.result_data?.fire_loss_hectares.toFixed(2)} ha
-                        </span>
+                        <EditableCell value={calculation.result_data.fire_loss_hectares} displayValue={calculation.result_data.fire_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveWholeForest('fire_loss_hectares', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.fire_loss_by_year &&
-                          Object.entries(calculation.result_data?.fire_loss_by_year)
+                          Object.entries(calculation.result_data.fire_loss_by_year)
                             .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
-                            .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
-                            .join(', ')
+                            .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                              <span key={year}>
+                                {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveWholePercentages('fire_loss_by_year', year, v)} className="inline" />
+                                {idx < arr.length - 1 && ', '}
+                              </span>
+                            ))
                         }
                       </td>
                     </tr>
@@ -509,10 +603,10 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Temperature</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        {calculation.result_data?.temperature_mean_c.toFixed(1)} °C (mean)
+                        <EditableCell value={calculation.result_data.temperature_mean_c} displayValue={calculation.result_data.temperature_mean_c.toFixed(1) + " °C (mean)"} onSave={(v) => handleSaveWholeForest('temperature_mean_c', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        Min (coldest month): {calculation.result_data?.temperature_min_c?.toFixed(1)} °C
+                        Min (coldest month): <EditableCell value={calculation.result_data.temperature_min_c} displayValue={calculation.result_data.temperature_min_c?.toFixed(1)} onSave={(v) => handleSaveWholeForest('temperature_min_c', v)} />{" °C"}
                       </td>
                     </tr>
                   )}
@@ -522,7 +616,7 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Precipitation</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                        {calculation.result_data?.precipitation_mean_mm.toFixed(0)} mm/year
+                        <EditableCell value={calculation.result_data.precipitation_mean_mm} displayValue={calculation.result_data.precipitation_mean_mm.toFixed(0) + " mm/year"} onSave={(v) => handleSaveWholeForest('precipitation_mean_mm', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         Annual total precipitation
@@ -535,9 +629,7 @@ export default function CalculationDetail() {
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                          {calculation.result_data?.soil_texture}
-                        </span>
+                        <EditableCell value={calculation.result_data.soil_texture} onSave={(v) => handleSaveWholeForest('soil_texture', v)} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {calculation.result_data?.soil_properties &&
@@ -548,6 +640,121 @@ export default function CalculationDetail() {
                       </td>
                     </tr>
                   )}
+
+                  {/* Administrative Location */}
+                  <tr className="bg-gray-100">
+                    <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                      Administrative Location
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Province</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_province} onSave={(v) => handleSaveWholeForest('whole_province', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">District</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_district} onSave={(v) => handleSaveWholeForest('whole_district', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Municipality</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_municipality} onSave={(v) => handleSaveWholeForest('whole_municipality', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Ward</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_ward} onSave={(v) => handleSaveWholeForest('whole_ward', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Watershed</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_watershed} onSave={(v) => handleSaveWholeForest('whole_watershed', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Major River Basin</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_major_river_basin} onSave={(v) => handleSaveWholeForest('whole_major_river_basin', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  {/* Geology */}
+                  {calculation.result_data?.whole_geology_percentages && Object.keys(calculation.result_data.whole_geology_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Geology</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_geology_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                          <span key={cls}>
+                            {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('whole_geology_percentages', cls, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_geology_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Access */}
+                  {calculation.result_data?.whole_access_info && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Access</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        <EditableCell value={calculation.result_data.whole_access_info} onSave={(v) => handleSaveWholeForest('whole_access_info', v)} />
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Nearby Features */}
+                  <tr className="bg-gray-100">
+                    <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                      Natural Features (within 100m)
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features North</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_north || ''} onSave={(v) => handleSaveWholeForest('whole_features_north', v)} />
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features East</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_east || ''} onSave={(v) => handleSaveWholeForest('whole_features_east', v)} />
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features South</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_south || ''} onSave={(v) => handleSaveWholeForest('whole_features_south', v)} />
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features West</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_west || ''} onSave={(v) => handleSaveWholeForest('whole_features_west', v)} />
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -587,13 +794,12 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              Extent
+                              <EditableCell value={block.extent.N} displayValue={"N: " + block.extent.N.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'N', v)} className="font-mono" />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600 font-mono">
-                              <div>N: {block.extent.N.toFixed(7)}</div>
-                              <div>S: {block.extent.S.toFixed(7)}</div>
-                              <div>E: {block.extent.E.toFixed(7)}</div>
-                              <div>W: {block.extent.W.toFixed(7)}</div>
+                              <div><EditableCell value={block.extent.S} displayValue={"S: " + block.extent.S.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'S', v)} className="font-mono" /></div>
+                              <div><EditableCell value={block.extent.E} displayValue={"E: " + block.extent.E.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'E', v)} className="font-mono" /></div>
+                              <div><EditableCell value={block.extent.W} displayValue={"W: " + block.extent.W.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'W', v)} className="font-mono" /></div>
                             </td>
                           </tr>
                         )}
@@ -603,10 +809,11 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Elevation</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              {block.elevation_mean_m.toFixed(1)} m (mean)
+                              <EditableCell value={block.elevation_mean_m} displayValue={block.elevation_mean_m.toFixed(1) + " m (mean)"} onSave={(v) => handleSaveBlock(index, 'elevation_mean_m', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
-                              Min: {block.elevation_min_m?.toFixed(0)} m, Max: {block.elevation_max_m?.toFixed(0)} m
+                              Min: <EditableCell value={block.elevation_min_m} displayValue={block.elevation_min_m?.toFixed(0)} onSave={(v) => handleSaveBlock(index, 'elevation_min_m', v)} />{" m, Max: "}
+                              <EditableCell value={block.elevation_max_m} displayValue={block.elevation_max_m?.toFixed(0)} onSave={(v) => handleSaveBlock(index, 'elevation_max_m', v)} />{" m"}
                             </td>
                           </tr>
                         )}
@@ -616,21 +823,16 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Slope</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                block.slope_dominant_class === 'flat' ? 'bg-blue-100 text-blue-800' :
-                                block.slope_dominant_class === 'gentle' ? 'bg-green-100 text-green-800' :
-                                block.slope_dominant_class === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
-                                block.slope_dominant_class === 'steep' ? 'bg-orange-100 text-orange-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {block.slope_dominant_class}
-                              </span>
+                              <EditableCell value={block.slope_dominant_class} onSave={(v) => handleSaveBlock(index, 'slope_dominant_class', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.slope_percentages &&
-                                Object.entries(block.slope_percentages)
-                                  .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
-                                  .join(', ')
+                                Object.entries(block.slope_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                  <span key={cls}>
+                                    {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'slope_percentages', cls, v)} className="inline" />
+                                    {idx < Object.keys(block.slope_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
                               }
                             </td>
                           </tr>
@@ -641,13 +843,16 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Aspect</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize font-semibold">
-                              {block.aspect_dominant}
+                              <EditableCell value={block.aspect_dominant} onSave={(v) => handleSaveBlock(index, 'aspect_dominant', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.aspect_percentages &&
-                                Object.entries(block.aspect_percentages)
-                                  .map(([dir, pct]: [string, any]) => `${dir}: ${pct.toFixed(1)}%`)
-                                  .join(', ')
+                                Object.entries(block.aspect_percentages).map(([dir, pct]: [string, any], idx: number) => (
+                                  <span key={dir}>
+                                    {dir}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'aspect_percentages', dir, v)} className="inline" />
+                                    {idx < Object.keys(block.aspect_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
                               }
                             </td>
                           </tr>
@@ -658,18 +863,21 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Canopy Structure</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              {block.canopy_dominant_class.replace('_', ' ')}
+                              <EditableCell value={block.canopy_dominant_class} onSave={(v) => handleSaveBlock(index, 'canopy_dominant_class', v)} />
                               {block.canopy_mean_m !== undefined && (
                                 <span className="text-xs text-gray-500 ml-2">
-                                  ({block.canopy_mean_m.toFixed(1)}m avg)
+                                  (<EditableCell value={block.canopy_mean_m} displayValue={block.canopy_mean_m.toFixed(1)} onSave={(v) => handleSaveBlock(index, 'canopy_mean_m', v)} />m avg)
                                 </span>
                               )}
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.canopy_percentages &&
-                                Object.entries(block.canopy_percentages)
-                                  .map(([cls, pct]: [string, any]) => `${cls.replace('_', ' ')}: ${pct.toFixed(1)}%`)
-                                  .join(', ')
+                                Object.entries(block.canopy_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                  <span key={cls}>
+                                    {cls.replace('_', ' ')}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'canopy_percentages', cls, v)} className="inline" />
+                                    {idx < Object.keys(block.canopy_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
                               }
                             </td>
                           </tr>
@@ -680,10 +888,10 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Above Ground Biomass</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              {block.agb_total_mg.toLocaleString()} Mg
+                              <EditableCell value={block.agb_total_mg} displayValue={block.agb_total_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveBlock(index, 'agb_total_mg', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
-                              {block.agb_mean_mg_ha?.toFixed(2)} Mg/ha (mean per hectare)
+                              <EditableCell value={block.agb_mean_mg_ha} displayValue={block.agb_mean_mg_ha?.toFixed(2)} onSave={(v) => handleSaveBlock(index, 'agb_mean_mg_ha', v)} /> Mg/ha (mean per hectare)
                             </td>
                           </tr>
                         )}
@@ -693,7 +901,7 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              {block.carbon_stock_mg.toLocaleString()} Mg
+                              <EditableCell value={block.carbon_stock_mg} displayValue={block.carbon_stock_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveBlock(index, 'carbon_stock_mg', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               50% of total biomass
@@ -706,21 +914,16 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Health</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                block.forest_health_dominant === 'excellent' ? 'bg-green-100 text-green-800' :
-                                block.forest_health_dominant === 'good' ? 'bg-green-100 text-green-700' :
-                                block.forest_health_dominant === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
-                                block.forest_health_dominant === 'poor' ? 'bg-orange-100 text-orange-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {block.forest_health_dominant}
-                              </span>
+                              <EditableCell value={block.forest_health_dominant} onSave={(v) => handleSaveBlock(index, 'forest_health_dominant', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.forest_health_percentages &&
-                                Object.entries(block.forest_health_percentages)
-                                  .map(([cls, pct]: [string, any]) => `${cls}: ${pct.toFixed(1)}%`)
-                                  .join(', ')
+                                Object.entries(block.forest_health_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                  <span key={cls}>
+                                    {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'forest_health_percentages', cls, v)} className="inline" />
+                                    {idx < Object.keys(block.forest_health_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
                               }
                             </td>
                           </tr>
@@ -731,15 +934,16 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Type</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                                {block.forest_type_dominant}
-                              </span>
+                              <EditableCell value={block.forest_type_dominant} onSave={(v) => handleSaveBlock(index, 'forest_type_dominant', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.forest_type_percentages &&
-                                Object.entries(block.forest_type_percentages)
-                                  .map(([type, pct]: [string, any]) => `${type}: ${pct.toFixed(1)}%`)
-                                  .join(', ')
+                                Object.entries(block.forest_type_percentages).map(([type, pct]: [string, any], idx: number) => (
+                                  <span key={type}>
+                                    {type}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'forest_type_percentages', type, v)} className="inline" />
+                                    {idx < Object.keys(block.forest_type_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
                               }
                             </td>
                           </tr>
@@ -750,15 +954,16 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                                {block.landcover_dominant}
-                              </span>
+                              <EditableCell value={block.landcover_dominant} onSave={(v) => handleSaveBlock(index, 'landcover_dominant', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.landcover_percentages &&
-                                Object.entries(block.landcover_percentages)
-                                  .map(([cover, pct]: [string, any]) => `${cover}: ${pct.toFixed(1)}%`)
-                                  .join(', ')
+                                Object.entries(block.landcover_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                                  <span key={cover}>
+                                    {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'landcover_percentages', cover, v)} className="inline" />
+                                    {idx < Object.keys(block.landcover_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
                               }
                             </td>
                           </tr>
@@ -769,16 +974,18 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Loss (2001-2023)</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                                {block.forest_loss_hectares.toFixed(2)} ha
-                              </span>
+                              <EditableCell value={block.forest_loss_hectares} displayValue={block.forest_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveBlock(index, 'forest_loss_hectares', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.forest_loss_by_year &&
                                 Object.entries(block.forest_loss_by_year)
                                   .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
-                                  .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
-                                  .join(', ')
+                                  .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                                    <span key={year}>
+                                      {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveBlockPercentages(index, 'forest_loss_by_year', year, v)} className="inline" />
+                                      {idx < arr.length - 1 && ', '}
+                                    </span>
+                                  ))
                               }
                             </td>
                           </tr>
@@ -789,9 +996,7 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Gain (2000-2012)</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                                {block.forest_gain_hectares.toFixed(2)} ha
-                              </span>
+                              <EditableCell value={block.forest_gain_hectares} displayValue={block.forest_gain_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveBlock(index, 'forest_gain_hectares', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               Net forest gain over 12-year period
@@ -804,16 +1009,18 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Fire Loss (2001-2023)</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
-                                {block.fire_loss_hectares.toFixed(2)} ha
-                              </span>
+                              <EditableCell value={block.fire_loss_hectares} displayValue={block.fire_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveBlock(index, 'fire_loss_hectares', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.fire_loss_by_year &&
                                 Object.entries(block.fire_loss_by_year)
                                   .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
-                                  .map(([year, ha]: [string, any]) => `${year}: ${ha.toFixed(2)} ha`)
-                                  .join(', ')
+                                  .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                                    <span key={year}>
+                                      {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveBlockPercentages(index, 'fire_loss_by_year', year, v)} className="inline" />
+                                      {idx < arr.length - 1 && ', '}
+                                    </span>
+                                  ))
                               }
                             </td>
                           </tr>
@@ -824,10 +1031,10 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Temperature</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              {block.temperature_mean_c.toFixed(1)} °C (mean)
+                              <EditableCell value={block.temperature_mean_c} displayValue={block.temperature_mean_c.toFixed(1) + " °C (mean)"} onSave={(v) => handleSaveBlock(index, 'temperature_mean_c', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
-                              Min (coldest month): {block.temperature_min_c?.toFixed(1)} °C
+                              Min (coldest month): <EditableCell value={block.temperature_min_c} displayValue={block.temperature_min_c?.toFixed(1)} onSave={(v) => handleSaveBlock(index, 'temperature_min_c', v)} />{" °C"}
                             </td>
                           </tr>
                         )}
@@ -837,7 +1044,7 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Precipitation</td>
                             <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              {block.precipitation_mean_mm.toFixed(0)} mm/year
+                              <EditableCell value={block.precipitation_mean_mm} displayValue={block.precipitation_mean_mm.toFixed(0) + " mm/year"} onSave={(v) => handleSaveBlock(index, 'precipitation_mean_mm', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               Annual total precipitation
@@ -850,9 +1057,7 @@ export default function CalculationDetail() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                                {block.soil_texture}
-                              </span>
+                              <EditableCell value={block.soil_texture} onSave={(v) => handleSaveBlock(index, 'soil_texture', v)} />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               {block.soil_properties &&
@@ -863,6 +1068,121 @@ export default function CalculationDetail() {
                             </td>
                           </tr>
                         )}
+
+                        {/* Administrative Location */}
+                        <tr className="bg-gray-100">
+                          <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                            Administrative Location
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Province</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.province} onSave={(v) => handleSaveBlock(index, 'province', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">District</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.district} onSave={(v) => handleSaveBlock(index, 'district', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Municipality</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.municipality} onSave={(v) => handleSaveBlock(index, 'municipality', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Ward</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.ward} onSave={(v) => handleSaveBlock(index, 'ward', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Watershed</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.watershed} onSave={(v) => handleSaveBlock(index, 'watershed', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Major River Basin</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.major_river_basin} onSave={(v) => handleSaveBlock(index, 'major_river_basin', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        {/* Geology */}
+                        {block.geology_percentages && Object.keys(block.geology_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Geology</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.geology_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                <span key={cls}>
+                                  {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'geology_percentages', cls, v)} className="inline" />
+                                  {idx < Object.keys(block.geology_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Access */}
+                        {block.access_info && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Access</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              <EditableCell value={block.access_info} onSave={(v) => handleSaveBlock(index, 'access_info', v)} />
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Nearby Features */}
+                        <tr className="bg-gray-100">
+                          <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                            Natural Features (within 100m)
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features North</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_north || ''} onSave={(v) => handleSaveBlock(index, 'features_north', v)} />
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features East</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_east || ''} onSave={(v) => handleSaveBlock(index, 'features_east', v)} />
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features South</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_south || ''} onSave={(v) => handleSaveBlock(index, 'features_south', v)} />
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features West</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_west || ''} onSave={(v) => handleSaveBlock(index, 'features_west', v)} />
+                          </td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>

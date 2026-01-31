@@ -1,0 +1,183 @@
+Whole Forest Analysis
+Lalitpur - Complete Forest Summary
+Total Area: 518.12 hectares (5 blocks)
+
+Parameter	Value	Details
+Total Area	518.12 ha	5,181,215.86 m²
+Extent	N: 27.4559329	S: 27.4077397, E: 85.0728599, W: 85.0360112
+Elevation	541.9 m (mean)	Min: 455 m, Max: 732 m
+Slope	moderate	steep: 38.9%, gentle: 7.9%, moderate: 42.7%, very_steep: 10.5%
+Aspect (Orientation)	SW	E: 0.6%, N: 2.4%, S: 7.4%, W: 11.8%, NE: 1.0%, NW: 5.8%, SE: 3.5%, SW: 11.8%, Flat: 55.6%
+Canopy Structure	non_forest(4.8m avg)	non forest: 65.9%, pole trees: 21.3%, high forest: 12.3%, bush regenerated: 0.4%
+Above Ground Biomass (AGB)	65,496 Mg	28.35 Mg/ha (mean per hectare)
+Carbon Stock	32,748 Mg	50% of total biomass
+Forest Health	healthy	poor: 1.2%, healthy: 91.2%, moderate: 6.0%, stressed: 0.0%, excellent: 1.6%
+Forest Type	Shorea robusta	Non forest: 35.4%, Shorea robusta: 59.7%, Tropical Mixed Broadleaved: 0.1%, Shorea robusta-Mixed Broadleaved: 4.9%
+Land Cover	Tree cover	Built-up: 0.5%, Cropland: 0.3%, Grassland: 0.2%, Tree cover: 64.9%, Bare/sparse vegetation: 0.0%, Permanent water bodies: 0.0%
+Forest Loss (2001-2023)	3.78 ha	2002: 1.80 ha, 2006: 0.18 ha, 2009: 1.08 ha, 2012: 0.09 ha, 2018: 0.27 ha, 2019: 0.36 ha
+Forest Gain (2000-2012)	0.90 ha	Net forest gain over 12-year period
+Fire Loss (2001-2023)	0.18 ha	2009: 0.18 ha
+Precipitation	2131 mm/year	Annual total precipitation
+Administrative Location
+Province	Bagmati	
+District	MAKAWANPUR	
+Municipality	Hetauda	
+Ward	5	
+Watershed	Narayani Saptagandaki Watershed	
+Major River Basin	East Rapti River Basin	
+Geology	Recent: 3.8%, Lower Siwalik: 34.0%, Upper Siwalik: 0.5%, Middle Siwalik2: 20.7%
+Access	Hetauda Northwest (295°) 2.1 km
+Natural Features (within 100m)
+Features North	River/Strem Flow Line, Chaukltol, Kusumdanda, Laijhadi, Maintar, Nishankhoriya, Suparitar, Chaukitol Suspension Bridge, path, residential, service, track, unclassified, Manokamna Mandir hetauda
+Features East	
+Features South	
+Features West	
+Detailed Block-wise Analysis
+Block #1: Panchpokhari pakho
+Area: 134.12 hectares
+
+Parameter	Value	Details
+Extent	N: 27.4187902	
+S: 27.4077397
+E: 85.0728599
+W: 85.0515997
+Elevation	528.5 m (mean)	Min: 456 m, Max: 658 m
+Slope	moderate	steep: 33.2%, gentle: 14.0%, moderate: 49.1%, very_steep: 3.7%
+Aspect	W	E: 2.5%, N: 1.3%, S: 10.1%, W: 13.4%, NE: 0.3%, NW: 5.7%, SE: 9.2%, SW: 9.0%, Flat: 48.5%
+Canopy Structure	pole_trees(10.9m avg)	non forest: 22.0%, pole trees: 55.3%, high forest: 22.0%, bush regenerated: 0.7%
+Above Ground Biomass	15,586 Mg	47.96 Mg/ha (mean per hectare)
+Carbon Stock	7,793 Mg	50% of total biomass
+Forest Health	healthy	poor: 0.8%, healthy: 92.3%, moderate: 4.9%, excellent: 2.1%
+Forest Type	Shorea robusta	Non forest: 29.4%, Shorea robusta: 70.4%, Alnus nepalensis: 0.2%
+Land Cover	Tree cover	Built-up: 0.3%, Cropland: 0.3%, Grassland: 0.5%, Tree cover: 59.9%, Bare/sparse vegetation: 0.1%
+Forest Loss (2001-2023)	0.01 ha	2018: 0.00 ha, 2019: 0.00 ha
+Forest Gain (2000-2012)	0.00 ha	Net forest gain over 12-year period
+Fire Loss (2001-2023)	0.00 ha	
+Temperature	22.6 °C (mean)	Min (coldest month): 8.0 °C
+Precipitation	2150 mm/year	Annual total precipitation
+Soil Texture	Silty Clay	
+Administrative Location
+Province	Bagmati	
+District	MAKAWANPUR	
+Municipality	Hetauda	
+Ward	5	
+Watershed	Narayani Saptagandaki Watershed	
+Major River Basin	East Rapti River Basin	
+Geology	Recent: 14.8%, Lower Siwalik: 67.3%, Middle Siwalik2: 17.9%
+Access	Hetauda Northwest (310°) 4.2 km
+Natural Features (within 100m)
+Features North	River/Strem Flow Line, Gothdanda, Kyampadanda, Phikrepakha, Pipalechok, unclassified
+Features East	
+Features South	
+Features West	
+Block #2: Chaukune Bari
+Area: 69.64 hectares
+
+Parameter	Value	Details
+Administrative Location
+Province	-	
+District	-	
+Municipality	-	
+Ward	-	
+Watershed	-	
+Major River Basin	-	
+Natural Features (within 100m)
+Features North	
+Features East	
+Features South	
+Features West	
+Block #3: Tikaram pakho
+Area: 90.24 hectares
+
+Parameter	Value	Details
+Extent	N: 27.4362563	
+S: 27.4221497
+E: 85.0573317
+W: 85.0455034
+Elevation	559.3 m (mean)	Min: 455 m, Max: 732 m
+Slope	steep	steep: 45.9%, gentle: 5.0%, moderate: 33.0%, very_steep: 16.1%
+Aspect	SW	N: 0.1%, S: 6.8%, W: 17.8%, NE: 0.0%, NW: 3.6%, SE: 1.9%, SW: 19.5%, Flat: 50.3%
+Canopy Structure	pole_trees(9.8m avg)	non forest: 27.6%, pole trees: 56.9%, high forest: 13.8%, bush regenerated: 1.7%
+Above Ground Biomass	10,805 Mg	45.40 Mg/ha (mean per hectare)
+Carbon Stock	5,402.5 Mg	50% of total biomass
+Forest Health	healthy	poor: 2.1%, healthy: 88.5%, moderate: 8.3%, stressed: 0.1%, excellent: 1.0%
+Forest Type	Shorea robusta	Non forest: 26.8%, Shorea robusta: 73.2%
+Land Cover	Tree cover	Built-up: 0.3%, Cropland: 0.4%, Grassland: 0.1%, Tree cover: 59.6%
+Forest Loss (2001-2023)	0.00 ha	2002: 0.00 ha
+Forest Gain (2000-2012)	0.00 ha	Net forest gain over 12-year period
+Fire Loss (2001-2023)	0.00 ha	
+Temperature	22.8 °C (mean)	Min (coldest month): 8.2 °C
+Precipitation	2224 mm/year	Annual total precipitation
+Soil Texture	Silty Clay	
+Administrative Location
+Province	Bagmati	
+District	MAKAWANPUR	
+Municipality	Hetauda	
+Ward	5	
+Watershed	Narayani Saptagandaki Watershed	
+Major River Basin	East Rapti River Basin	
+Geology	Lower Siwalik: 42.0%, Middle Siwalik2: 58.0%
+Access	Hetauda Northwest (297°) 2.1 km
+Natural Features (within 100m)
+Features North	River/Strem Flow Line, Kusumdanda, Sano Pokhara, track, unclassified, Manokamna Mandir hetauda
+Features East	
+Features South	
+Features West	
+Block #4: Dunetar
+Area: 101.54 hectares
+
+Parameter	Value	Details
+Administrative Location
+Province	-	
+District	-	
+Municipality	-	
+Ward	-	
+Watershed	-	
+Major River Basin	-	
+Natural Features (within 100m)
+Features North	
+Features East	
+Features South	
+Features West	
+Block #5: Rame kholsa
+Area: 122.58 hectares
+
+Parameter	Value	Details
+Extent	N: 27.4559329	
+S: 27.4368773
+E: 85.0480725
+W: 85.0360112
+Elevation	683.0 m (mean)	Min: 544 m, Max: 774 m
+Slope	moderate	steep: 35.5%, gentle: 6.5%, moderate: 42.3%, very_steep: 15.7%
+Aspect	W	E: 0.0%, N: 10.9%, S: 0.1%, W: 18.6%, NE: 4.6%, NW: 17.9%, SE: 0.0%, SW: 1.7%, Flat: 46.0%
+Canopy Structure	high_forest(13.4m avg)	non forest: 20.2%, pole trees: 24.5%, high forest: 54.6%, bush regenerated: 0.7%
+Above Ground Biomass	18,660 Mg	60.58 Mg/ha (mean per hectare)
+Carbon Stock	9,330 Mg	50% of total biomass
+Forest Health	healthy	poor: 1.1%, healthy: 90.7%, moderate: 6.6%, stressed: 0.0%, excellent: 1.6%
+Forest Type	Shorea robusta	Non forest: 52.5%, Shorea robusta: 37.7%, Quercus semecarpifolia: 9.8%
+Land Cover	Tree cover	Built-up: 0.9%, Cropland: 0.3%, Grassland: 0.1%, Tree cover: 59.8%, Bare/sparse vegetation: 0.0%, Permanent water bodies: 0.1%
+Forest Loss (2001-2023)	0.00 ha	2009: 0.00 ha, 2012: 0.00 ha
+Fire Loss (2001-2023)	0.00 ha	2009: 0.00 ha
+Temperature	22.4 °C (mean)	Min (coldest month): 8.0 °C
+Precipitation	2082 mm/year	Annual total precipitation
+Soil Texture	Silty Clay	
+Administrative Location
+Province	Bagmati	
+District	MAKAWANPUR	
+Municipality	Hetauda	
+Ward	2	
+Watershed	Narayani Saptagandaki Watershed	
+Major River Basin	East Rapti River Basin	
+Geology	Lower Siwalik: 0.0%, Upper Siwalik: 2.2%, Middle Siwalik2: 15.1%
+Access	Hetauda Southwest (229°) 1.3 km
+Natural Features (within 100m)
+Features North	River/Strem Flow Line, Chaukltol, Maintar, Nishankhoriya, Suparitar, path, residential, track, unclassified
+Features East	
+Features South	
+Features West	
+Status
+completed
+Processing Time
+37 seconds
+Completed At
+1/30/2026, 8:41:50 PM

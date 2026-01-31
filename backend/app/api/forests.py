@@ -281,11 +281,18 @@ async def upload_forest_boundary(
     db.commit()
     db.refresh(calculation)
 
+    # Get the calculation ID before analysis
+    calc_id = calculation.id
+
     # Start analysis in background
     try:
         # Run raster analysis on the uploaded boundary
-        print(f"Starting analysis for calculation {calculation.id}")
-        analysis_results, processing_time = await analyze_forest_boundary(calculation.id, db)
+        print(f"Starting analysis for calculation {calc_id}")
+
+        # Get a fresh calculation reference with eager loading to avoid detached instance issues
+        db.expire_all()  # Expire cached objects
+
+        analysis_results, processing_time = await analyze_forest_boundary(calc_id, db)
         print(f"Analysis completed with {len(analysis_results)} keys")
 
         # Merge analysis results with existing block data using SQL JSONB operators
@@ -305,28 +312,50 @@ async def upload_forest_boundary(
             "analysis_data": json.dumps(analysis_results),
             "processing_time": processing_time,
             "status": "COMPLETED",
-            "calc_id": str(calculation.id)
+            "calc_id": str(calc_id)  # Use calc_id instead of calculation.id
         })
         print(f"UPDATE affected {result.rowcount} rows")
 
         db.commit()
         print("Commit successful")
-        db.refresh(calculation)
-        print(f"Refreshed calculation, result_data has {len(calculation.result_data)} keys")
+
+        # Refresh calculation object after commit
+        calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()
+        if calculation and calculation.result_data:
+            print(f"Refreshed calculation, result_data has {len(calculation.result_data)} keys")
+        else:
+            print(f"Warning: Could not refresh calculation or result_data is empty")
 
     except Exception as e:
-        calculation.status = CalculationStatus.FAILED
-        calculation.error_message = str(e)
-        db.commit()
+        db.rollback()  # Rollback failed transaction first
+        print(f"Analysis failed: {str(e)}")
+
+        # Update status in a new transaction
+        try:
+            calculation.status = CalculationStatus.FAILED
+            calculation.error_message = str(e)[:500]  # Limit error message length
+            db.commit()
+        except Exception as commit_error:
+            print(f"Failed to update error status: {commit_error}")
+            db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analysis failed: {str(e)}"
         )
 
+    # Re-query calculation to ensure we have fresh data
+    calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found after processing"
+        )
+
     # Get geometry as GeoJSON
     geojson_query = db.query(
         func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
-    ).filter(Calculation.id == calculation.id).first()
+    ).filter(Calculation.id == calc_id).first()
 
     geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
 
@@ -464,3 +493,43 @@ async def delete_calculation(
     db.commit()
 
     return None
+
+@router.patch("/calculations/{calculation_id}/result-data")
+async def update_result_data(
+    calculation_id: UUID,
+    update_data: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update result_data fields for a calculation (field verification edits)
+
+    Users can only update their own calculations.
+    Accepts a JSON body with fields to update - merges into existing result_data.
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    from ..models.user import UserRole
+    if calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this calculation"
+        )
+
+    # Merge update_data into existing result_data
+    existing = calculation.result_data or {}
+    existing.update(update_data)
+    calculation.result_data = existing
+    flag_modified(calculation, "result_data")
+
+    db.commit()
+    db.refresh(calculation)
+
+    return {"status": "updated", "result_data": calculation.result_data}

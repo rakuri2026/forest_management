@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document>
+	<name>snow.kml</name>
+	<StyleMap id="m_ylw-pushpin">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#s_ylw-pushpin0</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#s_ylw-pushpin_hl</styleUrl>
+		</Pair>
+	</StyleMap>
+	<StyleMap id="m_ylw-pushpin0">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#s_ylw-pushpin</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#s_ylw-pushpin_hl0</styleUrl>
+		</Pair>
+	</StyleMap>
+	<StyleMap id="msn_ylw-pushpin">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#sn_ylw-pushpin</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#sh_ylw-pushpin</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Style id="s_ylw-pushpin">
+		<IconStyle>
+			<scale>1.1</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+	</Style>
+	<Style id="s_ylw-pushpin0">
+		<IconStyle>
+			<scale>1.1</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+	</Style>
+	<Style id="s_ylw-pushpin_hl">
+		<IconStyle>
+			<scale>1.3</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+	</Style>
+	<Style id="s_ylw-pushpin_hl0">
+		<IconStyle>
+			<scale>1.3</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+	</Style>
+	<Style id="sh_ylw-pushpin">
+		<IconStyle>
+			<scale>1.3</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+		<BalloonStyle>
+		</BalloonStyle>
+		<PolyStyle>
+			<fill>0</fill>
+		</PolyStyle>
+	</Style>
+	<Style id="sn_ylw-pushpin">
+		<IconStyle>
+			<scale>1.1</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+		<BalloonStyle>
+		</BalloonStyle>
+		<PolyStyle>
+			<fill>0</fill>
+		</PolyStyle>
+	</Style>
+	<Folder>
+		<name>snow</name>
+		<open>1</open>
+		<Placemark>
+			<name>Untitled Polygon</name>
+			<styleUrl>#msn_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							85.53853067806493,28.07280084027083,0 85.50221155241046,28.10909811054372,0 85.43029464685848,28.16167570563261,0 85.39665260460325,28.15471014658171,0 85.39568527394941,28.11483953130148,0 85.45402063066429,28.00830999565984,0 85.53301563391483,28.01893640071195,0 85.53853067806493,28.07280084027083,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>Untitled Path</name>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<LineString>
+				<tessellate>1</tessellate>
+				<coordinates>
+					85.4852413587592,28.1241357172072,0 85.47364294609287,28.10591172692211,0 85.45699051292925,28.09456862307505,0 85.4418152587035,28.08898839837277,0 85.41610541656711,28.07187318531112,0 
+				</coordinates>
+			</LineString>
+		</Placemark>
+		<Placemark>
+			<name>Untitled Path</name>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<LineString>
+				<tessellate>1</tessellate>
+				<coordinates>
+					85.41014150058629,28.16152440044239,0 85.46015195264492,28.09847368132899,0 85.48122824891294,28.07913487047904,0 85.53964963184265,28.02909028140735,0 
+				</coordinates>
+			</LineString>
+		</Placemark>
+		<Placemark>
+			<name>Untitled Path</name>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<LineString>
+				<tessellate>1</tessellate>
+				<coordinates>
+					85.44063655956592,28.02762160347714,0 85.44105789596631,28.02762169248781,0 85.44442784118652,28.03134215787108,0 85.4604377972824,28.04250229060398,0 85.47607800321934,28.03139228822311,0 85.48997656962212,28.00907681878402,0 
+				</coordinates>
+			</LineString>
+		</Placemark>
+		<Placemark>
+			<name>B1</name>
+			<LookAt>
+				<longitude>85.44390404600972</longitude>
+				<latitude>28.07499481551287</latitude>
+				<altitude>0</altitude>
+				<heading>-0.01089376274999432</heading>
+				<tilt>0</tilt>
+				<range>36387.77376562823</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#m_ylw-pushpin0</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>85.42481839757016,28.10549340530315,0</coordinates>
+			</Point>
+		</Placemark>
+		<Placemark>
+			<name>B2</name>
+			<LookAt>
+				<longitude>85.44390404600972</longitude>
+				<latitude>28.07499481551287</latitude>
+				<altitude>0</altitude>
+				<heading>-0.01089376274999432</heading>
+				<tilt>0</tilt>
+				<range>36387.77376562823</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#m_ylw-pushpin0</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>85.45309410659868,28.12503498909507,0</coordinates>
+			</Point>
+		</Placemark>
+		<Placemark>
+			<name>B3</name>
+			<LookAt>
+				<longitude>85.56169139951938</longitude>
+				<latitude>28.04811152001605</latitude>
+				<altitude>0</altitude>
+				<heading>0.04451454410499048</heading>
+				<tilt>0</tilt>
+				<range>57200.04687635005</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#m_ylw-pushpin0</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>85.49960835972031,28.08711567975248,0</coordinates>
+			</Point>
+		</Placemark>
+		<Placemark>
+			<name>B4</name>
+			<LookAt>
+				<longitude>85.56169139951938</longitude>
+				<latitude>28.04811152001605</latitude>
+				<altitude>0</altitude>
+				<heading>0.04451454410499048</heading>
+				<tilt>0</tilt>
+				<range>57200.04687635005</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#m_ylw-pushpin0</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>85.46158397414843,28.05782925678411,0</coordinates>
+			</Point>
+		</Placemark>
+		<Placemark>
+			<name>B5</name>
+			<LookAt>
+				<longitude>85.49643387873185</longitude>
+				<latitude>28.02890274027506</latitude>
+				<altitude>0</altitude>
+				<heading>0.01383927340558601</heading>
+				<tilt>0</tilt>
+				<range>26761.05268806648</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#m_ylw-pushpin0</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>85.46413450257032,28.0217228034693,0</coordinates>
+			</Point>
+		</Placemark>
+		<atom:link rel="app" href="https://www.google.com/earth/about/versions/#earth-pro" title="Google Earth Pro 7.3.6.10441"></atom:link>
+	</Folder>
+</Document>
+</kml>

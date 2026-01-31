@@ -40,21 +40,58 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
 
     # Analyze each block separately
     analyzed_blocks = []
-    for block in blocks:
-        block_analysis = await analyze_block_geometry(
-            block['geometry'],
-            calculation_id,
-            db
-        )
-        # Merge analysis results into block data
-        analyzed_block = {**block, **block_analysis}
+    for i, block in enumerate(blocks):
+        print(f"Analyzing block {i+1}/{len(blocks)}: {block.get('block_name', f'Block {i+1}')}", flush=True)
+
+        try:
+            block_analysis = await analyze_block_geometry(
+                block['geometry'],
+                calculation_id,
+                db
+            )
+            # Merge analysis results into block data
+            analyzed_block = {**block, **block_analysis}
+            print(f"Block {i+1} analysis completed successfully", flush=True)
+
+        except Exception as block_error:
+            print(f"Error analyzing block {i+1}: {block_error}")
+            db.rollback()  # Rollback failed block transaction
+
+            # Commit to clear transaction state for next block
+            try:
+                db.commit()
+                print(f"Transaction reset after block {i+1} error")
+            except Exception as commit_error:
+                print(f"Warning: Could not commit after block error: {commit_error}")
+
+            # Continue with minimal data for this block
+            analyzed_block = {**block, "analysis_error": str(block_error)[:200]}
+
         analyzed_blocks.append(analyzed_block)
+
+        # ALWAYS commit after each block to ensure clean transaction state for next block
+        try:
+            db.commit()
+            print(f"Block {i+1} transaction committed")
+        except Exception as commit_error:
+            print(f"Warning: Could not commit after block {i+1}: {commit_error}")
+            db.rollback()
 
     # Store analyzed blocks
     results['blocks'] = analyzed_blocks
 
+    # Commit block results to clear any transaction issues
+    print(f"Committing block analysis results...")
+    try:
+        db.commit()
+        print("Block analysis committed successfully")
+    except Exception as commit_error:
+        print(f"Warning: Could not commit block results: {commit_error}")
+        db.rollback()
+
     # Also calculate whole-area statistics for summary
     # 1. Calculate area (using UTM projection for accuracy)
+    print("Starting whole-forest analysis...")
     area_data = calculate_area(calculation_id, db)
     results.update(area_data)
 
@@ -84,11 +121,55 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
     vector_results = await analyze_vectors(calculation_id, db)
     results.update(vector_results)
 
+    # 3b. Get administrative location for whole forest
+    whole_geom_query = text("""
+        SELECT ST_AsText(boundary_geom) as wkt
+        FROM public.calculations
+        WHERE id = :calc_id
+    """)
+    whole_geom = db.execute(whole_geom_query, {"calc_id": str(calculation_id)}).first()
+    if whole_geom:
+        whole_location = get_administrative_location(whole_geom.wkt, db)
+        # Prefix keys with "whole_" to distinguish from block-level data
+        results["whole_province"] = whole_location.get("province")
+        results["whole_district"] = whole_location.get("district")
+        results["whole_municipality"] = whole_location.get("municipality")
+        results["whole_ward"] = whole_location.get("ward")
+        results["whole_watershed"] = whole_location.get("watershed")
+        results["whole_major_river_basin"] = whole_location.get("major_river_basin")
+
+    # 3c. Geology analysis for whole forest
+    if whole_geom:
+        whole_geology = analyze_geology_geometry(whole_geom.wkt, db)
+        results["whole_geology_percentages"] = whole_geology.get("geology_percentages")
+
+    # 3d. Access information for whole forest
+    if whole_geom:
+        whole_access = calculate_access_info(whole_geom.wkt, db)
+        results["whole_access_info"] = whole_access.get("access_info")
+
+    # 3e. Nearby features for whole forest
+    if whole_geom:
+        whole_features = analyze_nearby_features(whole_geom.wkt, db)
+        results["whole_features_north"] = whole_features.get("features_north")
+        results["whole_features_east"] = whole_features.get("features_east")
+        results["whole_features_south"] = whole_features.get("features_south")
+        results["whole_features_west"] = whole_features.get("features_west")
+
     # 4. Administrative boundaries
     admin_results = await analyze_admin_boundaries(calculation_id, db)
     results.update(admin_results)
 
     processing_time = int(time.time() - start_time)
+
+    # Commit all analysis results to ensure clean transaction state
+    print("Committing final analysis results...")
+    try:
+        db.commit()
+        print("Analysis transaction committed successfully")
+    except Exception as commit_error:
+        print(f"Warning: Could not commit analysis: {commit_error}")
+        db.rollback()
 
     return results, processing_time
 
@@ -110,12 +191,19 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
     # Convert GeoJSON to WKT for PostGIS
     geojson_str = json.dumps(geojson_geometry)
 
-    # Create a temporary geometry from GeoJSON
-    geom_query = text("""
-        SELECT ST_AsText(ST_GeomFromGeoJSON(:geojson)) as wkt
-    """)
-    wkt_result = db.execute(geom_query, {"geojson": geojson_str}).first()
-    block_wkt = wkt_result.wkt
+    try:
+        # Create a temporary geometry from GeoJSON
+        geom_query = text("""
+            SELECT ST_AsText(ST_GeomFromGeoJSON(:geojson)) as wkt
+        """)
+        wkt_result = db.execute(geom_query, {"geojson": geojson_str}).first()
+        block_wkt = wkt_result.wkt
+    except Exception as e:
+        print(f"Error converting GeoJSON to WKT: {e}")
+        print(f"GeoJSON string (first 500 chars): {geojson_str[:500]}")
+        # CRITICAL: Rollback the failed transaction before raising
+        db.rollback()
+        raise ValueError(f"Invalid geometry format: {str(e)}")
 
     block_results = {}
 
@@ -192,6 +280,38 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
     # 14. Soil Texture
     soil_results = analyze_soil_geometry(block_wkt, db)
     block_results.update(soil_results)
+
+    # 15. Administrative Location (Province, District, Municipality, Ward, Watershed)
+    location_results = get_administrative_location(block_wkt, db)
+    block_results.update(location_results)
+
+    # 16. Geology Analysis
+    geology_results = analyze_geology_geometry(block_wkt, db)
+    block_results.update(geology_results)
+
+    # 17. Access Information
+    access_results = calculate_access_info(block_wkt, db)
+    block_results.update(access_results)
+
+    # 18. Nearby Features (within 100m, by direction)
+    print("  Calling analyze_nearby_features...", flush=True)
+    try:
+        nearby_results = analyze_nearby_features(block_wkt, db)
+        print(f"  analyze_nearby_features returned: {list(nearby_results.keys())}", flush=True)
+        print(f"  Features: N={nearby_results.get('features_north', 'MISSING')}, E={nearby_results.get('features_east', 'MISSING')}, S={nearby_results.get('features_south', 'MISSING')}, W={nearby_results.get('features_west', 'MISSING')}", flush=True)
+        block_results.update(nearby_results)
+        print(f"  After update, block_results has keys: {list(block_results.keys())}", flush=True)
+    except Exception as e:
+        print(f"  ERROR in analyze_nearby_features: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        # Add empty features to avoid crashes
+        block_results.update({
+            'features_north': None,
+            'features_east': None,
+            'features_south': None,
+            'features_west': None
+        })
 
     return block_results
 
@@ -1094,6 +1214,319 @@ async def analyze_vectors(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     results["nearest_road"] = None
 
     return results
+
+
+
+
+def get_administrative_location(geometry_wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Get administrative location by intersecting geometry centroid with admin boundaries
+
+    Args:
+        geometry_wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with: province, district, municipality, ward, watershed, major_river_basin
+    """
+    location = {}
+
+    # Query for province
+    province_query = text("""
+        SELECT p.province
+        FROM admin.province p
+        WHERE ST_Intersects(
+            p.shape,
+            ST_Centroid(ST_GeomFromText(:wkt, 4326))
+        )
+        LIMIT 1
+    """)
+    province_result = db.execute(province_query, {"wkt": geometry_wkt}).first()
+    location["province"] = province_result.province if province_result else None
+
+    # Query for municipality (includes district)
+    municipality_query = text("""
+        SELECT m.district, m.gapa_napa as municipality
+        FROM admin.municipality m
+        WHERE ST_Intersects(
+            m.geom,
+            ST_Centroid(ST_GeomFromText(:wkt, 4326))
+        )
+        LIMIT 1
+    """)
+    municipality_result = db.execute(municipality_query, {"wkt": geometry_wkt}).first()
+    if municipality_result:
+        location["district"] = municipality_result.district
+        location["municipality"] = municipality_result.municipality
+    else:
+        location["district"] = None
+        location["municipality"] = None
+
+    # Query for ward
+    ward_query = text("""
+        SELECT w.ward
+        FROM admin.ward w
+        WHERE ST_Intersects(
+            w.geom,
+            ST_Centroid(ST_GeomFromText(:wkt, 4326))
+        )
+        LIMIT 1
+    """)
+    ward_result = db.execute(ward_query, {"wkt": geometry_wkt}).first()
+    location["ward"] = str(ward_result.ward) if ward_result else None
+
+    # Query for watershed
+    watershed_query = text("""
+        SELECT w."watershed name" as watershed_name, w."major river basin" as major_river_basin
+        FROM admin."watershed_Nepal" w
+        WHERE ST_Intersects(
+            w.geom,
+            ST_Centroid(ST_GeomFromText(:wkt, 4326))
+        )
+        LIMIT 1
+    """)
+    watershed_result = db.execute(watershed_query, {"wkt": geometry_wkt}).first()
+    if watershed_result:
+        location["watershed"] = watershed_result.watershed_name
+        location["major_river_basin"] = watershed_result.major_river_basin
+    else:
+        location["watershed"] = None
+        location["major_river_basin"] = None
+
+    return location
+
+
+
+
+def analyze_geology_geometry(geometry_wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze geology classes that intersect with the geometry
+    Returns percentage coverage for each geology class
+
+    Args:
+        geometry_wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with geology_percentages: {class_name: percentage}
+    """
+    geology_query = text("""
+        WITH input_geom AS (
+            SELECT ST_GeomFromText(:wkt, 4326) as geom
+        ),
+        total_area AS (
+            SELECT ST_Area(ST_Transform(geom, 32645)) as area
+            FROM input_geom
+        ),
+        geology_intersections AS (
+            SELECT
+                g."geology class" as geology_class,
+                ST_Area(
+                    ST_Transform(
+                        ST_Intersection(g.geom, i.geom),
+                        32645
+                    )
+                ) as intersection_area
+            FROM geology.geology g, input_geom i
+            WHERE ST_Intersects(g.geom, i.geom)
+            AND g."geology class" IS NOT NULL
+            AND g."geology class" != 'No Data'
+        )
+        SELECT
+            geology_class,
+            (intersection_area / (SELECT area FROM total_area)) * 100 as percentage
+        FROM geology_intersections
+        WHERE intersection_area > 0
+        ORDER BY percentage DESC
+    """)
+
+    try:
+        result = db.execute(geology_query, {"wkt": geometry_wkt})
+        geology_data = {}
+
+        for row in result:
+            if row.geology_class and row.percentage:
+                geology_data[row.geology_class] = round(float(row.percentage), 2)
+
+        return {
+            "geology_percentages": geology_data if geology_data else None
+        }
+    except Exception as e:
+        print(f"Geology analysis error: {e}")
+        return {"geology_percentages": None}
+
+
+def calculate_access_info(geometry_wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Calculate access information: distance and direction to nearest district headquarters
+
+    Args:
+        geometry_wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with access_info: "Location Direction (degrees°) distance km"
+    """
+    access_query = text("""
+        WITH input_geom AS (
+            SELECT
+                ST_GeomFromText(:wkt, 4326) as geom,
+                ST_Centroid(ST_GeomFromText(:wkt, 4326)) as centroid
+        ),
+        nearest_hq AS (
+            SELECT
+                dh."head quarter" as name,
+                ST_Distance(
+                    ST_Transform(i.centroid, 32645),
+                    ST_Transform(dh.geom, 32645)
+                ) / 1000.0 as distance_km,
+                degrees(
+                    ST_Azimuth(
+                        i.centroid,
+                        dh.geom
+                    )
+                ) as azimuth_degrees
+            FROM admin."district Headquarter" dh, input_geom i
+            WHERE dh."head quarter" IS NOT NULL
+            ORDER BY ST_Distance(i.centroid, dh.geom)
+            LIMIT 1
+        )
+        SELECT
+            name,
+            distance_km,
+            azimuth_degrees,
+            CASE
+                WHEN azimuth_degrees >= 337.5 OR azimuth_degrees < 22.5 THEN 'North'
+                WHEN azimuth_degrees >= 22.5 AND azimuth_degrees < 67.5 THEN 'Northeast'
+                WHEN azimuth_degrees >= 67.5 AND azimuth_degrees < 112.5 THEN 'East'
+                WHEN azimuth_degrees >= 112.5 AND azimuth_degrees < 157.5 THEN 'Southeast'
+                WHEN azimuth_degrees >= 157.5 AND azimuth_degrees < 202.5 THEN 'South'
+                WHEN azimuth_degrees >= 202.5 AND azimuth_degrees < 247.5 THEN 'Southwest'
+                WHEN azimuth_degrees >= 247.5 AND azimuth_degrees < 292.5 THEN 'West'
+                ELSE 'Northwest'
+            END as direction
+        FROM nearest_hq
+    """)
+
+    try:
+        result = db.execute(access_query, {"wkt": geometry_wkt}).first()
+
+        if result and result.name:
+            access_str = f"{result.name} {result.direction} ({int(result.azimuth_degrees)}°) {result.distance_km:.1f} km"
+            return {"access_info": access_str}
+        else:
+            return {"access_info": None}
+    except Exception as e:
+        print(f"Access calculation error: {e}")
+        return {"access_info": None}
+
+
+def analyze_nearby_features(geometry_wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Find natural and infrastructure features within 100m of boundary
+    Reports features by direction: North, East, South, West
+
+    Args:
+        geometry_wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with features_north, features_east, features_south, features_west
+    """
+
+    # Define feature tables and their name columns
+    feature_tables = [
+        ('river.river_line', ['river_name', 'features']),
+        ('river.ridge', ['ridge_name']),
+        ('infrastructure.road', ['name', 'name_en', 'highway']),
+        ('infrastructure.poi', ['name', 'name_en', 'amenity', 'shop', 'tourism']),
+        ('infrastructure.health_facilities', ['hf_type', 'vdc_name1']),
+        ('infrastructure.education_facilities', ['name', 'name_en', 'amenity']),
+        ('buildings.building', ['Building']),  # Generic name
+        ('admin.settlement', ['vil_name']),
+        ('admin."esa_forest_Boundary"', ['description', '"boundary of"']),
+    ]
+
+    directions = {
+        'north': (315, 45),      # 315° to 45°
+        'east': (45, 135),       # 45° to 135°
+        'south': (135, 225),     # 135° to 225°
+        'west': (225, 315)       # 225° to 315° (wraps to 360/0)
+    }
+
+    result_features = {}
+
+    for direction_name, (start_angle, end_angle) in directions.items():
+        features_list = []
+        print(f"  Querying features in {direction_name} direction ({start_angle}° to {end_angle}°)...")
+
+        # Build query for this direction
+        for table_name, name_columns in feature_tables:
+            # Build COALESCE for name columns
+            name_coalesce = "COALESCE(" + ", ".join([f"f.{col}" if '"' not in col else f'f.{col}' for col in name_columns]) + ")"
+
+            # Handle angle wrapping for North (315-45)
+            if direction_name == 'north':
+                angle_condition = f"(azimuth_deg >= {start_angle} OR azimuth_deg < {end_angle})"
+            else:
+                angle_condition = f"(azimuth_deg >= {start_angle} AND azimuth_deg < {end_angle})"
+
+            direction_query = text(f"""
+                WITH input_geom AS (
+                    SELECT ST_GeomFromText(:wkt, 4326) as geom
+                ),
+                nearby AS (
+                    SELECT
+                        {name_coalesce} as feature_name,
+                        ST_Distance(ST_Transform(i.geom, 32645), ST_Transform(f.geom, 32645)) as distance_m,
+                        degrees(ST_Azimuth(ST_Centroid(i.geom), ST_ClosestPoint(f.geom, ST_Centroid(i.geom)))) as azimuth_deg
+                    FROM {table_name} f, input_geom i
+                    WHERE ST_DWithin(ST_Transform(i.geom, 32645), ST_Transform(f.geom, 32645), 100)
+                )
+                SELECT DISTINCT feature_name
+                FROM nearby
+                WHERE feature_name IS NOT NULL
+                AND feature_name != ''
+                AND {angle_condition}
+                LIMIT 10
+            """)
+
+            try:
+                result = db.execute(direction_query, {"wkt": geometry_wkt})
+                row_count = 0
+                for row in result:
+                    row_count += 1
+                    if row.feature_name and row.feature_name.strip():
+                        features_list.append(row.feature_name.strip())
+                # Debug: Log if no results found for this table in this direction
+                if row_count == 0:
+                    print(f"  No features from {table_name} in {direction_name} direction")
+            except Exception as e:
+                # Skip tables that might have issues
+                print(f"  Error querying {table_name} for {direction_name}: {str(e)[:100]}")
+                # CRITICAL: Rollback transaction to prevent failed state from affecting subsequent queries
+                db.rollback()
+                continue
+
+        # Store comma-separated list or None
+        features_str = ", ".join(features_list) if features_list else None
+        result_features[f"features_{direction_name}"] = features_str
+        # Use safe printing to handle Unicode characters
+        try:
+            print(f"Direction {direction_name}: Found {len(features_list)} features - {features_str if features_str else 'None'}")
+        except UnicodeEncodeError:
+            print(f"Direction {direction_name}: Found {len(features_list)} features (contains non-ASCII characters)")
+
+        # Debug: Show what's in result_features after each direction
+        print(f"  result_features now has {len(result_features)} keys: {list(result_features.keys())}")
+
+    # Final debug before return
+    print(f"  FINAL result_features has {len(result_features)} keys: {list(result_features.keys())}")
+    for key, val in result_features.items():
+        val_preview = val[:50] if val else None
+        print(f"    {key}: {val_preview}")
+
+    return result_features
 
 
 async def analyze_admin_boundaries(calculation_id: UUID, db: Session) -> Dict[str, Any]:

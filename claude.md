@@ -273,23 +273,25 @@ MAX_UPLOAD_SIZE_MB=50
 
 **Analysis Service** (`services/analysis.py`):
 
-**Implemented Functions:**
+**Implemented Functions (All 16 Parameters):**
 1. ✅ `calculate_area()` - Auto-detect UTM zone, accurate area
-2. ✅ `analyze_dem()` - Min/max/mean elevation
-3. ✅ `analyze_slope()` - 4-class classification
-4. ✅ `analyze_aspect()` - 8-directional distribution
-5. ✅ `analyze_canopy_height()` - 4-class forest structure
-6. ✅ `analyze_agb()` - Biomass & carbon stock
-7. ✅ `analyze_forest_health()` - 5-class distribution
+2. ✅ `analyze_dem()` / `analyze_dem_geometry()` - Min/max/mean elevation
+3. ✅ `analyze_slope()` / `analyze_slope_geometry()` - 4-class classification
+4. ✅ `analyze_aspect()` / `analyze_aspect_geometry()` - 8-directional distribution
+5. ✅ `analyze_canopy_height()` / `analyze_canopy_height_geometry()` - 4-class forest structure
+6. ✅ `analyze_agb()` / `analyze_agb_geometry()` - Biomass & carbon stock
+7. ✅ `analyze_forest_health()` / `analyze_forest_health_geometry()` - 5-class distribution
+8. ✅ `analyze_forest_type_geometry()` - Forest type classification (26 species mapped)
+9. ✅ `analyze_landcover_geometry()` - ESA WorldCover land cover classes
+10. ✅ `analyze_forest_loss_geometry()` - Hansen forest loss by year
+11. ✅ `analyze_forest_gain_geometry()` - Hansen forest gain detection
+12. ✅ `analyze_fire_loss_geometry()` - Fire-related forest loss by year
+13. ✅ `analyze_temperature_geometry()` - Annual mean + min coldest month temperature
+14. ✅ `analyze_precipitation_geometry()` - Annual precipitation
+15. ✅ `analyze_soil_geometry()` - SoilGrids texture classification (12 classes)
+16. ✅ `analyze_block_geometry()` - Orchestrates all 14 per-block analyses
 
-**Placeholder Functions (for future implementation):**
-- Forest Type analysis
-- ESA WorldCover
-- Climate data
-- Forest change detection
-- Soil properties
-- Vector proximity analysis
-- Administrative boundaries
+**Block-wise Analysis:** Each uploaded boundary is split into blocks. All 16 parameters are computed per block using `_geometry` functions that accept WKT and query PostGIS raster tables directly.
 
 ---
 
@@ -398,9 +400,9 @@ SECRET_KEY: str = "cf-forest-management-secret-key-2026-change-in-production"
    - Requires GDAL installation
    - GeoPandas and Fiona dependencies
 
-2. **Complete Raster Analysis**
-   - 7 of 16 functions implemented
-   - Remaining 9 functions placeholder
+2. **Raster Analysis** ✅ Complete
+   - All 16 parameters implemented and verified
+   - Block-wise per-polygon analysis working end-to-end
 
 3. **Vector Analysis**
    - Proximity calculations
@@ -1151,8 +1153,8 @@ For questions or issues:
 
 ---
 
-**System Version:** 1.0.0
-**Status:** Phase 1 Complete - Production Ready
-**Date:** January 22, 2026
+**System Version:** 1.1.0
+**Status:** Phase 1 + Raster Analysis Complete - Production Ready
+**Date:** January 28, 2026
 **Location:** D:\forest_management
 **Server:** http://localhost:8001

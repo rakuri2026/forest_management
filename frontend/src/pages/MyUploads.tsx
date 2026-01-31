@@ -24,6 +24,20 @@ export default function MyUploads() {
     }
   };
 
+  const handleDelete = async (id: string, forestName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${forestName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await forestApi.deleteCalculation(id);
+      // Refresh the list after deletion
+      await loadCalculations();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to delete calculation');
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const styles = {
       processing: 'bg-yellow-100 text-yellow-800',
@@ -141,12 +155,20 @@ export default function MyUploads() {
                     {formatDate(calc.created_at)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <Link
-                      to={`/calculations/${calc.id}`}
-                      className="text-green-600 hover:text-green-900"
-                    >
-                      View Details
-                    </Link>
+                    <div className="flex items-center gap-4">
+                      <Link
+                        to={`/calculations/${calc.id}`}
+                        className="text-green-600 hover:text-green-900"
+                      >
+                        View Details
+                      </Link>
+                      <button
+                        onClick={() => handleDelete(calc.id, calc.forest_name || 'Unnamed Forest')}
+                        className="text-red-600 hover:text-red-900"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
