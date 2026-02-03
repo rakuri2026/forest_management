@@ -1,0 +1,31 @@
+===============================================
+   INVENTORY UPLOAD FIX - START HERE
+===============================================
+
+After your computer restarts:
+
+STEP 1: Double-click this file
+   --> FIX_INVENTORY_UPLOAD.bat
+
+STEP 2: Wait 15 seconds for servers to start
+
+STEP 3: Open browser and go to:
+   --> http://localhost:3000
+
+STEP 4: Login
+   Email: newuser@example.com
+   Password: SecurePass123
+
+STEP 5: Upload your inventory CSV file
+
+===============================================
+
+For full details, read:
+   RESUME_AFTER_RESTART.md
+
+===============================================
+
+The CORS issue has been FIXED in the code.
+You just need to restart with the new code!
+
+===============================================

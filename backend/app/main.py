@@ -10,7 +10,11 @@ import time
 
 from .core.config import settings
 from .core.database import check_db_connection, Base, engine
-from .api import auth_router, forests_router
+from .api import auth_router, forests_router, inventory_router, species_router
+
+# Debug: Print router info
+print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
+print(f"DEBUG: Species router has {len(species_router.routes)} routes")
 
 
 @asynccontextmanager
@@ -48,12 +52,19 @@ app = FastAPI(
 
 
 # Add CORS middleware
+# Allow requests from frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
+    allow_credentials=True,  # Allow credentials (cookies, auth headers)
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
 )
 
 
@@ -103,19 +114,37 @@ app.include_router(
     tags=["Forest Management"]
 )
 
+app.include_router(
+    inventory_router,
+    prefix="/api/inventory",
+    tags=["Tree Inventory"]
+)
+
+print(f"DEBUG: Including species router...")
+app.include_router(
+    species_router,
+    prefix="/api/species",
+    tags=["Species"]
+)
+print(f"DEBUG: Species router included. Total app routes: {len(app.routes)}")
+
 
 # Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint - API information"""
+    import datetime
     return {
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "running",
         "docs": "/docs",
+        "reloaded_at": str(datetime.datetime.now()),
         "endpoints": {
             "auth": "/api/auth",
-            "forests": "/api/forests"
+            "forests": "/api/forests",
+            "inventory": "/api/inventory",
+            "species": "/api/species"
         }
     }
 
@@ -130,6 +159,25 @@ async def health_check():
         "status": "healthy" if db_status else "unhealthy",
         "database": "connected" if db_status else "disconnected",
         "version": settings.APP_VERSION
+    }
+
+
+# Test endpoint to verify routes
+@app.get("/test-species")
+async def test_species():
+    """Test endpoint to check if species routes are loaded"""
+    species_routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and '/species' in route.path:
+            species_routes.append({
+                "path": route.path,
+                "methods": list(route.methods) if hasattr(route, 'methods') else []
+            })
+
+    return {
+        "species_routes_found": len(species_routes),
+        "routes": species_routes,
+        "total_routes": len(app.routes)
     }
 
 
