@@ -49,6 +49,7 @@ class User(Base):
     organization = relationship("Organization", back_populates="users")
     forest_managers = relationship("ForestManager", back_populates="user")
     calculations = relationship("Calculation", back_populates="user")
+    inventory_calculations = relationship("InventoryCalculation", back_populates="user")
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, role={self.role.value})>"

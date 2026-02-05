@@ -1,0 +1,52 @@
+{
+  "summary": {
+    "total_rows": 99,
+    "valid_rows": 99,
+    "rows_with_errors": 0,
+    "rows_with_warnings": 0,
+    "error_count": 0,
+    "warning_count": 0,
+    "auto_corrections": 0,
+    "has_critical_errors": false,
+    "ready_for_processing": true
+  },
+  "data_detection": {
+    "coordinate_columns": {
+      "x": "longitude",
+      "y": "latitude"
+    },
+    "crs": {
+      "epsg": 4326,
+      "name": "WGS84 (Geographic)",
+      "confidence": "high",
+      "method": "Nepal geographic bounds",
+      "detected_range": {
+        "x": [
+          85.05199522,
+          85.07251323
+        ],
+        "y": [
+          27.40786816,
+          27.41854054
+        ]
+      }
+    },
+    "diameter": {
+      "type": "diameter",
+      "confidence": "high",
+      "method": "column_name",
+      "column_name": "dia_cm"
+    }
+  },
+  "errors": [],
+  "warnings": [],
+  "info": [
+    {
+      "type": "auto_utm_detection",
+      "message": "Auto-detected UTM Zone 44N (EPSG:32644) based on longitude 85.06\u00b0E"
+    }
+  ],
+  "corrections": [],
+  "inventory_id": "a28d0620-2077-431b-a10d-651dc7d2f486",
+  "next_step": "POST /api/inventory/{inventory_id}/process"
+}

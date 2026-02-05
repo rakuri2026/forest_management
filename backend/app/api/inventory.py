@@ -163,21 +163,21 @@ async def upload_inventory(
                 mean_lon = float(df[x_col].mean())
 
                 # Nepal is in Northern Hemisphere
-                # UTM Zone 44N: 81°E to 87°E (EPSG:32644)
-                # UTM Zone 45N: 87°E to 93°E (EPSG:32645)
-                if mean_lon < 87.0:
+                # UTM Zone 44N: 78°E to 84°E (EPSG:32644) - Western/Central Nepal
+                # UTM Zone 45N: 84°E to 90°E (EPSG:32645) - Eastern Nepal
+                if mean_lon < 84.0:
                     final_projection_epsg = 32644  # UTM 44N
                     validation_report['info'] = validation_report.get('info', [])
                     validation_report['info'].append({
                         'type': 'auto_utm_detection',
-                        'message': f'Auto-detected UTM Zone 44N (EPSG:32644) based on longitude {mean_lon:.2f}°E'
+                        'message': f'Auto-detected UTM Zone 44N (EPSG:32644) based on longitude {mean_lon:.2f}°E (< 84°E)'
                     })
                 else:
                     final_projection_epsg = 32645  # UTM 45N
                     validation_report['info'] = validation_report.get('info', [])
                     validation_report['info'].append({
                         'type': 'auto_utm_detection',
-                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E'
+                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E (≥ 84°E)'
                     })
             else:
                 # Default to UTM 45N for Nepal

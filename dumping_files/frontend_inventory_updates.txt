@@ -1,0 +1,21 @@
+# Updates needed for frontend
+
+## 1. App.tsx - Add these imports after line 13:
+import InventoryList from './pages/InventoryList';
+import InventoryUpload from './pages/InventoryUpload';
+import InventoryDetail from './pages/InventoryDetail';
+
+## 2. App.tsx - Add these routes after line 40:
+
+            {/* Inventory routes */}
+            <Route path="inventory" element={<InventoryList />} />
+            <Route path="inventory/upload" element={<InventoryUpload />} />
+            <Route path="inventory/:id" element={<InventoryDetail />} />
+
+## 3. Layout.tsx - Add this menu item after line 55 (after "My Forests"):
+                <Link
+                  to="/inventory"
+                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                >
+                  Tree Inventory
+                </Link>

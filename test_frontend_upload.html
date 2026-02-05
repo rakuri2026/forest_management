@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Inventory Upload</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .result { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background: #f5f5f5; }
+        .error { background: #ffe6e6; border-color: #ff0000; }
+        .success { background: #e6ffe6; border-color: #00ff00; }
+        button { padding: 10px 20px; margin: 10px 0; cursor: pointer; }
+        input[type="file"] { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Test Inventory Upload</h1>
+
+    <div>
+        <h3>Step 1: Login</h3>
+        <button onclick="login()">Login as newuser@example.com</button>
+        <div id="loginResult" class="result" style="display:none;"></div>
+    </div>
+
+    <div>
+        <h3>Step 2: Select File</h3>
+        <input type="file" id="fileInput" accept=".csv" />
+    </div>
+
+    <div>
+        <h3>Step 3: Upload</h3>
+        <button onclick="uploadFile()">Upload Inventory</button>
+        <div id="uploadResult" class="result" style="display:none;"></div>
+    </div>
+
+    <script>
+        let token = null;
+
+        async function login() {
+            const resultDiv = document.getElementById('loginResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = 'Logging in...';
+            resultDiv.className = 'result';
+
+            try {
+                const response = await fetch('http://localhost:8001/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: 'newuser@example.com',
+                        password: 'SecurePass123'
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    token = data.access_token;
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `<strong>Login successful!</strong><br>Token: ${token.substring(0, 50)}...`;
+                } else {
+                    const error = await response.text();
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<strong>Login failed!</strong><br>${error}`;
+                }
+            } catch (err) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>Error:</strong><br>${err.message}`;
+            }
+        }
+
+        async function uploadFile() {
+            const resultDiv = document.getElementById('uploadResult');
+            const fileInput = document.getElementById('fileInput');
+
+            if (!token) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = 'Please login first!';
+                return;
+            }
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = 'Please select a file!';
+                return;
+            }
+
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = 'Uploading...';
+            resultDiv.className = 'result';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('grid_spacing_meters', '20.0');
+
+            try {
+                console.log('Sending request to http://localhost:8001/api/inventory/upload');
+                console.log('File:', fileInput.files[0]);
+                console.log('Token:', token.substring(0, 50) + '...');
+
+                const response = await fetch('http://localhost:8001/api/inventory/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                        // Note: NOT setting Content-Type - let browser set it with boundary
+                    },
+                    body: formData
+                });
+
+                console.log('Response status:', response.status);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>Upload successful!</strong><br>
+                        <strong>Summary:</strong><br>
+                        - Total rows: ${data.summary?.total_rows || 'N/A'}<br>
+                        - Valid rows: ${data.summary?.valid_rows || 'N/A'}<br>
+                        - Errors: ${data.summary?.error_count || 0}<br>
+                        - Ready: ${data.summary?.ready_for_processing || false}<br>
+                        ${data.inventory_id ? `- Inventory ID: ${data.inventory_id}` : ''}
+                        <br><br>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    const error = await response.text();
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<strong>Upload failed! Status: ${response.status}</strong><br>${error}`;
+                    console.error('Upload error:', error);
+                }
+            } catch (err) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>Error:</strong><br>${err.message}`;
+                console.error('Upload exception:', err);
+            }
+        }
+    </script>
+</body>
+</html>

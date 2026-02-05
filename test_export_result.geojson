@@ -1,0 +1,2684 @@
+{
+  "type": "FeatureCollection",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "EPSG:4326"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05797182,
+          27.41360331
+        ]
+      },
+      "properties": {
+        "species": "Abies spp",
+        "local_name": "Thingre Salla",
+        "dia_cm": 87.0,
+        "height_m": 29.0,
+        "tree_class": "4",
+        "stem_volume": 7.095342803529056,
+        "branch_volume": 1.4190685607058113,
+        "tree_volume": 8.514411364234867,
+        "gross_volume": 7.085405379015464,
+        "net_volume": 5.668324303212372,
+        "net_volume_cft": 200.17517227065395,
+        "firewood_m3": 2.8460870610224953,
+        "firewood_chatta": 10.659502101207847,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05199522,
+          27.40964846
+        ]
+      },
+      "properties": {
+        "species": "Acacia catechu",
+        "local_name": "Khayar",
+        "dia_cm": 40.0,
+        "height_m": 26.0,
+        "tree_class": "1",
+        "stem_volume": 1.3262905382335324,
+        "branch_volume": 0.2652581076467065,
+        "tree_volume": 1.5915486458802388,
+        "gross_volume": 1.295064805083504,
+        "net_volume": 1.0360518440668034,
+        "net_volume_cft": 36.58786005766594,
+        "firewood_m3": 0.5554968018134354,
+        "firewood_chatta": 2.0805123663424547,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07011406,
+          27.41043608
+        ]
+      },
+      "properties": {
+        "species": "Adina cardifolia",
+        "local_name": "Karma",
+        "dia_cm": 51.0,
+        "height_m": 23.0,
+        "tree_class": "1",
+        "stem_volume": 1.8147697544349357,
+        "branch_volume": 0.3629539508869872,
+        "tree_volume": 2.177723705321923,
+        "gross_volume": 1.7907797747395025,
+        "net_volume": 1.4326238197916021,
+        "net_volume_cft": 50.59268040879449,
+        "firewood_m3": 0.7450998855303208,
+        "firewood_chatta": 2.79063627539446,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06718004,
+          27.41346978
+        ]
+      },
+      "properties": {
+        "species": "Albizia spp",
+        "local_name": "Siris",
+        "dia_cm": 45.0,
+        "height_m": 22.0,
+        "tree_class": "3",
+        "stem_volume": 1.424131163132279,
+        "branch_volume": 0.28482623262645584,
+        "tree_volume": 1.708957395758735,
+        "gross_volume": 1.3982380484294739,
+        "net_volume": 1.1185904387435792,
+        "net_volume_cft": 39.50268576709788,
+        "firewood_m3": 0.5903669570151557,
+        "firewood_chatta": 2.2111121985586357,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06361336,
+          27.41510095
+        ]
+      },
+      "properties": {
+        "species": "Alnus nepalensis",
+        "local_name": "Uttis",
+        "dia_cm": 86.0,
+        "height_m": 17.0,
+        "tree_class": "3",
+        "stem_volume": 4.276909772541579,
+        "branch_volume": 0.8553819545083159,
+        "tree_volume": 5.1322917270498944,
+        "gross_volume": 4.2675862967291245,
+        "net_volume": 3.4140690373832996,
+        "net_volume_cft": 120.56682383448002,
+        "firewood_m3": 1.7182226896665949,
+        "firewood_chatta": 6.435290972534062,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06577657,
+          27.41123737
+        ]
+      },
+      "properties": {
+        "species": "Anogeissus latifolia",
+        "local_name": "Banjhi",
+        "dia_cm": 16.0,
+        "height_m": 26.0,
+        "tree_class": "4",
+        "stem_volume": 0.2621012210478365,
+        "branch_volume": 0.052420244209567306,
+        "tree_volume": 0.3145214652574038,
+        "gross_volume": 0.20504116511780335,
+        "net_volume": 0.1640329320942427,
+        "net_volume_cft": 5.792773787028553,
+        "firewood_m3": 0.15048853316316113,
+        "firewood_chatta": 0.563627465030566,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06068216,
+          27.41519405
+        ]
+      },
+      "properties": {
+        "species": "Bombax ceiba",
+        "local_name": "Simal",
+        "dia_cm": 31.0,
+        "height_m": 24.0,
+        "tree_class": "3",
+        "stem_volume": 0.8910681283743083,
+        "branch_volume": 0.17821362567486165,
+        "tree_volume": 1.06928175404917,
+        "gross_volume": 0.8596759197679128,
+        "net_volume": 0.6877407358143303,
+        "net_volume_cft": 24.28735776306233,
+        "firewood_m3": 0.38154101823483966,
+        "firewood_chatta": 1.4289925776585755,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05432451,
+          27.40856971
+        ]
+      },
+      "properties": {
+        "species": "Cedrela toona",
+        "local_name": "Tooni",
+        "dia_cm": 27.0,
+        "height_m": 18.0,
+        "tree_class": "2",
+        "stem_volume": 0.47381458086804357,
+        "branch_volume": 0.09476291617360871,
+        "tree_volume": 0.5685774970416523,
+        "gross_volume": 0.443634178473802,
+        "net_volume": 0.3549073427790416,
+        "net_volume_cft": 12.533446338039022,
+        "firewood_m3": 0.21367015426261066,
+        "firewood_chatta": 0.8002627500472309,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05831131,
+          27.41270397
+        ]
+      },
+      "properties": {
+        "species": "Dalbergia sissoo",
+        "local_name": "Sissoo",
+        "dia_cm": 35.0,
+        "height_m": 18.0,
+        "tree_class": "1",
+        "stem_volume": 0.7030472746840531,
+        "branch_volume": 0.14060945493681062,
+        "tree_volume": 0.8436567296208638,
+        "gross_volume": 0.6772968981200939,
+        "net_volume": 0.5418375184960751,
+        "net_volume_cft": 19.134829414433344,
+        "firewood_m3": 0.3018192111247887,
+        "firewood_chatta": 1.1304090304299201,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07191919,
+          27.41095692
+        ]
+      },
+      "properties": {
+        "species": "Eugenia Jambolana",
+        "local_name": "Jamun",
+        "dia_cm": 36.0,
+        "height_m": 25.0,
+        "tree_class": "3",
+        "stem_volume": 1.0010952309176961,
+        "branch_volume": 0.20021904618353925,
+        "tree_volume": 1.2013142771012353,
+        "gross_volume": 0.9639904974710791,
+        "net_volume": 0.7711923979768633,
+        "net_volume_cft": 27.234428176833536,
+        "firewood_m3": 0.43012187912437194,
+        "firewood_chatta": 1.6109433675070108,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07004604,
+          27.41368698
+        ]
+      },
+      "properties": {
+        "species": "Hymenodictyon excelsum",
+        "local_name": "Bhudkul",
+        "dia_cm": 89.0,
+        "height_m": 29.0,
+        "tree_class": "3",
+        "stem_volume": 6.636896089006203,
+        "branch_volume": 1.3273792178012407,
+        "tree_volume": 7.964275306807444,
+        "gross_volume": 6.613467353129959,
+        "net_volume": 5.290773882503967,
+        "net_volume_cft": 186.84209242846288,
+        "firewood_m3": 2.6735014243034767,
+        "firewood_chatta": 10.01311394870216,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06790791,
+          27.41398411
+        ]
+      },
+      "properties": {
+        "species": "Lagerstroemia parviflora",
+        "local_name": "Botdhayero",
+        "dia_cm": 93.0,
+        "height_m": 28.0,
+        "tree_class": "4",
+        "stem_volume": 6.055522240093756,
+        "branch_volume": 1.2111044480187514,
+        "tree_volume": 7.266626688112508,
+        "gross_volume": 6.036003171589269,
+        "net_volume": 4.828802537271415,
+        "net_volume_cft": 170.52771296297885,
+        "firewood_m3": 2.4378241508410925,
+        "firewood_chatta": 9.130427531240047,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0618044,
+          27.4153535
+        ]
+      },
+      "properties": {
+        "species": "Michelia champaca",
+        "local_name": "Chanp",
+        "dia_cm": 58.0,
+        "height_m": 22.0,
+        "tree_class": "2",
+        "stem_volume": 2.6370532986016313,
+        "branch_volume": 0.5274106597203263,
+        "tree_volume": 3.1644639583219574,
+        "gross_volume": 2.6161259207997394,
+        "net_volume": 2.0929007366397916,
+        "net_volume_cft": 73.91016164421325,
+        "firewood_m3": 1.0715632216821658,
+        "firewood_chatta": 4.013345399558673,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06323461,
+          27.41502467
+        ]
+      },
+      "properties": {
+        "species": "Pinus roxburghii",
+        "local_name": "Khote Salla",
+        "dia_cm": 94.0,
+        "height_m": 26.0,
+        "tree_class": "2",
+        "stem_volume": 8.31914226323904,
+        "branch_volume": 1.6638284526478082,
+        "tree_volume": 9.982970715886848,
+        "gross_volume": 8.307435133726436,
+        "net_volume": 6.645948106981149,
+        "net_volume_cft": 234.69966361360719,
+        "firewood_m3": 3.3370226089056994,
+        "firewood_chatta": 12.498212018373405,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06439908,
+          27.41250528
+        ]
+      },
+      "properties": {
+        "species": "Pinus wallichiana",
+        "local_name": "Gobre Salla",
+        "dia_cm": 83.0,
+        "height_m": 29.0,
+        "tree_class": "2",
+        "stem_volume": 6.104661823487604,
+        "branch_volume": 1.220932364697521,
+        "tree_volume": 7.325594188185125,
+        "gross_volume": 6.091181679709256,
+        "net_volume": 4.872945343767405,
+        "net_volume_cft": 172.08660293154279,
+        "firewood_m3": 2.4526488444177197,
+        "firewood_chatta": 9.185950728156254,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07091351,
+          27.41138038
+        ]
+      },
+      "properties": {
+        "species": "Quercus spp",
+        "local_name": "Kharsu",
+        "dia_cm": 63.0,
+        "height_m": 25.0,
+        "tree_class": "2",
+        "stem_volume": 3.6649078100598866,
+        "branch_volume": 0.7329815620119774,
+        "tree_volume": 4.397889372071864,
+        "gross_volume": 3.64656084331123,
+        "net_volume": 2.9172486746489845,
+        "net_volume_cft": 103.0217617706265,
+        "firewood_m3": 1.4806406974228796,
+        "firewood_chatta": 5.545470776864717,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0587898,
+          27.41124071
+        ]
+      },
+      "properties": {
+        "species": "Schima wallichii",
+        "local_name": "Chilaune",
+        "dia_cm": 86.0,
+        "height_m": 28.0,
+        "tree_class": "1",
+        "stem_volume": 6.030371515375396,
+        "branch_volume": 1.2060743030750793,
+        "tree_volume": 7.236445818450475,
+        "gross_volume": 6.018163312007133,
+        "net_volume": 4.814530649605707,
+        "net_volume_cft": 170.0237055316307,
+        "firewood_m3": 2.4219151688447678,
+        "firewood_chatta": 9.070843329006621,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06724462,
+          27.41101043
+        ]
+      },
+      "properties": {
+        "species": "Shorea robusta",
+        "local_name": "Sal",
+        "dia_cm": 72.0,
+        "height_m": 29.0,
+        "tree_class": "2",
+        "stem_volume": 4.884149452755258,
+        "branch_volume": 0.9768298905510516,
+        "tree_volume": 5.86097934330631,
+        "gross_volume": 4.86205447218018,
+        "net_volume": 3.889643577744144,
+        "net_volume_cft": 137.36159605496113,
+        "firewood_m3": 1.971335765562166,
+        "firewood_chatta": 7.383280020832082,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06764589,
+          27.41234653
+        ]
+      },
+      "properties": {
+        "species": "Terminalia alata",
+        "local_name": "Saj",
+        "dia_cm": 85.0,
+        "height_m": 17.0,
+        "tree_class": "2",
+        "stem_volume": 3.824564072911802,
+        "branch_volume": 0.7649128145823605,
+        "tree_volume": 4.589476887494163,
+        "gross_volume": 3.805711184297382,
+        "net_volume": 3.044568947437906,
+        "net_volume_cft": 107.51803900808542,
+        "firewood_m3": 1.544907940056257,
+        "firewood_chatta": 5.786172060135794,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05564738,
+          27.41017489
+        ]
+      },
+      "properties": {
+        "species": "Trewia nudiflora",
+        "local_name": "Gamhari",
+        "dia_cm": 50.0,
+        "height_m": 25.0,
+        "tree_class": "1",
+        "stem_volume": 1.9348142755365365,
+        "branch_volume": 0.3869628551073073,
+        "tree_volume": 2.3217771306438437,
+        "gross_volume": 1.9096953686353058,
+        "net_volume": 1.5277562949082446,
+        "net_volume_cft": 53.952255227796186,
+        "firewood_m3": 0.7940208357355991,
+        "firewood_chatta": 2.9738608079984985,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05841244,
+          27.4118597
+        ]
+      },
+      "properties": {
+        "species": "Tsuga spp",
+        "local_name": "Dhupi Salla",
+        "dia_cm": 93.0,
+        "height_m": 23.0,
+        "tree_class": "4",
+        "stem_volume": 6.612519000271764,
+        "branch_volume": 1.3225038000543528,
+        "tree_volume": 7.9350228003261165,
+        "gross_volume": 6.604590715534084,
+        "net_volume": 5.2836725724272675,
+        "net_volume_cft": 186.59131179349723,
+        "firewood_m3": 2.651350227898849,
+        "firewood_chatta": 9.930150666287824,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06130515,
+          27.41741202
+        ]
+      },
+      "properties": {
+        "species": "Terai spp",
+        "local_name": "Terai Spp",
+        "dia_cm": 52.0,
+        "height_m": 30.0,
+        "tree_class": "4",
+        "stem_volume": 2.6836184130687672,
+        "branch_volume": 0.5367236826137535,
+        "tree_volume": 3.2203420956825206,
+        "gross_volume": 2.648953075537819,
+        "net_volume": 2.119162460430255,
+        "net_volume_cft": 74.83758654135633,
+        "firewood_m3": 1.1011796352522656,
+        "firewood_chatta": 4.124268296824964,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07066377,
+          27.41455725
+        ]
+      },
+      "properties": {
+        "species": "Hill spp",
+        "local_name": "Hill spp",
+        "dia_cm": 79.0,
+        "height_m": 25.0,
+        "tree_class": "2",
+        "stem_volume": 4.505340416550836,
+        "branch_volume": 0.9010680833101672,
+        "tree_volume": 5.406408499861003,
+        "gross_volume": 4.483086146881519,
+        "net_volume": 3.586468917505215,
+        "net_volume_cft": 126.65507388102142,
+        "firewood_m3": 1.8199395823557882,
+        "firewood_chatta": 6.816253117437409,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0581424,
+          27.40987779
+        ]
+      },
+      "properties": {
+        "species": "Abies spp",
+        "local_name": "Thingre Salla",
+        "dia_cm": 19.0,
+        "height_m": 24.0,
+        "tree_class": "3",
+        "stem_volume": 0.42143115359311956,
+        "branch_volume": 0.08428623071862391,
+        "tree_volume": 0.5057173843117435,
+        "gross_volume": 0.38606247348991873,
+        "net_volume": 0.308849978791935,
+        "net_volume_cft": 10.906944346043547,
+        "firewood_m3": 0.19686740551980852,
+        "firewood_chatta": 0.7373311068157622,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05806982,
+          27.4097641
+        ]
+      },
+      "properties": {
+        "species": "Acacia catechu",
+        "local_name": "Khayar",
+        "dia_cm": 79.0,
+        "height_m": 25.0,
+        "tree_class": "4",
+        "stem_volume": 3.905183499682571,
+        "branch_volume": 0.7810366999365143,
+        "tree_volume": 4.686220199619085,
+        "gross_volume": 3.8883079560478553,
+        "net_volume": 3.1106463648382845,
+        "net_volume_cft": 109.85154318035457,
+        "firewood_m3": 1.5755738347808008,
+        "firewood_chatta": 5.901025598429965,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05836037,
+          27.4115373
+        ]
+      },
+      "properties": {
+        "species": "Adina cardifolia",
+        "local_name": "Karma",
+        "dia_cm": 83.0,
+        "height_m": 25.0,
+        "tree_class": "3",
+        "stem_volume": 4.83046685517563,
+        "branch_volume": 0.966093371035126,
+        "tree_volume": 5.796560226210756,
+        "gross_volume": 4.8114853243359255,
+        "net_volume": 3.8491882594687405,
+        "net_volume_cft": 135.93292862666073,
+        "firewood_m3": 1.9473719667420157,
+        "firewood_chatta": 7.293527965325901,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05723824,
+          27.40897892
+        ]
+      },
+      "properties": {
+        "species": "Albizia spp",
+        "local_name": "Siris",
+        "dia_cm": 16.0,
+        "height_m": 21.0,
+        "tree_class": "2",
+        "stem_volume": 0.22040550633116007,
+        "branch_volume": 0.04408110126623202,
+        "tree_volume": 0.26448660759739206,
+        "gross_volume": 0.18104308698575763,
+        "net_volume": 0.1448344695886061,
+        "net_volume_cft": 5.114785843180748,
+        "firewood_m3": 0.11965213800878596,
+        "firewood_chatta": 0.44813534834751295,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05883541,
+          27.41239109
+        ]
+      },
+      "properties": {
+        "species": "Alnus nepalensis",
+        "local_name": "Uttis",
+        "dia_cm": 33.0,
+        "height_m": 29.0,
+        "tree_class": "2",
+        "stem_volume": 1.1460182015580236,
+        "branch_volume": 0.22920364031160473,
+        "tree_volume": 1.3752218418696283,
+        "gross_volume": 1.1119718455178418,
+        "net_volume": 0.8895774764142734,
+        "net_volume_cft": 31.415161706327144,
+        "firewood_m3": 0.48564436545535483,
+        "firewood_chatta": 1.8188927545144375,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06863172,
+          27.40940609
+        ]
+      },
+      "properties": {
+        "species": "Anogeissus latifolia",
+        "local_name": "Banjhi",
+        "dia_cm": 29.0,
+        "height_m": 25.0,
+        "tree_class": "3",
+        "stem_volume": 0.7158192239944554,
+        "branch_volume": 0.14316384479889108,
+        "tree_volume": 0.8589830687933465,
+        "gross_volume": 0.6769585921680488,
+        "net_volume": 0.541566873734439,
+        "net_volume_cft": 19.125271675869595,
+        "firewood_m3": 0.3174161950589075,
+        "firewood_chatta": 1.188824700595159,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06986176,
+          27.41427473
+        ]
+      },
+      "properties": {
+        "species": "Bombax ceiba",
+        "local_name": "Simal",
+        "dia_cm": 16.0,
+        "height_m": 23.0,
+        "tree_class": "1",
+        "stem_volume": 0.26984125196456643,
+        "branch_volume": 0.05396825039291329,
+        "tree_volume": 0.32380950235747974,
+        "gross_volume": 0.22629670686584752,
+        "net_volume": 0.18103736549267802,
+        "net_volume_cft": 6.393280251164277,
+        "firewood_m3": 0.14277213686480172,
+        "firewood_chatta": 0.5347271043625532,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06660384,
+          27.4108245
+        ]
+      },
+      "properties": {
+        "species": "Cedrela toona",
+        "local_name": "Tooni",
+        "dia_cm": 98.0,
+        "height_m": 24.0,
+        "tree_class": "2",
+        "stem_volume": 6.545477928473558,
+        "branch_volume": 1.3090955856947115,
+        "tree_volume": 7.854573514168269,
+        "gross_volume": 6.5251560123722925,
+        "net_volume": 5.220124809897834,
+        "net_volume_cft": 184.34714162409907,
+        "firewood_m3": 2.6344487042704348,
+        "firewood_chatta": 9.866849079664549,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05484974,
+          27.41042426
+        ]
+      },
+      "properties": {
+        "species": "Dalbergia sissoo",
+        "local_name": "Sissoo",
+        "dia_cm": 22.0,
+        "height_m": 23.0,
+        "tree_class": "2",
+        "stem_volume": 0.4152396223401987,
+        "branch_volume": 0.08304792446803974,
+        "tree_volume": 0.4982875468082384,
+        "gross_volume": 0.37385632590647483,
+        "net_volume": 0.2990850607251799,
+        "net_volume_cft": 10.56209919399151,
+        "firewood_m3": 0.19920248608305852,
+        "firewood_chatta": 0.7460767269028409,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.061754,
+          27.41696214
+        ]
+      },
+      "properties": {
+        "species": "Eugenia Jambolana",
+        "local_name": "Jamun",
+        "dia_cm": 59.0,
+        "height_m": 25.0,
+        "tree_class": "4",
+        "stem_volume": 2.536131405911847,
+        "branch_volume": 0.5072262811823695,
+        "tree_volume": 3.0433576870942165,
+        "gross_volume": 2.5068887743943513,
+        "net_volume": 2.005511019515481,
+        "net_volume_cft": 70.82402000088337,
+        "firewood_m3": 1.0378466675787354,
+        "firewood_chatta": 3.8870661707068743,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06085931,
+          27.41702753
+        ]
+      },
+      "properties": {
+        "species": "Hymenodictyon excelsum",
+        "local_name": "Bhudkul",
+        "dia_cm": 42.0,
+        "height_m": 30.0,
+        "tree_class": "1",
+        "stem_volume": 1.5837244644725288,
+        "branch_volume": 0.3167448928945058,
+        "tree_volume": 1.9004693573670346,
+        "gross_volume": 1.5472901425328902,
+        "net_volume": 1.2378321140263122,
+        "net_volume_cft": 43.71366975720501,
+        "firewood_m3": 0.6626372433407224,
+        "firewood_chatta": 2.4817874282424057,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06240465,
+          27.41689759
+        ]
+      },
+      "properties": {
+        "species": "Lagerstroemia parviflora",
+        "local_name": "Botdhayero",
+        "dia_cm": 38.0,
+        "height_m": 20.0,
+        "tree_class": "2",
+        "stem_volume": 0.9333129265693804,
+        "branch_volume": 0.18666258531387608,
+        "tree_volume": 1.1199755118832564,
+        "gross_volume": 0.9065305234486849,
+        "net_volume": 0.7252244187589479,
+        "net_volume_cft": 25.61108278114662,
+        "firewood_m3": 0.39475109312430845,
+        "firewood_chatta": 1.4784685135741888,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05934746,
+          27.41243094
+        ]
+      },
+      "properties": {
+        "species": "Michelia champaca",
+        "local_name": "Chanp",
+        "dia_cm": 15.0,
+        "height_m": 16.0,
+        "tree_class": "3",
+        "stem_volume": 0.1681863083498654,
+        "branch_volume": 0.03363726166997308,
+        "tree_volume": 0.20182357001983847,
+        "gross_volume": 0.14779166403551453,
+        "net_volume": 0.11823333122841162,
+        "net_volume_cft": 4.175374622331988,
+        "firewood_m3": 0.08359023879142685,
+        "firewood_chatta": 0.31307205539860244,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06618533,
+          27.41348471
+        ]
+      },
+      "properties": {
+        "species": "Pinus roxburghii",
+        "local_name": "Khote Salla",
+        "dia_cm": 63.0,
+        "height_m": 24.0,
+        "tree_class": "4",
+        "stem_volume": 3.556071768648496,
+        "branch_volume": 0.7112143537296993,
+        "tree_volume": 4.267286122378195,
+        "gross_volume": 3.5405719619956364,
+        "net_volume": 2.8324575695965093,
+        "net_volume_cft": 100.02738933302986,
+        "firewood_m3": 1.4348285527816858,
+        "firewood_chatta": 5.37388971079283,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06424472,
+          27.41394361
+        ]
+      },
+      "properties": {
+        "species": "Pinus wallichiana",
+        "local_name": "Gobre Salla",
+        "dia_cm": 99.0,
+        "height_m": 17.0,
+        "tree_class": "2",
+        "stem_volume": 4.447625384525337,
+        "branch_volume": 0.8895250769050675,
+        "tree_volume": 5.337150461430404,
+        "gross_volume": 4.4415007532373565,
+        "net_volume": 3.5532006025898855,
+        "net_volume_cft": 125.48021332028104,
+        "firewood_m3": 1.783949858840519,
+        "firewood_chatta": 6.681460145470108,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0638313,
+          27.41461863
+        ]
+      },
+      "properties": {
+        "species": "Quercus spp",
+        "local_name": "Kharsu",
+        "dia_cm": 13.0,
+        "height_m": 20.0,
+        "tree_class": "3",
+        "stem_volume": 0.13885375371991251,
+        "branch_volume": 0.027770750743982504,
+        "tree_volume": 0.166624504463895,
+        "gross_volume": 0.10567418483109658,
+        "net_volume": 0.08453934786487727,
+        "net_volume_cft": 2.9854817080437814,
+        "firewood_m3": 0.08208515659901774,
+        "firewood_chatta": 0.307435043442014,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06178403,
+          27.41518669
+        ]
+      },
+      "properties": {
+        "species": "Schima wallichii",
+        "local_name": "Chilaune",
+        "dia_cm": 82.0,
+        "height_m": 16.0,
+        "tree_class": "4",
+        "stem_volume": 3.1477719196422926,
+        "branch_volume": 0.6295543839284585,
+        "tree_volume": 3.777326303570751,
+        "gross_volume": 3.1403969027585794,
+        "net_volume": 2.512317522206864,
+        "net_volume_cft": 88.72173960147875,
+        "firewood_m3": 1.2650087813638873,
+        "firewood_chatta": 4.7378606043591285,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05756391,
+          27.41294394
+        ]
+      },
+      "properties": {
+        "species": "Shorea robusta",
+        "local_name": "Sal",
+        "dia_cm": 33.0,
+        "height_m": 30.0,
+        "tree_class": "4",
+        "stem_volume": 1.1388056760284788,
+        "branch_volume": 0.22776113520569577,
+        "tree_volume": 1.3665668112341747,
+        "gross_volume": 1.1031755186636223,
+        "net_volume": 0.8825404149308979,
+        "net_volume_cft": 31.16664999116018,
+        "firewood_m3": 0.4840263963032768,
+        "firewood_chatta": 1.812832944956093,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06563925,
+          27.4094779
+        ]
+      },
+      "properties": {
+        "species": "Terminalia alata",
+        "local_name": "Saj",
+        "dia_cm": 85.0,
+        "height_m": 20.0,
+        "tree_class": "3",
+        "stem_volume": 4.412587053377255,
+        "branch_volume": 0.882517410675451,
+        "tree_volume": 5.295104464052706,
+        "gross_volume": 4.390835551602723,
+        "net_volume": 3.5126684412821785,
+        "net_volume_cft": 124.04883220334776,
+        "firewood_m3": 1.7824360227705274,
+        "firewood_chatta": 6.675790347455158,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05504806,
+          27.41008941
+        ]
+      },
+      "properties": {
+        "species": "Trewia nudiflora",
+        "local_name": "Gamhari",
+        "dia_cm": 49.0,
+        "height_m": 30.0,
+        "tree_class": "4",
+        "stem_volume": 2.207057258084258,
+        "branch_volume": 0.4414114516168516,
+        "tree_volume": 2.6484687097011093,
+        "gross_volume": 2.1769333319784856,
+        "net_volume": 1.7415466655827885,
+        "net_volume_cft": 61.5021980310565,
+        "firewood_m3": 0.9069220441183208,
+        "firewood_chatta": 3.3967117757240475,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07251323,
+          27.41146549
+        ]
+      },
+      "properties": {
+        "species": "Tsuga spp",
+        "local_name": "Dhupi Salla",
+        "dia_cm": 63.0,
+        "height_m": 23.0,
+        "tree_class": "3",
+        "stem_volume": 3.3039977959769478,
+        "branch_volume": 0.6607995591953896,
+        "tree_volume": 3.9647973551723372,
+        "gross_volume": 3.2928858052420327,
+        "net_volume": 2.6343086441936263,
+        "net_volume_cft": 93.02981947710467,
+        "firewood_m3": 1.330488710978711,
+        "firewood_chatta": 4.983103786437119,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05751422,
+          27.41389826
+        ]
+      },
+      "properties": {
+        "species": "Terai spp",
+        "local_name": "Terai Spp",
+        "dia_cm": 68.0,
+        "height_m": 20.0,
+        "tree_class": "1",
+        "stem_volume": 2.9405148712832956,
+        "branch_volume": 0.5881029742566591,
+        "tree_volume": 3.5286178455399546,
+        "gross_volume": 2.920242473685213,
+        "net_volume": 2.3361939789481703,
+        "net_volume_cft": 82.50198950836095,
+        "firewood_m3": 1.1924238665917843,
+        "firewood_chatta": 4.466006990980466,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05981426,
+          27.41707455
+        ]
+      },
+      "properties": {
+        "species": "Hill spp",
+        "local_name": "Hill spp",
+        "dia_cm": 97.0,
+        "height_m": 23.0,
+        "tree_class": "1",
+        "stem_volume": 6.150781966085133,
+        "branch_volume": 1.2301563932170267,
+        "tree_volume": 7.38093835930216,
+        "gross_volume": 6.132526049781419,
+        "net_volume": 4.9060208398251355,
+        "net_volume_cft": 173.25465415217272,
+        "firewood_m3": 2.4749175194770245,
+        "firewood_chatta": 9.269354005531927,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06995597,
+          27.41466229
+        ]
+      },
+      "properties": {
+        "species": "Abies spp",
+        "local_name": "Thingre Salla",
+        "dia_cm": 25.0,
+        "height_m": 22.0,
+        "tree_class": "4",
+        "stem_volume": 0.6156253235567195,
+        "branch_volume": 0.1231250647113439,
+        "tree_volume": 0.7387503882680634,
+        "gross_volume": 0.5909323484773386,
+        "net_volume": 0.47274587878187085,
+        "net_volume_cft": 16.694878885418134,
+        "firewood_m3": 0.26600450948619253,
+        "firewood_chatta": 0.9962715711093353,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06835434,
+          27.4113362
+        ]
+      },
+      "properties": {
+        "species": "Acacia catechu",
+        "local_name": "Khayar",
+        "dia_cm": 67.0,
+        "height_m": 20.0,
+        "tree_class": "4",
+        "stem_volume": 2.3522985953426807,
+        "branch_volume": 0.4704597190685362,
+        "tree_volume": 2.822758314411217,
+        "gross_volume": 2.336975534475562,
+        "net_volume": 1.8695804275804495,
+        "net_volume_cft": 66.0236719258753,
+        "firewood_m3": 0.9531778868307674,
+        "firewood_chatta": 3.5699546323249716,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06919143,
+          27.40786816
+        ]
+      },
+      "properties": {
+        "species": "Adina cardifolia",
+        "local_name": "Karma",
+        "dia_cm": 80.0,
+        "height_m": 15.0,
+        "tree_class": "3",
+        "stem_volume": 2.8800807956872445,
+        "branch_volume": 0.576016159137449,
+        "tree_volume": 3.4560969548246936,
+        "gross_volume": 2.8676764697234094,
+        "net_volume": 2.294141175778728,
+        "net_volume_cft": 81.01690738027304,
+        "firewood_m3": 1.1619557790459658,
+        "firewood_chatta": 4.3518943035429425,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05686536,
+          27.41070774
+        ]
+      },
+      "properties": {
+        "species": "Albizia spp",
+        "local_name": "Siris",
+        "dia_cm": 53.0,
+        "height_m": 23.0,
+        "tree_class": "3",
+        "stem_volume": 1.9830702261839876,
+        "branch_volume": 0.39661404523679755,
+        "tree_volume": 2.379684271420785,
+        "gross_volume": 1.9579533849107154,
+        "net_volume": 1.5663627079285725,
+        "net_volume_cft": 55.31562912168516,
+        "firewood_m3": 0.8133215634922126,
+        "firewood_chatta": 3.046148177873455,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06366006,
+          27.40958841
+        ]
+      },
+      "properties": {
+        "species": "Alnus nepalensis",
+        "local_name": "Uttis",
+        "dia_cm": 18.0,
+        "height_m": 22.0,
+        "tree_class": "1",
+        "stem_volume": 0.2791014645926456,
+        "branch_volume": 0.05582029291852913,
+        "tree_volume": 0.33492175751117476,
+        "gross_volume": 0.23579757035689125,
+        "net_volume": 0.188638056285513,
+        "net_volume_cft": 6.661696366306006,
+        "firewood_m3": 0.14628370122566176,
+        "firewood_chatta": 0.5478790308077219,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06422375,
+          27.41191564
+        ]
+      },
+      "properties": {
+        "species": "Anogeissus latifolia",
+        "local_name": "Banjhi",
+        "dia_cm": 85.0,
+        "height_m": 30.0,
+        "tree_class": "3",
+        "stem_volume": 5.555001164303325,
+        "branch_volume": 1.111000232860665,
+        "tree_volume": 6.666001397163989,
+        "gross_volume": 5.530524249207216,
+        "net_volume": 4.424419399365774,
+        "net_volume_cft": 156.24704376278248,
+        "firewood_m3": 2.2415819977982157,
+        "firewood_chatta": 8.395438194000807,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06495717,
+          27.4146296
+        ]
+      },
+      "properties": {
+        "species": "Bombax ceiba",
+        "local_name": "Simal",
+        "dia_cm": 13.0,
+        "height_m": 21.0,
+        "tree_class": "1",
+        "stem_volume": 0.17152100550158397,
+        "branch_volume": 0.034304201100316796,
+        "tree_volume": 0.20582520660190076,
+        "gross_volume": 0.1268906714474539,
+        "net_volume": 0.10151253715796311,
+        "net_volume_cft": 3.5848847959723202,
+        "firewood_m3": 0.10431266944393765,
+        "firewood_chatta": 0.39068415522074024,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06389692,
+          27.41262953
+        ]
+      },
+      "properties": {
+        "species": "Cedrela toona",
+        "local_name": "Tooni",
+        "dia_cm": 81.0,
+        "height_m": 16.0,
+        "tree_class": "2",
+        "stem_volume": 3.3736953981324924,
+        "branch_volume": 0.6747390796264985,
+        "tree_volume": 4.048434477758991,
+        "gross_volume": 3.357325683793006,
+        "net_volume": 2.6858605470344052,
+        "net_volume_cft": 94.85035946035592,
+        "firewood_m3": 1.3625739307245857,
+        "firewood_chatta": 5.103273148781219,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07050131,
+          27.41216638
+        ]
+      },
+      "properties": {
+        "species": "Abies spp",
+        "local_name": "Thingre Salla",
+        "dia_cm": 82.0,
+        "height_m": 17.0,
+        "tree_class": "3",
+        "stem_volume": 3.607456159553697,
+        "branch_volume": 0.7214912319107394,
+        "tree_volume": 4.328947391464436,
+        "gross_volume": 3.601531625643389,
+        "net_volume": 2.8812253005147115,
+        "net_volume_cft": 101.74960712008689,
+        "firewood_m3": 1.4477220909497248,
+        "firewood_chatta": 5.422180115916572,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0692927,
+          27.41232817
+        ]
+      },
+      "properties": {
+        "species": "Acacia catechu",
+        "local_name": "Khayar",
+        "dia_cm": 64.0,
+        "height_m": 21.0,
+        "tree_class": "1",
+        "stem_volume": 2.2965329335694147,
+        "branch_volume": 0.45930658671388297,
+        "tree_volume": 2.7558395202832977,
+        "gross_volume": 2.279764836723177,
+        "net_volume": 1.8238118693785417,
+        "net_volume_cft": 64.40736902354239,
+        "firewood_m3": 0.932027650904756,
+        "firewood_chatta": 3.4907402655608837,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07238179,
+          27.41090383
+        ]
+      },
+      "properties": {
+        "species": "Adina cardifolia",
+        "local_name": "Karma",
+        "dia_cm": 93.0,
+        "height_m": 30.0,
+        "tree_class": "2",
+        "stem_volume": 7.005145277565318,
+        "branch_volume": 1.4010290555130638,
+        "tree_volume": 8.406174333078383,
+        "gross_volume": 6.984410862977906,
+        "net_volume": 5.5875286903823245,
+        "net_volume_cft": 197.32189944224467,
+        "firewood_m3": 2.818645642696058,
+        "firewood_chatta": 10.556725253543288,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0653461,
+          27.41047377
+        ]
+      },
+      "properties": {
+        "species": "Albizia spp",
+        "local_name": "Siris",
+        "dia_cm": 33.0,
+        "height_m": 23.0,
+        "tree_class": "1",
+        "stem_volume": 0.8610173682579957,
+        "branch_volume": 0.17220347365159916,
+        "tree_volume": 1.033220841909595,
+        "gross_volume": 0.8299539498425861,
+        "net_volume": 0.663963159874069,
+        "net_volume_cft": 23.447659802004786,
+        "firewood_m3": 0.369257682035526,
+        "firewood_chatta": 1.382987573166764,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06733148,
+          27.41293256
+        ]
+      },
+      "properties": {
+        "species": "Alnus nepalensis",
+        "local_name": "Uttis",
+        "dia_cm": 62.0,
+        "height_m": 24.0,
+        "tree_class": "3",
+        "stem_volume": 3.178614736678637,
+        "branch_volume": 0.6357229473357274,
+        "tree_volume": 3.8143376840143643,
+        "gross_volume": 3.1617015671246174,
+        "net_volume": 2.529361253699694,
+        "net_volume_cft": 89.32363386602859,
+        "firewood_m3": 1.2849764303146705,
+        "firewood_chatta": 4.812645806421987,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06259139,
+          27.41796141
+        ]
+      },
+      "properties": {
+        "species": "Anogeissus latifolia",
+        "local_name": "Banjhi",
+        "dia_cm": 30.0,
+        "height_m": 30.0,
+        "tree_class": "2",
+        "stem_volume": 0.8978596605763949,
+        "branch_volume": 0.179571932115279,
+        "tree_volume": 1.0774315926916738,
+        "gross_volume": 0.8528265715746309,
+        "net_volume": 0.6822612572597048,
+        "net_volume_cft": 24.093851621749298,
+        "firewood_m3": 0.395170335431969,
+        "firewood_chatta": 1.4800387094830298,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06825795,
+          27.41478507
+        ]
+      },
+      "properties": {
+        "species": "Bombax ceiba",
+        "local_name": "Simal",
+        "dia_cm": 74.0,
+        "height_m": 19.0,
+        "tree_class": "2",
+        "stem_volume": 3.205065795114486,
+        "branch_volume": 0.6410131590228972,
+        "tree_volume": 3.846078954137383,
+        "gross_volume": 3.1898144984733463,
+        "net_volume": 2.5518515987786774,
+        "net_volume_cft": 90.11787365538936,
+        "firewood_m3": 1.2942273553587058,
+        "firewood_chatta": 4.8472934657629425,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07112078,
+          27.41501852
+        ]
+      },
+      "properties": {
+        "species": "Cedrela toona",
+        "local_name": "Tooni",
+        "dia_cm": 74.0,
+        "height_m": 29.0,
+        "tree_class": "2",
+        "stem_volume": 4.469667952595764,
+        "branch_volume": 0.8939335905191529,
+        "tree_volume": 5.3636015431149175,
+        "gross_volume": 4.442863649205774,
+        "net_volume": 3.554290919364619,
+        "net_volume_cft": 125.51871753008572,
+        "firewood_m3": 1.8093106237502985,
+        "firewood_chatta": 6.776444283708983,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06083132,
+          27.4119862
+        ]
+      },
+      "properties": {
+        "species": "Dalbergia sissoo",
+        "local_name": "Sissoo",
+        "dia_cm": 77.0,
+        "height_m": 27.0,
+        "tree_class": "4",
+        "stem_volume": 3.8778313891566665,
+        "branch_volume": 0.7755662778313334,
+        "tree_volume": 4.653397666988,
+        "gross_volume": 3.8518801010327026,
+        "net_volume": 3.0815040808261625,
+        "net_volume_cft": 108.82239216315169,
+        "firewood_m3": 1.5718935861618375,
+        "firewood_chatta": 5.887241895737219,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06524025,
+          27.40889362
+        ]
+      },
+      "properties": {
+        "species": "Eugenia Jambolana",
+        "local_name": "Jamun",
+        "dia_cm": 19.0,
+        "height_m": 15.0,
+        "tree_class": "2",
+        "stem_volume": 0.19485534136210755,
+        "branch_volume": 0.038971068272421514,
+        "tree_volume": 0.23382640963452905,
+        "gross_volume": 0.16214532070939494,
+        "net_volume": 0.12971625656751595,
+        "net_volume_cft": 4.580890685804856,
+        "firewood_m3": 0.1041101530670131,
+        "firewood_chatta": 0.389925666917652,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05680681,
+          27.40879978
+        ]
+      },
+      "properties": {
+        "species": "Hymenodictyon excelsum",
+        "local_name": "Bhudkul",
+        "dia_cm": 48.0,
+        "height_m": 23.0,
+        "tree_class": "3",
+        "stem_volume": 1.6642351613603,
+        "branch_volume": 0.33284703227206003,
+        "tree_volume": 1.99708219363236,
+        "gross_volume": 1.6368006101769914,
+        "net_volume": 1.3094404881415933,
+        "net_volume_cft": 46.242498006573925,
+        "firewood_m3": 0.6876417054907666,
+        "firewood_chatta": 2.575437099216354,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05321862,
+          27.41030618
+        ]
+      },
+      "properties": {
+        "species": "Lagerstroemia parviflora",
+        "local_name": "Botdhayero",
+        "dia_cm": 22.0,
+        "height_m": 20.0,
+        "tree_class": "2",
+        "stem_volume": 0.36364250898290007,
+        "branch_volume": 0.07272850179658001,
+        "tree_volume": 0.4363710107794801,
+        "gross_volume": 0.32398529941355103,
+        "net_volume": 0.25918823953084086,
+        "net_volume_cft": 9.153154922559786,
+        "firewood_m3": 0.17718277124863924,
+        "firewood_chatta": 0.6636058848263642,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0686082,
+          27.41231768
+        ]
+      },
+      "properties": {
+        "species": "Michelia champaca",
+        "local_name": "Chanp",
+        "dia_cm": 56.0,
+        "height_m": 22.0,
+        "tree_class": "3",
+        "stem_volume": 2.470820236551882,
+        "branch_volume": 0.4941640473103764,
+        "tree_volume": 2.9649842838622584,
+        "gross_volume": 2.4497745860796485,
+        "net_volume": 1.9598196688637188,
+        "net_volume_cft": 69.21044366002158,
+        "firewood_m3": 1.0051646149985396,
+        "firewood_chatta": 3.7646614793952793,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05508737,
+          27.41024919
+        ]
+      },
+      "properties": {
+        "species": "Pinus roxburghii",
+        "local_name": "Khote Salla",
+        "dia_cm": 99.0,
+        "height_m": 20.0,
+        "tree_class": "3",
+        "stem_volume": 7.066617374122384,
+        "branch_volume": 1.4133234748244767,
+        "tree_volume": 8.47994084894686,
+        "gross_volume": 7.0580273237847395,
+        "net_volume": 5.646421859027792,
+        "net_volume_cft": 199.4016940250088,
+        "firewood_m3": 2.8335189899190683,
+        "firewood_chatta": 10.612430673854188,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05506291,
+          27.40996352
+        ]
+      },
+      "properties": {
+        "species": "Pinus wallichiana",
+        "local_name": "Gobre Salla",
+        "dia_cm": 66.0,
+        "height_m": 15.0,
+        "tree_class": "2",
+        "stem_volume": 1.9106928018167342,
+        "branch_volume": 0.38213856036334687,
+        "tree_volume": 2.292831362180081,
+        "gross_volume": 1.9028970881261957,
+        "net_volume": 1.5223176705009567,
+        "net_volume_cft": 53.760191838440136,
+        "firewood_m3": 0.7705136916791244,
+        "firewood_chatta": 2.8858190699592674,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06114724,
+          27.41584297
+        ]
+      },
+      "properties": {
+        "species": "Quercus spp",
+        "local_name": "Kharsu",
+        "dia_cm": 83.0,
+        "height_m": 24.0,
+        "tree_class": "4",
+        "stem_volume": 6.11528997559657,
+        "branch_volume": 1.2230579951193141,
+        "tree_volume": 7.338347970715884,
+        "gross_volume": 6.099707619065005,
+        "net_volume": 4.8797660952520046,
+        "net_volume_cft": 172.32747572399597,
+        "firewood_m3": 2.4585818754638797,
+        "firewood_chatta": 9.208171818216778,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06416435,
+          27.41679368
+        ]
+      },
+      "properties": {
+        "species": "Schima wallichii",
+        "local_name": "Chilaune",
+        "dia_cm": 24.0,
+        "height_m": 21.0,
+        "tree_class": "3",
+        "stem_volume": 0.4448333547277077,
+        "branch_volume": 0.08896667094554155,
+        "tree_volume": 0.5338000256732492,
+        "gross_volume": 0.39966477084689833,
+        "net_volume": 0.3197318166775187,
+        "net_volume_cft": 11.29123318642157,
+        "firewood_m3": 0.21406820899573054,
+        "firewood_chatta": 0.801753591744309,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05270414,
+          27.41071064
+        ]
+      },
+      "properties": {
+        "species": "Shorea robusta",
+        "local_name": "Sal",
+        "dia_cm": 90.0,
+        "height_m": 29.0,
+        "tree_class": "1",
+        "stem_volume": 7.467408940999947,
+        "branch_volume": 1.4934817881999896,
+        "tree_volume": 8.960890729199937,
+        "gross_volume": 7.447979778769074,
+        "net_volume": 5.95838382301526,
+        "net_volume_cft": 210.41853719463703,
+        "firewood_m3": 3.002506906184677,
+        "firewood_chatta": 11.245344217920138,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05680488,
+          27.41358904
+        ]
+      },
+      "properties": {
+        "species": "Terminalia alata",
+        "local_name": "Saj",
+        "dia_cm": 72.0,
+        "height_m": 24.0,
+        "tree_class": "4",
+        "stem_volume": 3.8109610905606246,
+        "branch_volume": 0.762192218112125,
+        "tree_volume": 4.573153308672749,
+        "gross_volume": 3.783757936829312,
+        "net_volume": 3.02700634946345,
+        "net_volume_cft": 106.8978211293969,
+        "firewood_m3": 1.5461469592092993,
+        "firewood_chatta": 5.790812581308237,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06619689,
+          27.41356328
+        ]
+      },
+      "properties": {
+        "species": "Trewia nudiflora",
+        "local_name": "Gamhari",
+        "dia_cm": 91.0,
+        "height_m": 16.0,
+        "tree_class": "3",
+        "stem_volume": 3.777322141984316,
+        "branch_volume": 0.7554644283968632,
+        "tree_volume": 4.532786570381179,
+        "gross_volume": 3.766198560998628,
+        "net_volume": 3.0129588487989025,
+        "net_volume_cft": 106.40173785767861,
+        "firewood_m3": 1.5198277215822769,
+        "firewood_chatta": 5.692238657611523,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.059336,
+          27.41216121
+        ]
+      },
+      "properties": {
+        "species": "Tsuga spp",
+        "local_name": "Dhupi Salla",
+        "dia_cm": 56.0,
+        "height_m": 23.0,
+        "tree_class": "4",
+        "stem_volume": 2.6786226090559953,
+        "branch_volume": 0.5357245218111991,
+        "tree_volume": 3.2143471308671945,
+        "gross_volume": 2.6663162133052922,
+        "net_volume": 2.133052970644234,
+        "net_volume_cft": 75.32812574240994,
+        "firewood_m3": 1.0812941602229604,
+        "firewood_chatta": 4.049790862258279,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05757477,
+          27.41318155
+        ]
+      },
+      "properties": {
+        "species": "Terai spp",
+        "local_name": "Terai Spp",
+        "dia_cm": 99.0,
+        "height_m": 28.0,
+        "tree_class": "2",
+        "stem_volume": 7.922627541774956,
+        "branch_volume": 1.5845255083549912,
+        "tree_volume": 9.507153050129947,
+        "gross_volume": 7.89995304803659,
+        "net_volume": 6.319962438429272,
+        "net_volume_cft": 223.18757752439822,
+        "firewood_m3": 3.187190611700675,
+        "firewood_chatta": 11.937043489515636,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0593188,
+          27.41549449
+        ]
+      },
+      "properties": {
+        "species": "Hill spp",
+        "local_name": "Hill spp",
+        "dia_cm": 86.0,
+        "height_m": 22.0,
+        "tree_class": "4",
+        "stem_volume": 4.745844872772688,
+        "branch_volume": 0.9491689745545376,
+        "tree_volume": 5.695013847327226,
+        "gross_volume": 4.726855833450672,
+        "net_volume": 3.7814846667605373,
+        "net_volume_cft": 133.54199656124837,
+        "firewood_m3": 1.9135291805666883,
+        "firewood_chatta": 7.166775957178608,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06486818,
+          27.41417259
+        ]
+      },
+      "properties": {
+        "species": "Abies spp",
+        "local_name": "Thingre Salla",
+        "dia_cm": 84.0,
+        "height_m": 22.0,
+        "tree_class": "1",
+        "stem_volume": 4.962182259760623,
+        "branch_volume": 0.9924364519521247,
+        "tree_volume": 5.954618711712747,
+        "gross_volume": 4.954544399125094,
+        "net_volume": 3.9636355193000754,
+        "net_volume_cft": 139.97459927342638,
+        "firewood_m3": 1.990983192412672,
+        "firewood_chatta": 7.456865889186037,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05494674,
+          27.41003256
+        ]
+      },
+      "properties": {
+        "species": "Acacia catechu",
+        "local_name": "Khayar",
+        "dia_cm": 56.0,
+        "height_m": 19.0,
+        "tree_class": "1",
+        "stem_volume": 1.6582887173824203,
+        "branch_volume": 0.3316577434764841,
+        "tree_volume": 1.9899464608589044,
+        "gross_volume": 1.6414026241950315,
+        "net_volume": 1.3131220993560253,
+        "net_volume_cft": 46.37251300212823,
+        "firewood_m3": 0.6768243615028791,
+        "firewood_chatta": 2.534922702257974,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06092959,
+          27.41521954
+        ]
+      },
+      "properties": {
+        "species": "Adina cardifolia",
+        "local_name": "Karma",
+        "dia_cm": 13.0,
+        "height_m": 18.0,
+        "tree_class": "4",
+        "stem_volume": 0.11515814181893443,
+        "branch_volume": 0.023031628363786888,
+        "tree_volume": 0.13818977018272133,
+        "gross_volume": 0.06931995667460353,
+        "net_volume": 0.055455965339682826,
+        "net_volume_cft": 1.9584107791812972,
+        "firewood_m3": 0.0827338048430385,
+        "firewood_chatta": 0.3098644376143764,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05653789,
+          27.40841733
+        ]
+      },
+      "properties": {
+        "species": "Albizia spp",
+        "local_name": "Siris",
+        "dia_cm": 60.0,
+        "height_m": 19.0,
+        "tree_class": "2",
+        "stem_volume": 2.051339516212365,
+        "branch_volume": 0.410267903242473,
+        "tree_volume": 2.461607419454838,
+        "gross_volume": 2.031586555185625,
+        "net_volume": 1.6252692441485,
+        "net_volume_cft": 57.39589577633103,
+        "firewood_m3": 0.8363381753063379,
+        "firewood_chatta": 3.132352716503138,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06315845,
+          27.40922059
+        ]
+      },
+      "properties": {
+        "species": "Alnus nepalensis",
+        "local_name": "Uttis",
+        "dia_cm": 70.0,
+        "height_m": 24.0,
+        "tree_class": "2",
+        "stem_volume": 4.003239583911219,
+        "branch_volume": 0.8006479167822438,
+        "tree_volume": 4.803887500693462,
+        "gross_volume": 3.9879405782978155,
+        "net_volume": 3.1903524626382525,
+        "net_volume_cft": 112.6663401123311,
+        "firewood_m3": 1.6135350380552098,
+        "firewood_chatta": 6.0432023897198865,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06504586,
+          27.41392074
+        ]
+      },
+      "properties": {
+        "species": "Anogeissus latifolia",
+        "local_name": "Banjhi",
+        "dia_cm": 48.0,
+        "height_m": 27.0,
+        "tree_class": "4",
+        "stem_volume": 1.8553254230295961,
+        "branch_volume": 0.37106508460591925,
+        "tree_volume": 2.2263905076355153,
+        "gross_volume": 1.8242753963046197,
+        "net_volume": 1.459420317043696,
+        "net_volume_cft": 51.53899067030301,
+        "firewood_m3": 0.7669701905918194,
+        "firewood_chatta": 2.8725475303064396,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05537931,
+          27.41083929
+        ]
+      },
+      "properties": {
+        "species": "Bombax ceiba",
+        "local_name": "Simal",
+        "dia_cm": 61.0,
+        "height_m": 29.0,
+        "tree_class": "2",
+        "stem_volume": 3.5037375207431625,
+        "branch_volume": 0.7007475041486325,
+        "tree_volume": 4.204485024891795,
+        "gross_volume": 3.477732857779161,
+        "net_volume": 2.782186286223329,
+        "net_volume_cft": 98.252074042091,
+        "firewood_m3": 1.4222987386684665,
+        "firewood_chatta": 5.32696156804669,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0575954,
+          27.40902917
+        ]
+      },
+      "properties": {
+        "species": "Cedrela toona",
+        "local_name": "Tooni",
+        "dia_cm": 39.0,
+        "height_m": 21.0,
+        "tree_class": "2",
+        "stem_volume": 1.058243600270881,
+        "branch_volume": 0.21164872005417623,
+        "tree_volume": 1.2698923203250572,
+        "gross_volume": 1.0297709849888372,
+        "net_volume": 0.8238167879910698,
+        "net_volume_cft": 29.092842722868234,
+        "firewood_m3": 0.44607553233398733,
+        "firewood_chatta": 1.6706948776553832,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05899081,
+          27.41392523
+        ]
+      },
+      "properties": {
+        "species": "Dalbergia sissoo",
+        "local_name": "Sissoo",
+        "dia_cm": 61.0,
+        "height_m": 22.0,
+        "tree_class": "2",
+        "stem_volume": 2.1525482575534647,
+        "branch_volume": 0.430509651510693,
+        "tree_volume": 2.5830579090641574,
+        "gross_volume": 2.1287461366193887,
+        "net_volume": 1.702996909295511,
+        "net_volume_cft": 60.14082495269819,
+        "firewood_m3": 0.8800609997686464,
+        "firewood_chatta": 3.2961086133657167,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07039779,
+          27.4113628
+        ]
+      },
+      "properties": {
+        "species": "Eugenia Jambolana",
+        "local_name": "Jamun",
+        "dia_cm": 28.0,
+        "height_m": 19.0,
+        "tree_class": "3",
+        "stem_volume": 0.49411103090049346,
+        "branch_volume": 0.0988222061800987,
+        "tree_volume": 0.5929332370805922,
+        "gross_volume": 0.46094050622548277,
+        "net_volume": 0.36875240498038625,
+        "net_volume_cft": 13.022380556160847,
+        "firewood_m3": 0.22418083210020595,
+        "firewood_chatta": 0.839628584644966,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0565947,
+          27.40987713
+        ]
+      },
+      "properties": {
+        "species": "Hymenodictyon excelsum",
+        "local_name": "Bhudkul",
+        "dia_cm": 16.0,
+        "height_m": 19.0,
+        "tree_class": "3",
+        "stem_volume": 0.16914839063472845,
+        "branch_volume": 0.03382967812694569,
+        "tree_volume": 0.20297806876167412,
+        "gross_volume": 0.12587253252702402,
+        "net_volume": 0.10069802602161922,
+        "net_volume_cft": 3.5561205795456763,
+        "firewood_m3": 0.10228004274005491,
+        "firewood_chatta": 0.38307132112380116,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06958597,
+          27.41022936
+        ]
+      },
+      "properties": {
+        "species": "Lagerstroemia parviflora",
+        "local_name": "Botdhayero",
+        "dia_cm": 16.0,
+        "height_m": 22.0,
+        "tree_class": "3",
+        "stem_volume": 0.23031222736527707,
+        "branch_volume": 0.046062445473055415,
+        "tree_volume": 0.2763746728383325,
+        "gross_volume": 0.17563451534296004,
+        "net_volume": 0.14050761227436803,
+        "net_volume_cft": 4.961984175185625,
+        "firewood_m3": 0.13586706056396447,
+        "firewood_chatta": 0.5088653953706535,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06422373,
+          27.41566132
+        ]
+      },
+      "properties": {
+        "species": "Michelia champaca",
+        "local_name": "Chanp",
+        "dia_cm": 43.0,
+        "height_m": 26.0,
+        "tree_class": "4",
+        "stem_volume": 1.7192346041505422,
+        "branch_volume": 0.3438469208301085,
+        "tree_volume": 2.0630815249806504,
+        "gross_volume": 1.694291960877306,
+        "net_volume": 1.3554335687018448,
+        "net_volume_cft": 47.866729848635046,
+        "firewood_m3": 0.7076479562788056,
+        "firewood_chatta": 2.65036687744871,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06292944,
+          27.41854054
+        ]
+      },
+      "properties": {
+        "species": "Pinus roxburghii",
+        "local_name": "Khote Salla",
+        "dia_cm": 48.0,
+        "height_m": 20.0,
+        "tree_class": "4",
+        "stem_volume": 1.7557990112442696,
+        "branch_volume": 0.35115980224885396,
+        "tree_volume": 2.1069588134931236,
+        "gross_volume": 1.739298981009121,
+        "net_volume": 1.391439184807297,
+        "net_volume_cft": 49.13825737971425,
+        "firewood_m3": 0.7155196286858267,
+        "firewood_chatta": 2.67984879657613,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06576281,
+          27.41108219
+        ]
+      },
+      "properties": {
+        "species": "Pinus wallichiana",
+        "local_name": "Gobre Salla",
+        "dia_cm": 27.0,
+        "height_m": 24.0,
+        "tree_class": "2",
+        "stem_volume": 0.7060390593850547,
+        "branch_volume": 0.14120781187701095,
+        "tree_volume": 0.8472468712620657,
+        "gross_volume": 0.6744635195748109,
+        "net_volume": 0.5395708156598488,
+        "net_volume_cft": 19.05478148378286,
+        "firewood_m3": 0.3076760556022169,
+        "firewood_chatta": 1.1523447775363929,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.07247953,
+          27.41171684
+        ]
+      },
+      "properties": {
+        "species": "Quercus spp",
+        "local_name": "Kharsu",
+        "dia_cm": 20.0,
+        "height_m": 23.0,
+        "tree_class": "2",
+        "stem_volume": 0.35995088033058725,
+        "branch_volume": 0.07199017606611745,
+        "tree_volume": 0.4319410563967047,
+        "gross_volume": 0.33000712056526094,
+        "net_volume": 0.2640056964522088,
+        "net_volume_cft": 9.323281968500819,
+        "firewood_m3": 0.16793535994449593,
+        "firewood_chatta": 0.6289713855599098,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0634807,
+          27.4116891
+        ]
+      },
+      "properties": {
+        "species": "Schima wallichii",
+        "local_name": "Chilaune",
+        "dia_cm": 58.0,
+        "height_m": 17.0,
+        "tree_class": "2",
+        "stem_volume": 1.7844165281285376,
+        "branch_volume": 0.3568833056257075,
+        "tree_volume": 2.1412998337542453,
+        "gross_volume": 1.772322258129668,
+        "net_volume": 1.4178578065037346,
+        "net_volume_cft": 50.071223079337436,
+        "firewood_m3": 0.7234420272505107,
+        "firewood_chatta": 2.709520701312774,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06123251,
+          27.41401346
+        ]
+      },
+      "properties": {
+        "species": "Shorea robusta",
+        "local_name": "Sal",
+        "dia_cm": 100.0,
+        "height_m": 24.0,
+        "tree_class": "3",
+        "stem_volume": 7.7908664216195795,
+        "branch_volume": 1.558173284323916,
+        "tree_volume": 9.349039705943495,
+        "gross_volume": 7.77525486423502,
+        "net_volume": 6.220203891388016,
+        "net_volume_cft": 219.6646343632004,
+        "firewood_m3": 3.1288358145554787,
+        "firewood_chatta": 11.718486196836999,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05805474,
+          27.41203623
+        ]
+      },
+      "properties": {
+        "species": "Terminalia alata",
+        "local_name": "Saj",
+        "dia_cm": 77.0,
+        "height_m": 22.0,
+        "tree_class": "3",
+        "stem_volume": 3.996819695586761,
+        "branch_volume": 0.7993639391173523,
+        "tree_volume": 4.796183634704113,
+        "gross_volume": 3.972257800684258,
+        "net_volume": 3.1778062405474063,
+        "net_volume_cft": 112.22327404305949,
+        "firewood_m3": 1.618377394156707,
+        "firewood_chatta": 6.061338554894033,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.06200329,
+          27.41361653
+        ]
+      },
+      "properties": {
+        "species": "Trewia nudiflora",
+        "local_name": "Gamhari",
+        "dia_cm": 69.0,
+        "height_m": 27.0,
+        "tree_class": "2",
+        "stem_volume": 3.713982227765806,
+        "branch_volume": 0.7427964455531613,
+        "tree_volume": 4.456778673318967,
+        "gross_volume": 3.692271977701609,
+        "net_volume": 2.953817582161287,
+        "net_volume_cft": 104.3131817687512,
+        "firewood_m3": 1.5029610911576796,
+        "firewood_chatta": 5.629067757144867,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0635669,
+          27.40996543
+        ]
+      },
+      "properties": {
+        "species": "Tsuga spp",
+        "local_name": "Dhupi Salla",
+        "dia_cm": 25.0,
+        "height_m": 16.0,
+        "tree_class": "1",
+        "stem_volume": 0.4370399143426447,
+        "branch_volume": 0.08740798286852895,
+        "tree_volume": 0.5244478972111737,
+        "gross_volume": 0.4200456536439617,
+        "net_volume": 0.3360365229151694,
+        "net_volume_cft": 11.867028995792333,
+        "firewood_m3": 0.1884113742960043,
+        "firewood_chatta": 0.7056605778876565,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.05404581,
+          27.40890783
+        ]
+      },
+      "properties": {
+        "species": "Terai spp",
+        "local_name": "Terai Spp",
+        "dia_cm": 71.0,
+        "height_m": 20.0,
+        "tree_class": "3",
+        "stem_volume": 3.175885776129473,
+        "branch_volume": 0.6351771552258947,
+        "tree_volume": 3.8110629313553677,
+        "gross_volume": 3.1560950522532853,
+        "net_volume": 2.5248760418026284,
+        "net_volume_cft": 89.16523995344728,
+        "firewood_m3": 1.2861868895527393,
+        "firewood_chatta": 4.817179361620746,
+        "remark": "Felling Tree",
+        "grid_cell_id": null
+      }
+    }
+  ]
+}

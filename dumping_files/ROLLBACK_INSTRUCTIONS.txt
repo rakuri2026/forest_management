@@ -1,0 +1,107 @@
+HOW TO ROLLBACK TO CURRENT STATE
+================================================================================
+
+If future changes break the system, you can restore to this exact state.
+
+DATE/TIME OF BACKUP: 2026-01-31 (before debugging features East/South/West issue)
+COMMIT: 3651cca
+STATUS: Features North works, East/South/West broken but system otherwise functional
+
+================================================================================
+METHOD 1: Rollback to this commit (RECOMMENDED)
+================================================================================
+
+1. Open Command Prompt and navigate to project:
+   cd D:\forest_management
+
+2. Check current commits to confirm backup exists:
+   git log --oneline -5
+
+3. Rollback to the backup commit:
+   git reset --hard 3651cca
+
+4. If you want to keep current changes but start fresh:
+   git stash
+   git reset --hard 3651cca
+
+5. Restart servers:
+   start_all.bat
+
+================================================================================
+METHOD 2: Create a new branch from backup point
+================================================================================
+
+1. Navigate to project:
+   cd D:\forest_management
+
+2. Create new branch from backup:
+   git branch backup-before-debugging 3651cca
+
+3. Switch to that branch:
+   git checkout backup-before-debugging
+
+4. Restart servers:
+   start_all.bat
+
+================================================================================
+METHOD 3: View what changed since backup
+================================================================================
+
+To see what was changed after this backup:
+
+   git diff 3651cca HEAD
+
+To see list of files changed:
+
+   git diff --name-only 3651cca HEAD
+
+================================================================================
+WHAT THIS BACKUP CONTAINS
+================================================================================
+
+Working features:
+✅ User authentication
+✅ File upload (KML, GeoJSON, Shapefile)
+✅ All 16 raster analysis parameters
+✅ Block-wise analysis
+✅ Features North (directional features)
+✅ Geology and access info
+✅ Frontend display
+✅ Database saving
+
+Known issues:
+❌ Features East/South/West always None (but function works in isolation)
+❌ No console logs during upload (buffering issue)
+
+================================================================================
+EMERGENCY FULL RESTORE
+================================================================================
+
+If git doesn't work, manual restore:
+
+1. Rename current folder:
+   cd D:\
+   move forest_management forest_management_broken
+
+2. Clone fresh from backup:
+   git clone <your-repo-url> forest_management
+   cd forest_management
+   git checkout 3651cca
+
+3. Restore virtual environment:
+   python -m venv venv
+   .\venv\Scripts\activate
+   pip install -r backend\requirements.txt
+
+4. Start servers:
+   start_all.bat
+
+================================================================================
+CONTACT INFO
+================================================================================
+
+If you need help with rollback, the backup commit message contains full context:
+   git show 3651cca
+
+Problem summary for other AI assistants:
+   D:\forest_management\PROBLEM_SUMMARY_FOR_AI.txt

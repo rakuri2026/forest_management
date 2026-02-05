@@ -11,6 +11,7 @@ import time
 from .core.config import settings
 from .core.database import check_db_connection, Base, engine
 from .api import auth_router, forests_router, inventory_router, species_router
+from .api import fieldbook, sampling, fieldbook_list, sampling_list
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -128,6 +129,32 @@ app.include_router(
 )
 print(f"DEBUG: Species router included. Total app routes: {len(app.routes)}")
 
+# Include fieldbook and sampling routers
+app.include_router(
+    fieldbook.router,
+    prefix="/api/calculations",
+    tags=["Fieldbook"]
+)
+
+app.include_router(
+    sampling.router,
+    prefix="/api",
+    tags=["Sampling"]
+)
+
+# Include list routers
+app.include_router(
+    fieldbook_list.router,
+    prefix="/api",
+    tags=["Fieldbook Lists"]
+)
+
+app.include_router(
+    sampling_list.router,
+    prefix="/api",
+    tags=["Sampling Lists"]
+)
+
 
 # Root endpoint
 @app.get("/")
@@ -144,7 +171,9 @@ async def root():
             "auth": "/api/auth",
             "forests": "/api/forests",
             "inventory": "/api/inventory",
-            "species": "/api/species"
+            "species": "/api/species",
+            "fieldbook": "/api/calculations/{id}/fieldbook",
+            "sampling": "/api/calculations/{id}/sampling"
         }
     }
 

@@ -1,0 +1,24 @@
+code	species	species_nepali_unicode	name_nep	Common Name
+1	Abies spp	ठिन्ग्रे सल्ला	Thingre salla	Fir species
+2	Acacia catechu	खयर	Khayar	Khair
+3	Adina cordifolia	कर्मा	Karma	Haldina / Karma
+4	Albizia spp.	शिरीष	Shirish	Siris species
+5	Alnus nepalensis	उत्तिस	Uttis	Utis (Nepalese Alder)
+6	Anogeissus latifolia	धौटी	Dhauti	Axlewood / Bakli
+7	Bombax ceiba	सिमल	Simal	Simal (Silk Cotton Tree)
+8	Cedrela toona	टुनी	Tuni	Tooni (Red Cedar)
+9	Dalbergia sissoo	सिसौ	Sisau	Sisau / Shisham
+10	Eugenia jambolana	जामुन	Jamun	Jamun
+11	Hymenodictyon excelsum	भुडकुल	Bhudkul	Bhurkul
+12	Lagerstroemia parviflora	बोड धंगेरो	Bod dhangero	Dhaura / Bot Dhayero
+13	Michelia champaca	चाँप	Champ	Champ
+14	Pinus roxburghii	खोटे सल्लो	Khote salla	Khote Salla (Chir Pine)
+15	Pinus wallichiana	गोब्रेसल्लो	Gobre salla	Gobre Salla (Blue Pine)
+16	Quercus spp.	खस्रू	Khasru	Oak species
+17	Schima wallichii	चिलाउने	Chilaune	Chilaune
+18	Shorea robusta	साल	Sal	Sal
+19	Terminalia alata	असना / साज	Asna / Saj	Asna / Saj
+20	Trewia nudiflora	गुटेल	Gutel	Gutel
+21	Tsuga spp	हिमाली हेम्लक	Himali hemlock	Hemlock species
+22	Terai spp	तराइ प्रजाती	Terai species	Terai species
+23	Hill spp	पहाडी प्रजाती	Hill species	Hill species

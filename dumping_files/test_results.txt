@@ -1,0 +1,69 @@
+
+============================================================
+PHASE 2A TESTING: Fieldbook & Sampling
+============================================================
+Base URL: http://localhost:8001
+Calculation ID: 4377c308-85cb-4151-a296-3fbae10ba708
+
+Authenticating...
+✓ Authentication successful
+
+============================================================
+TEST 1: Generate Fieldbook
+============================================================
+
+Checking for existing fieldbook...
+
+Generating fieldbook with 20m interpolation...
+✗ Failed: 500
+{"detail":"Failed to generate fieldbook: generate_fieldbook_points() got an unexpected keyword argument 'interpolation_distance_meters'. Did you mean 'interpolation_distance'?"}
+
+============================================================
+TEST 2: List Fieldbook Points
+============================================================
+✗ Failed: 500
+{"detail":"3 validation errors for FieldbookListResponse\ncalculation_id\n  Field required [type=missing, input_value={'points': [], 'total_count': 0}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/missing\ntotal_points\n  Field required [type=missing, input_value={'points': [], 'total_count': 0}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/missing\nsummary\n  Field required [type=missing, input_value={'points': [], 'total_count': 0}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/missing","type":"ValidationError","path":"http://localhost:8001/api/calculations/4377c308-85cb-4151-a296-3fbae10ba708/fieldbook"}
+
+============================================================
+TEST 3: Export Fieldbook to CSV
+============================================================
+✗ Failed: 500
+{"detail":"Export failed: No fieldbook points found for this calculation"}
+
+============================================================
+TEST 4: Export Fieldbook to GeoJSON
+============================================================
+✗ Failed: 500
+{"detail":"Export failed: No fieldbook points found for this calculation"}
+
+============================================================
+TEST 5: Create Systematic Sampling Design
+============================================================
+✗ Failed: 500
+{"detail":"Failed to create sampling design: 'SamplingDesignCreate' object has no attribute 'num_strata'"}
+
+============================================================
+TEST 6: Create Random Sampling Design
+============================================================
+✗ Failed: 500
+{"detail":"Failed to create sampling design: 'SamplingDesignCreate' object has no attribute 'num_strata'"}
+
+============================================================
+TEST 8: List All Sampling Designs
+============================================================
+✓ Retrieved 0 sampling designs
+
+============================================================
+TEST SUMMARY
+============================================================
+✗ FAIL: Fieldbook Generation
+✗ FAIL: Fieldbook List
+✗ FAIL: Fieldbook CSV Export
+✗ FAIL: Fieldbook GeoJSON Export
+✗ FAIL: Systematic Sampling
+✗ FAIL: Random Sampling
+✓ PASS: List Sampling Designs
+
+Total: 1/7 tests passed
+
+⚠️  6 test(s) failed. Check output above for details.

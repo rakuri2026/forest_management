@@ -1,0 +1,5857 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 1,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 2,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 3,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 4,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 5,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 6,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 7,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 8,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 9,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 10,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 11,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 12,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 13,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 14,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 15,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 16,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 17,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 18,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.700900901
+        ]
+      },
+      "properties": {
+        "plot_number": 19,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 20,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 21,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 22,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 23,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 24,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 25,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 26,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 27,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 28,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 29,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 30,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 31,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 32,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 33,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 34,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 35,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 36,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 37,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.701801802
+        ]
+      },
+      "properties": {
+        "plot_number": 38,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 39,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 40,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 41,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 42,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 43,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 44,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 45,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 46,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 47,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 48,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 49,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 50,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 51,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 52,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 53,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 54,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 55,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 56,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.702702703
+        ]
+      },
+      "properties": {
+        "plot_number": 57,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 58,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 59,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 60,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 61,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 62,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 63,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 64,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 65,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 66,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 67,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 68,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 69,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 70,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 71,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 72,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 73,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 74,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 75,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.703603604
+        ]
+      },
+      "properties": {
+        "plot_number": 76,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 77,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 78,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 79,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 80,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 81,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 82,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 83,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 84,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 85,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 86,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 87,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 88,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 89,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 90,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 91,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 92,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 93,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 94,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.704504505
+        ]
+      },
+      "properties": {
+        "plot_number": 95,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 96,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 97,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 98,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 99,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 100,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 101,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 102,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 103,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 104,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 105,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 106,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 107,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 108,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 109,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 110,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 111,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 112,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 113,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.705405405
+        ]
+      },
+      "properties": {
+        "plot_number": 114,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 115,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 116,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 117,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 118,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 119,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 120,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 121,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 122,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 123,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 124,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 125,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 126,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 127,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 128,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 129,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 130,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 131,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 132,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.706306306
+        ]
+      },
+      "properties": {
+        "plot_number": 133,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 134,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 135,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 136,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 137,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 138,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 139,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 140,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 141,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 142,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 143,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 144,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 145,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 146,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 147,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 148,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 149,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 150,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 151,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.707207207
+        ]
+      },
+      "properties": {
+        "plot_number": 152,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 153,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 154,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 155,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 156,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 157,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 158,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 159,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 160,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 161,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 162,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 163,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 164,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 165,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 166,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 167,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 168,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 169,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 170,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.708108108
+        ]
+      },
+      "properties": {
+        "plot_number": 171,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 172,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 173,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 174,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 175,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 176,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 177,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 178,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 179,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 180,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 181,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 182,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 183,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 184,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 185,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 186,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 187,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 188,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 189,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.709009009
+        ]
+      },
+      "properties": {
+        "plot_number": 190,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 191,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 192,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 193,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 194,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 195,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 196,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 197,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 198,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 199,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 200,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 201,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 202,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 203,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 204,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 205,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 206,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 207,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 208,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.70990991
+        ]
+      },
+      "properties": {
+        "plot_number": 209,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 210,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 211,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 212,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 213,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 214,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 215,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 216,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 217,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 218,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 219,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 220,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 221,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 222,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 223,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 224,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 225,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 226,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 227,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.710810811
+        ]
+      },
+      "properties": {
+        "plot_number": 228,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 229,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 230,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 231,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 232,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 233,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 234,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 235,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 236,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 237,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 238,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 239,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 240,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 241,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 242,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 243,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 244,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 245,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 246,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.711711712
+        ]
+      },
+      "properties": {
+        "plot_number": 247,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 248,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 249,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 250,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 251,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 252,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 253,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 254,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 255,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 256,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 257,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 258,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 259,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 260,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 261,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 262,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 263,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 264,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 265,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.712612613
+        ]
+      },
+      "properties": {
+        "plot_number": 266,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 267,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 268,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 269,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 270,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 271,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 272,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 273,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 274,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 275,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 276,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 277,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 278,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 279,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 280,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 281,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 282,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 283,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 284,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.713513514
+        ]
+      },
+      "properties": {
+        "plot_number": 285,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 286,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 287,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 288,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 289,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 290,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 291,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 292,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 293,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 294,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 295,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 296,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 297,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 298,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 299,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 300,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 301,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 302,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 303,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.714414414
+        ]
+      },
+      "properties": {
+        "plot_number": 304,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 305,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 306,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 307,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 308,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 309,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 310,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 311,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 312,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 313,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 314,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 315,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 316,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 317,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 318,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 319,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 320,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 321,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 322,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.715315315
+        ]
+      },
+      "properties": {
+        "plot_number": 323,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 324,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 325,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 326,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 327,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 328,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 329,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 330,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 331,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 332,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 333,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 334,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 335,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 336,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 337,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 338,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 339,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 340,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 341,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.716216216
+        ]
+      },
+      "properties": {
+        "plot_number": 342,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 343,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 344,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 345,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 346,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 347,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 348,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 349,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 350,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 351,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 352,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 353,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 354,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 355,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 356,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 357,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 358,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 359,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 360,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.717117117
+        ]
+      },
+      "properties": {
+        "plot_number": 361,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 362,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 363,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 364,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 365,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 366,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 367,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 368,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 369,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 370,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 371,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 372,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 373,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 374,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 375,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 376,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 377,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 378,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 379,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.718018018
+        ]
+      },
+      "properties": {
+        "plot_number": 380,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 381,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 382,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 383,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 384,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 385,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 386,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 387,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 388,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 389,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 390,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 391,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 392,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 393,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 394,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 395,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 396,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 397,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 398,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.718918919
+        ]
+      },
+      "properties": {
+        "plot_number": 399,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.301020408,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 400,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.302040816,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 401,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.303061224,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 402,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.304081633,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 403,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.305102041,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 404,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.306122449,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 405,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.307142857,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 406,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.308163265,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 407,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.309183673,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 408,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.310204082,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 409,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.31122449,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 410,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.312244898,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 411,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.313265306,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 412,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.314285714,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 413,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.315306122,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 414,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.316326531,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 415,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.317346939,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 416,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.318367347,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 417,
+        "sampling_type": "systematic"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.319387755,
+          27.71981982
+        ]
+      },
+      "properties": {
+        "plot_number": 418,
+        "sampling_type": "systematic"
+      }
+    }
+  ]
+}

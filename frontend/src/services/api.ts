@@ -125,3 +125,186 @@ export const forestApi = {
 };
 
 export default api;
+
+
+// Inventory endpoints
+export const inventoryApi = {
+  listSpecies: async (): Promise<any[]> => {
+    const response = await api.get("/api/inventory/species");
+    return response.data;
+  },
+
+  downloadTemplate: async (): Promise<Blob> => {
+    const response = await api.get("/api/inventory/template", {
+      responseType: "blob",
+    });
+    return response.data;
+  },
+
+  uploadInventory: async (
+    file: File,
+    gridSpacing: number = 20.0,
+    projectionEpsg?: number
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("grid_spacing_meters", gridSpacing.toString());
+    if (projectionEpsg) {
+      formData.append("projection_epsg", projectionEpsg.toString());
+    }
+
+    const response = await api.post("/api/inventory/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  processInventory: async (id: string, file: File): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post(`/api/inventory/${id}/process`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  listMyInventories: async (): Promise<any> => {
+    const response = await api.get("/api/inventory/my-inventories");
+    return response.data;
+  },
+
+  getInventoryStatus: async (id: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/${id}/status`);
+    return response.data;
+  },
+
+  getInventorySummary: async (id: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/${id}/summary`);
+    return response.data;
+  },
+
+  listInventoryTrees: async (
+    id: string,
+    params?: {
+      page?: number;
+      page_size?: number;
+      remark?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.get(`/api/inventory/${id}/trees`, { params });
+    return response.data;
+  },
+
+  exportInventory: async (id: string, format: "csv" | "geojson"): Promise<Blob> => {
+    const response = await api.get(`/api/inventory/${id}/export`, {
+      params: { format },
+      responseType: "blob",
+    });
+    return response.data;
+  },
+
+  deleteInventory: async (id: string): Promise<void> => {
+    await api.delete(`/api/inventory/${id}`);
+  },
+};
+
+// Fieldbook endpoints
+export const fieldbookApi = {
+  generate: async (
+    calculationId: string,
+    params: {
+      interpolation_distance_meters: number;
+      extract_elevation: boolean;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/calculations/${calculationId}/fieldbook/generate`,
+      params
+    );
+    return response.data;
+  },
+
+  list: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/calculations/${calculationId}/fieldbook`);
+    return response.data;
+  },
+
+  delete: async (calculationId: string): Promise<void> => {
+    await api.delete(`/api/calculations/${calculationId}/fieldbook`);
+  },
+
+  export: async (
+    calculationId: string,
+    format: "csv" | "excel" | "gpx" | "geojson"
+  ): Promise<Blob> => {
+    const response = await api.get(
+      `/api/calculations/${calculationId}/fieldbook`,
+      {
+        params: { format },
+        responseType: "blob",
+      }
+    );
+    return response.data;
+  },
+};
+
+// Sampling endpoints
+export const samplingApi = {
+  create: async (
+    calculationId: string,
+    params: {
+      sampling_type: "systematic" | "random" | "stratified";
+      intensity_per_hectare?: number;
+      grid_spacing_meters?: number;
+      min_distance_meters?: number;
+      plot_shape?: "circular" | "square" | "rectangular";
+      plot_radius_meters?: number;
+      plot_length_meters?: number;
+      plot_width_meters?: number;
+      notes?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/calculations/${calculationId}/sampling/create`,
+      params
+    );
+    return response.data;
+  },
+
+  list: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(`/api/calculations/${calculationId}/sampling`);
+    return response.data;
+  },
+
+  getDesign: async (designId: string): Promise<any> => {
+    const response = await api.get(`/api/sampling/${designId}`);
+    return response.data;
+  },
+
+  getPoints: async (designId: string, format?: "json" | "geojson"): Promise<any> => {
+    const response = await api.get(`/api/sampling/${designId}/points`, {
+      params: format ? { format } : undefined,
+    });
+    return response.data;
+  },
+
+  delete: async (designId: string): Promise<void> => {
+    await api.delete(`/api/sampling/${designId}`);
+  },
+
+  export: async (
+    designId: string,
+    format: "csv" | "gpx" | "geojson" | "kml"
+  ): Promise<Blob> => {
+    const response = await api.get(`/api/sampling/${designId}/points`, {
+      params: { format },
+      responseType: "blob",
+    });
+    return response.data;
+  },
+};

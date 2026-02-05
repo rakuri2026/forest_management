@@ -57,6 +57,8 @@ class Calculation(Base):
 
     # Relationships
     user = relationship("User", back_populates="calculations")
+    fieldbook_points = relationship("Fieldbook", back_populates="calculation", cascade="all, delete-orphan")
+    sampling_designs = relationship("SamplingDesign", back_populates="calculation", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Calculation(id={self.id}, user_id={self.user_id}, status={self.status.value})>"

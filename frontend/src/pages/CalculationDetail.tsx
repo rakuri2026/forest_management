@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { forestApi } from '../services/api';
 import type { Calculation } from '../types';
 import { EditableCell } from '../components/EditableCell';
+import { FieldbookTab } from '../components/FieldbookTab';
+import { SamplingTab } from '../components/SamplingTab';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -92,6 +94,7 @@ export default function CalculationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling'>('analysis');
 
   useEffect(() => {
     if (id) {
@@ -324,9 +327,59 @@ export default function CalculationDetail() {
           )}
         </div>
 
+        {/* Tab Navigation */}
+        <div className="border-b border-gray-200">
+          <nav className="flex -mb-px">
+            <button
+              onClick={() => setActiveTab('analysis')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'analysis'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Analysis
+            </button>
+            <button
+              onClick={() => setActiveTab('fieldbook')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'fieldbook'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Fieldbook
+            </button>
+            <button
+              onClick={() => setActiveTab('sampling')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'sampling'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Sampling
+            </button>
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'fieldbook' && (
+          <div className="p-6">
+            <FieldbookTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'sampling' && (
+          <div className="p-6">
+            <SamplingTab calculationId={calculation.id} />
+          </div>
+        )}
+
         {/* Whole Forest Analysis Section */}
-        <div className="p-6 border-t border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis</h2>
+        {activeTab === 'analysis' && (
+          <div className="p-6 border-t border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis</h2>
           <div className="border border-gray-300 rounded-lg bg-white shadow-sm">
             {/* Forest Header */}
             <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-gray-200">
@@ -759,10 +812,9 @@ export default function CalculationDetail() {
               </table>
             </div>
           </div>
-        </div>
 
-        {/* Detailed Block-wise Analysis */}
-        {blocks.length > 0 && (
+          {/* Detailed Block-wise Analysis */}
+          {blocks.length > 0 && (
           <div className="p-6 border-t border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Detailed Block-wise Analysis</h2>
             <div className="space-y-6">
@@ -1190,10 +1242,10 @@ export default function CalculationDetail() {
               ))}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Additional Information */}
-        <div className="px-6 pb-6">
+          {/* Additional Information */}
+          <div className="px-6 pb-6">
           <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-3">
             <div>
               <dt className="text-sm font-medium text-gray-500">Status</dt>
@@ -1233,10 +1285,10 @@ export default function CalculationDetail() {
               </div>
             )}
           </dl>
-        </div>
+          </div>
 
-        {/* Map Section */}
-        {calculation.geometry && (
+          {/* Map Section */}
+          {calculation.geometry && (
           <div className="px-6 pb-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900">
@@ -1298,10 +1350,10 @@ export default function CalculationDetail() {
               </p>
             </div>
           </div>
-        )}
+          )}
 
-        {/* Processing Info Section - Only show if partitioned */}
-        {processingInfo.partitioned && (
+          {/* Processing Info Section - Only show if partitioned */}
+          {processingInfo.partitioned && (
           <div className="px-6 pb-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Processing Information</h2>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -1319,6 +1371,8 @@ export default function CalculationDetail() {
               </div>
             </div>
           </div>
+          )}
+        </div>
         )}
       </div>
     </div>

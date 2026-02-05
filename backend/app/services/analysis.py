@@ -1426,6 +1426,9 @@ def analyze_nearby_features(geometry_wkt: str, db: Session) -> Dict[str, Any]:
     Find natural and infrastructure features within 100m of boundary
     Reports features by direction: North, East, South, West
 
+    NEW IMPLEMENTATION: Uses PostgreSQL function for efficiency and reliability
+    Single database call returns all 4 directions at once
+
     Args:
         geometry_wkt: WKT string of geometry
         db: Database session
@@ -1434,99 +1437,65 @@ def analyze_nearby_features(geometry_wkt: str, db: Session) -> Dict[str, Any]:
         Dict with features_north, features_east, features_south, features_west
     """
 
-    # Define feature tables and their name columns
-    feature_tables = [
-        ('river.river_line', ['river_name', 'features']),
-        ('river.ridge', ['ridge_name']),
-        ('infrastructure.road', ['name', 'name_en', 'highway']),
-        ('infrastructure.poi', ['name', 'name_en', 'amenity', 'shop', 'tourism']),
-        ('infrastructure.health_facilities', ['hf_type', 'vdc_name1']),
-        ('infrastructure.education_facilities', ['name', 'name_en', 'amenity']),
-        ('buildings.building', ['Building']),  # Generic name
-        ('admin.settlement', ['vil_name']),
-        ('admin."esa_forest_Boundary"', ['description', '"boundary of"']),
-    ]
+    print("  Calling PostgreSQL analyze_nearby_features function...")
 
-    directions = {
-        'north': (315, 45),      # 315° to 45°
-        'east': (45, 135),       # 45° to 135°
-        'south': (135, 225),     # 135° to 225°
-        'west': (225, 315)       # 225° to 315° (wraps to 360/0)
-    }
+    # Use savepoint for transaction isolation (based on E:\CF_application working implementation)
+    savepoint = db.begin_nested()
 
-    result_features = {}
+    try:
+        # Call PostgreSQL function - returns all 4 directions in single query
+        query = text("""
+            SELECT analyze_nearby_features(:wkt)
+        """)
 
-    for direction_name, (start_angle, end_angle) in directions.items():
-        features_list = []
-        print(f"  Querying features in {direction_name} direction ({start_angle}° to {end_angle}°)...")
+        result = db.execute(query, {"wkt": geometry_wkt}).scalar()
 
-        # Build query for this direction
-        for table_name, name_columns in feature_tables:
-            # Build COALESCE for name columns
-            name_coalesce = "COALESCE(" + ", ".join([f"f.{col}" if '"' not in col else f'f.{col}' for col in name_columns]) + ")"
+        # Commit savepoint (keeps outer transaction intact)
+        savepoint.commit()
 
-            # Handle angle wrapping for North (315-45)
-            if direction_name == 'north':
-                angle_condition = f"(azimuth_deg >= {start_angle} OR azimuth_deg < {end_angle})"
-            else:
-                angle_condition = f"(azimuth_deg >= {start_angle} AND azimuth_deg < {end_angle})"
+        # Convert JSONB result to Python dict
+        if result:
+            # result is already a dict from JSONB
+            result_dict = {
+                'features_north': result.get('features_north'),
+                'features_east': result.get('features_east'),
+                'features_south': result.get('features_south'),
+                'features_west': result.get('features_west')
+            }
 
-            direction_query = text(f"""
-                WITH input_geom AS (
-                    SELECT ST_GeomFromText(:wkt, 4326) as geom
-                ),
-                nearby AS (
-                    SELECT
-                        {name_coalesce} as feature_name,
-                        ST_Distance(ST_Transform(i.geom, 32645), ST_Transform(f.geom, 32645)) as distance_m,
-                        degrees(ST_Azimuth(ST_Centroid(i.geom), ST_ClosestPoint(f.geom, ST_Centroid(i.geom)))) as azimuth_deg
-                    FROM {table_name} f, input_geom i
-                    WHERE ST_DWithin(ST_Transform(i.geom, 32645), ST_Transform(f.geom, 32645), 100)
-                )
-                SELECT DISTINCT feature_name
-                FROM nearby
-                WHERE feature_name IS NOT NULL
-                AND feature_name != ''
-                AND {angle_condition}
-                LIMIT 10
-            """)
+            # Debug logging
+            print(f"  PostgreSQL function returned all 4 directions:")
+            for direction in ['north', 'east', 'south', 'west']:
+                key = f'features_{direction}'
+                val = result_dict.get(key)
+                val_preview = val[:50] if val else None
+                print(f"    {key}: {val_preview}")
 
-            try:
-                result = db.execute(direction_query, {"wkt": geometry_wkt})
-                row_count = 0
-                for row in result:
-                    row_count += 1
-                    if row.feature_name and row.feature_name.strip():
-                        features_list.append(row.feature_name.strip())
-                # Debug: Log if no results found for this table in this direction
-                if row_count == 0:
-                    print(f"  No features from {table_name} in {direction_name} direction")
-            except Exception as e:
-                # Skip tables that might have issues
-                print(f"  Error querying {table_name} for {direction_name}: {str(e)[:100]}")
-                # CRITICAL: Rollback transaction to prevent failed state from affecting subsequent queries
-                db.rollback()
-                continue
+            return result_dict
+        else:
+            # Function returned NULL
+            print("  WARNING: PostgreSQL function returned NULL")
+            return {
+                'features_north': None,
+                'features_east': None,
+                'features_south': None,
+                'features_west': None
+            }
 
-        # Store comma-separated list or None
-        features_str = ", ".join(features_list) if features_list else None
-        result_features[f"features_{direction_name}"] = features_str
-        # Use safe printing to handle Unicode characters
-        try:
-            print(f"Direction {direction_name}: Found {len(features_list)} features - {features_str if features_str else 'None'}")
-        except UnicodeEncodeError:
-            print(f"Direction {direction_name}: Found {len(features_list)} features (contains non-ASCII characters)")
+    except Exception as e:
+        # Rollback savepoint only (preserves outer transaction)
+        savepoint.rollback()
+        print(f"  ERROR calling PostgreSQL function: {e}")
+        import traceback
+        traceback.print_exc()
 
-        # Debug: Show what's in result_features after each direction
-        print(f"  result_features now has {len(result_features)} keys: {list(result_features.keys())}")
-
-    # Final debug before return
-    print(f"  FINAL result_features has {len(result_features)} keys: {list(result_features.keys())}")
-    for key, val in result_features.items():
-        val_preview = val[:50] if val else None
-        print(f"    {key}: {val_preview}")
-
-    return result_features
+        # Return empty result on error
+        return {
+            'features_north': None,
+            'features_east': None,
+            'features_south': None,
+            'features_west': None
+        }
 
 
 async def analyze_admin_boundaries(calculation_id: UUID, db: Session) -> Dict[str, Any]:

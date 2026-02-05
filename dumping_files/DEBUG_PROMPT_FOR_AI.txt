@@ -1,0 +1,311 @@
+================================================================================
+PROBLEM DESCRIPTION FOR AI DEBUGGING ASSISTANCE
+================================================================================
+
+I'm working on a FastAPI backend with React frontend for a Forest Management
+System. I need to add two new menu items (Fieldbook and Sampling) that display
+lists of records across all user calculations. However, the API endpoints are
+failing with "Failed to load" errors.
+
+================================================================================
+SYSTEM DETAILS
+================================================================================
+
+Backend: FastAPI (Python), running on http://localhost:8001
+Frontend: React with TypeScript, running on http://localhost:3000
+Authentication: JWT tokens via Bearer authentication
+Database: PostgreSQL with existing tables: calculations, fieldbook, sampling_design
+Operating System: Windows
+
+================================================================================
+WHAT WE'RE TRYING TO ACHIEVE
+================================================================================
+
+1. Add "Fieldbook" menu item that calls GET /api/fieldbook to list all
+   fieldbook records for the logged-in user
+
+2. Add "Sampling" menu item that calls GET /api/sampling to list all
+   sampling designs for the logged-in user
+
+3. Both endpoints should be authenticated and return data for the current
+   user only
+
+4. The data should aggregate records from multiple calculations (forest
+   boundary uploads) that belong to the user
+
+================================================================================
+WHAT WE'VE TRIED
+================================================================================
+
+ATTEMPT 1: Added endpoints to existing routers
+---------------------------------------------
+- Created list_all_fieldbooks() in backend/app/api/fieldbook.py
+- Created list_all_sampling_designs() in backend/app/api/sampling.py
+- Registered routers with different prefixes in main.py
+- ISSUE: Routes ended up at wrong paths
+  (/api/calculations/fieldbook/list instead of /api/fieldbook)
+
+ATTEMPT 2: Created separate router files
+-----------------------------------------
+- Created backend/app/api/fieldbook_list.py with route @router.get("/fieldbook")
+- Created backend/app/api/sampling_list.py with route @router.get("/sampling")
+- Registered these routers with prefix "/api" in main.py
+- ISSUE: Still getting "Failed to load" errors in frontend
+
+================================================================================
+CURRENT CODE STRUCTURE
+================================================================================
+
+FILE: backend/app/api/fieldbook_list.py
+----------------------------------------
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import func, Integer
+
+from app.core.database import get_db
+from app.utils.auth import get_current_user
+from app.models.user import User
+from app.models.calculation import Calculation
+from app.models.fieldbook import Fieldbook
+
+router = APIRouter()
+
+@router.get("/fieldbook")
+async def list_all_fieldbooks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    List all fieldbook records for the current user across all calculations.
+    """
+    results = db.query(
+        Calculation.id.label('calculation_id'),
+        Calculation.forest_name,
+        Calculation.created_at,
+        func.count(Fieldbook.id).label('vertex_count'),
+        func.sum(func.cast(Fieldbook.is_interpolated == False, Integer)).label('original_vertices'),
+        func.sum(func.cast(Fieldbook.is_interpolated == True, Integer)).label('interpolated_count')
+    ).join(
+        Fieldbook, Calculation.id == Fieldbook.calculation_id
+    ).filter(
+        Calculation.user_id == current_user.id
+    ).group_by(
+        Calculation.id, Calculation.forest_name, Calculation.created_at
+    ).order_by(
+        Calculation.created_at.desc()
+    ).all()
+
+    fieldbooks = []
+    for r in results:
+        fieldbooks.append({
+            "id": str(r.calculation_id),
+            "calculation_id": str(r.calculation_id),
+            "forest_name": r.forest_name or "Unnamed Forest",
+            "vertex_count": int(r.original_vertices or 0),
+            "interpolated_count": int(r.interpolated_count or 0),
+            "total_points": int(r.vertex_count or 0),
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        })
+
+    return fieldbooks
+
+
+FILE: backend/app/api/sampling_list.py (similar structure)
+-----------------------------------------------------------
+router = APIRouter()
+
+@router.get("/sampling")
+async def list_all_sampling_designs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Similar query joining Calculation and SamplingDesign
+    # Returns list of dicts with sampling design info
+
+
+FILE: backend/app/main.py (relevant sections)
+----------------------------------------------
+from .api import auth_router, forests_router, inventory_router, species_router
+from .api import fieldbook, sampling, fieldbook_list, sampling_list
+
+# ... other router registrations ...
+
+# Include fieldbook and sampling routers
+app.include_router(
+    fieldbook.router,
+    prefix="/api/calculations",
+    tags=["Fieldbook"]
+)
+
+app.include_router(
+    sampling.router,
+    prefix="/api",
+    tags=["Sampling"]
+)
+
+# Include list routers
+app.include_router(
+    fieldbook_list.router,
+    prefix="/api",
+    tags=["Fieldbook Lists"]
+)
+
+app.include_router(
+    sampling_list.router,
+    prefix="/api",
+    tags=["Sampling Lists"]
+)
+
+
+FILE: frontend/src/pages/FieldbookList.tsx
+-------------------------------------------
+const fetchFieldbooks = async () => {
+  try {
+    setLoading(true);
+    const response = await api.get('/api/fieldbook');
+    setFieldbooks(response.data);
+    setError(null);
+  } catch (err: any) {
+    console.error('Error fetching fieldbooks:', err);
+    setError(err.response?.data?.detail || 'Failed to load fieldbooks');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+FILE: frontend/src/pages/SamplingList.tsx
+------------------------------------------
+const fetchSamplings = async () => {
+  try {
+    setLoading(true);
+    const response = await api.get('/api/sampling');
+    setSamplings(response.data);
+    setError(null);
+  } catch (err: any) {
+    console.error('Error fetching samplings:', err);
+    setError(err.response?.data?.detail || 'Failed to load sampling designs');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+FILE: frontend/src/services/api.ts (axios configuration)
+---------------------------------------------------------
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: 'http://localhost:8001',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add JWT token to requests
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export default api;
+
+================================================================================
+TESTING RESULTS
+================================================================================
+
+1. LOGIN WORKS: Can get JWT token successfully
+   curl -X POST http://localhost:8001/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"demo@forest.com","password":"Demo1234"}'
+
+   Response: {"access_token":"eyJ...", "token_type":"bearer"}
+
+2. MANUAL CURL TEST: Authentication failing
+   TOKEN="eyJ..."
+   curl -H "Authorization: Bearer $TOKEN" http://localhost:8001/api/fieldbook
+
+   Response: {"detail":"Not authenticated"}
+
+3. FRONTEND ERROR:
+   - Clicking "Fieldbook" menu: "Failed to load fieldbooks"
+   - Clicking "Sampling" menu: "Failed to load sampling designs"
+
+4. OPENAPI DOCS:
+   - Endpoint appears at /api/fieldbook (confirmed via /openapi.json)
+   - Endpoint shows it requires authentication
+
+5. EXISTING ENDPOINTS WORK:
+   - GET /api/calculations/{id}/fieldbook works fine
+   - GET /api/auth/me works fine
+   - Other authenticated endpoints work correctly
+
+================================================================================
+OBSERVED ISSUES
+================================================================================
+
+1. The uvicorn auto-reload feature hangs and doesn't complete reloading
+2. Multiple background uvicorn processes running simultaneously
+3. Authentication dependency not being recognized on new endpoints
+4. CORS might be blocking the Authorization header
+5. Router registration order might be causing conflicts
+
+================================================================================
+QUESTIONS FOR DEBUGGING
+================================================================================
+
+1. Why is the authentication not working even though we're using
+   Depends(get_current_user)?
+
+2. Is there an issue with how we're registering multiple routers in FastAPI?
+
+3. Could there be a CORS issue preventing the Authorization header from
+   being sent?
+
+4. What's the correct way to structure "list all records across calculations"
+   endpoints in FastAPI?
+
+5. Should we be using a different approach like creating a single aggregation
+   endpoint instead of separate routers?
+
+6. How can we properly debug FastAPI route registration to see which routes
+   are actually available?
+
+7. Is there a better way to test authentication on new endpoints?
+
+================================================================================
+ADDITIONAL CONTEXT
+================================================================================
+
+- The project uses SQLAlchemy 2.0.45 with async patterns
+- Database connection pooling is configured
+- The existing per-calculation endpoints work fine
+- Frontend uses React Router v6
+- Authentication context properly stores and retrieves JWT tokens
+- Token expiry is set to 30 minutes
+- Multiple attempts to restart the backend server have been made
+
+================================================================================
+WHAT WE NEED
+================================================================================
+
+A clear debugging strategy to:
+
+1. Verify the endpoints are actually registered and accessible
+2. Confirm authentication is working properly
+3. Test the complete request flow from frontend to database
+4. Identify the root cause of the "Failed to load" errors
+5. Implement a working solution for listing aggregated records
+
+Please provide:
+- Step-by-step debugging instructions
+- Potential root causes
+- Code fixes if needed
+- Best practices for this type of endpoint in FastAPI
+
+================================================================================
+END OF PROBLEM DESCRIPTION
+================================================================================

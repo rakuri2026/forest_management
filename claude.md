@@ -1153,8 +1153,234 @@ For questions or issues:
 
 ---
 
-**System Version:** 1.1.0
-**Status:** Phase 1 + Raster Analysis Complete - Production Ready
-**Date:** January 28, 2026
+**System Version:** 1.2.0
+**Status:** Phase 1 + Raster Analysis Complete - Phase 2 Design Approved
+**Date:** February 3, 2026
+**Location:** D:\forest_management
+**Server:** http://localhost:8001
+
+---
+
+## Phase 2: Community Forest Operational Plan (CFOP) System
+
+### Overview
+The system will support complete operational plan preparation for Nepal's community forests, enabling foresters to:
+- Work on multiple CFOPs simultaneously
+- Save work as drafts across multiple sessions
+- Navigate context-aware workspace per CFOP
+- Complete all government-required sections
+
+### Key Features (Phase 2A-2F)
+
+**2A: Fieldbook & Sampling** (Priority 1)
+- Boundary vertex extraction + 20m interpolation
+- Systematic/Random/Stratified sampling design
+- GPS-ready coordinate export
+
+**2B: Field Data Collection**
+- Sample plot data entry
+- Tree measurements (DBH, height, species)
+- Statistical analysis and reporting
+- Mobile-optimized interface with offline support
+
+**2C: User Group Management**
+- Forest User Group demographics
+- Committee member tracking
+- CSV bulk upload support
+
+**2D: Product Pricing**
+- Forest product price management
+- Economic analysis calculations
+- Harvest planning integration
+
+**2E: Extensible Tables**
+- Custom table upload system
+- Final report generation
+- Government-compliant PDF export
+
+**2F: UX & Draft Management**
+- CFOP-centric dashboard
+- Auto-save functionality
+- Progress tracking
+- Section navigation with status indicators
+
+### Database Additions (Phase 2)
+
+**New Tables:**
+1. `sampling_designs` - Sampling methodology per CFOP
+2. `sample_plots` - Plot locations and metadata
+3. `plot_trees` - Individual tree measurements
+4. `fieldbook` - Boundary vertices + interpolated points
+5. `forest_user_groups` - FUG demographics
+6. `forest_committees` - Committee structure
+7. `committee_members` - Individual members
+8. `forest_products` - Product pricing
+9. `custom_tables` - Extensible table metadata
+10. `custom_table_data` - Custom table rows
+11. `cfop_versions` - Version tracking for drafts
+
+**Enhanced Tables:**
+- `calculations` - Add CFOP status, progress tracking, renewal info
+
+### User Interface Design
+
+**Dashboard View:**
+- Card-based CFOP overview with status badges
+- Progress indicators (Draft, In Progress, Completed)
+- Quick action buttons and recent activity
+
+**CFOP Workspace:**
+- Persistent sidebar navigation
+- Section status icons (✓ complete, ⚠️ incomplete, - not started)
+- Auto-save every 2 minutes
+- Breadcrumb navigation
+- Overall progress tracker
+
+**Mobile Field Collection:**
+- Progressive Web App (PWA) for offline use
+- GPS and camera integration
+- Simplified data entry forms
+- Sync queue for online connectivity
+
+### Implementation Timeline
+
+- **Q2 2026:** Phase 2A-2B (Fieldbook, Sampling, Field Data) - 5-7 weeks
+- **Q3 2026:** Phase 2C-2D (User Groups, Products) - 3-4 weeks
+- **Q4 2026:** Phase 2E-2F (Reporting, UX) - 4-5 weeks
+- **Q1 2027:** Pilot deployment with beta testers
+- **Q2 2027:** Full production rollout
+
+### Documentation
+See `CFOP_SYSTEM_DESIGN.md` for complete technical specifications, API design, database schema, and UX mockups.
+
+---
+
+## Phase 2A: Frontend Tab Navigation Implementation
+
+### Status: ✅ COMPLETE (February 4, 2026)
+
+### What Was Implemented
+
+**Tab Navigation UI in CalculationDetail Page**
+- **Location**: `frontend/src/pages/CalculationDetail.tsx` (lines 330-364)
+- **Position**: Right after the header section, before tab content
+- **Three Tabs**:
+  1. **Analysis** - Shows whole forest analysis + block-wise detailed analysis
+  2. **Fieldbook** - Displays boundary vertices and interpolated points
+  3. **Sampling** - Shows sampling design and sample plots
+
+**Tab Features:**
+- Active tab highlighting with green bottom border
+- Hover effects on inactive tabs
+- State management with `activeTab` useState hook
+- Conditional rendering of tab content
+- Seamless switching between tabs
+
+**Tab Components:**
+- `FieldbookTab` component imported from `../components/FieldbookTab.tsx`
+- `SamplingTab` component imported from `../components/SamplingTab.tsx`
+- Existing analysis content properly wrapped in conditional block
+
+### Files Modified
+
+1. **frontend/src/components/Layout.tsx**
+   - Fixed duplicate/nested `<Link>` tags (lines 50-61)
+   - Corrected "My Forests" and "Tree Inventory" navigation links
+
+2. **frontend/src/pages/CalculationDetail.tsx**
+   - Added tab navigation UI after header section
+   - Fixed JSX structure and indentation throughout
+   - Moved all analysis sections inside `{activeTab === 'analysis' && (...)}` conditional:
+     - Whole Forest Analysis (lines 380-815)
+     - Detailed Block-wise Analysis (lines 817-1245)
+     - Additional Information (status, processing time) (lines 1247-1288)
+     - Map Section with Leaflet (lines 1290-1353)
+     - Processing Info Section (lines 1355-1374)
+   - Fixed closing tags and conditional block structure
+
+### Syntax Errors Fixed
+
+**Issue**: Babel parser error - "Unexpected token, expected ','" at line 817
+
+**Root Cause**:
+- Tab content sections were outside the `activeTab === 'analysis'` conditional block
+- Misaligned closing tags caused JSX structure errors
+- Extra `</div>` tags breaking the component hierarchy
+
+**Resolution**:
+1. Moved "Detailed Block-wise Analysis" inside analysis tab conditional (reduced indentation)
+2. Moved "Additional Information", "Map Section", and "Processing Info" inside conditional
+3. Fixed closing tags sequence at lines 1374-1376
+4. Corrected all indentation to match proper JSX nesting
+
+### Visual Design
+
+**Tab Styling:**
+```tsx
+// Active tab
+className="px-6 py-3 border-b-2 font-medium text-sm border-green-500 text-green-600"
+
+// Inactive tab
+className="px-6 py-3 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+```
+
+**Layout:**
+- Tabs use flexbox navigation bar
+- Border-bottom indicator for active state
+- Green theme matching application design
+- Responsive padding and spacing
+
+### How to Test After Restart
+
+1. **Start Backend:**
+   ```bash
+   cd D:\forest_management\backend
+   ..\venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8001
+   ```
+
+2. **Start Frontend:**
+   ```bash
+   cd D:\forest_management\frontend
+   npm run dev
+   ```
+
+3. **Test Tab Navigation:**
+   - Navigate to any calculation detail page
+   - Click on "Analysis", "Fieldbook", and "Sampling" tabs
+   - Verify active tab highlighting works
+   - Confirm each tab shows appropriate content
+   - Check that switching is smooth without page reload
+
+### Technical Notes
+
+- **State Management**: Uses React useState hook for `activeTab` state
+- **Conditional Rendering**: Each tab content wrapped in `{activeTab === 'tabName' && (...)}`
+- **Component Integration**: FieldbookTab and SamplingTab components properly imported
+- **Styling Consistency**: All tabs use Tailwind CSS with consistent green theme
+- **No Breaking Changes**: Existing Analysis tab functionality fully preserved
+
+### Known Working Features
+
+- ✅ Tab navigation UI renders correctly
+- ✅ Active tab highlighting
+- ✅ Tab switching functionality
+- ✅ Analysis tab shows all existing content (whole forest + blocks + map)
+- ✅ Fieldbook tab loads FieldbookTab component
+- ✅ Sampling tab loads SamplingTab component
+- ✅ No console errors or warnings
+- ✅ JSX structure valid and properly closed
+
+### Next Steps (Phase 2A Continued)
+
+1. Complete FieldbookTab component implementation (boundary vertices + interpolation)
+2. Complete SamplingTab component implementation (sampling designs)
+3. Add export functionality for fieldbook and sampling data
+4. Implement GPS coordinate formatting for field use
+
+---
+
+**System Version:** 1.2.1
+**Status:** Phase 1 Complete + Phase 2A Tab Navigation Complete
+**Date:** February 4, 2026
 **Location:** D:\forest_management
 **Server:** http://localhost:8001
