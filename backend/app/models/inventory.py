@@ -65,7 +65,7 @@ class InventoryCalculation(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    calculation_id = Column(UUID(as_uuid=True), ForeignKey("public.calculations.id", ondelete="SET NULL"), nullable=True)
+    calculation_id = Column(UUID(as_uuid=True), ForeignKey("public.calculations.id", ondelete="SET NULL"), nullable=True, unique=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
     uploaded_filename = Column(String(255), nullable=False)
 
@@ -146,6 +146,11 @@ class InventoryTree(Base):
     # Metadata
     local_name = Column(String(100), nullable=True)
     row_number = Column(Integer, nullable=True)
+
+    # Boundary correction tracking
+    was_corrected = Column(Boolean, default=False, nullable=False)
+    original_x = Column(Float, nullable=True)  # Original longitude before correction
+    original_y = Column(Float, nullable=True)  # Original latitude before correction
 
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
@@ -240,3 +245,45 @@ class InventoryValidationIssue(Base):
 
     def __repr__(self):
         return f"<InventoryValidationIssue(id={self.id}, row={self.row_number}, severity='{self.severity}')>"
+
+
+class TreeCorrectionLog(Base):
+    """
+    Tree correction log model
+    Stores record of boundary corrections applied to out-of-boundary trees
+    """
+    __tablename__ = "tree_correction_logs"
+    __table_args__ = (
+        Index('idx_tree_corrections_inventory', 'inventory_calculation_id'),
+        {"schema": "public"}
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inventory_calculation_id = Column(UUID(as_uuid=True), ForeignKey("public.inventory_calculations.id", ondelete="CASCADE"), nullable=False)
+
+    # Tree identification
+    tree_row_number = Column(Integer, nullable=False)
+    species = Column(String(255), nullable=True)
+
+    # Original coordinates (before correction)
+    original_x = Column(Float, nullable=False)
+    original_y = Column(Float, nullable=False)
+
+    # Corrected coordinates (snapped to boundary)
+    corrected_x = Column(Float, nullable=False)
+    corrected_y = Column(Float, nullable=False)
+
+    # Distance moved
+    distance_moved_meters = Column(Float, nullable=False)
+
+    # Why corrected
+    correction_reason = Column(String(100), nullable=False)  # 'out_of_boundary', 'gps_error'
+
+    # When corrected
+    corrected_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    inventory_calculation = relationship("InventoryCalculation")
+
+    def __repr__(self):
+        return f"<TreeCorrectionLog(id={self.id}, row={self.tree_row_number}, moved={self.distance_moved_meters:.2f}m)>"

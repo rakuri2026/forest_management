@@ -24,6 +24,8 @@ from ..schemas.forest import (
 from ..utils.auth import get_current_active_user, require_super_admin
 from ..services.file_processor import process_uploaded_file
 from ..services.analysis import analyze_forest_boundary
+from ..services.fieldbook import generate_fieldbook_points
+from ..services.sampling import create_sampling_design
 from shapely.geometry import mapping
 
 
@@ -318,6 +320,34 @@ async def upload_forest_boundary(
 
         db.commit()
         print("Commit successful")
+
+        # Auto-generate fieldbook and sampling with default values
+        try:
+            print(f"Auto-generating fieldbook with 50m interpolation for calculation {calc_id}")
+            fieldbook_result = generate_fieldbook_points(
+                db=db,
+                calculation_id=calc_id,
+                interpolation_distance=50.0,
+                extract_elevation=True
+            )
+            print(f"Fieldbook auto-generated: {fieldbook_result['total_points']} points")
+        except Exception as fb_error:
+            print(f"Warning: Fieldbook auto-generation failed: {fb_error}")
+            # Don't fail the entire upload if fieldbook generation fails
+
+        try:
+            print(f"Auto-generating sampling design for calculation {calc_id}")
+            sampling_result = create_sampling_design(
+                db=db,
+                calculation_id=calc_id,
+                method="systematic",
+                spacing_meters=250.0,
+                plot_size_sqm=500.0
+            )
+            print(f"Sampling auto-generated: {sampling_result['total_plots']} plots")
+        except Exception as sp_error:
+            print(f"Warning: Sampling auto-generation failed: {sp_error}")
+            # Don't fail the entire upload if sampling generation fails
 
         # Refresh calculation object after commit
         calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()

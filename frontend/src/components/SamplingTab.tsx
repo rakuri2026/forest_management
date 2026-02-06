@@ -14,8 +14,9 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
   // Form state
   const [samplingType, setSamplingType] = useState<'systematic' | 'random'>('systematic');
-  const [gridSpacing, setGridSpacing] = useState(300);
-  const [intensity, setIntensity] = useState(0.5);
+  const [samplingIntensity, setSamplingIntensity] = useState(0.5); // NEW: percentage of block area
+  const [minSamplesPerBlock, setMinSamplesPerBlock] = useState(5); // NEW: min for blocks >= 1ha
+  const [minSamplesSmallBlocks, setMinSamplesSmallBlocks] = useState(2); // NEW: min for blocks < 1ha
   const [minDistance, setMinDistance] = useState(30);
   const [plotShape, setPlotShape] = useState<'circular' | 'square'>('circular');
   const [plotRadius, setPlotRadius] = useState(12.6156);
@@ -44,13 +45,14 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
     try {
       const params: any = {
         sampling_type: samplingType,
+        sampling_intensity_percent: samplingIntensity, // NEW: Use percentage instead of grid spacing
+        min_samples_per_block: minSamplesPerBlock, // NEW: Minimum for blocks >= 1ha
+        min_samples_small_blocks: minSamplesSmallBlocks, // NEW: Minimum for blocks < 1ha
         plot_shape: plotShape,
       };
 
-      if (samplingType === 'systematic') {
-        params.grid_spacing_meters = gridSpacing;
-      } else {
-        params.intensity_per_hectare = intensity;
+      // For random sampling, add minimum distance
+      if (samplingType === 'random') {
         params.min_distance_meters = minDistance;
       }
 
@@ -63,7 +65,17 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
       const result = await samplingApi.create(calculationId, params);
 
-      alert(`Sampling design created successfully!\n\nType: ${result.sampling_type}\nTotal points: ${result.total_points}\nPlot area: ${parseFloat(result.plot_area_sqm || 0).toFixed(2)} m²\nSampling: ${parseFloat(result.sampling_percentage || 0).toFixed(2)}%`);
+      // Build per-block summary for alert
+      let blockSummary = '';
+      if (result.blocks_info && result.blocks_info.length > 0) {
+        blockSummary = '\n\nPer-Block Summary:';
+        result.blocks_info.forEach((block: any) => {
+          const warning = block.minimum_enforced ? ' ⚠️ Min enforced' : '';
+          blockSummary += `\n- ${block.block_name}: ${block.samples_generated} samples (${parseFloat(block.actual_intensity_percent).toFixed(2)}%)${warning}`;
+        });
+      }
+
+      alert(`Sampling design created successfully!\n\nType: ${result.sampling_type}\nTotal Blocks: ${result.total_blocks}\nTotal Points: ${result.total_points}\nRequested Intensity: ${result.requested_intensity_percent}%\nActual Sampling: ${parseFloat(result.sampling_percentage || 0).toFixed(2)}%${blockSummary}`);
 
       setShowCreateForm(false);
       await loadDesigns();
@@ -169,59 +181,83 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                 onChange={(e) => setSamplingType(e.target.value as 'systematic' | 'random')}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md"
               >
-                <option value="systematic">Systematic (Grid)</option>
+                <option value="systematic">Systematic (Grid) - Recommended</option>
                 <option value="random">Random</option>
               </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Systematic sampling is preferred in forestry for even coverage
+              </p>
             </div>
 
-            {/* Systematic Options */}
-            {samplingType === 'systematic' && (
+            {/* Sampling Intensity (Common to both types) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Sampling Intensity (% of block area)
+              </label>
+              <input
+                type="number"
+                min="0.1"
+                max="10"
+                step="0.1"
+                value={samplingIntensity}
+                onChange={(e) => setSamplingIntensity(parseFloat(e.target.value))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Default: 0.5% (grid spacing calculated automatically)
+              </p>
+            </div>
+
+            {/* Minimum Samples Configuration */}
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Grid Spacing (meters)
+                  Min Samples (blocks ≥ 1 ha)
                 </label>
                 <input
                   type="number"
-                  min="10"
-                  max="500"
-                  value={gridSpacing}
-                  onChange={(e) => setGridSpacing(parseInt(e.target.value))}
+                  min="2"
+                  max="10"
+                  value={minSamplesPerBlock}
+                  onChange={(e) => setMinSamplesPerBlock(parseInt(e.target.value))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md"
                 />
+                <p className="mt-1 text-xs text-gray-500">Default: 5</p>
               </div>
-            )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Min Samples (blocks &lt; 1 ha)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="5"
+                  value={minSamplesSmallBlocks}
+                  onChange={(e) => setMinSamplesSmallBlocks(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
+                <p className="mt-1 text-xs text-gray-500">Default: 2</p>
+              </div>
+            </div>
 
-            {/* Random Options */}
+            {/* Random-specific Options */}
             {samplingType === 'random' && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Intensity (points per hectare)
-                  </label>
-                  <input
-                    type="number"
-                    min="0.1"
-                    max="10"
-                    step="0.1"
-                    value={intensity}
-                    onChange={(e) => setIntensity(parseFloat(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Minimum Distance Between Points (meters)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="200"
-                    value={minDistance}
-                    onChange={(e) => setMinDistance(parseInt(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  />
-                </div>
-              </>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Minimum Distance Between Points (meters)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="200"
+                  value={minDistance}
+                  onChange={(e) => setMinDistance(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Optional spacing constraint for random points
+                </p>
+              </div>
             )}
 
             {/* Plot Shape */}
@@ -319,11 +355,23 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                         {new Date(design.created_at).toLocaleDateString()}
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
                       <div>
                         <div className="text-gray-600">Total Points</div>
                         <div className="font-semibold">{design.total_points}</div>
                       </div>
+                      {design.total_blocks && (
+                        <div>
+                          <div className="text-gray-600">Total Blocks</div>
+                          <div className="font-semibold">{design.total_blocks}</div>
+                        </div>
+                      )}
+                      {design.requested_intensity_percent && (
+                        <div>
+                          <div className="text-gray-600">Requested Intensity</div>
+                          <div className="font-semibold">{design.requested_intensity_percent}%</div>
+                        </div>
+                      )}
                       {design.plot_area_sqm && (
                         <div>
                           <div className="text-gray-600">Plot Area</div>
@@ -331,6 +379,31 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                         </div>
                       )}
                     </div>
+
+                    {/* Per-Block Summary */}
+                    {design.blocks_info && design.blocks_info.length > 0 && (
+                      <div className="mt-4 border-t pt-4">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Per-Block Distribution:</h4>
+                        <div className="space-y-2">
+                          {design.blocks_info.map((block: any, idx: number) => (
+                            <div key={idx} className="flex justify-between items-center text-sm bg-gray-50 rounded px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{block.block_name}</span>
+                                <span className="text-gray-500">({parseFloat(block.block_area_hectares).toFixed(2)} ha)</span>
+                                {block.minimum_enforced && (
+                                  <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
+                                    Min enforced
+                                  </span>
+                                )}
+                              </div>
+                              <div className="font-semibold">
+                                {block.samples_generated} samples ({parseFloat(block.actual_intensity_percent).toFixed(2)}%)
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={() => handleDelete(design.id)}

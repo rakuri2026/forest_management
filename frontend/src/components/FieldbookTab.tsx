@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
 import { fieldbookApi } from '../services/api';
-import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
 
 interface FieldbookTabProps {
   calculationId: string;
@@ -14,7 +12,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   const [generating, setGenerating] = useState(false);
 
   // Generation settings
-  const [interpolationDistance, setInterpolationDistance] = useState(20);
+  const [interpolationDistance, setInterpolationDistance] = useState(50);
   const [extractElevation, setExtractElevation] = useState(true);
 
   useEffect(() => {

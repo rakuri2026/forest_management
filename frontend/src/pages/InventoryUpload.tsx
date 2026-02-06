@@ -89,7 +89,7 @@ export default function InventoryUpload() {
   return (
     <div className="max-w-4xl mx-auto py-8 px-4">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Upload Tree Inventory</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Upload Tree Mapping</h1>
         <p className="mt-2 text-gray-600">
           Upload a CSV file with tree measurements for volume calculation
         </p>

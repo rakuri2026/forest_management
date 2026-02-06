@@ -55,16 +55,16 @@ export default function InventoryList() {
     <div className="max-w-7xl mx-auto py-8 px-4">
       <div className="mb-8 flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Tree Inventory</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Tree Mapping</h1>
           <p className="mt-2 text-gray-600">
-            Upload and manage tree inventory data for volume calculations
+            Upload and manage tree mapping data for volume calculations
           </p>
         </div>
         <Link
           to="/inventory/upload"
           className="bg-green-600 text-white px-6 py-3 rounded-md hover:bg-green-700 font-medium transition-colors"
         >
-          Upload New Inventory
+          Upload New Tree Mapping
         </Link>
       </div>
 

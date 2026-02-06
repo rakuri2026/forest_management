@@ -39,12 +39,18 @@ async def create_sampling(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Create a sampling design for a calculation.
+    Create a sampling design for a calculation with PER-BLOCK sampling.
 
     Generates sampling points based on:
-    - Systematic: Regular grid pattern
+    - Systematic: Regular grid pattern (preferred for forestry)
     - Random: Random points with optional minimum distance
     - Stratified: Random points within grid strata
+
+    NEW APPROACH:
+    - Uses sampling_intensity_percent (% of block area) instead of grid spacing
+    - Enforces minimum samples per block (default: 5 for blocks ≥1ha, 2 for <1ha)
+    - Calculates grid spacing automatically for systematic sampling
+    - Ensures each block is adequately sampled for statistical validity
     """
     # Verify calculation exists and belongs to user
     calculation = db.query(Calculation).filter(
@@ -70,15 +76,18 @@ async def create_sampling(
         )
 
     try:
-        # Create sampling design
+        # Create sampling design with new intensity-based approach
         summary = create_sampling_design(
             db=db,
             calculation_id=calculation_id,
             sampling_type=request.sampling_type,
-            intensity_per_hectare=request.intensity_per_hectare,
-            grid_spacing_meters=request.grid_spacing_meters,
+            sampling_intensity_percent=request.sampling_intensity_percent,
+            min_samples_per_block=request.min_samples_per_block or 5,
+            min_samples_small_blocks=request.min_samples_small_blocks or 2,
+            intensity_per_hectare=request.intensity_per_hectare,  # Deprecated fallback
+            grid_spacing_meters=request.grid_spacing_meters,  # Deprecated
             min_distance_meters=request.min_distance_meters,
-            plot_shape=request.plot_shape,
+            plot_shape=request.plot_shape or "circular",
             plot_radius_meters=request.plot_radius_meters,
             plot_length_meters=request.plot_length_meters,
             plot_width_meters=request.plot_width_meters,
@@ -93,6 +102,8 @@ async def create_sampling(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         db.rollback()
+        import logging
+        logging.error(f"Sampling design creation failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create sampling design: {str(e)}")
 
 

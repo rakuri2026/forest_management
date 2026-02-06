@@ -158,3 +158,66 @@ class ExportFormat(str):
     CSV = "csv"
     SHAPEFILE = "shapefile"
     GEOJSON = "geojson"
+
+
+# Boundary Correction Schemas
+
+class TreeCorrectionDetail(BaseModel):
+    """Schema for individual tree correction"""
+    row_number: int
+    species: str
+    original_x: float
+    original_y: float
+    corrected_x: float
+    corrected_y: float
+    distance_moved_meters: float
+
+
+class CorrectionSummary(BaseModel):
+    """Schema for correction summary statistics"""
+    total_corrections: int
+    max_distance: float
+    min_distance: float
+    avg_distance: float
+
+
+class BoundaryCheckResult(BaseModel):
+    """Schema for boundary validation result"""
+    total_points: int
+    out_of_boundary_count: int
+    out_of_boundary_percentage: float
+    within_tolerance: bool
+    needs_correction: bool
+    error_message: Optional[str] = None
+
+
+class CorrectionPreviewResponse(BaseModel):
+    """Schema for correction preview response"""
+    inventory_id: UUID
+    boundary_check: BoundaryCheckResult
+    corrections: List[TreeCorrectionDetail]
+    summary: CorrectionSummary
+    warnings: List[str] = []
+
+
+class AcceptCorrectionsRequest(BaseModel):
+    """Schema for accepting corrections"""
+    inventory_id: UUID
+    apply_corrections: bool = True
+
+
+class TreeCorrectionLogResponse(BaseModel):
+    """Schema for tree correction log"""
+    id: int
+    tree_row_number: int
+    species: Optional[str]
+    original_x: float
+    original_y: float
+    corrected_x: float
+    corrected_y: float
+    distance_moved_meters: float
+    correction_reason: str
+    corrected_at: datetime
+
+    class Config:
+        from_attributes = True

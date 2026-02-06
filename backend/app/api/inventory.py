@@ -31,6 +31,10 @@ from ..utils.auth import get_current_active_user
 from ..services.inventory_validator import InventoryValidator
 from ..services.inventory import InventoryService
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
@@ -110,10 +114,23 @@ async def upload_inventory(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Upload and validate tree inventory CSV file
+    Upload and validate tree mapping CSV file
 
     Returns validation report
     """
+    # Check if tree mapping already exists for this calculation
+    if calculation_id:
+        existing_mapping = db.query(InventoryCalculation).filter(
+            InventoryCalculation.calculation_id == UUID(calculation_id),
+            InventoryCalculation.user_id == current_user.id
+        ).first()
+
+        if existing_mapping:
+            raise HTTPException(
+                status_code=400,
+                detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
+            )
+
     # Validate file type
     if not file.filename.endswith('.csv'):
         raise HTTPException(
@@ -137,6 +154,79 @@ async def upload_inventory(
         df,
         user_specified_crs=projection_epsg
     )
+
+    # Check boundary if calculation_id is provided
+    boundary_check_result = None
+    if calculation_id and validation_report['summary'].get('ready_for_processing'):
+        try:
+            from app.services.boundary_validator import validate_inventory_boundary
+
+            # Get coordinate columns
+            coord_cols = validation_report['data_detection'].get('coordinate_columns', {})
+            x_col = coord_cols.get('x')
+            y_col = coord_cols.get('y')
+
+            if x_col and y_col and x_col in df.columns and y_col in df.columns:
+                # Extract tree points (lon, lat, row_number)
+                tree_points = [
+                    (float(row[x_col]), float(row[y_col]), idx + 1)
+                    for idx, row in df.iterrows()
+                    if pd.notna(row[x_col]) and pd.notna(row[y_col])
+                ]
+
+                # Validate boundary
+                boundary_check_result = validate_inventory_boundary(
+                    db,
+                    UUID(calculation_id),
+                    tree_points,
+                    tolerance_percent=5.0
+                )
+
+                # Add boundary check to validation report
+                validation_report['boundary_check'] = {
+                    'total_points': boundary_check_result['total_points'],
+                    'out_of_boundary_count': boundary_check_result['out_of_boundary_count'],
+                    'out_of_boundary_percentage': boundary_check_result['out_of_boundary_percentage'],
+                    'within_tolerance': boundary_check_result['within_tolerance'],
+                    'needs_correction': boundary_check_result['needs_correction']
+                }
+
+                # Generate correction preview if corrections are needed
+                if boundary_check_result['needs_correction']:
+                    from app.services.boundary_corrector import generate_correction_preview
+
+                    species_col = validation_report['data_detection'].get('species_column', 'Species')
+
+                    corrections_preview = generate_correction_preview(
+                        df,
+                        boundary_check_result['boundary_wkt'],
+                        boundary_check_result['out_of_boundary_points'],
+                        x_col,
+                        y_col,
+                        species_col
+                    )
+
+                    validation_report['boundary_check']['corrections'] = corrections_preview['corrections']
+                    validation_report['boundary_check']['correction_summary'] = corrections_preview['summary']
+
+                # If too many points outside boundary, fail validation
+                if not boundary_check_result['within_tolerance']:
+                    validation_report['summary']['ready_for_processing'] = False
+                    validation_report['errors'].append({
+                        'type': 'boundary_error',
+                        'severity': 'error',
+                        'message': boundary_check_result.get('error_message', 'Too many trees outside boundary')
+                    })
+
+        except Exception as e:
+            # Log boundary check error but don't fail upload
+            import logging
+            logging.error(f"Boundary check failed: {str(e)}")
+            validation_report['warnings'].append({
+                'type': 'boundary_check_error',
+                'severity': 'warning',
+                'message': f'Could not validate boundary: {str(e)}'
+            })
 
     # If validation passed, create inventory calculation record
     if validation_report['summary'].get('ready_for_processing'):
@@ -195,8 +285,20 @@ async def upload_inventory(
             status='validated'
         )
         db.add(inventory)
-        db.commit()
-        db.refresh(inventory)
+
+        try:
+            db.commit()
+            db.refresh(inventory)
+        except Exception as e:
+            db.rollback()
+            # Check if it's a unique constraint violation
+            if 'uq_inventory_calculations_calculation_id' in str(e) or 'duplicate key value' in str(e):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
+                )
+            # Re-raise other errors
+            raise
 
         validation_report['inventory_id'] = str(inventory.id)
         validation_report['next_step'] = 'POST /api/inventory/{inventory_id}/process'
@@ -225,7 +327,7 @@ async def process_inventory(
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
-    if inventory.status not in ['validated', 'failed']:
+    if inventory.status not in ['validated', 'failed', 'corrections_applied']:
         raise HTTPException(
             status_code=400,
             detail=f"Inventory cannot be processed. Current status: {inventory.status}"
@@ -240,6 +342,52 @@ async def process_inventory(
             status_code=400,
             detail=f"Error reading CSV file: {str(e)}"
         )
+
+    # Check if corrections were applied and need to be used
+    from app.models.inventory import TreeCorrectionLog
+    import logging
+    logger = logging.getLogger(__name__)
+
+    corrections = db.query(TreeCorrectionLog).filter(
+        TreeCorrectionLog.inventory_calculation_id == inventory_id
+    ).all()
+
+    if corrections and len(corrections) > 0:
+        logger.info(f"Found {len(corrections)} corrections to apply")
+
+        # Detect coordinate columns by looking for common column names
+        x_col = None
+        y_col = None
+
+        for col in df.columns:
+            col_lower = col.lower()
+            if col_lower in ['x', 'longitude', 'lon', 'long', 'easting']:
+                x_col = col
+            if col_lower in ['y', 'latitude', 'lat', 'northing']:
+                y_col = col
+
+        if x_col and y_col:
+            # Convert coordinate columns to float to avoid dtype errors
+            # (CSV may have read them as integers)
+            logger.info(f"Converting coordinate columns to float: {x_col}={df[x_col].dtype}, {y_col}={df[y_col].dtype}")
+            df[x_col] = df[x_col].astype(float)
+            df[y_col] = df[y_col].astype(float)
+            logger.info(f"Converted to: {x_col}={df[x_col].dtype}, {y_col}={df[y_col].dtype}")
+
+            # Apply each correction
+            correction_map = {c.tree_row_number: c for c in corrections}
+
+            for idx in range(len(df)):
+                row_num = idx + 1  # CSV rows are 1-indexed (first data row is 1)
+                if row_num in correction_map:
+                    correction = correction_map[row_num]
+                    df.at[idx, x_col] = correction.corrected_x
+                    df.at[idx, y_col] = correction.corrected_y
+                    logger.debug(f"Applied correction to row {row_num}")
+
+            logger.info(f"Applied {len(corrections)} boundary corrections to dataframe")
+        else:
+            logger.warning(f"Could not detect coordinate columns. Found: {df.columns.tolist()}")
 
     # Process with simplified service (no GDAL required)
     service = InventoryService(db)
@@ -469,6 +617,30 @@ async def export_inventory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/by-calculation/{calculation_id}", response_model=InventoryCalculationResponse)
+async def get_tree_mapping_by_calculation(
+    calculation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get tree mapping for a specific calculation
+    Returns tree mapping if it exists, otherwise 404
+    """
+    tree_mapping = db.query(InventoryCalculation).filter(
+        InventoryCalculation.calculation_id == calculation_id,
+        InventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not tree_mapping:
+        raise HTTPException(
+            status_code=404,
+            detail="No tree mapping found for this calculation"
+        )
+
+    return tree_mapping
+
+
 @router.delete("/{inventory_id}")
 async def delete_inventory(
     inventory_id: UUID,
@@ -476,7 +648,7 @@ async def delete_inventory(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Delete inventory calculation and all associated trees
+    Delete tree mapping calculation and all associated trees
     """
     inventory = db.query(InventoryCalculation).filter(
         InventoryCalculation.id == inventory_id,
@@ -484,12 +656,12 @@ async def delete_inventory(
     ).first()
 
     if not inventory:
-        raise HTTPException(status_code=404, detail="Inventory not found")
+        raise HTTPException(status_code=404, detail="Tree mapping not found")
 
     db.delete(inventory)
     db.commit()
 
-    return {"message": "Inventory deleted successfully"}
+    return {"message": "Tree mapping deleted successfully"}
 
 
 @router.get("/my-inventories", response_model=MyInventoriesResponse)
@@ -507,4 +679,262 @@ async def list_my_inventories(
     return {
         'inventories': inventories,
         'total_count': len(inventories)
+    }
+
+
+@router.get("/{inventory_id}/correction-preview")
+async def get_correction_preview(
+    inventory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get preview of boundary corrections for out-of-boundary trees
+
+    Returns proposed corrections without applying them
+    """
+    from app.services.boundary_validator import get_boundary_from_calculation
+    from app.services.boundary_corrector import generate_correction_preview
+    from app.models.inventory import TreeCorrectionLog
+
+    # Verify ownership
+    inventory = db.query(InventoryCalculation).filter(
+        InventoryCalculation.id == inventory_id,
+        InventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not inventory:
+        raise HTTPException(status_code=404, detail="Inventory not found")
+
+    if inventory.status != 'validated':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Inventory must be in 'validated' status. Current status: {inventory.status}"
+        )
+
+    if not inventory.calculation_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Inventory not linked to a calculation boundary"
+        )
+
+    # Check if already corrected
+    existing_corrections = db.query(TreeCorrectionLog).filter(
+        TreeCorrectionLog.inventory_calculation_id == inventory_id
+    ).first()
+
+    if existing_corrections:
+        raise HTTPException(
+            status_code=400,
+            detail="Corrections already applied to this inventory"
+        )
+
+    # Re-read the uploaded file to get tree data
+    # Note: In production, you might want to cache this data
+    try:
+        import os
+        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'uploads')
+        # For now, we'll need to re-upload or store the dataframe
+        # This is a simplified version - in production, consider storing validated data
+        raise HTTPException(
+            status_code=501,
+            detail="Correction preview requires re-upload. Use process endpoint with corrections enabled."
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{inventory_id}/accept-corrections")
+async def accept_corrections(
+    inventory_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Apply boundary corrections and proceed with processing
+
+    Requires re-uploading the CSV file
+    """
+    from app.services.boundary_validator import validate_inventory_boundary, get_boundary_from_calculation
+    from app.services.boundary_corrector import generate_correction_preview, apply_corrections_to_dataframe
+    from app.models.inventory import TreeCorrectionLog
+    from app.services.inventory_validator import InventoryValidator
+
+    logger.info(f"Accepting corrections for inventory {inventory_id}")
+
+    # Verify ownership
+    inventory = db.query(InventoryCalculation).filter(
+        InventoryCalculation.id == inventory_id,
+        InventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not inventory:
+        logger.error(f"Inventory {inventory_id} not found for user {current_user.id}")
+        raise HTTPException(status_code=404, detail="Inventory not found")
+
+    logger.info(f"Inventory status: {inventory.status}, calculation_id: {inventory.calculation_id}")
+
+    if inventory.status != 'validated':
+        logger.error(f"Invalid status for corrections: {inventory.status}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Inventory must be in 'validated' status. Current status: {inventory.status}. "
+                   f"Cannot apply corrections to inventories that are already processed or have corrections applied."
+        )
+
+    if not inventory.calculation_id:
+        logger.error(f"Inventory {inventory_id} not linked to calculation")
+        raise HTTPException(
+            status_code=400,
+            detail="Inventory not linked to a calculation boundary. Please ensure you uploaded the file with a calculation_id."
+        )
+
+    # Read CSV
+    try:
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content))
+        logger.info(f"CSV read successfully: {len(df)} rows, columns: {list(df.columns)}")
+    except Exception as e:
+        logger.error(f"Error reading CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+
+    # Validate again
+    validator = InventoryValidator(db)
+    validation_report = await validator.validate_inventory_file(df)
+
+    if not validation_report['summary'].get('ready_for_processing'):
+        logger.error(f"File validation failed: {validation_report}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"File validation failed. Please check the file format and required columns."
+        )
+
+    # Get coordinate columns
+    coord_cols = validation_report['data_detection'].get('coordinate_columns', {})
+    x_col = coord_cols.get('x')
+    y_col = coord_cols.get('y')
+    species_col = 'Species'  # Adjust if different
+
+    if not x_col or not y_col:
+        logger.error(f"Could not detect coordinates. Found columns: {list(df.columns)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not detect coordinate columns. Found columns: {list(df.columns)}"
+        )
+
+    logger.info(f"Detected coordinate columns: X={x_col}, Y={y_col}")
+
+    # Extract tree points
+    tree_points = [
+        (float(row[x_col]), float(row[y_col]), idx + 1)
+        for idx, row in df.iterrows()
+        if pd.notna(row[x_col]) and pd.notna(row[y_col])
+    ]
+
+    # Validate boundary
+    try:
+        boundary_check = validate_inventory_boundary(
+            db,
+            inventory.calculation_id,
+            tree_points,
+            tolerance_percent=5.0
+        )
+    except Exception as e:
+        logger.error(f"Boundary validation failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Boundary validation error: {str(e)}"
+        )
+
+    # Provide specific error messages
+    if not boundary_check['needs_correction']:
+        # Check why correction is not needed
+        if boundary_check['out_of_boundary_count'] == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="All trees are already within the boundary. No corrections needed."
+            )
+        elif not boundary_check['within_tolerance']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many trees outside boundary ({boundary_check['out_of_boundary_percentage']}% > 5%). "
+                       f"Please check your data: verify coordinates, EPSG code, and boundary selection. "
+                       f"Automatic correction is only available when <5% of trees are outside the boundary."
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Boundary correction not available for this dataset"
+            )
+
+    # Generate corrections
+    try:
+        logger.info(f"Generating corrections for {len(boundary_check['out_of_boundary_points'])} trees")
+        corrections_data = generate_correction_preview(
+            df,
+            boundary_check['boundary_wkt'],
+            boundary_check['out_of_boundary_points'],
+            x_col,
+            y_col,
+            species_col
+        )
+        logger.info(f"Generated {len(corrections_data['corrections'])} corrections")
+    except Exception as e:
+        logger.error(f"Error generating corrections: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate corrections: {str(e)}"
+        )
+
+    # Apply corrections to dataframe (not used directly, just for validation)
+    try:
+        df_corrected = apply_corrections_to_dataframe(
+            df,
+            corrections_data['corrections'],
+            x_col,
+            y_col
+        )
+    except Exception as e:
+        logger.error(f"Error applying corrections to dataframe: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to apply corrections: {str(e)}"
+        )
+
+    # Log corrections to database
+    try:
+        for correction in corrections_data['corrections']:
+            correction_log = TreeCorrectionLog(
+                inventory_calculation_id=inventory_id,
+                tree_row_number=correction['row_number'],
+                species=correction['species'],
+                original_x=correction['original_x'],
+                original_y=correction['original_y'],
+                corrected_x=correction['corrected_x'],
+                corrected_y=correction['corrected_y'],
+                distance_moved_meters=correction['distance_moved_meters'],
+                correction_reason='out_of_boundary'
+            )
+            db.add(correction_log)
+
+        # Update inventory status
+        inventory.status = 'corrections_applied'
+        db.commit()
+        logger.info(f"Successfully saved {len(corrections_data['corrections'])} corrections to database")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error saving corrections to database: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save corrections: {str(e)}"
+        )
+
+    return {
+        'message': 'Corrections applied successfully',
+        'corrections_count': len(corrections_data['corrections']),
+        'summary': corrections_data['summary'],
+        'next_step': 'POST /api/inventory/{inventory_id}/process with corrected file'
     }

@@ -268,57 +268,133 @@ def generate_fieldbook_points(
 
     logger.info(f"Processing {result.geom_type} with {num_blocks} block(s)")
 
-    # Extract vertices (this will handle both Polygon and MultiPolygon)
-    vertices = extract_boundary_vertices(geom_wkt)
-    if len(vertices) < 3:
-        raise ValueError("Polygon must have at least 3 vertices")
+    # Get block names from result_data if available
+    block_names_map = {}
+    if calculation.result_data and 'blocks' in calculation.result_data:
+        for block in calculation.result_data['blocks']:
+            block_index = block.get('block_index')
+            block_name = block.get('block_name')
+            if block_index is not None and block_name:
+                # ST_Dump uses 1-based indexing, result_data uses 0-based
+                block_names_map[block_index + 1] = block_name
 
-    logger.info(f"Extracted {len(vertices)} vertices from boundary")
-
-    # Generate fieldbook points
+    # Generate fieldbook points - process each block separately to avoid link lines
     fieldbook_points = []
     point_number = 1
     total_perimeter = 0.0
     vertex_count = 0
     interpolated_count = 0
 
-    # Process each edge
-    for i in range(len(vertices)):
-        v1 = vertices[i]
-        v2 = vertices[(i + 1) % len(vertices)]  # Wrap around to first vertex
+    if is_multipolygon:
+        # Process each polygon block separately - NO link lines between blocks
+        from shapely import wkt as shapely_wkt
+        geom = shapely_wkt.loads(geom_wkt)
 
-        lon1, lat1 = v1
-        lon2, lat2 = v2
+        for block_num, polygon in enumerate(geom.geoms, start=1):
+            # Get block name
+            block_name = block_names_map.get(block_num, f'Block {block_num}')
 
-        # Calculate distance between vertices
-        edge_distance = calculate_distance(lon1, lat1, lon2, lat2)
-        total_perimeter += edge_distance
+            # Extract vertices for this block only (excluding duplicate last vertex)
+            vertices = list(polygon.exterior.coords)[:-1]
+            if len(vertices) < 3:
+                logger.warning(f"Block {block_num} has < 3 vertices, skipping")
+                continue
 
-        # Add first vertex
-        fieldbook_points.append({
-            'point_number': point_number,
-            'point_type': 'vertex',
-            'longitude': lon1,
-            'latitude': lat1,
-        })
-        vertex_count += 1
-        point_number += 1
+            logger.info(f"Processing Block {block_num} ({block_name}): {len(vertices)} vertices")
 
-        # Interpolate points if distance > interpolation_distance
-        if edge_distance > interpolation_distance:
-            num_intervals = int(edge_distance / interpolation_distance)
-            for j in range(1, num_intervals + 1):
-                fraction = (j * interpolation_distance) / edge_distance
-                if fraction < 1.0:  # Don't duplicate the end vertex
-                    lon_interp, lat_interp = interpolate_point(lon1, lat1, lon2, lat2, fraction)
-                    fieldbook_points.append({
-                        'point_number': point_number,
-                        'point_type': 'interpolated',
-                        'longitude': lon_interp,
-                        'latitude': lat_interp,
-                    })
-                    interpolated_count += 1
-                    point_number += 1
+            # Process edges within this block ONLY (closed ring)
+            for i in range(len(vertices)):
+                v1 = vertices[i]
+                v2 = vertices[(i + 1) % len(vertices)]  # Wrap to first vertex of THIS block
+
+                lon1, lat1 = v1[0], v1[1]
+                lon2, lat2 = v2[0], v2[1]
+
+                # Calculate distance
+                edge_distance = calculate_distance(lon1, lat1, lon2, lat2)
+                total_perimeter += edge_distance
+
+                # Add vertex
+                fieldbook_points.append({
+                    'point_number': point_number,
+                    'point_type': 'vertex',
+                    'longitude': lon1,
+                    'latitude': lat1,
+                    'block_number': block_num,
+                    'block_name': block_name,
+                })
+                vertex_count += 1
+                point_number += 1
+
+                # Interpolate points along this edge
+                if edge_distance > interpolation_distance:
+                    num_intervals = int(edge_distance / interpolation_distance)
+                    for j in range(1, num_intervals + 1):
+                        fraction = (j * interpolation_distance) / edge_distance
+                        if fraction < 1.0:
+                            lon_interp, lat_interp = interpolate_point(lon1, lat1, lon2, lat2, fraction)
+                            fieldbook_points.append({
+                                'point_number': point_number,
+                                'point_type': 'interpolated',
+                                'longitude': lon_interp,
+                                'latitude': lat_interp,
+                                'block_number': block_num,
+                                'block_name': block_name,
+                            })
+                            interpolated_count += 1
+                            point_number += 1
+    else:
+        # Single polygon - use original logic
+        vertices = extract_boundary_vertices(geom_wkt)
+        if len(vertices) < 3:
+            raise ValueError("Polygon must have at least 3 vertices")
+
+        logger.info(f"Extracted {len(vertices)} vertices from boundary")
+
+        # Get block name (should be block 1)
+        block_name = block_names_map.get(1, 'Block 1')
+
+        # Process each edge
+        for i in range(len(vertices)):
+            v1 = vertices[i]
+            v2 = vertices[(i + 1) % len(vertices)]
+
+            lon1, lat1 = v1
+            lon2, lat2 = v2
+
+            # Calculate distance
+            edge_distance = calculate_distance(lon1, lat1, lon2, lat2)
+            total_perimeter += edge_distance
+
+            # Add vertex
+            fieldbook_points.append({
+                'point_number': point_number,
+                'point_type': 'vertex',
+                'longitude': lon1,
+                'latitude': lat1,
+                'block_number': 1,
+                'block_name': block_name,
+            })
+            vertex_count += 1
+            point_number += 1
+
+            # Interpolate points
+            if edge_distance > interpolation_distance:
+                num_intervals = int(edge_distance / interpolation_distance)
+                for j in range(1, num_intervals + 1):
+                    fraction = (j * interpolation_distance) / edge_distance
+                    if fraction < 1.0:
+                        lon_interp, lat_interp = interpolate_point(lon1, lat1, lon2, lat2, fraction)
+                        fieldbook_points.append({
+                            'point_number': point_number,
+                            'point_type': 'interpolated',
+                            'longitude': lon_interp,
+                            'latitude': lat_interp,
+                            'block_number': 1,
+                            'block_name': block_name,
+                        })
+                        interpolated_count += 1
+                        point_number += 1
 
     logger.info(f"Generated {len(fieldbook_points)} total points ({vertex_count} vertices + {interpolated_count} interpolated)")
 
@@ -354,6 +430,8 @@ def generate_fieldbook_points(
                 azimuth_to_next=Decimal(str(point['azimuth_to_next'])),
                 distance_to_next=Decimal(str(point['distance_to_next'])),
                 utm_zone=point['utm_zone'],
+                block_number=point.get('block_number'),  # Block assigned during generation
+                block_name=point.get('block_name'),      # Block name from result_data
             )
             fieldbook_objects.append(fb_point)
 
@@ -364,8 +442,8 @@ def generate_fieldbook_points(
         if extract_elevation:
             update_utm_and_elevation(db, calculation_id)
 
-        # Assign block numbers to points based on spatial intersection
-        assign_blocks_to_fieldbook(db, calculation_id)
+        # No need to call assign_blocks_to_fieldbook() - blocks assigned during generation
+        logger.info(f"Fieldbook generation complete. Blocks assigned during point generation.")
 
     # Calculate summary statistics
     elevation_stats = get_elevation_stats(db, calculation_id) if extract_elevation else None

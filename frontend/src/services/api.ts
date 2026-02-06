@@ -144,13 +144,17 @@ export const inventoryApi = {
   uploadInventory: async (
     file: File,
     gridSpacing: number = 20.0,
-    projectionEpsg?: number
+    projectionEpsg?: number,
+    calculationId?: string
   ): Promise<any> => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("grid_spacing_meters", gridSpacing.toString());
     if (projectionEpsg) {
       formData.append("projection_epsg", projectionEpsg.toString());
+    }
+    if (calculationId) {
+      formData.append("calculation_id", calculationId);
     }
 
     const response = await api.post("/api/inventory/upload", formData, {
@@ -211,6 +215,28 @@ export const inventoryApi = {
   deleteInventory: async (id: string): Promise<void> => {
     await api.delete(`/api/inventory/${id}`);
   },
+
+  getTreeMappingByCalculation: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/by-calculation/${calculationId}`);
+    return response.data;
+  },
+
+  getCorrectionPreview: async (inventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/${inventoryId}/correction-preview`);
+    return response.data;
+  },
+
+  acceptCorrections: async (inventoryId: string, file: File): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post(`/api/inventory/${inventoryId}/accept-corrections`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
 };
 
 // Fieldbook endpoints
@@ -259,8 +285,11 @@ export const samplingApi = {
     calculationId: string,
     params: {
       sampling_type: "systematic" | "random" | "stratified";
-      intensity_per_hectare?: number;
-      grid_spacing_meters?: number;
+      sampling_intensity_percent?: number; // NEW: Percentage of block area (0.1-10%, default 0.5%)
+      min_samples_per_block?: number; // NEW: Minimum samples for blocks >= 1ha (2-10, default 5)
+      min_samples_small_blocks?: number; // NEW: Minimum samples for blocks < 1ha (1-5, default 2)
+      intensity_per_hectare?: number; // DEPRECATED: Use sampling_intensity_percent instead
+      grid_spacing_meters?: number; // DEPRECATED: Calculated automatically
       min_distance_meters?: number;
       plot_shape?: "circular" | "square" | "rectangular";
       plot_radius_meters?: number;

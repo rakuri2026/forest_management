@@ -16,7 +16,7 @@ import logging
 
 from app.models.calculation import Calculation
 from app.models.sampling import SamplingDesign
-from app.schemas.sampling import SamplingGenerateResponse
+from app.schemas.sampling import SamplingGenerateResponse, BlockSamplingInfo
 
 logger = logging.getLogger(__name__)
 
@@ -236,103 +236,241 @@ def generate_stratified_points(
     return points
 
 
+def extract_blocks_from_calculation(
+    db: Session,
+    calculation_id: UUID
+) -> List[Tuple[int, str, str, float]]:
+    """
+    Extract individual blocks from calculation geometry.
+
+    Args:
+        db: Database session
+        calculation_id: Calculation ID
+
+    Returns:
+        List of tuples: (block_number, block_geom_wkt, block_name, block_area_hectares)
+    """
+    query = text("""
+        WITH blocks AS (
+            SELECT
+                (ST_Dump(boundary_geom)).path[1] as block_number,
+                (ST_Dump(boundary_geom)).geom as block_geom,
+                result_data->'blocks' as blocks_data
+            FROM public.calculations
+            WHERE id = :calc_id
+        )
+        SELECT
+            block_number,
+            ST_AsText(block_geom) as block_wkt,
+            ST_Area(ST_Transform(block_geom,
+                CASE
+                    WHEN ST_X(ST_Centroid(block_geom)) < 84.0 THEN 32644
+                    ELSE 32645
+                END
+            )) / 10000.0 as area_hectares,
+            blocks_data
+        FROM blocks
+        ORDER BY block_number
+    """)
+
+    results = db.execute(query, {"calc_id": str(calculation_id)}).fetchall()
+
+    blocks = []
+    for row in results:
+        block_number = row.block_number
+        block_wkt = row.block_wkt
+        area_hectares = float(row.area_hectares)
+        blocks_data = row.blocks_data if row.blocks_data else []
+
+        # Get block name from result_data
+        block_name = f"Block {block_number}"
+        if blocks_data:
+            for block in blocks_data:
+                if block.get('block_index') == block_number - 1:  # 0-indexed in result_data
+                    block_name = block.get('block_name', block_name)
+                    break
+
+        blocks.append((block_number, block_wkt, block_name, area_hectares))
+
+    logger.info(f"Extracted {len(blocks)} blocks from calculation {calculation_id}")
+    return blocks
+
+
 def create_sampling_design(
     db: Session,
     calculation_id: UUID,
     sampling_type: str,
+    sampling_intensity_percent: Optional[Decimal] = None,
+    min_samples_per_block: int = 5,
+    min_samples_small_blocks: int = 2,
     intensity_per_hectare: Optional[Decimal] = None,
     grid_spacing_meters: Optional[int] = None,
     min_distance_meters: Optional[int] = None,
-    plot_shape: Optional[str] = None,
+    plot_shape: str = "circular",
     plot_radius_meters: Optional[Decimal] = None,
     plot_length_meters: Optional[Decimal] = None,
     plot_width_meters: Optional[Decimal] = None,
     notes: Optional[str] = None
 ) -> SamplingGenerateResponse:
     """
-    Create sampling design and generate sampling points.
+    Create sampling design and generate sampling points PER BLOCK.
+
+    Uses sampling intensity percentage and enforces minimum samples per block.
 
     Args:
         db: Database session
         calculation_id: Calculation ID
         sampling_type: 'systematic', 'random', or 'stratified'
-        intensity_per_hectare: Points per hectare (for random/stratified)
-        grid_spacing_meters: Grid spacing (for systematic)
+        sampling_intensity_percent: Percentage of block area to sample (default 0.5%)
+        min_samples_per_block: Minimum samples for blocks >= 1 ha (default 5)
+        min_samples_small_blocks: Minimum samples for blocks < 1 ha (default 2)
+        intensity_per_hectare: [DEPRECATED] Use sampling_intensity_percent
+        grid_spacing_meters: [DEPRECATED] Calculated automatically
         min_distance_meters: Minimum distance between points
         plot_shape: 'circular', 'square', or 'rectangular'
-        plot_radius_meters: Plot radius (for circular)
+        plot_radius_meters: Plot radius (for circular, default 12.62m)
         plot_length_meters: Plot length (for rectangular)
         plot_width_meters: Plot width (for rectangular)
         notes: Design notes
 
     Returns:
-        SamplingGenerateResponse with summary statistics
+        SamplingGenerateResponse with per-block summary statistics
     """
     # Get calculation
     calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
     if not calculation:
         raise ValueError(f"Calculation {calculation_id} not found")
 
-    # Get boundary geometry as WKT
-    geom_query = text("""
-        SELECT
-            ST_AsText(boundary_geom) as wkt,
-            ST_Area(ST_Transform(boundary_geom,
-                CASE
-                    WHEN ST_X(ST_Centroid(boundary_geom)) < 84.0 THEN 32644
-                    ELSE 32645
-                END
-            )) / 10000.0 as area_hectares
-        FROM public.calculations
-        WHERE id = :calc_id
-    """)
-    result = db.execute(geom_query, {"calc_id": str(calculation_id)}).first()
-    if not result:
-        raise ValueError("Failed to retrieve geometry")
-
-    geom_wkt = result.wkt
-    area_hectares = float(result.area_hectares)
-
-    logger.info(f"Generating {sampling_type} sampling for {area_hectares:.2f} hectares")
-
-    # Generate sampling points based on type
-    if sampling_type == "systematic":
-        if not grid_spacing_meters:
-            raise ValueError("grid_spacing_meters required for systematic sampling")
-
-        bounds = get_polygon_bounds(geom_wkt)
-        points = generate_systematic_grid(
-            bounds[0], bounds[1], bounds[2], bounds[3],
-            grid_spacing_meters,
-            geom_wkt
-        )
-
-    elif sampling_type == "random":
-        if not intensity_per_hectare:
-            raise ValueError("intensity_per_hectare required for random sampling")
-
-        num_points = int(float(intensity_per_hectare) * area_hectares)
-        points = generate_random_points(geom_wkt, num_points, min_distance_meters)
-
-    elif sampling_type == "stratified":
-        if not intensity_per_hectare:
-            raise ValueError("intensity_per_hectare required for stratified sampling")
-
-        num_points = int(float(intensity_per_hectare) * area_hectares)
-        points = generate_stratified_points(geom_wkt, num_points)
-
-    else:
-        raise ValueError(f"Invalid sampling_type: {sampling_type}")
-
-    if not points:
-        raise ValueError("No sampling points generated - check polygon and parameters")
+    # Use sampling_intensity_percent if provided, otherwise fallback to old intensity_per_hectare
+    if sampling_intensity_percent is None and intensity_per_hectare is not None:
+        # Convert old intensity_per_hectare to percentage (rough estimate)
+        sampling_intensity_percent = Decimal("0.5")
+        logger.warning("Using default 0.5% intensity - intensity_per_hectare is deprecated")
+    elif sampling_intensity_percent is None:
+        sampling_intensity_percent = Decimal("0.5")  # Default
 
     # Calculate plot area
     plot_area_sqm = None
     if plot_shape == "circular" and plot_radius_meters:
         plot_area_sqm = math.pi * float(plot_radius_meters) ** 2
+    elif plot_shape == "circular":
+        # Default circular plot: radius 12.6156m = 500m²
+        plot_area_sqm = math.pi * (12.6156 ** 2)
+        plot_radius_meters = Decimal("12.6156")
     elif plot_shape in ["square", "rectangular"] and plot_length_meters and plot_width_meters:
         plot_area_sqm = float(plot_length_meters) * float(plot_width_meters)
+    else:
+        raise ValueError("Plot shape and dimensions must be specified")
+
+    plot_area_hectares = plot_area_sqm / 10000.0
+
+    logger.info(
+        f"Generating {sampling_type} sampling with {float(sampling_intensity_percent)}% intensity, "
+        f"plot size {plot_area_sqm:.2f}m², min samples: {min_samples_per_block} (large blocks), "
+        f"{min_samples_small_blocks} (small blocks < 1ha)"
+    )
+
+    # Extract blocks from calculation
+    blocks = extract_blocks_from_calculation(db, calculation_id)
+
+    # Generate sampling points PER BLOCK
+    all_points = []
+    block_assignments = []
+    blocks_info = []
+    total_forest_area = 0.0
+
+    for block_number, block_wkt, block_name, block_area_ha in blocks:
+        total_forest_area += block_area_ha
+
+        # Determine minimum samples for this block
+        if block_area_ha < 1.0:
+            min_samples = min_samples_small_blocks
+        else:
+            min_samples = min_samples_per_block
+
+        # Calculate samples based on intensity
+        # sample_area = block_area * (intensity% / 100)
+        # num_plots = sample_area / plot_area
+        sample_area_hectares = block_area_ha * (float(sampling_intensity_percent) / 100.0)
+        samples_from_intensity = int(sample_area_hectares / plot_area_hectares)
+
+        # Apply minimum
+        samples_for_block = max(min_samples, samples_from_intensity)
+        minimum_enforced = samples_for_block == min_samples
+
+        logger.info(
+            f"  {block_name} ({block_area_ha:.2f} ha): "
+            f"{samples_from_intensity} from intensity → {samples_for_block} samples "
+            f"(minimum {'enforced' if minimum_enforced else 'not needed'})"
+        )
+
+        # Generate points for this block
+        if sampling_type == "systematic":
+            # Calculate grid spacing to get desired number of samples
+            # For systematic grid: spacing ≈ sqrt(block_area / num_samples)
+            block_area_sqm = block_area_ha * 10000.0
+            spacing_meters = math.sqrt(block_area_sqm / samples_for_block)
+
+            bounds = get_polygon_bounds(block_wkt)
+            block_points = generate_systematic_grid(
+                bounds[0], bounds[1], bounds[2], bounds[3],
+                int(spacing_meters),
+                block_wkt
+            )
+
+            # If we got fewer points than needed, adjust spacing and retry
+            if len(block_points) < samples_for_block:
+                spacing_meters = spacing_meters * 0.8  # Reduce spacing by 20%
+                block_points = generate_systematic_grid(
+                    bounds[0], bounds[1], bounds[2], bounds[3],
+                    int(spacing_meters),
+                    block_wkt
+                )
+
+        elif sampling_type == "random":
+            block_points = generate_random_points(
+                block_wkt,
+                samples_for_block,
+                min_distance_meters
+            )
+
+        elif sampling_type == "stratified":
+            block_points = generate_stratified_points(
+                block_wkt,
+                samples_for_block,
+                num_strata=max(4, samples_for_block // 2)
+            )
+
+        else:
+            raise ValueError(f"Invalid sampling_type: {sampling_type}")
+
+        # Store points with block assignment
+        for point in block_points:
+            all_points.append(point)
+            block_assignments.append({
+                'point_index': len(all_points) - 1,
+                'block_number': block_number,
+                'block_name': block_name
+            })
+
+        # Calculate actual intensity for this block
+        actual_intensity_pct = Decimal(str((len(block_points) * plot_area_hectares / block_area_ha) * 100))
+
+        # Store block info
+        blocks_info.append(BlockSamplingInfo(
+            block_number=block_number,
+            block_name=block_name,
+            block_area_hectares=Decimal(str(round(block_area_ha, 4))),
+            samples_generated=len(block_points),
+            minimum_enforced=minimum_enforced,
+            actual_intensity_percent=actual_intensity_pct
+        ))
+
+    points = all_points
+    logger.info(f"Generated total {len(points)} sampling points across {len(blocks)} blocks")
+
+    if not points:
+        raise ValueError("No sampling points generated - check polygon and parameters")
 
     # Create MultiPoint geometry WKT
     points_wkt = "MULTIPOINT(" + ", ".join([f"{lon} {lat}" for lon, lat in points]) + ")"
@@ -341,8 +479,8 @@ def create_sampling_design(
     sampling_design = SamplingDesign(
         calculation_id=calculation_id,
         sampling_type=sampling_type,
-        intensity_per_hectare=intensity_per_hectare,
-        grid_spacing_meters=grid_spacing_meters,
+        intensity_per_hectare=Decimal(str(len(points) / total_forest_area)),  # Calculated
+        grid_spacing_meters=None,  # Not used with intensity-based approach
         min_distance_meters=min_distance_meters,
         plot_shape=plot_shape,
         plot_radius_meters=plot_radius_meters,
@@ -366,31 +504,39 @@ def create_sampling_design(
         "design_id": str(sampling_design.id)
     })
 
-    # Assign blocks to sampling points
-    assign_blocks_to_sampling(db, sampling_design.id, calculation_id)
+    # Save block assignments directly (we already calculated them)
+    import json
+    update_assignments_query = text("""
+        UPDATE public.sampling_designs
+        SET points_block_assignment = CAST(:assignments AS jsonb)
+        WHERE id = :design_id
+    """)
+    db.execute(update_assignments_query, {
+        "assignments": json.dumps(block_assignments),
+        "design_id": str(sampling_design.id)
+    })
 
     db.commit()
 
     # Calculate statistics
-    actual_intensity = Decimal(str(len(points) / area_hectares))
-    total_sampled_area_hectares = None
-    sampling_percentage = None
-
-    if plot_area_sqm:
-        total_sampled_area_sqm = plot_area_sqm * len(points)
-        total_sampled_area_hectares = Decimal(str(total_sampled_area_sqm / 10000.0))
-        sampling_percentage = Decimal(str((total_sampled_area_sqm / (area_hectares * 10000.0)) * 100))
+    actual_intensity = Decimal(str(len(points) / total_forest_area))
+    total_sampled_area_sqm = plot_area_sqm * len(points)
+    total_sampled_area_hectares = Decimal(str(total_sampled_area_sqm / 10000.0))
+    sampling_percentage = Decimal(str((total_sampled_area_sqm / (total_forest_area * 10000.0)) * 100))
 
     return SamplingGenerateResponse(
         sampling_design_id=sampling_design.id,
         calculation_id=calculation_id,
         sampling_type=sampling_type,
         total_points=len(points),
-        forest_area_hectares=Decimal(str(round(area_hectares, 4))),
+        total_blocks=len(blocks),
+        forest_area_hectares=Decimal(str(round(total_forest_area, 4))),
+        requested_intensity_percent=sampling_intensity_percent,
         actual_intensity_per_hectare=actual_intensity,
-        plot_area_sqm=Decimal(str(round(plot_area_sqm, 2))) if plot_area_sqm else None,
+        plot_area_sqm=Decimal(str(round(plot_area_sqm, 2))),
         total_sampled_area_hectares=total_sampled_area_hectares,
-        sampling_percentage=sampling_percentage
+        sampling_percentage=sampling_percentage,
+        blocks_info=blocks_info
     )
 
 
