@@ -14,6 +14,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   // Generation settings
   const [interpolationDistance, setInterpolationDistance] = useState(50);
   const [extractElevation, setExtractElevation] = useState(true);
+  const [calculateReference, setCalculateReference] = useState(false);
 
   useEffect(() => {
     loadFieldbook();
@@ -45,6 +46,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       const result = await fieldbookApi.generate(calculationId, {
         interpolation_distance_meters: interpolationDistance,
         extract_elevation: extractElevation,
+        calculate_reference: calculateReference,
       });
 
       alert(`Fieldbook generated successfully!\n\nTotal points: ${result.total_points}\nVertices: ${result.total_vertices}\nInterpolated: ${result.interpolated_points}\nPerimeter: ${parseFloat(result.total_perimeter_meters).toFixed(2)}m`);
@@ -135,6 +137,24 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               </label>
             </div>
 
+            <div className="flex items-start">
+              <input
+                type="checkbox"
+                id="calculateReference"
+                checked={calculateReference}
+                onChange={(e) => setCalculateReference(e.target.checked)}
+                className="h-4 w-4 text-blue-600 mt-0.5"
+              />
+              <div className="ml-2">
+                <label htmlFor="calculateReference" className="text-sm text-gray-700">
+                  Calculate reference (nearest landmark)
+                </label>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  ⚠️ WARNING: Very slow! Takes 10-20 seconds per point. Only enable if needed for field navigation.
+                </p>
+              </div>
+            </div>
+
             <button
               onClick={handleGenerate}
               disabled={generating}
@@ -205,6 +225,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Longitude</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latitude</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference (Nearest Landmark)</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Elevation (m)</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Zone</th>
                 </tr>
@@ -231,6 +252,13 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
                     </td>
                     <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.longitude).toFixed(7)}</td>
                     <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.latitude).toFixed(7)}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">
+                      {point.reference ? (
+                        <span className="font-medium text-blue-700">{point.reference}</span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">↑ same</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-sm">{point.elevation ? parseFloat(point.elevation).toFixed(2) : 'N/A'}</td>
                     <td className="px-4 py-2 text-sm">{point.utm_zone}</td>
                   </tr>

@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react';
-import { samplingApi } from '../services/api';
+import { samplingApi, forestApi } from '../services/api';
 
 interface SamplingTabProps {
   calculationId: string;
+}
+
+interface BlockOverride {
+  enabled: boolean;
+  sampling_type?: 'systematic' | 'random';
+  sampling_intensity_percent?: number;
+  min_samples_per_block?: number;
+  boundary_buffer_meters?: number;
+  min_distance_meters?: number;
 }
 
 export function SamplingTab({ calculationId }: SamplingTabProps) {
@@ -11,6 +20,20 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+
+  // Sampling points table
+  const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null);
+  const [samplingPoints, setSamplingPoints] = useState<any[]>([]);
+  const [loadingPoints, setLoadingPoints] = useState(false);
+
+  // Calculation and blocks data
+  const [calculation, setCalculation] = useState<any>(null);
+  const [blocks, setBlocks] = useState<any[]>([]);
+
+  // Block overrides state
+  const [enableBlockOverrides, setEnableBlockOverrides] = useState(false);
+  const [blockOverrides, setBlockOverrides] = useState<Record<string, BlockOverride>>({});
+  const [expandedBlocks, setExpandedBlocks] = useState<Record<string, boolean>>({});
 
   // Form state
   const [samplingType, setSamplingType] = useState<'systematic' | 'random'>('systematic');
@@ -24,7 +47,26 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
   useEffect(() => {
     loadDesigns();
+    loadCalculation();
   }, [calculationId]);
+
+  const loadCalculation = async () => {
+    try {
+      const data = await forestApi.getCalculation(calculationId);
+      setCalculation(data);
+      const extractedBlocks = data.result_data?.blocks || [];
+      setBlocks(extractedBlocks);
+
+      // Initialize block overrides for all blocks
+      const initialOverrides: Record<string, BlockOverride> = {};
+      extractedBlocks.forEach((block: any) => {
+        initialOverrides[block.block_name] = { enabled: false };
+      });
+      setBlockOverrides(initialOverrides);
+    } catch (err: any) {
+      console.error('Failed to load calculation:', err);
+    }
+  };
 
   const loadDesigns = async () => {
     setLoading(true);
@@ -32,10 +74,28 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
     try {
       const data = await samplingApi.list(calculationId);
       setDesigns(data);
+
+      // Auto-load sampling points for the first design by default
+      if (data.length > 0 && !selectedDesignId) {
+        loadSamplingPoints(data[0].id);
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load sampling designs');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSamplingPoints = async (designId: string) => {
+    setLoadingPoints(true);
+    try {
+      const data = await samplingApi.getPoints(designId);
+      setSamplingPoints(data.points || []);
+      setSelectedDesignId(designId);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to load sampling points');
+    } finally {
+      setLoadingPoints(false);
     }
   };
 
@@ -61,6 +121,39 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
       } else {
         params.plot_length_meters = plotSide;
         params.plot_width_meters = plotSide;
+      }
+
+      // Add block overrides if enabled
+      if (enableBlockOverrides) {
+        const overrides: Record<string, any> = {};
+        Object.entries(blockOverrides).forEach(([blockName, override]) => {
+          if (override.enabled) {
+            const blockOverride: any = {};
+            if (override.sampling_type !== undefined) {
+              blockOverride.sampling_type = override.sampling_type;
+            }
+            if (override.sampling_intensity_percent !== undefined) {
+              blockOverride.sampling_intensity_percent = override.sampling_intensity_percent;
+            }
+            if (override.min_samples_per_block !== undefined) {
+              blockOverride.min_samples_per_block = override.min_samples_per_block;
+            }
+            if (override.boundary_buffer_meters !== undefined) {
+              blockOverride.boundary_buffer_meters = override.boundary_buffer_meters;
+            }
+            if (override.min_distance_meters !== undefined) {
+              blockOverride.min_distance_meters = override.min_distance_meters;
+            }
+
+            if (Object.keys(blockOverride).length > 0) {
+              overrides[blockName] = blockOverride;
+            }
+          }
+        });
+
+        if (Object.keys(overrides).length > 0) {
+          params.block_overrides = overrides;
+        }
       }
 
       const result = await samplingApi.create(calculationId, params);
@@ -306,6 +399,206 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
               </div>
             )}
 
+            {/* Block Overrides Section */}
+            {blocks.length > 1 && (
+              <div className="border-t pt-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h4 className="text-md font-semibold text-gray-900">Per-Block Customization</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Optionally customize sampling parameters for individual blocks
+                    </p>
+                  </div>
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableBlockOverrides}
+                      onChange={(e) => setEnableBlockOverrides(e.target.checked)}
+                      className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Enable</span>
+                  </label>
+                </div>
+
+                {enableBlockOverrides && (
+                  <div className="space-y-3">
+                    {blocks.map((block: any, index: number) => {
+                      const blockName = block.block_name;
+                      const override = blockOverrides[blockName] || { enabled: false };
+                      const isExpanded = expandedBlocks[blockName];
+
+                      return (
+                        <div key={index} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => setExpandedBlocks(prev => ({
+                                  ...prev,
+                                  [blockName]: !prev[blockName]
+                                }))}
+                                className="text-gray-500 hover:text-gray-700"
+                              >
+                                {isExpanded ? '▼' : '▶'}
+                              </button>
+                              <div>
+                                <div className="font-medium text-gray-900">{blockName}</div>
+                                <div className="text-xs text-gray-500">
+                                  {block.area_hectares?.toFixed(2)} ha
+                                  {override.enabled && (
+                                    <span className="ml-2 text-blue-600 font-semibold">⚡ Customized</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <label className="flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={override.enabled}
+                                onChange={(e) => setBlockOverrides(prev => ({
+                                  ...prev,
+                                  [blockName]: { ...prev[blockName], enabled: e.target.checked }
+                                }))}
+                                className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              />
+                              <span className="text-sm text-gray-700">Customize</span>
+                            </label>
+                          </div>
+
+                          {isExpanded && override.enabled && (
+                            <div className="px-4 py-4 space-y-3 bg-white">
+                              {/* Sampling Type Override */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Sampling Type (override)
+                                </label>
+                                <select
+                                  value={override.sampling_type || ''}
+                                  onChange={(e) => setBlockOverrides(prev => ({
+                                    ...prev,
+                                    [blockName]: {
+                                      ...prev[blockName],
+                                      sampling_type: e.target.value ? e.target.value as 'systematic' | 'random' : undefined
+                                    }
+                                  }))}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                >
+                                  <option value="">Use default ({samplingType})</option>
+                                  <option value="systematic">Systematic</option>
+                                  <option value="random">Random</option>
+                                </select>
+                              </div>
+
+                              {/* Intensity Override */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Sampling Intensity % (override)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0.1"
+                                  max="10"
+                                  step="0.1"
+                                  placeholder={`Default: ${samplingIntensity}%`}
+                                  value={override.sampling_intensity_percent || ''}
+                                  onChange={(e) => setBlockOverrides(prev => ({
+                                    ...prev,
+                                    [blockName]: {
+                                      ...prev[blockName],
+                                      sampling_intensity_percent: e.target.value ? parseFloat(e.target.value) : undefined
+                                    }
+                                  }))}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                />
+                              </div>
+
+                              {/* Min Samples Override */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Min Samples (override)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="2"
+                                  max="20"
+                                  placeholder={`Default: ${minSamplesPerBlock}`}
+                                  value={override.min_samples_per_block || ''}
+                                  onChange={(e) => setBlockOverrides(prev => ({
+                                    ...prev,
+                                    [blockName]: {
+                                      ...prev[blockName],
+                                      min_samples_per_block: e.target.value ? parseInt(e.target.value) : undefined
+                                    }
+                                  }))}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                />
+                              </div>
+
+                              {/* Boundary Buffer Override */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Boundary Buffer (meters, override)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="200"
+                                  placeholder="Default: 50m"
+                                  value={override.boundary_buffer_meters || ''}
+                                  onChange={(e) => setBlockOverrides(prev => ({
+                                    ...prev,
+                                    [blockName]: {
+                                      ...prev[blockName],
+                                      boundary_buffer_meters: e.target.value ? parseFloat(e.target.value) : undefined
+                                    }
+                                  }))}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                />
+                              </div>
+
+                              {/* Min Distance Override (for random sampling) */}
+                              {(override.sampling_type === 'random' || (!override.sampling_type && samplingType === 'random')) && (
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Min Distance Between Points (meters, override)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="5"
+                                    max="500"
+                                    placeholder={`Default: ${minDistance}m`}
+                                    value={override.min_distance_meters || ''}
+                                    onChange={(e) => setBlockOverrides(prev => ({
+                                      ...prev,
+                                      [blockName]: {
+                                        ...prev[blockName],
+                                        min_distance_meters: e.target.value ? parseInt(e.target.value) : undefined
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                  />
+                                </div>
+                              )}
+
+                              {/* Reset Button */}
+                              <button
+                                onClick={() => setBlockOverrides(prev => ({
+                                  ...prev,
+                                  [blockName]: { enabled: true }
+                                }))}
+                                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                              >
+                                Reset to Defaults
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Buttons */}
             <div className="flex gap-2">
               <button
@@ -413,32 +706,112 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                   </button>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="space-y-2">
+                  {/* Toggle Points Button */}
                   <button
-                    onClick={() => handleExport(design.id, 'csv')}
-                    className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
+                    onClick={() => {
+                      if (selectedDesignId === design.id && samplingPoints.length > 0) {
+                        setSelectedDesignId(null);
+                        setSamplingPoints([]);
+                      } else {
+                        loadSamplingPoints(design.id);
+                      }
+                    }}
+                    className="w-full bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700"
                   >
-                    CSV
+                    {selectedDesignId === design.id && samplingPoints.length > 0
+                      ? '▲ Hide Sampling Points'
+                      : '▼ View Sampling Points'}
                   </button>
-                  <button
-                    onClick={() => handleExport(design.id, 'geojson')}
-                    className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
-                  >
-                    GeoJSON
-                  </button>
-                  <button
-                    onClick={() => handleExport(design.id, 'gpx')}
-                    className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
-                  >
-                    GPX
-                  </button>
-                  <button
-                    onClick={() => handleExport(design.id, 'kml')}
-                    className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
-                  >
-                    KML
-                  </button>
+
+                  {/* Export Buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleExport(design.id, 'csv')}
+                      className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
+                    >
+                      CSV
+                    </button>
+                    <button
+                      onClick={() => handleExport(design.id, 'geojson')}
+                      className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
+                    >
+                      GeoJSON
+                    </button>
+                    <button
+                      onClick={() => handleExport(design.id, 'gpx')}
+                      className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
+                    >
+                      GPX
+                    </button>
+                    <button
+                      onClick={() => handleExport(design.id, 'kml')}
+                      className="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700"
+                    >
+                      KML
+                    </button>
+                  </div>
                 </div>
+
+                {/* Sampling Points Table */}
+                {selectedDesignId === design.id && samplingPoints.length > 0 && (
+                  <div className="mt-6 border-t pt-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h4 className="text-md font-semibold text-gray-700">
+                        Sampling Points ({samplingPoints.length} total)
+                      </h4>
+                      {samplingPoints.length > 100 && (
+                        <span className="text-sm text-gray-600">
+                          Showing first 100 rows - Export for full data
+                        </span>
+                      )}
+                    </div>
+
+                    {loadingPoints ? (
+                      <div className="text-center py-8 text-gray-600">Loading points...</div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plot #</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Longitude</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latitude</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Easting</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Northing</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Zone</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Distance from Boundary (m)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {samplingPoints.slice(0, 100).map((point: any) => (
+                              <tr key={point.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 text-sm font-mono">P{point.plot_number}</td>
+                                <td className="px-4 py-2 text-sm">
+                                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
+                                    {point.block_name || `Block ${point.block_number}`}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.longitude).toFixed(7)}</td>
+                                <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.latitude).toFixed(7)}</td>
+                                <td className="px-4 py-2 text-sm font-mono">{point.utm_easting ? parseFloat(point.utm_easting).toFixed(2) : 'N/A'}</td>
+                                <td className="px-4 py-2 text-sm font-mono">{point.utm_northing ? parseFloat(point.utm_northing).toFixed(2) : 'N/A'}</td>
+                                <td className="px-4 py-2 text-sm">{point.utm_zone || 'N/A'}</td>
+                                <td className="px-4 py-2 text-sm">{point.distance_from_boundary ? parseFloat(point.distance_from_boundary).toFixed(2) : 'N/A'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {samplingPoints.length > 100 && (
+                          <div className="px-6 py-4 bg-gray-50 text-sm text-gray-600 text-center">
+                            Showing first 100 of {samplingPoints.length} points. Export to see all.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

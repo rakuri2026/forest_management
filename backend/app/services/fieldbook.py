@@ -219,7 +219,8 @@ def generate_fieldbook_points(
     db: Session,
     calculation_id: UUID,
     interpolation_distance: float = 20.0,
-    extract_elevation: bool = True
+    extract_elevation: bool = True,
+    calculate_reference: bool = False
 ) -> FieldbookGenerateResponse:
     """
     Generate fieldbook points from calculation boundary.
@@ -229,13 +230,15 @@ def generate_fieldbook_points(
     3. Calculate azimuth and distance to next point
     4. Extract elevation from DEM
     5. Convert to UTM coordinates
-    6. Save to database
+    6. Optionally calculate reference (nearest landmark) - VERY SLOW!
+    7. Save to database
 
     Args:
         db: Database session
         calculation_id: ID of calculation
         interpolation_distance: Distance between interpolated points (meters)
         extract_elevation: Whether to extract elevation from DEM
+        calculate_reference: Whether to calculate nearest landmark reference (SLOW: 10-20s per point)
 
     Returns:
         FieldbookGenerateResponse with summary statistics
@@ -440,7 +443,7 @@ def generate_fieldbook_points(
 
         # Update with PostGIS-calculated UTM and elevation
         if extract_elevation:
-            update_utm_and_elevation(db, calculation_id)
+            update_utm_and_elevation(db, calculation_id, calculate_reference=calculate_reference)
 
         # No need to call assign_blocks_to_fieldbook() - blocks assigned during generation
         logger.info(f"Fieldbook generation complete. Blocks assigned during point generation.")
@@ -460,13 +463,14 @@ def generate_fieldbook_points(
     )
 
 
-def update_utm_and_elevation(db: Session, calculation_id: UUID):
+def update_utm_and_elevation(db: Session, calculation_id: UUID, calculate_reference: bool = False):
     """
     Update fieldbook points with UTM coordinates and elevation using PostGIS.
 
     Args:
         db: Database session
         calculation_id: Calculation ID
+        calculate_reference: Whether to calculate nearest landmark reference (SLOW!)
     """
     # Update UTM coordinates using PostGIS
     utm_update_query = text("""
@@ -503,8 +507,45 @@ def update_utm_and_elevation(db: Session, calculation_id: UUID):
     """)
     db.execute(elevation_update_query, {"calc_id": str(calculation_id)})
 
+    # Update reference (nearest landmark) for each point - OPTIONAL (VERY SLOW!)
+    # Only calculate if explicitly requested by user
+    if calculate_reference:
+        logger.info(f"Calculating reference landmarks for fieldbook {calculation_id} - This may take 10-20 seconds per point...")
+        # Only show reference when it changes from previous point
+        # OPTIMIZED: Uses find_nearest_feature() which filters within 100m FIRST using ST_DWithin
+        # This leverages spatial indexes and is much faster than scanning all features
+        reference_update_query = text("""
+            WITH references_raw AS (
+                SELECT
+                    id,
+                    point_number,
+                    rasters.find_nearest_feature(longitude, latitude) as ref
+                FROM public.fieldbook
+                WHERE calculation_id = :calc_id
+                ORDER BY point_number
+            ),
+            references_with_lag AS (
+                SELECT
+                    id,
+                    ref,
+                    LAG(ref) OVER (ORDER BY point_number) as prev_ref
+                FROM references_raw
+            )
+            UPDATE public.fieldbook fb
+            SET reference = CASE
+                WHEN rwl.ref IS NOT NULL AND (rwl.prev_ref IS NULL OR rwl.ref != rwl.prev_ref) THEN rwl.ref
+                ELSE NULL
+            END
+            FROM references_with_lag rwl
+            WHERE fb.id = rwl.id
+        """)
+        db.execute(reference_update_query, {"calc_id": str(calculation_id)})
+        logger.info(f"Reference calculation completed for fieldbook {calculation_id}")
+
     db.commit()
-    logger.info(f"Updated UTM coordinates and elevation for fieldbook {calculation_id}")
+
+    reference_status = "with references" if calculate_reference else "without references (skipped for performance)"
+    logger.info(f"Updated UTM coordinates and elevation for fieldbook {calculation_id} {reference_status}")
 
 
 def assign_blocks_to_fieldbook(db: Session, calculation_id: UUID):

@@ -215,6 +215,25 @@ async def upload_forest_boundary(
     file: UploadFile = File(...),
     forest_name: str = Form(...),
     block_name: Optional[str] = Form(None),
+    # Analysis options (all optional, default True for backward compatibility)
+    run_raster_analysis: bool = Form(True),
+    run_elevation: bool = Form(True),
+    run_slope: bool = Form(True),
+    run_aspect: bool = Form(True),
+    run_canopy: bool = Form(True),
+    run_biomass: bool = Form(True),
+    run_forest_health: bool = Form(True),
+    run_forest_type: bool = Form(True),
+    run_landcover: bool = Form(True),
+    run_forest_loss: bool = Form(True),
+    run_forest_gain: bool = Form(True),
+    run_fire_loss: bool = Form(True),
+    run_temperature: bool = Form(True),
+    run_precipitation: bool = Form(True),
+    run_soil: bool = Form(True),
+    run_proximity: bool = Form(True),
+    auto_generate_fieldbook: bool = Form(True),
+    auto_generate_sampling: bool = Form(True),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -227,6 +246,16 @@ async def upload_forest_boundary(
 
     - **forest_name**: Required - Name of the forest (mandatory)
     - **block_name**: Optional - Name of the block
+
+    Analysis Options (all default to True):
+    - **run_raster_analysis**: Run all raster analyses (if False, skips all raster)
+    - **run_elevation, run_slope, run_aspect**: Terrain analyses
+    - **run_canopy, run_biomass, run_forest_health**: Forest structure
+    - **run_forest_type, run_landcover**: Classification
+    - **run_forest_loss, run_forest_gain, run_fire_loss**: Change detection
+    - **run_temperature, run_precipitation, run_soil**: Climate & soil
+    - **run_proximity**: Vector proximity analysis
+    - **auto_generate_fieldbook, auto_generate_sampling**: Auto-generation
     """
     # Process uploaded file
     try:
@@ -294,7 +323,27 @@ async def upload_forest_boundary(
         # Get a fresh calculation reference with eager loading to avoid detached instance issues
         db.expire_all()  # Expire cached objects
 
-        analysis_results, processing_time = await analyze_forest_boundary(calc_id, db)
+        # Build analysis options dict
+        analysis_options = {
+            'run_raster_analysis': run_raster_analysis,
+            'run_elevation': run_elevation,
+            'run_slope': run_slope,
+            'run_aspect': run_aspect,
+            'run_canopy': run_canopy,
+            'run_biomass': run_biomass,
+            'run_forest_health': run_forest_health,
+            'run_forest_type': run_forest_type,
+            'run_landcover': run_landcover,
+            'run_forest_loss': run_forest_loss,
+            'run_forest_gain': run_forest_gain,
+            'run_fire_loss': run_fire_loss,
+            'run_temperature': run_temperature,
+            'run_precipitation': run_precipitation,
+            'run_soil': run_soil,
+            'run_proximity': run_proximity,
+        }
+
+        analysis_results, processing_time = await analyze_forest_boundary(calc_id, db, options=analysis_options)
         print(f"Analysis completed with {len(analysis_results)} keys")
 
         # Merge analysis results with existing block data using SQL JSONB operators
@@ -321,33 +370,41 @@ async def upload_forest_boundary(
         db.commit()
         print("Commit successful")
 
-        # Auto-generate fieldbook and sampling with default values
-        try:
-            print(f"Auto-generating fieldbook with 50m interpolation for calculation {calc_id}")
-            fieldbook_result = generate_fieldbook_points(
-                db=db,
-                calculation_id=calc_id,
-                interpolation_distance=50.0,
-                extract_elevation=True
-            )
-            print(f"Fieldbook auto-generated: {fieldbook_result['total_points']} points")
-        except Exception as fb_error:
-            print(f"Warning: Fieldbook auto-generation failed: {fb_error}")
-            # Don't fail the entire upload if fieldbook generation fails
+        # Auto-generate fieldbook and sampling (OPTIONAL - controlled by user)
+        if auto_generate_fieldbook:
+            try:
+                print(f"Auto-generating fieldbook with 50m interpolation for calculation {calc_id}")
+                fieldbook_result = generate_fieldbook_points(
+                    db=db,
+                    calculation_id=calc_id,
+                    interpolation_distance=50.0,
+                    extract_elevation=True,
+                    calculate_reference=False  # Never auto-calculate references (too slow)
+                )
+                print(f"Fieldbook auto-generated: {fieldbook_result.total_points} points")
+            except Exception as fb_error:
+                print(f"Warning: Fieldbook auto-generation failed: {fb_error}")
+                # Don't fail the entire upload if fieldbook generation fails
+        else:
+            print(f"Skipping fieldbook auto-generation (user disabled)")
 
-        try:
-            print(f"Auto-generating sampling design for calculation {calc_id}")
-            sampling_result = create_sampling_design(
-                db=db,
-                calculation_id=calc_id,
-                method="systematic",
-                spacing_meters=250.0,
-                plot_size_sqm=500.0
-            )
-            print(f"Sampling auto-generated: {sampling_result['total_plots']} plots")
-        except Exception as sp_error:
-            print(f"Warning: Sampling auto-generation failed: {sp_error}")
-            # Don't fail the entire upload if sampling generation fails
+        if auto_generate_sampling:
+            try:
+                print(f"Auto-generating sampling design for calculation {calc_id}")
+                sampling_result = create_sampling_design(
+                    db=db,
+                    calculation_id=calc_id,
+                    sampling_type="systematic",
+                    grid_spacing_meters=250,
+                    plot_shape="circular",
+                    plot_radius_meters=12.62  # 500 sqm circular plot = radius ~12.62m
+                )
+                print(f"Sampling auto-generated: {sampling_result.total_plots} plots")
+            except Exception as sp_error:
+                print(f"Warning: Sampling auto-generation failed: {sp_error}")
+                # Don't fail the entire upload if sampling generation fails
+        else:
+            print(f"Skipping sampling auto-generation (user disabled)")
 
         # Refresh calculation object after commit
         calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()
@@ -503,6 +560,7 @@ async def delete_calculation(
     Delete a calculation
 
     Users can only delete their own calculations
+    Note: May be slow for calculations with many fieldbook points (uses ORM cascade)
     """
     calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
 
@@ -519,8 +577,18 @@ async def delete_calculation(
             detail="You don't have permission to delete this calculation"
         )
 
-    db.delete(calculation)
-    db.commit()
+    try:
+        # Use ORM delete with cascade (slower but more reliable)
+        db.delete(calculation)
+        db.commit()
+        print(f"Successfully deleted calculation {calculation_id}")
+    except Exception as e:
+        db.rollback()
+        print(f"Error deleting calculation {calculation_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete calculation: {str(e)}"
+        )
 
     return None
 

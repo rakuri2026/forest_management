@@ -55,16 +55,16 @@ export default function MyUploads() {
     <div className="max-w-7xl mx-auto py-8 px-4">
       <div className="mb-8 flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">My Uploads</h1>
+          <h1 className="text-3xl font-bold text-gray-900">My CFOPs</h1>
           <p className="mt-2 text-gray-600">
-            View and manage your uploaded forest boundary files
+            Community Forest Operational Plans - View and manage your CF boundary uploads
           </p>
         </div>
         <Link
           to="/upload"
           className="bg-green-600 text-white px-6 py-3 rounded-md hover:bg-green-700 font-medium transition-colors"
         >
-          Upload New File
+          Upload New CF Boundary
         </Link>
       </div>
 
@@ -92,15 +92,15 @@ export default function MyUploads() {
               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
             />
           </svg>
-          <h3 className="mt-4 text-lg font-medium text-gray-900">No uploads yet</h3>
+          <h3 className="mt-4 text-lg font-medium text-gray-900">No CFOPs yet</h3>
           <p className="mt-2 text-gray-500">
-            Get started by uploading your first forest boundary file
+            Get started by uploading your first community forest boundary
           </p>
           <Link
             to="/upload"
             className="mt-6 inline-block bg-green-600 text-white px-6 py-3 rounded-md hover:bg-green-700 font-medium transition-colors"
           >
-            Upload Your First File
+            Upload Your First CF Boundary
           </Link>
         </div>
       ) : (

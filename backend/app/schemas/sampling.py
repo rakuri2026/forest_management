@@ -2,10 +2,44 @@
 Pydantic schemas for Sampling Design API
 """
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
+
+
+class BlockOverride(BaseModel):
+    """Per-block sampling parameter overrides"""
+    sampling_type: Optional[Literal["systematic", "random", "stratified"]] = Field(
+        None,
+        description="Override sampling type for this block"
+    )
+    sampling_intensity_percent: Optional[Decimal] = Field(
+        None,
+        ge=0.1,
+        le=10.0,
+        description="Override sampling intensity for this block"
+    )
+    min_samples_per_block: Optional[int] = Field(
+        None,
+        ge=2,
+        le=20,
+        description="Override minimum samples for this block"
+    )
+    boundary_buffer_meters: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=200.0,
+        description="Override boundary buffer for this block"
+    )
+    min_distance_meters: Optional[int] = Field(
+        None,
+        ge=5,
+        le=500,
+        description="Override minimum distance between points for this block"
+    )
+
+    model_config = ConfigDict(extra='forbid')
 
 
 class SamplingDesignBase(BaseModel):
@@ -78,7 +112,17 @@ class SamplingDesignBase(BaseModel):
         le=100.0,
         description="Plot width for rectangular plots"
     )
+    boundary_buffer_meters: Optional[float] = Field(
+        default=50.0,
+        ge=0.0,
+        le=200.0,
+        description="Minimum distance from boundary to avoid edge effects (default: 50m)"
+    )
     notes: Optional[str] = Field(None, max_length=1000, description="Design notes")
+    block_overrides: Optional[Dict[str, BlockOverride]] = Field(
+        None,
+        description="Per-block parameter overrides. Key is block name (e.g., 'Block 1'), value is override parameters"
+    )
 
 
 class SamplingDesignCreate(SamplingDesignBase):
@@ -119,6 +163,14 @@ class SamplingDesign(SamplingDesignBase):
     total_points: int
     created_at: datetime
     updated_at: datetime
+    default_parameters: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Default sampling parameters applied to all blocks"
+    )
+    block_overrides: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Per-block parameter overrides"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

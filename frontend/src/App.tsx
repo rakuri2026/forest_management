@@ -35,27 +35,30 @@ const App: React.FC = () => {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
+            {/* Default route - redirect to My CFOPs */}
+            <Route index element={<Navigate to="/my-uploads" replace />} />
+
+            {/* Main routes */}
+            <Route path="my-uploads" element={<MyUploads />} />
+            <Route path="upload" element={<Upload />} />
+            <Route path="calculations/:id" element={<CalculationDetail />} />
             <Route path="forests" element={<Forests />} />
             <Route path="forests/:id" element={<ForestDetail />} />
-            <Route path="my-forests" element={<Dashboard />} />
-            <Route path="upload" element={<Upload />} />
-            <Route path="my-uploads" element={<MyUploads />} />
-            <Route path="calculations/:id" element={<CalculationDetail />} />
-            
+
             {/* Inventory routes */}
             <Route path="inventory" element={<InventoryList />} />
             <Route path="inventory/upload" element={<InventoryUpload />} />
             <Route path="inventory/:id" element={<InventoryDetail />} />
 
-            {/* Fieldbook and Sampling routes */}
+            {/* Legacy routes (redirects for backward compatibility) */}
+            <Route path="dashboard" element={<Navigate to="/my-uploads" replace />} />
+            <Route path="my-forests" element={<Navigate to="/my-uploads" replace />} />
             <Route path="fieldbook" element={<FieldbookList />} />
             <Route path="sampling" element={<SamplingList />} />
           </Route>
 
-          {/* Catch all */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* Catch all - redirect to My CFOPs */}
+          <Route path="*" element={<Navigate to="/my-uploads" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

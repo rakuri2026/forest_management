@@ -6,6 +6,7 @@ import { EditableCell } from '../components/EditableCell';
 import { FieldbookTab } from '../components/FieldbookTab';
 import { SamplingTab } from '../components/SamplingTab';
 import { TreeMappingTab } from '../components/TreeMappingTab';
+import BiodiversityTab from '../components/BiodiversityTab';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -371,6 +372,16 @@ export default function CalculationDetail() {
             >
               Tree Mapping
             </button>
+            <button
+              onClick={() => setActiveTab('biodiversity')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'biodiversity'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Biodiversity
+            </button>
           </nav>
         </div>
 
@@ -390,6 +401,12 @@ export default function CalculationDetail() {
         {activeTab === 'treemapping' && (
           <div className="p-6">
             <TreeMappingTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'biodiversity' && (
+          <div className="p-6">
+            <BiodiversityTab calculationId={calculation.id} />
           </div>
         )}
 

@@ -61,6 +61,10 @@ class FieldbookGenerateRequest(BaseModel):
         default=True,
         description="Extract elevation from DEM for each point"
     )
+    calculate_reference: bool = Field(
+        default=False,
+        description="Calculate reference (nearest landmark) for each point. WARNING: This is VERY slow (10-20 seconds per point). Only enable if needed."
+    )
 
     model_config = ConfigDict(extra='forbid')
 

@@ -46,6 +46,15 @@ class SamplingDesign(Base):
     # Format: [{"point_index": 0, "block_number": 1, "block_name": "Ward 5"}, ...]
     points_block_assignment = Column(JSONB, nullable=True)
 
+    # Per-block sampling parameters (Option 2: Single design with overrides)
+    # Default parameters applied to all blocks unless overridden
+    # Format: {"sampling_type": "systematic", "intensity_percent": 0.5, "min_samples": 5, ...}
+    default_parameters = Column(JSONB, nullable=True)
+
+    # Block-specific parameter overrides
+    # Format: {"Block 1": {"intensity_percent": 1.0, "min_samples": 10}, "Block 3": {...}}
+    block_overrides = Column(JSONB, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

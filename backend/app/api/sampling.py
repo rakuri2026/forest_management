@@ -2,9 +2,12 @@
 Sampling design API endpoints for forest inventory sampling.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List, Optional
 from uuid import UUID
+import io
 
 from app.core.database import get_db
 from app.utils.auth import get_current_user
@@ -76,6 +79,18 @@ async def create_sampling(
         )
 
     try:
+        # Convert block_overrides from Pydantic models to dicts if present
+        block_overrides_dict = None
+        if request.block_overrides:
+            block_overrides_dict = {}
+            for block_name, override in request.block_overrides.items():
+                if hasattr(override, 'model_dump'):
+                    block_overrides_dict[block_name] = override.model_dump(exclude_none=True)
+                elif hasattr(override, 'dict'):
+                    block_overrides_dict[block_name] = override.dict(exclude_none=True)
+                else:
+                    block_overrides_dict[block_name] = override
+
         # Create sampling design with new intensity-based approach
         summary = create_sampling_design(
             db=db,
@@ -84,6 +99,7 @@ async def create_sampling(
             sampling_intensity_percent=request.sampling_intensity_percent,
             min_samples_per_block=request.min_samples_per_block or 5,
             min_samples_small_blocks=request.min_samples_small_blocks or 2,
+            boundary_buffer_meters=request.boundary_buffer_meters or 50.0,
             intensity_per_hectare=request.intensity_per_hectare,  # Deprecated fallback
             grid_spacing_meters=request.grid_spacing_meters,  # Deprecated
             min_distance_meters=request.min_distance_meters,
@@ -91,7 +107,8 @@ async def create_sampling(
             plot_radius_meters=request.plot_radius_meters,
             plot_length_meters=request.plot_length_meters,
             plot_width_meters=request.plot_width_meters,
-            notes=request.notes
+            notes=request.notes,
+            block_overrides=block_overrides_dict
         )
 
         db.commit()
@@ -218,9 +235,78 @@ async def get_sampling_points(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
-    # Return GeoJSON by default
-    geojson_data = get_sampling_points_geojson(db, design_id)
-    return JSONResponse(content=geojson_data)
+    # Return JSON array of points with detailed information
+    from shapely import wkt as shapely_wkt
+    from pyproj import Transformer
+
+    # Get points geometry as WKT
+    wkt_query = text("""
+        SELECT ST_AsText(points_geometry) as wkt,
+               points_block_assignment
+        FROM public.sampling_designs
+        WHERE id = :design_id
+    """)
+    result = db.execute(wkt_query, {"design_id": str(design_id)}).first()
+
+    if not result or not result.wkt:
+        return {"points": []}
+
+    # Parse MultiPoint geometry
+    multipoint = shapely_wkt.loads(result.wkt)
+    block_assignment = result.points_block_assignment or []
+
+    # Get calculation boundary for distance calculation
+    calc = db.query(Calculation).filter(Calculation.id == design.calculation_id).first()
+    boundary_wkt = None
+    if calc:
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM public.calculations
+            WHERE id = :calc_id
+        """)
+        boundary_result = db.execute(boundary_query, {"calc_id": str(design.calculation_id)}).first()
+        if boundary_result:
+            boundary_wkt = boundary_result.wkt
+
+    # Build points array
+    points = []
+    for i, point in enumerate(multipoint.geoms):
+        lon, lat = point.x, point.y
+
+        # Find block assignment
+        block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
+        block_number = block_info.get('block_number', 1) if block_info else 1
+        block_name = block_info.get('block_name', f'Block {block_number}') if block_info else f'Block {block_number}'
+
+        # Calculate UTM coordinates
+        utm_zone = 44 if lon < 84 else 45  # Nepal is in zones 44N and 45N
+        transformer = Transformer.from_crs(f"EPSG:4326", f"EPSG:326{utm_zone}", always_xy=True)
+        utm_easting, utm_northing = transformer.transform(lon, lat)
+
+        # Calculate distance from boundary (if available)
+        distance_from_boundary = None
+        if boundary_wkt:
+            try:
+                boundary_geom = shapely_wkt.loads(boundary_wkt)
+                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320  # Convert degrees to meters (approximate)
+            except:
+                pass
+
+        point_data = {
+            "id": f"{design_id}_{i}",
+            "plot_number": i + 1,
+            "block_number": block_number,
+            "block_name": block_name,
+            "longitude": float(f"{lon:.7f}"),
+            "latitude": float(f"{lat:.7f}"),
+            "utm_easting": float(f"{utm_easting:.2f}"),
+            "utm_northing": float(f"{utm_northing:.2f}"),
+            "utm_zone": f"{utm_zone}N",
+            "distance_from_boundary": float(f"{distance_from_boundary:.2f}") if distance_from_boundary else None
+        }
+        points.append(point_data)
+
+    return {"points": points}
 
 
 @router.put("/sampling/{design_id}", response_model=SamplingDesignSchema)

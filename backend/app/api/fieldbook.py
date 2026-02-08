@@ -78,7 +78,8 @@ async def generate_fieldbook(
             db=db,
             calculation_id=calculation_id,
             interpolation_distance=request.interpolation_distance_meters,
-            extract_elevation=request.extract_elevation
+            extract_elevation=request.extract_elevation,
+            calculate_reference=request.calculate_reference
         )
 
         db.commit()

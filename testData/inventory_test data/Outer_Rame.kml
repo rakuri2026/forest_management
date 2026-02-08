@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document>
+	<name>Outer_Rame.kml</name>
+	<Schema name="sundar" id="S_sundar_SD">
+		<SimpleField type="string" name="Name"><displayName>&lt;b&gt;Name&lt;/b&gt;</displayName>
+</SimpleField>
+		<SimpleField type="double" name="area_ha"><displayName>&lt;b&gt;area_ha&lt;/b&gt;</displayName>
+</SimpleField>
+	</Schema>
+	<Style id="falseColor">
+		<IconStyle>
+		</IconStyle>
+		<BalloonStyle>
+			<text><![CDATA[<table border="0">
+  <tr><td><b>Name</b></td><td>$[sundar/Name]</td></tr>
+  <tr><td><b>area_ha</b></td><td>$[sundar/area_ha]</td></tr>
+</table>
+]]></text>
+		</BalloonStyle>
+		<ListStyle>
+		</ListStyle>
+		<LineStyle>
+			<color>ffff00ff</color>
+			<width>2.3</width>
+		</LineStyle>
+		<PolyStyle>
+			<color>ff0000ff</color>
+			<fill>0</fill>
+		</PolyStyle>
+		<gx:IconStackStyle>
+		</gx:IconStackStyle>
+	</Style>
+	<StyleMap id="falseColor0">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#falseColor1</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#falseColor</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Style id="falseColor1">
+		<IconStyle>
+		</IconStyle>
+		<BalloonStyle>
+			<text><![CDATA[<table border="0">
+  <tr><td><b>Name</b></td><td>$[sundar/Name]</td></tr>
+  <tr><td><b>area_ha</b></td><td>$[sundar/area_ha]</td></tr>
+</table>
+]]></text>
+		</BalloonStyle>
+		<ListStyle>
+		</ListStyle>
+		<LineStyle>
+			<color>ffff00ff</color>
+			<width>2.3</width>
+		</LineStyle>
+		<PolyStyle>
+			<color>ff0000ff</color>
+			<fill>0</fill>
+		</PolyStyle>
+		<gx:IconStackStyle>
+		</gx:IconStackStyle>
+	</Style>
+	<Placemark>
+		<name>Rame kholsa</name>
+		<open>1</open>
+		<styleUrl>#falseColor0</styleUrl>
+		<ExtendedData>
+			<SchemaData schemaUrl="#S_sundar_SD">
+				<SimpleData name="Name">Rame kholsa</SimpleData>
+				<SimpleData name="area_ha">122.564</SimpleData>
+			</SchemaData>
+		</ExtendedData>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						85.04199853799997,27.45593286500005,0 85.04104511200006,27.45420717300007,0 85.04009173000007,27.45254918800002,0 85.03925279500005,27.45133110000008,0 85.03841387200002,27.44997767200008,0 85.03776562100006,27.44879342200006,0 85.03726984000008,27.44632338700005,0 85.03700280300005,27.443311968,0 85.03654521200008,27.44202619700005,0 85.03624012200005,27.44057122700009,0 85.03601128100003,27.43908240200009,0 85.03600983052574,27.43781783666849,0 85.03645792546352,27.4378720878617,0 85.0368347354576,27.43780883527268,0 85.03742262899998,27.43877276400005,0 85.03787492400006,27.43965579200001,0 85.03874935400007,27.44075287500001,0 85.03950317800015,27.44152885700003,0 85.04028716100002,27.44222456000004,0 85.04089022700003,27.44267943900006,0 85.04185512700013,27.44316105200006,0 85.04336274600006,27.44335932400004,0 85.04435770300005,27.44301137900003,0 85.04532252600006,27.44285074200005,0 85.04622705999996,27.44279713900005,0 85.0470983342928,27.44293583400441,0 85.04719502200011,27.44387514900008,0 85.04715710600006,27.44543162300008,0 85.04803409400007,27.4458375580001,0 85.04795795400001,27.44664963500002,0 85.04807251400014,27.44786772100001,0 85.04734827700008,27.44928891700001,0 85.04658587499999,27.45057477200001,0 85.04509905899999,27.45243591900008,0 85.04467979100008,27.45385710000009,0 85.0439554260001,27.45497379000007,0 85.04315475700008,27.45588747100001,0 85.04199853799997,27.45593286500005,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+		<atom:link rel="app" href="https://www.google.com/earth/about/versions/#earth-pro" title="Google Earth Pro 7.3.6.10441"></atom:link>
+	</Placemark>
+</Document>
+</kml>

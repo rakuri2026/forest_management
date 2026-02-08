@@ -63,25 +63,73 @@ def calculate_polygon_area_hectares(geom_wkt: str) -> float:
     return 0.0  # Placeholder
 
 
+def apply_boundary_buffer(polygon_wkt: str, buffer_meters: float = 50.0) -> str:
+    """
+    Apply inward buffer to polygon to keep sampling points away from boundary.
+
+    Uses accurate UTM projection for Nepal.
+
+    Args:
+        polygon_wkt: WKT of polygon in EPSG:4326
+        buffer_meters: Buffer distance in meters (negative = inward)
+
+    Returns:
+        WKT of buffered polygon in EPSG:4326
+    """
+    from shapely import wkt as shapely_wkt
+    from shapely.ops import transform
+    from pyproj import Transformer
+
+    polygon = shapely_wkt.loads(polygon_wkt)
+    centroid = polygon.centroid
+
+    # Determine UTM zone for Nepal (44N or 45N)
+    utm_zone = 44 if centroid.x < 84.0 else 45
+    utm_epsg = f"EPSG:326{utm_zone}"
+
+    # Create transformers
+    to_utm = Transformer.from_crs("EPSG:4326", utm_epsg, always_xy=True)
+    to_wgs84 = Transformer.from_crs(utm_epsg, "EPSG:4326", always_xy=True)
+
+    # Transform to UTM, apply buffer, transform back
+    polygon_utm = transform(to_utm.transform, polygon)
+    buffered_utm = polygon_utm.buffer(-buffer_meters)  # Negative buffer = inward
+    buffered_wgs84 = transform(to_wgs84.transform, buffered_utm)
+
+    # Check if buffer resulted in empty geometry
+    if buffered_wgs84.is_empty or buffered_wgs84.area == 0:
+        logger.warning(f"Buffer of {buffer_meters}m resulted in empty polygon - using original")
+        return polygon_wkt
+
+    return buffered_wgs84.wkt
+
+
 def generate_systematic_grid(
     min_lon: float,
     min_lat: float,
     max_lon: float,
     max_lat: float,
     grid_spacing_meters: int,
-    polygon_wkt: str
+    polygon_wkt: str,
+    boundary_buffer_meters: float = 50.0
 ) -> List[Tuple[float, float]]:
     """
     Generate systematic grid of points within polygon.
+
+    Enforces minimum distance from boundary to avoid edge effects.
 
     Args:
         min_lon, min_lat, max_lon, max_lat: Bounding box
         grid_spacing_meters: Grid spacing in meters
         polygon_wkt: WKT of polygon to constrain points
+        boundary_buffer_meters: Minimum distance from boundary (default 50m)
 
     Returns:
         List of (lon, lat) tuples
     """
+    # Apply boundary buffer to keep points away from edge
+    buffered_polygon_wkt = apply_boundary_buffer(polygon_wkt, boundary_buffer_meters)
+
     # Convert grid spacing to approximate degrees
     # At Nepal's latitude (~28°), 1 degree latitude ≈ 111 km
     # 1 degree longitude ≈ 111 km * cos(28°) ≈ 98 km
@@ -91,8 +139,8 @@ def generate_systematic_grid(
     spacing_lat = grid_spacing_meters / meters_per_degree_lat
     spacing_lon = grid_spacing_meters / meters_per_degree_lon
 
-    # Load polygon for intersection testing
-    polygon = wkt.loads(polygon_wkt)
+    # Load buffered polygon for intersection testing
+    polygon = wkt.loads(buffered_polygon_wkt)
 
     # Generate grid points
     points = []
@@ -113,20 +161,26 @@ def generate_systematic_grid(
 def generate_random_points(
     polygon_wkt: str,
     num_points: int,
-    min_distance_meters: Optional[int] = None
+    min_distance_meters: Optional[int] = None,
+    boundary_buffer_meters: float = 50.0
 ) -> List[Tuple[float, float]]:
     """
     Generate random points within polygon.
+
+    Enforces minimum distance from boundary to avoid edge effects.
 
     Args:
         polygon_wkt: WKT of polygon
         num_points: Number of points to generate
         min_distance_meters: Minimum distance between points (optional)
+        boundary_buffer_meters: Minimum distance from boundary (default 50m)
 
     Returns:
         List of (lon, lat) tuples
     """
-    polygon = wkt.loads(polygon_wkt)
+    # Apply boundary buffer to keep points away from edge
+    buffered_polygon_wkt = apply_boundary_buffer(polygon_wkt, boundary_buffer_meters)
+    polygon = wkt.loads(buffered_polygon_wkt)
     minx, miny, maxx, maxy = polygon.bounds
 
     points = []
@@ -166,21 +220,26 @@ def generate_random_points(
 def generate_stratified_points(
     polygon_wkt: str,
     num_points: int,
-    num_strata: int = 4
+    num_strata: int = 4,
+    boundary_buffer_meters: float = 50.0
 ) -> List[Tuple[float, float]]:
     """
     Generate stratified random points within polygon.
     Divides polygon into grid strata and samples from each.
+    Enforces minimum distance from boundary to avoid edge effects.
 
     Args:
         polygon_wkt: WKT of polygon
         num_points: Total number of points to generate
         num_strata: Number of strata (grid cells) to divide polygon into
+        boundary_buffer_meters: Minimum distance from boundary (default 50m)
 
     Returns:
         List of (lon, lat) tuples
     """
-    polygon = wkt.loads(polygon_wkt)
+    # Apply boundary buffer to keep points away from edge
+    buffered_polygon_wkt = apply_boundary_buffer(polygon_wkt, boundary_buffer_meters)
+    polygon = wkt.loads(buffered_polygon_wkt)
     minx, miny, maxx, maxy = polygon.bounds
 
     # Calculate grid dimensions
@@ -225,7 +284,8 @@ def generate_stratified_points(
 
                 # Generate random points within stratum
                 stratum_wkt = stratum.wkt
-                stratum_points = generate_random_points(stratum_wkt, n_points)
+                # Already buffered at polygon level, so use 0 buffer for strata
+                stratum_points = generate_random_points(stratum_wkt, n_points, boundary_buffer_meters=0)
                 points.extend(stratum_points)
 
             except Exception as e:
@@ -303,6 +363,7 @@ def create_sampling_design(
     sampling_intensity_percent: Optional[Decimal] = None,
     min_samples_per_block: int = 5,
     min_samples_small_blocks: int = 2,
+    boundary_buffer_meters: float = 50.0,
     intensity_per_hectare: Optional[Decimal] = None,
     grid_spacing_meters: Optional[int] = None,
     min_distance_meters: Optional[int] = None,
@@ -310,7 +371,8 @@ def create_sampling_design(
     plot_radius_meters: Optional[Decimal] = None,
     plot_length_meters: Optional[Decimal] = None,
     plot_width_meters: Optional[Decimal] = None,
-    notes: Optional[str] = None
+    notes: Optional[str] = None,
+    block_overrides: Optional[dict] = None
 ) -> SamplingGenerateResponse:
     """
     Create sampling design and generate sampling points PER BLOCK.
@@ -370,6 +432,16 @@ def create_sampling_design(
         f"{min_samples_small_blocks} (small blocks < 1ha)"
     )
 
+    # Build default parameters dictionary
+    default_parameters = {
+        "sampling_type": sampling_type,
+        "sampling_intensity_percent": float(sampling_intensity_percent),
+        "min_samples_per_block": min_samples_per_block,
+        "min_samples_small_blocks": min_samples_small_blocks,
+        "boundary_buffer_meters": boundary_buffer_meters,
+        "min_distance_meters": min_distance_meters
+    }
+
     # Extract blocks from calculation
     blocks = extract_blocks_from_calculation(db, calculation_id)
 
@@ -382,16 +454,34 @@ def create_sampling_design(
     for block_number, block_wkt, block_name, block_area_ha in blocks:
         total_forest_area += block_area_ha
 
+        # Apply block-specific overrides if they exist
+        block_sampling_type = sampling_type
+        block_intensity_percent = sampling_intensity_percent
+        block_min_samples_per_block = min_samples_per_block
+        block_min_samples_small_blocks = min_samples_small_blocks
+        block_boundary_buffer = boundary_buffer_meters
+        block_min_distance = min_distance_meters
+
+        if block_overrides and block_name in block_overrides:
+            override = block_overrides[block_name]
+            block_sampling_type = override.get("sampling_type", sampling_type)
+            block_intensity_percent = Decimal(str(override.get("sampling_intensity_percent", sampling_intensity_percent)))
+            block_min_samples_per_block = override.get("min_samples_per_block", min_samples_per_block)
+            block_boundary_buffer = override.get("boundary_buffer_meters", boundary_buffer_meters)
+            block_min_distance = override.get("min_distance_meters", min_distance_meters)
+
+            logger.info(f"  Applying overrides for {block_name}: {override}")
+
         # Determine minimum samples for this block
         if block_area_ha < 1.0:
-            min_samples = min_samples_small_blocks
+            min_samples = block_min_samples_small_blocks
         else:
-            min_samples = min_samples_per_block
+            min_samples = block_min_samples_per_block
 
         # Calculate samples based on intensity
         # sample_area = block_area * (intensity% / 100)
         # num_plots = sample_area / plot_area
-        sample_area_hectares = block_area_ha * (float(sampling_intensity_percent) / 100.0)
+        sample_area_hectares = block_area_ha * (float(block_intensity_percent) / 100.0)
         samples_from_intensity = int(sample_area_hectares / plot_area_hectares)
 
         # Apply minimum
@@ -405,7 +495,7 @@ def create_sampling_design(
         )
 
         # Generate points for this block
-        if sampling_type == "systematic":
+        if block_sampling_type == "systematic":
             # Calculate grid spacing to get desired number of samples
             # For systematic grid: spacing ≈ sqrt(block_area / num_samples)
             block_area_sqm = block_area_ha * 10000.0
@@ -415,7 +505,8 @@ def create_sampling_design(
             block_points = generate_systematic_grid(
                 bounds[0], bounds[1], bounds[2], bounds[3],
                 int(spacing_meters),
-                block_wkt
+                block_wkt,
+                block_boundary_buffer
             )
 
             # If we got fewer points than needed, adjust spacing and retry
@@ -424,25 +515,28 @@ def create_sampling_design(
                 block_points = generate_systematic_grid(
                     bounds[0], bounds[1], bounds[2], bounds[3],
                     int(spacing_meters),
-                    block_wkt
+                    block_wkt,
+                    block_boundary_buffer
                 )
 
-        elif sampling_type == "random":
+        elif block_sampling_type == "random":
             block_points = generate_random_points(
                 block_wkt,
                 samples_for_block,
-                min_distance_meters
+                block_min_distance,
+                block_boundary_buffer
             )
 
-        elif sampling_type == "stratified":
+        elif block_sampling_type == "stratified":
             block_points = generate_stratified_points(
                 block_wkt,
                 samples_for_block,
-                num_strata=max(4, samples_for_block // 2)
+                num_strata=max(4, samples_for_block // 2),
+                boundary_buffer_meters=block_boundary_buffer
             )
 
         else:
-            raise ValueError(f"Invalid sampling_type: {sampling_type}")
+            raise ValueError(f"Invalid sampling_type: {block_sampling_type}")
 
         # Store points with block assignment
         for point in block_points:
@@ -492,6 +586,41 @@ def create_sampling_design(
 
     db.add(sampling_design)
     db.flush()  # Get ID
+
+    # Save default parameters and block overrides
+    import json
+    if default_parameters:
+        update_defaults_query = text("""
+            UPDATE public.sampling_designs
+            SET default_parameters = CAST(:params AS jsonb)
+            WHERE id = :design_id
+        """)
+        db.execute(update_defaults_query, {
+            "params": json.dumps(default_parameters),
+            "design_id": str(sampling_design.id)
+        })
+
+    if block_overrides:
+        # Convert block_overrides to JSON-serializable format
+        serializable_overrides = {}
+        for block_name, override_params in block_overrides.items():
+            # If override_params is a Pydantic model, convert to dict
+            if hasattr(override_params, 'model_dump'):
+                serializable_overrides[block_name] = override_params.model_dump(exclude_none=True)
+            elif hasattr(override_params, 'dict'):
+                serializable_overrides[block_name] = override_params.dict(exclude_none=True)
+            else:
+                serializable_overrides[block_name] = override_params
+
+        update_overrides_query = text("""
+            UPDATE public.sampling_designs
+            SET block_overrides = CAST(:overrides AS jsonb)
+            WHERE id = :design_id
+        """)
+        db.execute(update_overrides_query, {
+            "overrides": json.dumps(serializable_overrides),
+            "design_id": str(sampling_design.id)
+        })
 
     # Update geometry using PostGIS
     update_geom_query = text("""

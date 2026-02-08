@@ -1,0 +1,196 @@
+plant_category,nepali_name,english_name,scientific_name,primary_use,secondary_uses,iucn_status,cites_appendix,distribution,notes
+Tree,साल,Sal,Shorea robusta,Timber,"Firewood, Resin, Fodder",LC,Not listed,Terai to mid-hills,Most important timber species
+Tree,खोटे सल्ला,Chir Pine,Pinus roxburghii,Timber,"Resin, Firewood",LC,Not listed,Mid-hills,Major source of resin
+Tree,गोबे सल्ला,Blue Pine,Pinus wallichiana,Timber,Firewood,LC,Not listed,High hills,
+Tree,पाटे सल्ला,Patula Pine,Pinus patula,Timber,Firewood,LC,Not listed,Mid-hills,Plantation species
+Tree,सल्लो,Hemlock,Tsuga dumosa,Timber,Firewood,LC,Not listed,High hills,
+Tree,देवदार,Deodar,Cedrus deodara,Timber,"Medicinal, Construction",LC,Not listed,Western Nepal hills,
+Tree,तालीसपत्र,Fir,Abies spectabilis,Timber,Medicinal,LC,Not listed,High Himalayas,
+Tree,स्प्रुस,Spruce,Picea smithiana,Timber,Construction,LC,Not listed,High hills,
+Tree,सिसौ,Rosewood,Dalbergia sissoo,Timber,"Fodder, Fuelwood",LC,Not listed,Terai to mid-hills,Most valuable timber
+Tree,कर्मा,Adina,Haldina cordifolia,Timber,Firewood,LC,Not listed,Terai,
+Tree,सागवान,Teak,Tectona grandis,Timber,Construction,NT,Not listed,Terai,Plantation species
+Tree,असना,Asna,Terminalia tomentosa,Timber,"Fodder, Medicinal",LC,Not listed,Terai to hills,
+Tree,हर्रो,Myrobalan,Terminalia chebula,Medicinal,"Timber, Fodder",LC,Not listed,Terai to mid-hills,
+Tree,बर्रो,Beleric,Terminalia bellirica,Medicinal,"Timber, Fodder",LC,Not listed,Terai to mid-hills,
+Tree,चाँप,Champak,Michelia champaca,Timber,"Medicinal, Ornamental",NT,Not listed,Hills,Fragrant flowers
+Tree,सतितसाल,Indian Blackwood,Dalbergia latifolia,Timber,Valuable wood,VU,Not listed,Terai,High value timber
+Tree,बिक्रमसाल,Red Sandalwood,Pterocarpus marsupium,Timber,Medicinal,NT,Not listed,Terai,
+Tree,टुनी,Toon Tree,Toona ciliata,Timber,"Fodder, Medicinal",VU,Not listed,Terai to hills,
+Tree,जामुन,Jamun,Syzygium cumini,Fruit,"Timber, Medicinal",LC,Not listed,Terai to hills,
+Tree,आँप,Mango,Mangifera indica,Fruit,"Timber, Fodder",LC,Not listed,Terai to mid-hills,
+Tree,कटहर,Jackfruit,Artocarpus heterophyllus,Fruit,"Timber, Fodder",LC,Not listed,Terai,
+Tree,रुख,Banyan,Ficus benghalensis,Sacred,"Fodder, Medicinal",LC,Not listed,Terai to hills,National tree
+Tree,पिपल,Peepal,Ficus religiosa,Sacred,"Fodder, Medicinal",LC,Not listed,Terai to hills,Sacred tree
+Tree,बर,Indian Fig,Ficus racemosa,Fruit,"Fodder, Medicinal",LC,Not listed,Terai to hills,
+Tree,पाखुरी,Fig Tree,Ficus lacor,Fodder,Fruit,LC,Not listed,Terai to hills,
+Tree,कब्रो,Kadam,Neolamarckia cadamba,Timber,Medicinal,LC,Not listed,Terai,
+Tree,सेमल,Silk Cotton,Bombax ceiba,Fodder,"Fiber, Medicinal",LC,Not listed,Terai to hills,
+Tree,खयर,Cutch Tree,Acacia catechu,Timber,"Dye, Medicinal",LC,Not listed,Terai,
+Tree,बाबुल,Babul,Acacia nilotica,Fuelwood,"Fodder, Gum",LC,Not listed,Terai,
+Tree,सिरिस,Siris,Albizia lebbeck,Fodder,"Timber, Medicinal",LC,Not listed,Terai to hills,
+Tree,कालो सिरिस,Black Siris,Albizia julibrissin,Ornamental,Fodder,LC,Not listed,Hills,
+Tree,नीम,Neem,Azadirachta indica,Medicinal,"Timber, Pesticide",LC,Not listed,Terai,
+Tree,बोधि चिरौंजी,Chironji,Buchanania lanzan,Nut,"Timber, Medicinal",LC,Not listed,Terai,
+Tree,मसला,Eucalyptus,Eucalyptus spp.,Timber,"Fuelwood, Oil",LC,Not listed,Plantation species,
+Tree,सल्लो आर्बर,Oak (Banj),Quercus incana,Fuelwood,"Fodder, Timber",LC,Not listed,Mid-hills,Most common oak
+Tree,कहरू,Oak (Kharsu),Quercus semecarpifolia,Fuelwood,Fodder,LC,Not listed,High hills,
+Tree,फलाँट,Oak (Phalant),Quercus glauca,Fuelwood,Fodder,LC,Not listed,Mid-hills,
+Tree,उत्तिस,Alder,Alnus nepalensis,Timber,"Fuelwood, Nitrogen-fixing",LC,Not listed,Mid to high hills,
+Tree,चिलाउने,Chilaune,Schima wallichii,Fuelwood,"Timber, Fodder",LC,Not listed,Mid-hills,Common species
+Tree,काफल,Box Myrtle,Myrica esculenta,Fruit,"Fuelwood, Medicinal",LC,Not listed,Mid-hills,Edible fruit
+Tree,रुद्राक्ष,Rudraksha,Elaeocarpus sphaericus,Sacred,"Timber, Medicinal",VU,Not listed,Mid-hills,Sacred beads
+Tree,तेजपात,Cinnamon,Cinnamomum tamala,Spice,Medicinal,LC,Not listed,Mid-hills,
+Tree,अलैंची,Cardamom tree,Amomum subulatum,Spice,Medicinal,LC,Not listed,Eastern hills,
+Tree,अर्जुन,Arjun,Terminalia arjuna,Medicinal,"Timber, Fodder",LC,Not listed,Terai to hills,
+Tree,पीपल,Sacred Fig,Ficus religiosa,Sacred,Medicinal,LC,Not listed,Terai to hills,
+Tree,ओखर,Walnut,Juglans regia,Nut,"Timber, Medicinal",NT,Not listed,Mid to high hills,
+Tree,लपसी,Lapsi,Choerospondias axillaris,Fruit,Pickle,LC,Not listed,Mid-hills,
+Tree,अमला,Indian Gooseberry,Phyllanthus emblica,Fruit,Medicinal,LC,Not listed,Terai to hills,
+Tree,बेल,Wood Apple,Aegle marmelos,Fruit,Medicinal,LC,Not listed,Terai,
+Tree,गुराँस,Rhododendron,Rhododendron arboreum,Ornamental,"Medicinal, Fodder",LC,Not listed,Mid to high hills,National flower
+Tree,लालीगुराँस,Red Rhododendron,Rhododendron campanulatum,Ornamental,Medicinal,LC,Not listed,High hills,
+Tree,खोटे गुराँस,White Rhododendron,Rhododendron anthopogon,Ornamental,Medicinal,LC,Not listed,High Himalayas,
+Tree,चिउरी,Butter Tree,Diploknema butyracea,Oil,"Fruit, Timber",LC,Not listed,Mid-hills,
+Tree,रिठा,Soapnut,Sapindus mukorossi,Soap,"Medicinal, Fuelwood",LC,Not listed,Mid-hills,
+Tree,कुसुम,Kusum,Schleichera oleosa,Oil,"Timber, Lac host",LC,Not listed,Terai,
+Tree,महुआ,Mahua,Madhuca longifolia,Oil,"Fruit, Flowers edible",VU,Not listed,Terai,
+Tree,पलास,Flame of Forest,Butea monosperma,Fodder,"Medicinal, Dye",LC,Not listed,Terai to hills,
+Tree,गम्हारी,Gmelina,Gmelina arborea,Timber,"Fodder, Medicinal",LC,Not listed,Terai,
+Tree,हल्दु,Haldu,Haldina cordifolia,Timber,Fuelwood,LC,Not listed,Terai,
+Tree,फिरफिरे,Phoenix Tree,Sterculia villosa,Ornamental,Medicinal,LC,Not listed,Terai,
+Tree,सेमल,Red Silk Cotton,Bombax ceiba,Fiber,"Fodder, Medicinal",LC,Not listed,Terai to hills,
+Tree,कदम्ब,Kadam,Neolamarckia cadamba,Timber,Sacred,LC,Not listed,Terai,
+Tree,तुन,Cedrela,Toona ciliata,Timber,Fodder,VU,Not listed,Hills,
+Shrub/Bamboo,बाँस (ठूलो),Giant Bamboo,Dendrocalamus giganteus,Construction,"Shoots edible, Fodder",LC,Not listed,Terai to hills,
+Shrub/Bamboo,बाँस (साधारण),Common Bamboo,Bambusa tulda,Construction,"Shoots edible",LC,Not listed,Terai to hills,
+Shrub/Bamboo,निगालो,Hill Bamboo,Drepanostachyum falcatum,Fodder,"Construction, Paper",LC,Not listed,Mid to high hills,
+Shrub/Bamboo,माल बाँस,Male Bamboo,Dendrocalamus hamiltonii,Construction,Shoots,LC,Not listed,Terai to mid-hills,
+Shrub/Bamboo,तामा बाँस,Tama Bamboo,Bambusa balcooa,Construction,Shoots,LC,Not listed,Eastern Nepal,
+Shrub/Bamboo,नेत,Cane,Calamus tenuis,Handicraft,Furniture,LC,Appendix II (some),Terai forests,
+Shrub,अमलिसो,Amriso,Thysanolaena maxima,Broom,Fodder,LC,Not listed,Hills,Commercial broom grass
+Shrub,केभ्रा,Lemongrass,Cymbopogon flexuosus,Oil,Medicinal,LC,Not listed,Hills,Essential oil
+Shrub,तितेपाती,Mugwort,Artemisia vulgaris,Medicinal,Insecticide,LC,Not listed,Hills,
+Shrub,धतुरो,Thorn Apple,Datura stramonium,Medicinal,Poisonous,LC,Not listed,Terai to hills,Toxic plant
+Shrub,टिमुर,Szechuan Pepper,Zanthoxylum armatum,Spice,Medicinal,LC,Not listed,Hills,
+Shrub,बोझो,Acacia shrub,Acacia rugata,Fuelwood,"Fodder, Hedge",LC,Not listed,Terai to hills,
+Shrub,बनकाफोर,Wild Camphor,Cinnamomum glanduliferum,Aromatic,Medicinal,LC,Not listed,Hills,
+Shrub,ऐंसेलु,Raspberry,Rubus ellipticus,Fruit,Medicinal,LC,Not listed,Hills,Edible berries
+Shrub,केराउ,Wild Banana,Musa spp.,Fiber,"Fodder, Ornamental",LC,Not listed,Terai to hills,
+Shrub,कुचुबुन्दी,Lantana,Lantana camara,Invasive,None,LC,Not listed,Terai to hills,Problematic invasive
+Shrub,बन्किला,Castor,Ricinus communis,Oil,"Medicinal, Poisonous",LC,Not listed,Terai to hills,
+Shrub,भ्याकुर मुल,Yam,Dioscorea bulbifera,Tuber,Medicinal,LC,Not listed,Terai to hills,
+Shrub,धूपी,Juniper,Juniperus indica,Incense,Medicinal,LC,Not listed,High Himalayas,Sacred incense
+Shrub,तिते पाती,Wormwood,Artemisia indica,Medicinal,Insect repellent,LC,Not listed,Hills,
+Fern,उन्यू,Tree Fern,Cyathea spinulosa,Ornamental,Medicinal,VU,Appendix II,Mid to high hills,Endangered fern
+Fern,निगुरो,Edible Fern,Diplazium esculentum,Vegetable,Fodder,LC,Not listed,Hills,Widely consumed
+Fern,निगुरो (कालो),Black Fern,Dryopteris cochleata,Medicinal,Ornamental,LC,Not listed,Hills,
+Fern,ढेकिया,Bracken Fern,Pteridium aquilinum,Vegetable,"Fodder, Bedding",LC,Not listed,Hills,Edible shoots
+Fern,पानी निगुरो,Water Fern,Azolla spp.,Biofertilizer,Fodder,LC,Not listed,Wetlands,Nitrogen-fixing
+Fern,राज निगुरो,Royal Fern,Osmunda regalis,Ornamental,Medicinal,LC,Not listed,Wetlands,
+Fern,सिस्नो निगुरो,Maiden Hair Fern,Adiantum spp.,Ornamental,Medicinal,LC,Not listed,Moist areas,
+Fern,लहरे उन्यू,Climbing Fern,Lygodium japonicum,Ornamental,Medicinal,LC,Not listed,Hills,
+Fern,पत्थरे निगुरो,Rock Fern,Cheilanthes spp.,Ornamental,None,LC,Not listed,Rocky areas,
+Fern,सुनौलो निगुरो,Golden Fern,Pityrogramma calomelanos,Ornamental,Medicinal,LC,Not listed,Hills,
+Orchid,सुनाखरी,Golden Orchid,Coelogyne cristata,Ornamental,Medicinal,VU,Appendix II,Mid to high hills,All orchids CITES II
+Orchid,पञ्चौले अर्किड,Lady's Slipper,Paphiopedilum spp.,Ornamental,Highly threatened,EN,Appendix I,Eastern hills,Critically threatened
+Orchid,जीउनाबैगामा,Jewel Orchid,Anoectochilus spp.,Medicinal,Ornamental,VU,Appendix II,Hills,
+Orchid,बोकेफुल,Dendrobium,Dendrobium nobile,Ornamental,Medicinal,NT,Appendix II,Hills,Common epiphytic
+Orchid,सुनौलो बोके,Yellow Dendrobium,Dendrobium chrysanthum,Ornamental,Medicinal,NT,Appendix II,Mid-hills,
+Orchid,सुगन्धित अर्किड,Fragrant Orchid,Cymbidium spp.,Ornamental,Medicinal,VU,Appendix II,Hills,
+Orchid,लेमुभा,Ground Orchid,Calanthe triplicata,Ornamental,Medicinal,LC,Appendix II,Forests,
+Orchid,बैजनाथी,Blue Vanda,Vanda coerulea,Ornamental,Highly valued,EN,Appendix I,Eastern Nepal,State flower of Sikkim
+Orchid,रातो अर्किड,Red Orchid,Renanthera imschootiana,Ornamental,Rare,VU,Appendix II,Eastern hills,
+Orchid,घण्टे अर्किड,Bell Orchid,Bulbophyllum spp.,Ornamental,Small flowers,LC,Appendix II,Forests,
+Orchid,माटो अर्किड,Terrestrial Orchid,Habenaria spp.,Ornamental,Medicinal,LC,Appendix II,Grasslands,
+Orchid,चामर अर्किड,Fan Orchid,Oberonia spp.,Ornamental,Minute,LC,Appendix II,Epiphytic,
+Orchid,फुले बोके,Flowering Dendrobium,Dendrobium densiflorum,Ornamental,Clusters,NT,Appendix II,Hills,
+Orchid,पातले अर्किड,Leafy Orchid,Liparis spp.,Ornamental,Common,LC,Appendix II,Moist forests,
+Orchid,सुनखरी डोले,Pleione,Pleione humilis,Ornamental,Medicinal,VU,Appendix II,High hills,
+Grass,कुशे घाँस,Imperata Grass,Imperata cylindrica,Thatching,"Fodder, Erosion control",LC,Not listed,Terai to hills,
+Grass,खर,Elephant Grass,Miscanthus spp.,Thatching,Paper pulp,LC,Not listed,Terai,Tall grass
+Grass,बाबियो,Eulaliopsis Grass,Eulaliopsis binata,Thatching,Rope,LC,Not listed,Hills,
+Grass,कनस,Saccharum Grass,Saccharum spontaneum,Thatching,"Paper, Erosion control",LC,Not listed,River banks,
+Grass,नरकट,Reed Grass,Phragmites karka,Thatching,"Mat, Construction",LC,Not listed,Wetlands,
+Grass,सिरु,Vetiver Grass,Chrysopogon zizanioides,Erosion control,"Aromatic oil, Medicinal",LC,Not listed,Hills,Soil conservation
+Grass,दूबो घाँस,Bermuda Grass,Cynodon dactylon,Fodder,"Lawn, Medicinal",LC,Not listed,Lowlands,Sacred grass
+Grass,कोदो,Kodo Millet,Paspalum scrobiculatum,Grain,Fodder,LC,Not listed,Hills,Traditional crop
+Grass,कागुनो,Barnyard Millet,Echinochloa frumentacea,Grain,Fodder,LC,Not listed,Hills,
+Grass,छ्यांग,Panicum Grass,Panicum spp.,Fodder,Grain,LC,Not listed,Hills,
+Grass,मकै,Maize grass,Zea mays,Grain,"Fodder, Food",LC,Not listed,Terai to hills,Major crop
+Grass,गहूँ,Wheat grass,Triticum aestivum,Grain,Food,LC,Not listed,Terai to hills,
+Grass,धान,Rice grass,Oryza sativa,Grain,Food,LC,Not listed,Terai to hills,Staple crop
+Grass,डडुवा,Naked Barley,Hordeum vulgare,Grain,Fodder,LC,Not listed,High hills,
+Grass,फापर,Buckwheat,Fagopyrum esculentum,Grain,Food,LC,Not listed,Hills,
+Sedge,मोथा,Nutgrass,Cyperus rotundus,Medicinal,Weed,LC,Not listed,Everywhere,Common sedge
+Sedge,नागरमोथा,Cyperus,Cyperus scariosus,Medicinal,Aromatic,LC,Not listed,Wetlands,
+Sedge,पाती घाँस,Carex,Carex spp.,Fodder,Mat making,LC,Not listed,Wetlands,
+Sedge,कोइराला,Scirpus,Scirpus spp.,Mat making,Wetland plant,LC,Not listed,Marshes,
+Medicinal Herb,यार्सागुम्बा,Caterpillar Fungus,Ophiocordyceps sinensis,Medicinal,High value trade,VU,Not listed,High Himalayas,Critically valuable
+Medicinal Herb,पञ्चौले,Dactylorhiza,Dactylorhiza hatagirea,Medicinal,Highly threatened,CR,Appendix II,Alpine meadows,Critically endangered
+Medicinal Herb,अतिस,Aconite,Aconitum heterophyllum,Medicinal,Toxic alkaloids,EN,Not listed,High Himalayas,
+Medicinal Herb,चिरायतो,Chirayito,Swertia chirayita,Medicinal,Bitter tonic,VU,Not listed,Mid-hills,Over-exploited
+Medicinal Herb,जटामासी,Spikenard,Nardostachys jatamansi,Medicinal,Aromatic oil,CR,Not listed,Alpine,Critically endangered
+Medicinal Herb,बिष,Aconitum,Aconitum spicatum,Medicinal,"Poison, Medicinal",VU,Not listed,High hills,Toxic
+Medicinal Herb,बनकुरीलो,Asparagus,Asparagus racemosus,Medicinal,Tonic,LC,Not listed,Terai to hills,
+Medicinal Herb,गुड्पुच्छी,Tinospora,Tinospora sinensis,Medicinal,Immunomodulator,LC,Not listed,Hills,
+Medicinal Herb,तुलसी,Holy Basil,Ocimum sanctum,Medicinal,Sacred,LC,Not listed,Terai to hills,
+Medicinal Herb,अदुवा,Ginger,Zingiber officinale,Spice,Medicinal,LC,Not listed,Hills,
+Medicinal Herb,बेसार,Turmeric,Curcuma longa,Spice,Medicinal,LC,Not listed,Terai to hills,
+Medicinal Herb,खुर्सानी,Chili,Capsicum annuum,Spice,Vegetable,LC,Not listed,Everywhere,
+Medicinal Herb,लसुन,Garlic,Allium sativum,Spice,Medicinal,LC,Not listed,Hills,
+Medicinal Herb,प्याज,Onion,Allium cepa,Vegetable,Spice,LC,Not listed,Terai to hills,
+Medicinal Herb,जिम्बु,Jimbu,Allium wallichii,Spice,Aromatic,VU,Not listed,High hills,Over-collected
+Medicinal Herb,बनकुसुम,Safflower,Carthamus tinctorius,Oil,Dye,LC,Not listed,Hills,
+Medicinal Herb,केसर,Saffron,Crocus sativus,Spice,Most expensive spice,VU,Not listed,High hills (cultivated),
+Medicinal Herb,सतुवा,Paris,Paris polyphylla,Medicinal,High value,EN,Not listed,Mid to high hills,
+Medicinal Herb,कुटकी,Picrorhiza,Picrorhiza kurroa,Medicinal,Hepatoprotective,EN,Not listed,Alpine,Endangered
+Medicinal Herb,सुगन्धकोकिला,Valeriana,Valeriana jatamansi,Medicinal,Sedative,VU,Not listed,Alpine,
+Medicinal Herb,धुपी,Juniper,Juniperus recurva,Incense,Medicinal,LC,Not listed,High Himalayas,
+Medicinal Herb,भोजपत्र,Himalayan Birch,Betula utilis,Bark paper,Medicinal,LC,Not listed,High Himalayas,Sacred bark
+Medicinal Herb,लोध,Lodh,Symplocos racemosa,Dye,Medicinal,LC,Not listed,Hills,
+Medicinal Herb,इन्द्रजौ,Kutki,Holarrhena antidysenterica,Medicinal,Antidiarrheal,VU,Not listed,Terai to hills,
+Climber,तितेलौकी,Bitter Gourd,Momordica charantia,Vegetable,Medicinal,LC,Not listed,Terai to hills,
+Climber,घीरौला,Sponge Gourd,Luffa cylindrica,Vegetable,Sponge,LC,Not listed,Terai,
+Climber,लौका,Bottle Gourd,Lagenaria siceraria,Vegetable,Utensils,LC,Not listed,Terai to hills,
+Climber,फर्सी,Pumpkin,Cucurbita moschata,Vegetable,Food,LC,Not listed,Terai to hills,
+Climber,लहरा तरूल,Yam,Dioscorea alata,Tuber,Food,LC,Not listed,Hills,
+Climber,गुड्पुच्छी,Guduchi,Tinospora cordifolia,Medicinal,Immunostimulant,LC,Not listed,Terai to hills,
+Climber,काली लहरा,Black Yam,Dioscorea bulbifera,Tuber,Medicinal,LC,Not listed,Forests,
+Climber,बोडी,Beans,Vigna spp.,Vegetable,Protein,LC,Not listed,Everywhere,
+Climber,केराउँ,Banana,Musa spp.,Fruit,"Fiber, Vegetable",LC,Not listed,Terai to hills,
+Climber,गहत,Horsegram,Macrotyloma uniflorum,Pulse,Fodder,LC,Not listed,Hills,
+Aquatic,कमल,Lotus,Nelumbo nucifera,Sacred,"Vegetable, Medicinal",LC,Not listed,Wetlands,National flower candidate
+Aquatic,पदम,Water Lily,Nymphaea spp.,Ornamental,Medicinal,LC,Not listed,Ponds,
+Aquatic,सिंघाडा,Water Chestnut,Trapa natans,Vegetable,Food,LC,Not listed,Wetlands,
+Aquatic,कचु,Taro,Colocasia esculenta,Vegetable,Food,LC,Not listed,Wetlands,
+Aquatic,पानीफूल,Water Hyacinth,Eichhornia crassipes,Invasive,Problematic weed,LC,Not listed,Water bodies,Invasive - clogs waterways
+Invasive Plant,बनमारा (मिकानिया),Mile-a-minute Weed,Mikania micrantha,Invasive,None,LC,Not listed,Terai to mid-hills,Highly aggressive climber - smothers native vegetation
+Invasive Plant,बनमारा (क्रोमोलेना),Siam Weed,Chromolaena odorata,Invasive,None,LC,Not listed,Terai,Fast-growing shrub - forms dense thickets
+Invasive Plant,बनमारा (एजेरेटिना),Crofton Weed,Ageratina adenophora,Invasive,None,LC,Not listed,Mid-hills,Toxic to livestock - displaces native plants
+Invasive Plant,कुचुबुन्दी,Lantana,Lantana camara,Invasive,None,LC,Not listed,Terai to mid-hills,Allelopathic - prevents other plant growth
+Invasive Plant,गजरघाँस,Parthenium,Parthenium hysterophorus,Invasive,Allergen,LC,Not listed,Terai to hills,Causes severe allergies - toxic to animals
+Invasive Plant,बेशरम,Bush Morning Glory,Ipomoea carnea,Invasive,Toxic,LC,Not listed,Terai,Toxic to cattle - invades grazing lands
+Invasive Plant,गाँधे,Goatweed,Ageratum conyzoides,Invasive,Medicinal (minor),LC,Not listed,Everywhere,Common weed - aggressive spreader
+Invasive Plant,तपरे,Sickle Pod,Cassia tora,Invasive,Medicinal (seeds),LC,Not listed,Terai to hills,Competes with crops
+Invasive Plant,गाँधे लहरा,Wild Spikenard,Hyptis suaveolens,Invasive,None,LC,Not listed,Terai,Strong odor - invades pastures
+Invasive Plant,भेडे कुरो,Cocklebur,Xanthium strumarium,Invasive,Toxic,LC,Not listed,Terai to hills,Toxic to livestock - spiny seeds
+Invasive Plant,युफोर्बिया,Poinsettia,Euphorbia pulcherrima,Invasive,Ornamental,LC,Not listed,Urban areas,Escaped cultivation
+Invasive Plant,सल्यानो काँडा,Prickly Pear,Opuntia stricta,Invasive,Edible fruit,LC,Not listed,Dry areas,Forms impenetrable thickets
+Invasive Plant,चिचिण्डो काँडा,Cactus,Opuntia dillenii,Invasive,Hedge,LC,Not listed,Terai,Spiny invasive
+Invasive Plant,अमेरिकन खजुर,Alligator Weed,Alternanthera philoxeroides,Invasive,None,LC,Not listed,Wetlands,Aquatic/terrestrial invader
+Invasive Plant,काली तोरी,Black Mustard,Brassica nigra,Invasive,Edible,LC,Not listed,Farmlands,Agricultural weed
+Invasive Plant,जंगली सूर्यमुखी,Sunflower,Tithonia diversifolia,Invasive,Green manure,LC,Not listed,Roadsides,Fast spreading shrub
+Invasive Plant,रातो जरा,Red-stem,Ambrosia artemisiifolia,Invasive,Allergen,LC,Not listed,Fields,Causes hay fever
+Invasive Plant,बन स्याउ,Thorn Apple,Datura stramonium,Invasive,Toxic/Medicinal,LC,Not listed,Disturbed areas,Highly toxic - hallucinogenic
+Invasive Plant,बिलायती इमली,Mesquite,Prosopis juliflora,Invasive,Fuelwood,LC,Not listed,Terai (western),Thorny - degrades grasslands
+Invasive Plant,चिउरी पत्ती,Congress Grass,Chromolaena odorata,Invasive,None,LC,Not listed,Terai,Same as Siam weed
+Invasive Plant,जलकुम्भी,Water Lettuce,Pistia stratiotes,Invasive,None,LC,Not listed,Slow water,Aquatic - blocks sunlight
+Invasive Plant,साल्भिनिया,Salvinia,Salvinia molesta,Invasive,None,LC,Not listed,Ponds,Aquatic fern - doubles every 2-3 days
+Invasive Plant,भुइँ कमल,Water Pennywort,Hydrocotyle umbellata,Invasive,Medicinal,LC,Not listed,Wetlands,Spreads rapidly
+Invasive Plant,गाँजा,Cannabis,Cannabis sativa,Invasive,Medicinal/Drug,LC,Not listed,Terai to hills,Wild populations - Schedule I drug in Nepal
+Invasive Plant,भाँग,Hemp,Cannabis indica,Invasive,Drug/Fiber,LC,Not listed,Hills,Narcotic plant - controlled substance
+Invasive Plant,कुडो,Kudzu,Pueraria montana,Invasive,Fodder,LC,Not listed,Eastern Nepal,Extremely fast-growing vine
+Invasive Plant,यूकेलिप्टस,Eucalyptus,Eucalyptus globulus,Invasive,Timber/Oil,LC,Not listed,Plantations,Allelopathic - dries soil
+Invasive Plant,पोप्लर,Poplar,Populus deltoides,Invasive,Timber,LC,Not listed,Riverbanks,Displaces native riparian species
+Invasive Plant,चाइनिज गोभी,Chinese Cabbage Mustard,Brassica juncea,Invasive,Vegetable,LC,Not listed,Agricultural areas,Escaped cultivation

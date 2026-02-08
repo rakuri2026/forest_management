@@ -3,7 +3,7 @@ Forest boundary analysis service
 Performs raster and vector analysis on uploaded forest boundaries
 """
 import time
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
@@ -12,7 +12,7 @@ from datetime import datetime
 from ..models.calculation import Calculation
 
 
-async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Dict[str, Any], int]:
+async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Optional[Dict[str, bool]] = None) -> Tuple[Dict[str, Any], int]:
     """
     Perform comprehensive analysis on forest boundary
     Now analyzes each block separately and adds analysis results to each block
@@ -20,10 +20,19 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
     Args:
         calculation_id: UUID of calculation record
         db: Database session
+        options: Dict of boolean flags to enable/disable specific analyses
+                 If None, all analyses run (backward compatible)
 
     Returns:
         Tuple of (result_data dict, processing_time_seconds)
     """
+    # Default options: run everything if not specified
+    if options is None:
+        options = {}
+
+    # Helper function to check if analysis should run
+    def should_run(analysis_name: str) -> bool:
+        return options.get(analysis_name, True)  # Default True for backward compatibility
     # Per-block analysis enabled
     start_time = time.time()
 
@@ -47,7 +56,8 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
             block_analysis = await analyze_block_geometry(
                 block['geometry'],
                 calculation_id,
-                db
+                db,
+                options
             )
             # Merge analysis results into block data
             analyzed_block = {**block, **block_analysis}
@@ -113,13 +123,15 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
             "W": round(float(whole_extent.west), 7)
         }
 
-    # 2. Raster analysis on whole boundary
-    raster_results = await analyze_rasters(calculation_id, db)
-    results.update(raster_results)
+    # 2. Raster analysis on whole boundary (if enabled)
+    if should_run('run_raster_analysis'):
+        raster_results = await analyze_rasters(calculation_id, db)
+        results.update(raster_results)
 
-    # 3. Vector analysis
-    vector_results = await analyze_vectors(calculation_id, db)
-    results.update(vector_results)
+    # 3. Vector analysis (if enabled)
+    if should_run('run_proximity'):
+        vector_results = await analyze_vectors(calculation_id, db)
+        results.update(vector_results)
 
     # 3b. Get administrative location for whole forest
     whole_geom_query = text("""
@@ -174,7 +186,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session) -> Tuple[Di
     return results, processing_time
 
 
-async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, db: Session) -> Dict[str, Any]:
+async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, db: Session, options: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
     """
     Analyze a single block's geometry
 
@@ -182,10 +194,21 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
         geojson_geometry: Block geometry in GeoJSON format
         calculation_id: UUID of parent calculation (for context)
         db: Database session
+        options: Dict of boolean flags to enable/disable specific analyses
 
     Returns:
         Dict with analysis results for this block
     """
+    # Default options: run everything if not specified
+    if options is None:
+        options = {}
+
+    # Helper function to check if analysis should run
+    def should_run(analysis_name: str) -> bool:
+        # First check if raster analysis is globally disabled
+        if analysis_name != 'run_raster_analysis' and not options.get('run_raster_analysis', True):
+            return False
+        return options.get(analysis_name, True)  # Default True for backward compatibility
     import json
 
     # Convert GeoJSON to WKT for PostGIS
@@ -207,6 +230,9 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
 
     block_results = {}
 
+    # Store WKT for future reanalysis
+    block_results['wkt'] = block_wkt
+
     # Calculate bounding box extent for this block
     extent_query = text("""
         SELECT
@@ -224,62 +250,76 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
             "W": round(float(extent_result.west), 7)
         }
 
-    # Run all raster analyses on this block's geometry
+    # Run raster analyses conditionally based on options
     # 1. DEM - Elevation
-    dem_results = analyze_dem_geometry(block_wkt, db)
-    block_results.update(dem_results)
+    if should_run('run_elevation'):
+        dem_results = analyze_dem_geometry(block_wkt, db)
+        block_results.update(dem_results)
 
     # 2. Slope
-    slope_results = analyze_slope_geometry(block_wkt, db)
-    block_results.update(slope_results)
+    if should_run('run_slope'):
+        slope_results = analyze_slope_geometry(block_wkt, db)
+        block_results.update(slope_results)
 
     # 3. Aspect
-    aspect_results = analyze_aspect_geometry(block_wkt, db)
-    block_results.update(aspect_results)
+    if should_run('run_aspect'):
+        aspect_results = analyze_aspect_geometry(block_wkt, db)
+        block_results.update(aspect_results)
 
     # 4. Canopy Height
-    canopy_results = analyze_canopy_height_geometry(block_wkt, db)
-    block_results.update(canopy_results)
+    if should_run('run_canopy'):
+        canopy_results = analyze_canopy_height_geometry(block_wkt, db)
+        block_results.update(canopy_results)
 
     # 5. AGB (Biomass)
-    agb_results = analyze_agb_geometry(block_wkt, db)
-    block_results.update(agb_results)
+    if should_run('run_biomass'):
+        agb_results = analyze_agb_geometry(block_wkt, db)
+        block_results.update(agb_results)
 
     # 6. Forest Health
-    health_results = analyze_forest_health_geometry(block_wkt, db)
-    block_results.update(health_results)
+    if should_run('run_forest_health'):
+        health_results = analyze_forest_health_geometry(block_wkt, db)
+        block_results.update(health_results)
 
     # 7. Forest Type
-    forest_type_results = analyze_forest_type_geometry(block_wkt, db)
-    block_results.update(forest_type_results)
+    if should_run('run_forest_type'):
+        forest_type_results = analyze_forest_type_geometry(block_wkt, db)
+        block_results.update(forest_type_results)
 
     # 8. Land Cover (ESA WorldCover)
-    landcover_results = analyze_landcover_geometry(block_wkt, db)
-    block_results.update(landcover_results)
+    if should_run('run_landcover'):
+        landcover_results = analyze_landcover_geometry(block_wkt, db)
+        block_results.update(landcover_results)
 
     # 9. Forest Loss
-    loss_results = analyze_forest_loss_geometry(block_wkt, db)
-    block_results.update(loss_results)
+    if should_run('run_forest_loss'):
+        loss_results = analyze_forest_loss_geometry(block_wkt, db)
+        block_results.update(loss_results)
 
     # 10. Forest Gain
-    gain_results = analyze_forest_gain_geometry(block_wkt, db)
-    block_results.update(gain_results)
+    if should_run('run_forest_gain'):
+        gain_results = analyze_forest_gain_geometry(block_wkt, db)
+        block_results.update(gain_results)
 
     # 11. Fire Loss
-    fire_results = analyze_fire_loss_geometry(block_wkt, db)
-    block_results.update(fire_results)
+    if should_run('run_fire_loss'):
+        fire_results = analyze_fire_loss_geometry(block_wkt, db)
+        block_results.update(fire_results)
 
     # 12. Temperature
-    temp_results = analyze_temperature_geometry(block_wkt, db)
-    block_results.update(temp_results)
+    if should_run('run_temperature'):
+        temp_results = analyze_temperature_geometry(block_wkt, db)
+        block_results.update(temp_results)
 
     # 13. Precipitation
-    precip_results = analyze_precipitation_geometry(block_wkt, db)
-    block_results.update(precip_results)
+    if should_run('run_precipitation'):
+        precip_results = analyze_precipitation_geometry(block_wkt, db)
+        block_results.update(precip_results)
 
     # 14. Soil Texture
-    soil_results = analyze_soil_geometry(block_wkt, db)
-    block_results.update(soil_results)
+    if should_run('run_soil'):
+        soil_results = analyze_soil_geometry(block_wkt, db)
+        block_results.update(soil_results)
 
     # 15. Administrative Location (Province, District, Municipality, Ward, Watershed)
     location_results = get_administrative_location(block_wkt, db)

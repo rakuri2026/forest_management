@@ -18,52 +18,22 @@ const Layout: React.FC = () => {
           <div className="flex justify-between h-16">
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
-                <Link to="/dashboard" className="text-white text-xl font-bold">
-                  Forest Management
+                <Link to="/my-uploads" className="text-white text-xl font-bold">
+                  Community Forest Management System
                 </Link>
               </div>
               <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                 <Link
-                  to="/dashboard"
-                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  to="/upload"
-                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Upload
-                </Link>
-                <Link
                   to="/my-uploads"
                   className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 >
-                  My Uploads
+                  My CFOPs
                 </Link>
                 <Link
                   to="/forests"
                   className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 >
-                  All Forests
-                </Link>
-                <Link
-                  to="/my-forests"
-                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  My Forests
-                </Link>
-                <Link
-                  to="/fieldbook"
-                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Fieldbook
-                </Link>
-                <Link
-                  to="/sampling"
-                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Sampling
+                  Community Forests
                 </Link>
               </div>
             </div>

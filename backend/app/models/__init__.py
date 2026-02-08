@@ -13,6 +13,7 @@ from .inventory import (
 )
 from .fieldbook import Fieldbook
 from .sampling import SamplingDesign
+from .biodiversity import BiodiversitySpecies, CalculationBiodiversity
 
 __all__ = [
     "User",
@@ -31,4 +32,6 @@ __all__ = [
     "InventoryValidationIssue",
     "Fieldbook",
     "SamplingDesign",
+    "BiodiversitySpecies",
+    "CalculationBiodiversity",
 ]

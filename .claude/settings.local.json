@@ -99,7 +99,11 @@
       "Bash(cmd /c \"taskkill /F /IM python.exe 2>nul || echo No python processes to kill\")",
       "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODY0NmQxMS1iYTQ1LTRhMzktOGFiNS05NTFjOTA3ODZmMmEiLCJlbWFpbCI6ImRlbW9AZm9yZXN0LmNvbSIsImV4cCI6MTc3MDIwMDA4MSwidHlwZSI6ImFjY2VzcyJ9.ml_TL5cCU64t6LK31UvLPfc7hgcBVyUdkEgSTaY4fFA\":*)",
       "Bash(/d/forest_management/token2.json)",
-      "Bash(cmd /c move_to_dumping.bat)"
+      "Bash(cmd /c move_to_dumping.bat)",
+      "Bash(/d/forest_management/venv/Scripts/python -m py_compile:*)",
+      "Bash(..venvScriptsalembic current)",
+      "Bash(..venvScriptsalembic heads)",
+      "Bash(../venv/Scripts/alembic current:*)"
     ],
     "deny": [],
     "ask": []

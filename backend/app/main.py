@@ -11,7 +11,7 @@ import time
 from .core.config import settings
 from .core.database import check_db_connection, Base, engine
 from .api import auth_router, forests_router, inventory_router, species_router
-from .api import fieldbook, sampling, fieldbook_list, sampling_list
+from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -153,6 +153,13 @@ app.include_router(
     sampling_list.router,
     prefix="/api",
     tags=["Sampling Lists"]
+)
+
+# Include biodiversity router
+app.include_router(
+    biodiversity.router,
+    prefix="/api",
+    tags=["Biodiversity"]
 )
 
 
