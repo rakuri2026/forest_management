@@ -7,6 +7,8 @@ import { FieldbookTab } from '../components/FieldbookTab';
 import { SamplingTab } from '../components/SamplingTab';
 import { TreeMappingTab } from '../components/TreeMappingTab';
 import BiodiversityTab from '../components/BiodiversityTab';
+import AnalysisTabContent from '../components/AnalysisTabContent';
+import MapsTab from '../components/MapsTab';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -96,7 +98,7 @@ export default function CalculationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemapping'>('analysis');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemapping' | 'biodiversity' | 'maps'>('analysis');
 
   useEffect(() => {
     if (id) {
@@ -382,6 +384,16 @@ export default function CalculationDetail() {
             >
               Biodiversity
             </button>
+            <button
+              onClick={() => setActiveTab('maps')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'maps'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Maps
+            </button>
           </nav>
         </div>
 
@@ -410,10 +422,34 @@ export default function CalculationDetail() {
           </div>
         )}
 
-        {/* Whole Forest Analysis Section */}
+        {activeTab === 'maps' && (
+          <div className="p-6">
+            <MapsTab
+              calculationId={calculation.id}
+              forestName={calculation.forest_name || undefined}
+            />
+          </div>
+        )}
+
+        {/* Whole Forest Analysis Section - New Organized Layout */}
         {activeTab === 'analysis' && (
+          <AnalysisTabContent
+            calculation={calculation}
+            blocks={blocks}
+            totalBlocks={totalBlocks}
+            handleSaveWholeForest={handleSaveWholeForest}
+            handleSaveWholeExtent={handleSaveWholeExtent}
+            handleSaveWholePercentages={handleSaveWholePercentages}
+            handleSaveBlockExtent={handleSaveBlockExtent}
+            handleSaveBlockField={handleSaveBlock}
+            handleSaveBlockPercentages={handleSaveBlockPercentages}
+          />
+        )}
+
+        {/* Keep old table structure temporarily for reference - TO BE REMOVED */}
+        {false && activeTab === 'analysis' && (
           <div className="p-6 border-t border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis (OLD)</h2>
           <div className="border border-gray-300 rounded-lg bg-white shadow-sm">
             {/* Forest Header */}
             <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-gray-200">
@@ -608,10 +644,82 @@ export default function CalculationDetail() {
                     </tr>
                   )}
 
-                  {/* Land Cover */}
+                  {/* Potential Tree Species */}
+                  {calculation.result_data?.potential_species && calculation.result_data.potential_species.length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Potential Tree Species</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        <div className="flex flex-wrap gap-2">
+                          {calculation.result_data.potential_species.slice(0, 10).map((species: any, idx: number) => (
+                            <div key={idx} className="inline-flex items-center bg-gray-100 rounded-md px-2 py-1 text-xs">
+                              <span className="font-semibold">{species.local_name}</span>
+                              <span className="text-gray-500 ml-1">({species.scientific_name})</span>
+                              {species.economic_value === 'High' && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-green-200 text-green-800 rounded text-xs">High Value</span>
+                              )}
+                              {species.economic_value === 'Medium' && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">Med Value</span>
+                              )}
+                              <span className="ml-1 text-gray-400 text-xs">| {species.role}</span>
+                            </div>
+                          ))}
+                          {calculation.result_data.potential_species.length > 10 && (
+                            <div className="text-xs text-gray-500 italic">
+                              +{calculation.result_data.potential_species.length - 10} more species
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-2">
+                          Total: {calculation.result_data.species_count || calculation.result_data.potential_species.length} potential species
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Land Cover 1984 (Historical) */}
+                  {calculation.result_data?.landcover_1984_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (1984)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.landcover_1984_dominant} onSave={(v) => handleSaveWholeForest('landcover_1984_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.landcover_1984_percentages &&
+                          Object.entries(calculation.result_data.landcover_1984_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                            <span key={cover}>
+                              {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('landcover_1984_percentages', cover, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.landcover_1984_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Hansen 2000 Forest Classification */}
+                  {calculation.result_data?.hansen2000_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Status (2000)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.hansen2000_dominant} onSave={(v) => handleSaveWholeForest('hansen2000_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.hansen2000_percentages &&
+                          Object.entries(calculation.result_data.hansen2000_percentages).map(([forestClass, pct]: [string, any], idx: number) => (
+                            <span key={forestClass}>
+                              {forestClass}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('hansen2000_percentages', forestClass, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.hansen2000_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Land Cover (Current) */}
                   {calculation.result_data?.landcover_dominant && (
                     <tr className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover</td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (Current)</td>
                       <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                         <EditableCell value={calculation.result_data.landcover_dominant} onSave={(v) => handleSaveWholeForest('landcover_dominant', v)} />
                       </td>
@@ -711,21 +819,82 @@ export default function CalculationDetail() {
                     </tr>
                   )}
 
-                  {/* Soil Texture */}
+                  {/* Soil Analysis */}
                   {calculation.result_data?.soil_texture && (
-                    <tr className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                        <EditableCell value={calculation.result_data.soil_texture} onSave={(v) => handleSaveWholeForest('soil_texture', v)} />
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {calculation.result_data?.soil_properties &&
-                          Object.entries(calculation.result_data?.soil_properties)
-                            .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
-                            .join(', ')
-                        }
-                      </td>
-                    </tr>
+                    <>
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          <EditableCell value={calculation.result_data.soil_texture} onSave={(v) => handleSaveWholeForest('soil_texture', v)} />
+                          {calculation.result_data.soil_texture_system && (
+                            <span className="text-xs text-gray-500 ml-2">({calculation.result_data.soil_texture_system})</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {calculation.result_data?.soil_properties &&
+                            Object.entries(calculation.result_data?.soil_properties)
+                              .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
+                              .join(', ')
+                          }
+                        </td>
+                      </tr>
+                      {calculation.result_data.carbon_stock_t_ha && (
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell
+                              value={calculation.result_data.carbon_stock_t_ha}
+                              displayValue={`${calculation.result_data.carbon_stock_t_ha} t/ha`}
+                              onSave={(v) => handleSaveWholeForest('carbon_stock_t_ha', v)}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            Topsoil (0-30cm) organic carbon stock
+                          </td>
+                        </tr>
+                      )}
+                      {calculation.result_data.fertility_class && (
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Fertility</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                              calculation.result_data.fertility_class === 'Very High' ? 'bg-green-100 text-green-800' :
+                              calculation.result_data.fertility_class === 'High' ? 'bg-green-50 text-green-700' :
+                              calculation.result_data.fertility_class === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                              calculation.result_data.fertility_class === 'Low' ? 'bg-orange-100 text-orange-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {calculation.result_data.fertility_class}
+                            </span>
+                            {calculation.result_data.fertility_score && (
+                              <span className="text-xs text-gray-500 ml-2">(Score: {calculation.result_data.fertility_score}/100)</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {calculation.result_data.limiting_factors && calculation.result_data.limiting_factors.length > 0 &&
+                              calculation.result_data.limiting_factors.join('; ')}
+                          </td>
+                        </tr>
+                      )}
+                      {calculation.result_data.compaction_status && (
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Compaction Status</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                              calculation.result_data.compaction_status === 'Not compacted' ? 'bg-green-100 text-green-800' :
+                              calculation.result_data.compaction_status === 'Slight compaction' ? 'bg-yellow-100 text-yellow-800' :
+                              calculation.result_data.compaction_status === 'Moderate compaction' ? 'bg-orange-100 text-orange-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {calculation.result_data.compaction_status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {calculation.result_data.compaction_alert || 'No action needed'}
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   )}
 
                   {/* Administrative Location */}
@@ -798,6 +967,51 @@ export default function CalculationDetail() {
                     </tr>
                   )}
 
+                  {/* Physiography */}
+                  {calculation.result_data?.whole_physiography_percentages && Object.keys(calculation.result_data.whole_physiography_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Physiography</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_physiography_percentages).map(([zone, pct]: [string, any], idx: number) => (
+                          <span key={zone}>
+                            {zone}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveWholePercentages('whole_physiography_percentages', zone, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_physiography_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Ecoregion */}
+                  {calculation.result_data?.whole_ecoregion_percentages && Object.keys(calculation.result_data.whole_ecoregion_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Ecoregion</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_ecoregion_percentages).map(([eco, pct]: [string, any], idx: number) => (
+                          <span key={eco}>
+                            {eco}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveWholePercentages('whole_ecoregion_percentages', eco, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_ecoregion_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* NASA Forest 2020 */}
+                  {calculation.result_data?.whole_nasa_forest_2020_percentages && Object.keys(calculation.result_data.whole_nasa_forest_2020_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">NASA Forest 2020</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_nasa_forest_2020_percentages).map(([type, pct]: [string, any], idx: number) => (
+                          <span key={type}>
+                            <span className="capitalize">{type.replace(/_/g, ' ')}</span>: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveWholePercentages('whole_nasa_forest_2020_percentages', type, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_nasa_forest_2020_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
                   {/* Access */}
                   {calculation.result_data?.whole_access_info && (
                     <tr className="hover:bg-gray-50">
@@ -846,9 +1060,11 @@ export default function CalculationDetail() {
               </table>
             </div>
           </div>
+          </div>
+        )}
 
-          {/* Detailed Block-wise Analysis */}
-          {blocks.length > 0 && (
+        {/* Detailed Block-wise Analysis */}
+        {activeTab === 'analysis' && blocks.length > 0 && (
           <div className="p-6 border-t border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Detailed Block-wise Analysis</h2>
             <div className="space-y-6">
@@ -879,13 +1095,11 @@ export default function CalculationDetail() {
                         {block.extent && (
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                              <EditableCell value={block.extent.N} displayValue={"N: " + block.extent.N.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'N', v)} className="font-mono" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-600 font-mono">
-                              <div><EditableCell value={block.extent.S} displayValue={"S: " + block.extent.S.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'S', v)} className="font-mono" /></div>
-                              <div><EditableCell value={block.extent.E} displayValue={"E: " + block.extent.E.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'E', v)} className="font-mono" /></div>
-                              <div><EditableCell value={block.extent.W} displayValue={"W: " + block.extent.W.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'W', v)} className="font-mono" /></div>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono" colSpan={2}>
+                              <EditableCell value={block.extent.N} displayValue={"N: " + block.extent.N.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'N', v)} className="font-mono" />{", "}
+                              <EditableCell value={block.extent.S} displayValue={"S: " + block.extent.S.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'S', v)} className="font-mono" />{", "}
+                              <EditableCell value={block.extent.E} displayValue={"E: " + block.extent.E.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'E', v)} className="font-mono" />{", "}
+                              <EditableCell value={block.extent.W} displayValue={"W: " + block.extent.W.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'W', v)} className="font-mono" />
                             </td>
                           </tr>
                         )}
@@ -1035,10 +1249,78 @@ export default function CalculationDetail() {
                           </tr>
                         )}
 
-                        {/* Land Cover */}
+                        {/* Potential Tree Species */}
+                        {block.potential_species && block.potential_species.length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Potential Tree Species</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              <div className="flex flex-wrap gap-2">
+                                {block.potential_species.slice(0, 8).map((species: any, speciesIdx: number) => (
+                                  <div key={speciesIdx} className="inline-flex items-center bg-gray-100 rounded-md px-2 py-1 text-xs">
+                                    <span className="font-semibold">{species.local_name}</span>
+                                    <span className="text-gray-500 ml-1 text-xs">({species.scientific_name})</span>
+                                    {species.economic_value === 'High' && (
+                                      <span className="ml-1 px-1 py-0.5 bg-green-200 text-green-800 rounded text-xs">$$</span>
+                                    )}
+                                    {species.economic_value === 'Medium' && (
+                                      <span className="ml-1 px-1 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">$</span>
+                                    )}
+                                  </div>
+                                ))}
+                                {block.potential_species.length > 8 && (
+                                  <div className="text-xs text-gray-500 italic">
+                                    +{block.potential_species.length - 8} more
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Land Cover 1984 (Historical) */}
+                        {block.landcover_1984_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (1984)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.landcover_1984_dominant} onSave={(v) => handleSaveBlock(index, 'landcover_1984_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.landcover_1984_percentages &&
+                                Object.entries(block.landcover_1984_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                                  <span key={cover}>
+                                    {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'landcover_1984_percentages', cover, v)} className="inline" />
+                                    {idx < Object.keys(block.landcover_1984_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Hansen 2000 Forest Classification */}
+                        {block.hansen2000_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Status (2000)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.hansen2000_dominant} onSave={(v) => handleSaveBlock(index, 'hansen2000_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.hansen2000_percentages &&
+                                Object.entries(block.hansen2000_percentages).map(([forestClass, pct]: [string, any], idx: number) => (
+                                  <span key={forestClass}>
+                                    {forestClass}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'hansen2000_percentages', forestClass, v)} className="inline" />
+                                    {idx < Object.keys(block.hansen2000_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Land Cover (Current) */}
                         {block.landcover_dominant && (
                           <tr className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover</td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (Current)</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                               <EditableCell value={block.landcover_dominant} onSave={(v) => handleSaveBlock(index, 'landcover_dominant', v)} />
                             </td>
@@ -1138,21 +1420,82 @@ export default function CalculationDetail() {
                           </tr>
                         )}
 
-                        {/* Soil Texture */}
+                        {/* Soil Analysis */}
                         {block.soil_texture && (
-                          <tr className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                              <EditableCell value={block.soil_texture} onSave={(v) => handleSaveBlock(index, 'soil_texture', v)} />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              {block.soil_properties &&
-                                Object.entries(block.soil_properties)
-                                  .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
-                                  .join(', ')
-                              }
-                            </td>
-                          </tr>
+                          <>
+                            <tr className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">
+                                <EditableCell value={block.soil_texture} onSave={(v) => handleSaveBlock(index, 'soil_texture', v)} />
+                                {block.soil_texture_system && (
+                                  <span className="text-xs text-gray-500 ml-2">({block.soil_texture_system})</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {block.soil_properties &&
+                                  Object.entries(block.soil_properties)
+                                    .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
+                                    .join(', ')
+                                }
+                              </td>
+                            </tr>
+                            {block.carbon_stock_t_ha && (
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <EditableCell
+                                    value={block.carbon_stock_t_ha}
+                                    displayValue={`${block.carbon_stock_t_ha} t/ha`}
+                                    onSave={(v) => handleSaveBlock(index, 'carbon_stock_t_ha', v)}
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  Topsoil (0-30cm) organic carbon stock
+                                </td>
+                              </tr>
+                            )}
+                            {block.fertility_class && (
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Fertility</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                                    block.fertility_class === 'Very High' ? 'bg-green-100 text-green-800' :
+                                    block.fertility_class === 'High' ? 'bg-green-50 text-green-700' :
+                                    block.fertility_class === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                                    block.fertility_class === 'Low' ? 'bg-orange-100 text-orange-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {block.fertility_class}
+                                  </span>
+                                  {block.fertility_score && (
+                                    <span className="text-xs text-gray-500 ml-2">(Score: {block.fertility_score}/100)</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  {block.limiting_factors && block.limiting_factors.length > 0 &&
+                                    block.limiting_factors.join('; ')}
+                                </td>
+                              </tr>
+                            )}
+                            {block.compaction_status && (
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">Compaction Status</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                                    block.compaction_status === 'Not compacted' ? 'bg-green-100 text-green-800' :
+                                    block.compaction_status === 'Slight compaction' ? 'bg-yellow-100 text-yellow-800' :
+                                    block.compaction_status === 'Moderate compaction' ? 'bg-orange-100 text-orange-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {block.compaction_status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  {block.compaction_alert || 'No action needed'}
+                                </td>
+                              </tr>
+                            )}
+                          </>
                         )}
 
                         {/* Administrative Location */}
@@ -1225,6 +1568,51 @@ export default function CalculationDetail() {
                           </tr>
                         )}
 
+                        {/* Physiography */}
+                        {block.physiography_percentages && Object.keys(block.physiography_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Physiography</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.physiography_percentages).map(([zone, pct]: [string, any], idx: number) => (
+                                <span key={zone}>
+                                  {zone}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'physiography_percentages', zone, v)} className="inline" />
+                                  {idx < Object.keys(block.physiography_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Ecoregion */}
+                        {block.ecoregion_percentages && Object.keys(block.ecoregion_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Ecoregion</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.ecoregion_percentages).map(([eco, pct]: [string, any], idx: number) => (
+                                <span key={eco}>
+                                  {eco}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'ecoregion_percentages', eco, v)} className="inline" />
+                                  {idx < Object.keys(block.ecoregion_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* NASA Forest 2020 */}
+                        {block.nasa_forest_2020_percentages && Object.keys(block.nasa_forest_2020_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">NASA Forest 2020</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.nasa_forest_2020_percentages).map(([type, pct]: [string, any], idx: number) => (
+                                <span key={type}>
+                                  <span className="capitalize">{type.replace(/_/g, ' ')}</span>: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'nasa_forest_2020_percentages', type, v)} className="inline" />
+                                  {idx < Object.keys(block.nasa_forest_2020_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
                         {/* Access */}
                         {block.access_info && (
                           <tr className="hover:bg-gray-50">
@@ -1276,9 +1664,10 @@ export default function CalculationDetail() {
               ))}
             </div>
           </div>
-          )}
+        )}
 
-          {/* Additional Information */}
+        {/* Additional Information */}
+        {activeTab === 'analysis' && (
           <div className="px-6 pb-6">
           <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-3">
             <div>
@@ -1320,9 +1709,10 @@ export default function CalculationDetail() {
             )}
           </dl>
           </div>
+        )}
 
-          {/* Map Section */}
-          {calculation.geometry && (
+        {/* Map Section */}
+        {activeTab === 'analysis' && calculation.geometry && (
           <div className="px-6 pb-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900">
@@ -1384,10 +1774,10 @@ export default function CalculationDetail() {
               </p>
             </div>
           </div>
-          )}
+        )}
 
-          {/* Processing Info Section - Only show if partitioned */}
-          {processingInfo.partitioned && (
+        {/* Processing Info Section - Only show if partitioned */}
+        {activeTab === 'analysis' && processingInfo.partitioned && (
           <div className="px-6 pb-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Processing Information</h2>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -1405,8 +1795,6 @@ export default function CalculationDetail() {
               </div>
             </div>
           </div>
-          )}
-        </div>
         )}
       </div>
     </div>

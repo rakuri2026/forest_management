@@ -103,7 +103,13 @@
       "Bash(/d/forest_management/venv/Scripts/python -m py_compile:*)",
       "Bash(..venvScriptsalembic current)",
       "Bash(..venvScriptsalembic heads)",
-      "Bash(../venv/Scripts/alembic current:*)"
+      "Bash(../venv/Scripts/alembic current:*)",
+      "Bash(/d/forest_management/venv/Scripts/python:*)",
+      "Bash(venv/Scripts/python:*)",
+      "Bash(.\\venv\\Scripts\\pip install:*)",
+      "Bash(cmd /c \"rmdir /s /q D:\\forest_management\\venv\\Lib\\site-packages\\~yproj\")",
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(../venv/Scripts/pip:*)"
     ],
     "deny": [],
     "ask": []

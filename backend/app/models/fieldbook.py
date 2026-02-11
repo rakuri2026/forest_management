@@ -8,7 +8,7 @@ from sqlalchemy.sql import func
 from geoalchemy2 import Geometry
 import uuid
 
-from app.core.database import Base
+from ..core.database import Base
 
 
 class Fieldbook(Base):

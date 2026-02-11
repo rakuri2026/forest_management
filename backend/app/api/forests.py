@@ -22,11 +22,20 @@ from ..schemas.forest import (
     MyForestsResponse,
 )
 from ..utils.auth import get_current_active_user, require_super_admin
-from ..services.file_processor import process_uploaded_file
+try:
+    from ..services.file_processor import process_uploaded_file
+    FILE_UPLOAD_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: File upload disabled due to import error: {e}")
+    FILE_UPLOAD_AVAILABLE = False
 from ..services.analysis import analyze_forest_boundary
 from ..services.fieldbook import generate_fieldbook_points
 from ..services.sampling import create_sampling_design
+from ..services.map_generator import get_map_generator
 from shapely.geometry import mapping
+from shapely import wkb
+from fastapi.responses import StreamingResponse
+import io
 
 
 router = APIRouter()
@@ -257,6 +266,13 @@ async def upload_forest_boundary(
     - **run_proximity**: Vector proximity analysis
     - **auto_generate_fieldbook, auto_generate_sampling**: Auto-generation
     """
+    # Check if file upload is available
+    if not FILE_UPLOAD_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="File upload functionality is temporarily disabled due to missing dependencies (GDAL/pyproj). Please contact support."
+        )
+
     # Process uploaded file
     try:
         wkt, metadata = await process_uploaded_file(file)
@@ -631,3 +647,259 @@ async def update_result_data(
     db.refresh(calculation)
 
     return {"status": "updated", "result_data": calculation.result_data}
+
+
+# ============================================================================
+# MAP GENERATION ENDPOINTS
+# ============================================================================
+
+@router.get("/calculations/{calculation_id}/maps/boundary")
+async def generate_boundary_map(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate boundary map with contextual features (schools, roads, rivers, etc.)
+
+    Returns PNG image (A5 size, 300 DPI)
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this calculation"
+        )
+
+    if not calculation.boundary_geom:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no boundary geometry"
+        )
+
+    try:
+        # Convert boundary to GeoJSON
+        geom_shape = wkb.loads(bytes(calculation.boundary_geom.data))
+        geometry = mapping(geom_shape)
+
+        # Generate map
+        map_generator = get_map_generator()
+        buffer = map_generator.generate_boundary_map(
+            geometry=geometry,
+            forest_name=calculation.forest_name or 'Community Forest',
+            orientation='auto',
+            db_session=db,
+            show_schools=True,
+            show_poi=True,
+            show_roads=True,
+            show_rivers=True,
+            show_ridges=True,
+            show_esa_boundary=True,
+            buffer_m=100.0
+        )
+
+        # Return as PNG image
+        return StreamingResponse(
+            io.BytesIO(buffer.getvalue()),
+            media_type="image/png",
+            headers={"Content-Disposition": f"inline; filename=boundary_map_{calculation_id}.png"}
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating boundary map: {str(e)}"
+        )
+
+
+@router.get("/calculations/{calculation_id}/maps/slope")
+async def generate_slope_map(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate slope classification map
+
+    Returns PNG image (A5 size, 300 DPI) with 5 slope classes
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this calculation"
+        )
+
+    if not calculation.boundary_geom:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no boundary geometry"
+        )
+
+    try:
+        # Convert boundary to GeoJSON
+        geom_shape = wkb.loads(bytes(calculation.boundary_geom.data))
+        geometry = mapping(geom_shape)
+
+        # Generate map
+        map_generator = get_map_generator()
+        buffer = map_generator.generate_slope_map(
+            geometry=geometry,
+            db_session=db,
+            forest_name=calculation.forest_name or 'Community Forest',
+            orientation='auto'
+        )
+
+        # Return as PNG image
+        return StreamingResponse(
+            io.BytesIO(buffer.getvalue()),
+            media_type="image/png",
+            headers={"Content-Disposition": f"inline; filename=slope_map_{calculation_id}.png"}
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating slope map: {str(e)}"
+        )
+
+
+@router.get("/calculations/{calculation_id}/maps/aspect")
+async def generate_aspect_map(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate aspect (slope direction) map with temperature-based colors
+
+    Returns PNG image (A5 size, 300 DPI) with 9 aspect classes
+    North = blue (cold), South = red (warm)
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this calculation"
+        )
+
+    if not calculation.boundary_geom:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no boundary geometry"
+        )
+
+    try:
+        # Convert boundary to GeoJSON
+        geom_shape = wkb.loads(bytes(calculation.boundary_geom.data))
+        geometry = mapping(geom_shape)
+
+        # Generate map
+        map_generator = get_map_generator()
+        buffer = map_generator.generate_aspect_map(
+            geometry=geometry,
+            db_session=db,
+            forest_name=calculation.forest_name or 'Community Forest',
+            orientation='auto'
+        )
+
+        # Return as PNG image
+        return StreamingResponse(
+            io.BytesIO(buffer.getvalue()),
+            media_type="image/png",
+            headers={"Content-Disposition": f"inline; filename=aspect_map_{calculation_id}.png"}
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating aspect map: {str(e)}"
+        )
+
+
+@router.get("/calculations/{calculation_id}/maps/landcover")
+async def generate_landcover_map(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate ESA WorldCover land cover classification map
+
+    Returns PNG image (A5 size, 300 DPI) with ESA WorldCover classes
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this calculation"
+        )
+
+    if not calculation.boundary_geom:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no boundary geometry"
+        )
+
+    try:
+        # Convert boundary to GeoJSON
+        geom_shape = wkb.loads(bytes(calculation.boundary_geom.data))
+        geometry = mapping(geom_shape)
+
+        # Generate map
+        map_generator = get_map_generator()
+        buffer = map_generator.generate_landcover_map(
+            geometry=geometry,
+            db_session=db,
+            forest_name=calculation.forest_name or 'Community Forest',
+            orientation='auto'
+        )
+
+        # Return as PNG image
+        return StreamingResponse(
+            io.BytesIO(buffer.getvalue()),
+            media_type="image/png",
+            headers={"Content-Disposition": f"inline; filename=landcover_map_{calculation_id}.png"}
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating landcover map: {str(e)}"
+        )

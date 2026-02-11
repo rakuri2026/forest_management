@@ -3,7 +3,7 @@ Biodiversity models for species inventory tracking
 """
 from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, Numeric, UUID, func
 from sqlalchemy.orm import relationship
-from app.core.database import Base
+from ..core.database import Base
 
 
 class BiodiversitySpecies(Base):

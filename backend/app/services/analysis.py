@@ -168,6 +168,91 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
         results["whole_features_south"] = whole_features.get("features_south")
         results["whole_features_west"] = whole_features.get("features_west")
 
+    # 3f. Physiography for whole forest
+    if whole_geom:
+        print("Analyzing whole forest physiography...", flush=True)
+        try:
+            whole_physio = analyze_physiography_geometry(whole_geom.wkt, db)
+            results["whole_physiography_percentages"] = whole_physio.get("physiography_percentages")
+            print(f"Whole forest physiography: {whole_physio.get('physiography_percentages')}", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest physiography: {e}")
+            results["whole_physiography_percentages"] = None
+
+    # 3g. Ecoregion for whole forest
+    if whole_geom:
+        print("Analyzing whole forest ecoregion...", flush=True)
+        try:
+            whole_ecoregion = analyze_ecoregion_geometry(whole_geom.wkt, db)
+            results["whole_ecoregion_percentages"] = whole_ecoregion.get("ecoregion_percentages")
+            print(f"Whole forest ecoregion: {whole_ecoregion.get('ecoregion_percentages')}", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest ecoregion: {e}")
+            results["whole_ecoregion_percentages"] = None
+
+    # 3h. NASA Forest 2020 for whole forest
+    if whole_geom:
+        print("Analyzing whole forest NASA forest 2020...", flush=True)
+        try:
+            whole_nasa = analyze_nasa_forest_2020_geometry(whole_geom.wkt, db)
+            results["whole_nasa_forest_2020_percentages"] = whole_nasa.get("nasa_forest_2020_percentages")
+            results["whole_nasa_forest_2020_dominant"] = whole_nasa.get("nasa_forest_2020_dominant")
+            print(f"Whole forest NASA forest 2020: {whole_nasa.get('nasa_forest_2020_percentages')}", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest NASA forest 2020: {e}")
+            results["whole_nasa_forest_2020_percentages"] = None
+            results["whole_nasa_forest_2020_dominant"] = None
+
+    # 3i. Landcover 1984 for whole forest (Historical baseline)
+    if whole_geom and should_run('run_landcover_1984'):
+        print("Analyzing whole forest landcover 1984...", flush=True)
+        try:
+            whole_lc1984 = analyze_landcover_1984_geometry(whole_geom.wkt, db)
+            results["landcover_1984_dominant"] = whole_lc1984.get("landcover_1984_dominant")
+            results["landcover_1984_percentages"] = whole_lc1984.get("landcover_1984_percentages")
+            print(f"Whole forest landcover 1984 dominant: {whole_lc1984.get('landcover_1984_dominant')}", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest landcover 1984: {e}")
+            results["landcover_1984_dominant"] = None
+            results["landcover_1984_percentages"] = None
+
+    # 3j. Hansen 2000 for whole forest (Forest classification)
+    if whole_geom and should_run('run_hansen2000'):
+        print("Analyzing whole forest hansen 2000...", flush=True)
+        try:
+            whole_hansen2000 = analyze_hansen2000_geometry(whole_geom.wkt, db)
+            results["hansen2000_dominant"] = whole_hansen2000.get("hansen2000_dominant")
+            results["hansen2000_percentages"] = whole_hansen2000.get("hansen2000_percentages")
+            print(f"Whole forest hansen 2000 dominant: {whole_hansen2000.get('hansen2000_dominant')}", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest hansen 2000: {e}")
+            results["hansen2000_dominant"] = None
+            results["hansen2000_percentages"] = None
+
+    # 3k. Temperature for whole forest
+    if whole_geom and should_run('run_temperature'):
+        print("Analyzing whole forest temperature...", flush=True)
+        try:
+            whole_temp = analyze_temperature_geometry(whole_geom.wkt, db)
+            results["temperature_mean_c"] = whole_temp.get("temperature_mean_c")
+            results["temperature_min_c"] = whole_temp.get("temperature_min_c")
+            print(f"Whole forest temperature: {whole_temp.get('temperature_mean_c')}°C (mean), {whole_temp.get('temperature_min_c')}°C (min)", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest temperature: {e}")
+            results["temperature_mean_c"] = None
+            results["temperature_min_c"] = None
+
+    # 3l. Precipitation for whole forest
+    if whole_geom and should_run('run_precipitation'):
+        print("Analyzing whole forest precipitation...", flush=True)
+        try:
+            whole_precip = analyze_precipitation_geometry(whole_geom.wkt, db)
+            results["precipitation_mean_mm"] = whole_precip.get("precipitation_mean_mm")
+            print(f"Whole forest precipitation: {whole_precip.get('precipitation_mean_mm')} mm/year", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest precipitation: {e}")
+            results["precipitation_mean_mm"] = None
+
     # 4. Administrative boundaries
     admin_results = await analyze_admin_boundaries(calculation_id, db)
     results.update(admin_results)
@@ -286,7 +371,25 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
         forest_type_results = analyze_forest_type_geometry(block_wkt, db)
         block_results.update(forest_type_results)
 
-    # 8. Land Cover (ESA WorldCover)
+        # 7.1 Potential Tree Species (based on forest type)
+        if forest_type_results.get('forest_type_percentages'):
+            species_results = analyze_potential_tree_species(
+                forest_type_results['forest_type_percentages'],
+                db
+            )
+            block_results.update(species_results)
+
+    # 7A. Historical Land Cover (1984 - Vector)
+    if should_run('run_landcover_1984'):
+        landcover_1984_results = analyze_landcover_1984_geometry(block_wkt, db)
+        block_results.update(landcover_1984_results)
+
+    # 7B. Hansen 2000 Forest Classification (Raster)
+    if should_run('run_hansen2000'):
+        hansen2000_results = analyze_hansen2000_geometry(block_wkt, db)
+        block_results.update(hansen2000_results)
+
+    # 8. Land Cover (ESA WorldCover - Current)
     if should_run('run_landcover'):
         landcover_results = analyze_landcover_geometry(block_wkt, db)
         block_results.update(landcover_results)
@@ -351,6 +454,39 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
             'features_east': None,
             'features_south': None,
             'features_west': None
+        })
+
+    # 19. Physiography Analysis
+    print("  Analyzing physiography...", flush=True)
+    try:
+        physio_results = analyze_physiography_geometry(block_wkt, db)
+        block_results.update(physio_results)
+        print(f"  Physiography analysis complete: {list(physio_results.keys())}", flush=True)
+    except Exception as e:
+        print(f"  ERROR in physiography analysis: {e}", flush=True)
+        block_results.update({'physiography_percentages': None})
+
+    # 20. Ecoregion Analysis
+    print("  Analyzing ecoregion...", flush=True)
+    try:
+        ecoregion_results = analyze_ecoregion_geometry(block_wkt, db)
+        block_results.update(ecoregion_results)
+        print(f"  Ecoregion analysis complete: {list(ecoregion_results.keys())}", flush=True)
+    except Exception as e:
+        print(f"  ERROR in ecoregion analysis: {e}", flush=True)
+        block_results.update({'ecoregion_percentages': None})
+
+    # 21. NASA Forest 2020 Classification
+    print("  Analyzing NASA forest 2020...", flush=True)
+    try:
+        nasa_forest_results = analyze_nasa_forest_2020_geometry(block_wkt, db)
+        block_results.update(nasa_forest_results)
+        print(f"  NASA forest 2020 analysis complete: {list(nasa_forest_results.keys())}", flush=True)
+    except Exception as e:
+        print(f"  ERROR in NASA forest 2020 analysis: {e}", flush=True)
+        block_results.update({
+            'nasa_forest_2020_percentages': None,
+            'nasa_forest_2020_dominant': None
         })
 
     return block_results
@@ -430,6 +566,14 @@ async def analyze_rasters(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     # 7. Forest Type
     forest_type_results = analyze_forest_type(calculation_id, db)
     results.update(forest_type_results)
+
+    # 7.1 Potential Tree Species (based on forest type)
+    if forest_type_results.get('forest_type_percentages'):
+        species_results = analyze_potential_tree_species(
+            forest_type_results['forest_type_percentages'],
+            db
+        )
+        results.update(species_results)
 
     # 8. ESA WorldCover - Land cover
     esa_results = analyze_esa_worldcover(calculation_id, db)
@@ -561,10 +705,10 @@ def analyze_slope(calculation_id: UUID, db: Session) -> Dict[str, Any]:
 
 
 def analyze_aspect(calculation_id: UUID, db: Session) -> Dict[str, Any]:
-    """Analyze aspect raster - categorical codes (0-8)
+    """Analyze aspect raster - categorical codes (1-8)
 
     Aspect classes from raster:
-    0 = Flat (slope < 2°) - excluded from dominant calculation
+    0 = No data (excluded from analysis)
     1 = N (337.5° - 22.5°)
     2 = NE (22.5° - 67.5°)
     3 = E (67.5° - 112.5°)
@@ -577,7 +721,6 @@ def analyze_aspect(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     try:
         # Mapping from raster categorical codes to direction names
         aspect_map = {
-            0: "Flat",
             1: "N",
             2: "NE",
             3: "E",
@@ -598,7 +741,7 @@ def analyze_aspect(calculation_id: UUID, db: Session) -> Dict[str, Any]:
                 WHERE calculations.id = :calc_id
                   AND ST_Intersects(rast, boundary_geom)
             ) as subquery
-            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 0 AND 8
+            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 1 AND 8
             GROUP BY aspect_code
         """)
 
@@ -619,14 +762,10 @@ def analyze_aspect(calculation_id: UUID, db: Session) -> Dict[str, Any]:
                 direction = aspect_map[code]
                 aspect_percentages[direction] = round(percentage, 2)
 
-                # Exclude "Flat" from dominant calculation
-                if code != 0 and percentage > max_percentage:
+                # Track dominant aspect
+                if percentage > max_percentage:
                     max_percentage = percentage
                     dominant_aspect = direction
-
-        # If no non-flat aspects found, use Flat
-        if dominant_aspect is None and "Flat" in aspect_percentages:
-            dominant_aspect = "Flat"
 
         return {
             "aspect_dominant": dominant_aspect,
@@ -810,7 +949,7 @@ def analyze_forest_type(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     2 = Tropical Mixed Broadleaved Forest
     3 = Subtropical Mixed Broadleaved Forest
     ... (26 total classes)
-    26 = Non forest
+    26 = Data Not Available
     """
     try:
         # Mapping from codes to forest type names
@@ -840,7 +979,7 @@ def analyze_forest_type(calculation_id: UUID, db: Session) -> Dict[str, Any]:
             23: "Lower Temperate Mixed robusta",
             24: "Pinus roxburghii-Shorea robusta",
             25: "Lower Temperate Pinus roxburghii-Quercus",
-            26: "Non forest"
+            26: "Data Not Available"
         }
 
         query = text("""
@@ -875,7 +1014,7 @@ def analyze_forest_type(calculation_id: UUID, db: Session) -> Dict[str, Any]:
                 type_name = forest_type_map[code]
                 forest_type_percentages[type_name] = round(percentage, 2)
 
-                # Find dominant (excluding "Non forest" if possible)
+                # Find dominant (excluding "Data Not Available" if possible)
                 if code != 26 and percentage > max_percentage:
                     max_percentage = percentage
                     dominant_type = type_name
@@ -934,7 +1073,7 @@ def analyze_esa_worldcover(calculation_id: UUID, db: Session) -> Dict[str, Any]:
                 WHERE calculations.id = :calc_id
                   AND ST_Intersects(rast, boundary_geom)
             ) as subquery
-            WHERE (pvc).value IS NOT NULL
+            WHERE (pvc).value IS NOT NULL AND (pvc).value > 0
             GROUP BY landcover_code
             ORDER BY pixel_count DESC
         """)
@@ -1163,8 +1302,188 @@ def analyze_forest_change(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     }
 
 
+def classify_usda_texture(clay_pct: float, sand_pct: float, silt_pct: float) -> str:
+    """
+    Classify soil texture using USDA 12-class system
+    Based on clay, sand, and silt percentages
+    """
+    if clay_pct >= 40:
+        if sand_pct >= 45:
+            return "Sandy Clay"
+        elif silt_pct >= 40:
+            return "Silty Clay"
+        else:
+            return "Clay"
+    elif clay_pct >= 27:
+        if sand_pct >= 20 and sand_pct < 45:
+            return "Clay Loam"
+        elif sand_pct >= 45:
+            return "Sandy Clay Loam"
+        else:
+            return "Silty Clay Loam"
+    elif clay_pct >= 7:
+        if sand_pct >= 52:
+            if sand_pct >= 80:
+                return "Loamy Sand"
+            else:
+                return "Sandy Loam"
+        elif silt_pct >= 50:
+            return "Silt Loam"
+        elif silt_pct >= 80:
+            return "Silt"
+        else:
+            return "Loam"
+    else:  # clay < 7%
+        if sand_pct >= 85:
+            return "Sand"
+        else:
+            return "Loamy Sand"
+
+
+def calculate_carbon_stock(soc_dg_kg: float, bulk_density_cg_cm3: float, depth_cm: float = 30) -> float:
+    """
+    Calculate soil organic carbon stock in topsoil
+
+    Formula: Carbon Stock (t/ha) = SOC (%) × Bulk Density (g/cm³) × Depth (cm) × 10
+
+    Args:
+        soc_dg_kg: Soil organic carbon in dg/kg (from SoilGrids)
+        bulk_density_cg_cm3: Bulk density in cg/cm³ (from SoilGrids)
+        depth_cm: Soil depth in cm (default 30cm for topsoil)
+
+    Returns:
+        Carbon stock in tonnes per hectare
+    """
+    if not soc_dg_kg or not bulk_density_cg_cm3:
+        return None
+
+    # Convert units
+    soc_percent = soc_dg_kg / 1000  # dg/kg to % (1 dg/kg = 0.1%)
+    bulk_density_g_cm3 = bulk_density_cg_cm3 / 100  # cg/cm³ to g/cm³
+
+    # Calculate carbon stock
+    carbon_stock = soc_percent * bulk_density_g_cm3 * depth_cm * 10
+
+    return round(carbon_stock, 2)
+
+
+def assess_fertility(ph: float, soc_dg_kg: float, nitrogen_cg_kg: float, cec_mmol_kg: float) -> dict:
+    """
+    Assess soil fertility based on multiple parameters
+
+    Returns:
+        dict with fertility_class, score (0-100), and limiting_factors
+    """
+    score = 0
+    limiting_factors = []
+
+    # pH assessment (optimal 5.5-7.0 for most forest species)
+    if ph:
+        if 5.5 <= ph <= 7.0:
+            score += 25
+        elif 5.0 <= ph < 5.5 or 7.0 < ph <= 7.5:
+            score += 15
+            limiting_factors.append("pH slightly outside optimal range")
+        elif ph < 5.0:
+            score += 5
+            limiting_factors.append("Low pH (acidic) limits nutrient availability")
+        else:  # pH > 7.5
+            score += 5
+            limiting_factors.append("High pH (alkaline) may cause micronutrient deficiency")
+
+    # Soil Organic Carbon assessment
+    if soc_dg_kg:
+        soc_percent = soc_dg_kg / 1000
+        if soc_percent >= 2.0:
+            score += 25
+        elif soc_percent >= 1.0:
+            score += 15
+        else:
+            score += 5
+            limiting_factors.append("Low organic carbon content")
+
+    # Nitrogen assessment
+    if nitrogen_cg_kg:
+        nitrogen_percent = nitrogen_cg_kg / 1000  # cg/kg to %
+        if nitrogen_percent >= 0.15:
+            score += 25
+        elif nitrogen_percent >= 0.10:
+            score += 15
+        else:
+            score += 5
+            limiting_factors.append("Low nitrogen content")
+
+    # CEC assessment (cation exchange capacity)
+    if cec_mmol_kg:
+        if cec_mmol_kg >= 150:
+            score += 25
+        elif cec_mmol_kg >= 80:
+            score += 15
+        else:
+            score += 5
+            limiting_factors.append("Low CEC (poor nutrient retention)")
+
+    # Determine fertility class
+    if score >= 80:
+        fertility_class = "Very High"
+    elif score >= 60:
+        fertility_class = "High"
+    elif score >= 40:
+        fertility_class = "Medium"
+    elif score >= 20:
+        fertility_class = "Low"
+    else:
+        fertility_class = "Very Low"
+
+    return {
+        "fertility_class": fertility_class,
+        "fertility_score": score,
+        "limiting_factors": limiting_factors if limiting_factors else ["None identified"]
+    }
+
+
+def assess_compaction(bulk_density_cg_cm3: float) -> dict:
+    """
+    Assess soil compaction based on bulk density
+
+    Returns:
+        dict with compaction_status and compaction_alert
+    """
+    if not bulk_density_cg_cm3:
+        return {"compaction_status": "Unknown", "compaction_alert": None}
+
+    bulk_density_g_cm3 = bulk_density_cg_cm3 / 100
+
+    if bulk_density_g_cm3 < 1.3:
+        return {
+            "compaction_status": "Not compacted",
+            "compaction_alert": None
+        }
+    elif bulk_density_g_cm3 < 1.6:
+        return {
+            "compaction_status": "Slight compaction",
+            "compaction_alert": "Monitor compaction levels, especially in high-traffic areas"
+        }
+    elif bulk_density_g_cm3 < 1.8:
+        return {
+            "compaction_status": "Moderate compaction",
+            "compaction_alert": "Compaction may limit root growth. Consider soil amendments or reduced machinery use"
+        }
+    else:
+        return {
+            "compaction_status": "Severe compaction",
+            "compaction_alert": "CRITICAL: Severe compaction detected. Root penetration severely limited. Intervention required"
+        }
+
+
 def analyze_soil(calculation_id: UUID, db: Session) -> Dict[str, Any]:
-    """Analyze soil properties (ISRIC SoilGrids)
+    """Analyze soil properties (ISRIC SoilGrids) with enhanced analysis
+
+    Phase 1 Enhanced Features:
+    1. USDA 12-class texture classification
+    2. Soil carbon stock calculation
+    3. Fertility assessment
+    4. Compaction alert
 
     8 bands from soilgrids_isric:
     Band 1 = clay_g_kg (Clay content in g/kg)
@@ -1175,71 +1494,23 @@ def analyze_soil(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     Band 6 = nitrogen_cg_kg (Nitrogen content in cg/kg)
     Band 7 = bdod_cg_cm3 (Bulk density in cg/cm3)
     Band 8 = cec_mmol_kg (Cation exchange capacity in mmol/kg)
+
+    NOTE: TEMPORARILY DISABLED - Soil analysis causes PostgreSQL crashes
     """
-    try:
-        query = text("""
-            SELECT
-                (clay_stats).mean as clay_mean,
-                (sand_stats).mean as sand_mean,
-                (silt_stats).mean as silt_mean,
-                (ph_stats).mean as ph_mean,
-                (soc_stats).mean as soc_mean,
-                (nitrogen_stats).mean as nitrogen_mean,
-                (bdod_stats).mean as bdod_mean,
-                (cec_stats).mean as cec_mean
-            FROM (
-                SELECT
-                    ST_SummaryStats(ST_Clip(rast, 1, boundary_geom), 1, true) as clay_stats,
-                    ST_SummaryStats(ST_Clip(rast, 2, boundary_geom), 1, true) as sand_stats,
-                    ST_SummaryStats(ST_Clip(rast, 3, boundary_geom), 1, true) as silt_stats,
-                    ST_SummaryStats(ST_Clip(rast, 4, boundary_geom), 1, true) as ph_stats,
-                    ST_SummaryStats(ST_Clip(rast, 5, boundary_geom), 1, true) as soc_stats,
-                    ST_SummaryStats(ST_Clip(rast, 6, boundary_geom), 1, true) as nitrogen_stats,
-                    ST_SummaryStats(ST_Clip(rast, 7, boundary_geom), 1, true) as bdod_stats,
-                    ST_SummaryStats(ST_Clip(rast, 8, boundary_geom), 1, true) as cec_stats
-                FROM rasters.soilgrids_isric, public.calculations
-                WHERE calculations.id = :calc_id
-                  AND ST_Intersects(rast, boundary_geom)
-                LIMIT 1
-            ) as subquery
-        """)
-
-        result = db.execute(query, {"calc_id": str(calculation_id)}).first()
-
-        if result:
-            # Determine soil texture class based on clay/sand/silt percentages
-            clay_pct = result.clay_mean / 10 if result.clay_mean else 0  # g/kg to %
-            sand_pct = result.sand_mean / 10 if result.sand_mean else 0
-            silt_pct = result.silt_mean / 10 if result.silt_mean else 0
-
-            # Simple texture classification
-            soil_texture = "Unknown"
-            if clay_pct > 40:
-                soil_texture = "Clay"
-            elif sand_pct > 50:
-                soil_texture = "Sandy"
-            elif silt_pct > 40:
-                soil_texture = "Silty"
-            else:
-                soil_texture = "Loam"
-
-            return {
-                "soil_texture": soil_texture,
-                "soil_properties": {
-                    "clay_g_kg": round(result.clay_mean, 1) if result.clay_mean else None,
-                    "sand_g_kg": round(result.sand_mean, 1) if result.sand_mean else None,
-                    "silt_g_kg": round(result.silt_mean, 1) if result.silt_mean else None,
-                    "ph_h2o": round(result.ph_mean, 2) if result.ph_mean else None,
-                    "soc_dg_kg": round(result.soc_mean, 1) if result.soc_mean else None,
-                    "nitrogen_cg_kg": round(result.nitrogen_mean, 1) if result.nitrogen_mean else None,
-                    "bulk_density_cg_cm3": round(result.bdod_mean, 1) if result.bdod_mean else None,
-                    "cec_mmol_kg": round(result.cec_mean, 1) if result.cec_mean else None
-                }
-            }
-    except Exception as e:
-        print(f"Error analyzing soil: {e}")
-
-    return {"soil_texture": None, "soil_properties": {}}
+    # TEMPORARILY DISABLED: Soil analysis crashes PostgreSQL
+    # Return empty results to allow other analyses to complete
+    print("Soil analysis skipped (temporarily disabled to prevent database crashes)")
+    return {
+        "soil_texture": None,
+        "soil_texture_system": "USDA 12-class (disabled)",
+        "carbon_stock_t_ha": None,
+        "fertility_class": None,
+        "fertility_score": None,
+        "limiting_factors": ["Soil analysis temporarily disabled to prevent database crashes"],
+        "compaction_status": None,
+        "compaction_alert": None,
+        "soil_properties": {}
+    }
 
 
 async def analyze_vectors(calculation_id: UUID, db: Session) -> Dict[str, Any]:
@@ -1657,12 +1928,11 @@ def analyze_aspect_geometry(wkt: str, db: Session) -> Dict[str, Any]:
     """Analyze aspect for a specific geometry
 
     Aspect raster contains categorical codes (8-bit unsigned):
-    0 = Flat (excluded from dominant), 1 = N, 2 = NE, 3 = E, 4 = SE, 5 = S, 6 = SW, 7 = W, 8 = NW
+    0 = No data (excluded from analysis), 1 = N, 2 = NE, 3 = E, 4 = SE, 5 = S, 6 = SW, 7 = W, 8 = NW
     """
     try:
         # Mapping from raster values to direction names
         aspect_map = {
-            0: "Flat",
             1: "N",
             2: "NE",
             3: "E",
@@ -1682,7 +1952,7 @@ def analyze_aspect_geometry(wkt: str, db: Session) -> Dict[str, Any]:
                 FROM rasters.aspect
                 WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
             ) as subquery
-            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 0 AND 8
+            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 1 AND 8
             GROUP BY aspect_code
         """)
 
@@ -1697,9 +1967,8 @@ def analyze_aspect_geometry(wkt: str, db: Session) -> Dict[str, Any]:
                     percentages[aspect_map[code]] = round((r.pixel_count / total_pixels) * 100, 2)
 
             if percentages:
-                # Find dominant (excluding Flat if possible)
-                non_flat = {k: v for k, v in percentages.items() if k != "Flat"}
-                dominant = max(non_flat.items(), key=lambda x: x[1])[0] if non_flat else "Flat"
+                # Find dominant aspect
+                dominant = max(percentages.items(), key=lambda x: x[1])[0]
 
                 return {
                     "aspect_dominant": dominant,
@@ -1884,7 +2153,7 @@ def analyze_forest_type_geometry(wkt: str, db: Session) -> Dict[str, Any]:
             20: "Temperate Mixed Broadleaved", 21: "Tropical Deciduous Indigenous Riverine",
             22: "Tropical Riverine", 23: "Lower Temperate Mixed robusta",
             24: "Pinus roxburghii-Shorea robusta", 25: "Lower Temperate Pinus roxburghii-Quercus",
-            26: "Non forest"
+            26: "Data Not Available"
         }
         query = text("""
             SELECT (pvc).value as forest_type_code, SUM((pvc).count) as pixel_count
@@ -1920,7 +2189,12 @@ def analyze_forest_type_geometry(wkt: str, db: Session) -> Dict[str, Any]:
 
 
 def analyze_landcover_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze ESA WorldCover land cover for a specific geometry (WKT)"""
+    """Analyze ESA WorldCover land cover for a specific geometry (WKT)
+
+    ESA WorldCover classes:
+    0 = No data (excluded from analysis)
+    10-100 = Valid land cover classes
+    """
     try:
         landcover_map = {
             10: "Tree cover", 20: "Shrubland", 30: "Grassland", 40: "Cropland",
@@ -1934,7 +2208,7 @@ def analyze_landcover_geometry(wkt: str, db: Session) -> Dict[str, Any]:
                 SELECT ST_ValueCount(ST_Clip(rast, ST_GeomFromText(:wkt, 4326))) as pvc
                 FROM rasters.esa_world_cover WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
             ) as subquery
-            WHERE (pvc).value IS NOT NULL
+            WHERE (pvc).value IS NOT NULL AND (pvc).value > 0
             GROUP BY landcover_code ORDER BY pixel_count DESC
         """)
         results = db.execute(query, {"wkt": wkt}).fetchall()
@@ -2103,27 +2377,668 @@ def analyze_precipitation_geometry(wkt: str, db: Session) -> Dict[str, Any]:
 
 
 def analyze_soil_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze soil texture for a specific geometry"""
+    """Analyze soil properties for a specific geometry (WKT) with enhanced analysis
+
+    Phase 1 Enhanced Features:
+    1. USDA 12-class texture classification
+    2. Soil carbon stock calculation
+    3. Fertility assessment
+    4. Compaction alert
+
+    NOTE: TEMPORARILY DISABLED - Soil analysis causes PostgreSQL crashes
+    """
+    # TEMPORARILY DISABLED: Soil analysis crashes PostgreSQL
+    # Return empty results to allow other analyses to complete
+    return {
+        "soil_texture": None,
+        "soil_texture_system": "USDA 12-class (disabled)",
+        "carbon_stock_t_ha": None,
+        "fertility_class": None,
+        "fertility_score": None,
+        "limiting_factors": ["Soil analysis temporarily disabled"],
+        "compaction_status": None,
+        "compaction_alert": None,
+        "soil_properties": {}
+    }
+
+
+def analyze_physiography_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+        # Process bands individually to prevent database crash from memory overload
+        # Get clay content (band 1)
+        clay_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 1, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as clay_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        clay_result = db.execute(clay_query, {"wkt": wkt}).first()
+        clay_mean = clay_result.clay_mean if clay_result else None
+
+        # Get sand content (band 2)
+        sand_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 2, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as sand_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        sand_result = db.execute(sand_query, {"wkt": wkt}).first()
+        sand_mean = sand_result.sand_mean if sand_result else None
+
+        # Get silt content (band 3)
+        silt_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 3, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as silt_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        silt_result = db.execute(silt_query, {"wkt": wkt}).first()
+        silt_mean = silt_result.silt_mean if silt_result else None
+
+        # Get pH (band 4)
+        ph_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 4, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as ph_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        ph_result = db.execute(ph_query, {"wkt": wkt}).first()
+        ph_mean = ph_result.ph_mean if ph_result else None
+
+        # Get SOC (band 5)
+        soc_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 5, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as soc_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        soc_result = db.execute(soc_query, {"wkt": wkt}).first()
+        soc_mean = soc_result.soc_mean if soc_result else None
+
+        # Get nitrogen (band 6)
+        nitrogen_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 6, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as nitrogen_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        nitrogen_result = db.execute(nitrogen_query, {"wkt": wkt}).first()
+        nitrogen_mean = nitrogen_result.nitrogen_mean if nitrogen_result else None
+
+        # Get bulk density (band 7)
+        bdod_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 7, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as bdod_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        bdod_result = db.execute(bdod_query, {"wkt": wkt}).first()
+        bdod_mean = bdod_result.bdod_mean if bdod_result else None
+
+        # Get CEC (band 8)
+        cec_query = text("""
+            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 8, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as cec_mean
+            FROM rasters.soilgrids_isric
+            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+        """)
+        cec_result = db.execute(cec_query, {"wkt": wkt}).first()
+        cec_mean = cec_result.cec_mean if cec_result else None
+
+        if clay_mean or sand_mean or silt_mean:
+            # Convert to percentages for texture classification
+            clay_pct = clay_mean / 10 if clay_mean else 0
+            sand_pct = sand_mean / 10 if sand_mean else 0
+            silt_pct = silt_mean / 10 if silt_mean else 0
+
+            # USDA 12-class texture classification
+            soil_texture = classify_usda_texture(clay_pct, sand_pct, silt_pct)
+
+            # Calculate carbon stock
+            carbon_stock = calculate_carbon_stock(soc_mean, bdod_mean)
+
+            # Assess fertility
+            fertility_data = assess_fertility(ph_mean, soc_mean, nitrogen_mean, cec_mean)
+
+            # Assess compaction
+            compaction_data = assess_compaction(bdod_mean)
+
+            return {
+                "soil_texture": soil_texture,
+                "soil_texture_system": "USDA 12-class",
+                "carbon_stock_t_ha": carbon_stock,
+                "fertility_class": fertility_data["fertility_class"],
+                "fertility_score": fertility_data["fertility_score"],
+                "limiting_factors": fertility_data["limiting_factors"],
+                "compaction_status": compaction_data["compaction_status"],
+                "compaction_alert": compaction_data["compaction_alert"],
+                "soil_properties": {
+                    "clay_g_kg": round(clay_mean, 1) if clay_mean else None,
+                    "sand_g_kg": round(sand_mean, 1) if sand_mean else None,
+                    "silt_g_kg": round(silt_mean, 1) if silt_mean else None,
+                    "ph_h2o": round(ph_mean, 2) if ph_mean else None,
+                    "soc_dg_kg": round(soc_mean, 1) if soc_mean else None,
+                    "nitrogen_cg_kg": round(nitrogen_mean, 1) if nitrogen_mean else None,
+                    "bulk_density_cg_cm3": round(bdod_mean, 1) if bdod_mean else None,
+                    "cec_mmol_kg": round(cec_mean, 1) if cec_mean else None
+                }
+            }
+    # except Exception as e:
+    #     print(f"Error analyzing soil for geometry: {e}")
+    #
+    # return {
+    #     "soil_texture": None,
+    #     "soil_texture_system": "USDA 12-class",
+    #     "carbon_stock_t_ha": None,
+    #     "fertility_class": None,
+    #     "fertility_score": None,
+    #     "limiting_factors": [],
+    #     "compaction_status": None,
+    #     "compaction_alert": None,
+    #     "soil_properties": {}
+    # }
+
+
+def analyze_physiography_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze physiographic zones that intersect with geometry
+    Returns percentage coverage for each zone (sum = 100%)
+    Uses UTM projection for accurate area calculation
+
+    Args:
+        wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with physiography_percentages: {zone_name: percentage}
+    """
     try:
-        texture_map = {
-            1: "Clay", 2: "Silty Clay", 3: "Sandy Clay", 4: "Clay Loam",
-            5: "Silty Clay Loam", 6: "Sandy Clay Loam", 7: "Loam",
-            8: "Silty Loam", 9: "Sandy Loam", 10: "Silt", 11: "Loamy Sand", 12: "Sand"
+        # Determine UTM zone from centroid longitude
+        centroid_query = text("""
+            SELECT ST_X(ST_Centroid(ST_GeomFromText(:wkt, 4326))) as lon
+        """)
+        centroid_result = db.execute(centroid_query, {"wkt": wkt}).first()
+        utm_srid = 32645 if centroid_result.lon > 84 else 32644
+
+        # Calculate intersection areas in UTM projection
+        query = text(f"""
+            WITH input_geom AS (
+                SELECT ST_GeomFromText(:wkt, 4326) as geom
+            ),
+            total_area AS (
+                SELECT ST_Area(ST_Transform(geom, {utm_srid})) as area
+                FROM input_geom
+            ),
+            intersections AS (
+                SELECT
+                    p."physiography Zone" as zone_name,
+                    ST_Area(
+                        ST_Transform(
+                            ST_Intersection(p.geom, i.geom),
+                            {utm_srid}
+                        )
+                    ) as intersection_area
+                FROM admin.physiography p, input_geom i
+                WHERE ST_Intersects(p.geom, i.geom)
+                AND p."physiography Zone" IS NOT NULL
+            )
+            SELECT
+                zone_name,
+                (intersection_area / (SELECT area FROM total_area)) * 100 as percentage
+            FROM intersections
+            WHERE intersection_area > 0
+            ORDER BY percentage DESC
+        """)
+
+        results = db.execute(query, {"wkt": wkt}).fetchall()
+
+        if results:
+            percentages = {}
+            for r in results:
+                percentages[r.zone_name] = round(float(r.percentage), 2)
+
+            return {"physiography_percentages": percentages}
+    except Exception as e:
+        print(f"Error analyzing physiography: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return {"physiography_percentages": None}
+
+
+def analyze_ecoregion_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze ecoregions that intersect with geometry
+    Returns percentage coverage for each ecoregion (sum = 100%)
+    Uses UTM projection for accurate area calculation
+
+    Args:
+        wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with ecoregion_percentages: {eco_name: percentage}
+    """
+    try:
+        # Determine UTM zone from centroid longitude
+        centroid_query = text("""
+            SELECT ST_X(ST_Centroid(ST_GeomFromText(:wkt, 4326))) as lon
+        """)
+        centroid_result = db.execute(centroid_query, {"wkt": wkt}).first()
+        utm_srid = 32645 if centroid_result.lon > 84 else 32644
+
+        # Calculate intersection areas in UTM projection
+        query = text(f"""
+            WITH input_geom AS (
+                SELECT ST_GeomFromText(:wkt, 4326) as geom
+            ),
+            total_area AS (
+                SELECT ST_Area(ST_Transform(geom, {utm_srid})) as area
+                FROM input_geom
+            ),
+            intersections AS (
+                SELECT
+                    e.eco_name as ecoregion_name,
+                    ST_Area(
+                        ST_Transform(
+                            ST_Intersection(e.geom, i.geom),
+                            {utm_srid}
+                        )
+                    ) as intersection_area
+                FROM ecology.ecoregion e, input_geom i
+                WHERE ST_Intersects(e.geom, i.geom)
+                AND e.eco_name IS NOT NULL
+            )
+            SELECT
+                ecoregion_name,
+                (intersection_area / (SELECT area FROM total_area)) * 100 as percentage
+            FROM intersections
+            WHERE intersection_area > 0
+            ORDER BY percentage DESC
+        """)
+
+        results = db.execute(query, {"wkt": wkt}).fetchall()
+
+        if results:
+            percentages = {}
+            for r in results:
+                percentages[r.ecoregion_name] = round(float(r.percentage), 2)
+
+            return {"ecoregion_percentages": percentages}
+    except Exception as e:
+        print(f"Error analyzing ecoregion: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return {"ecoregion_percentages": None}
+
+
+def analyze_nasa_forest_2020_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze NASA forest 2020 classification
+    Returns pixel count and percentage for each forest type (sum = 100%)
+
+    Forest types:
+    0 = no data (excluded from analysis)
+    1 = primary_forest
+    2 = young_secondary_forest
+    3 = old_secondary_forest
+
+    Args:
+        wkt: WKT string of geometry
+        db: Database session
+
+    Returns:
+        Dict with nasa_forest_2020_percentages and nasa_forest_2020_dominant
+    """
+    try:
+        forest_type_map = {
+            1: "primary_forest",
+            2: "young_secondary_forest",
+            3: "old_secondary_forest"
         }
+
         query = text("""
-            SELECT (pvc).value as texture_code, SUM((pvc).count) as pixel_count
+            SELECT
+                (pvc).value as forest_class,
+                SUM((pvc).count) as pixel_count
             FROM (
                 SELECT ST_ValueCount(ST_Clip(rast, ST_GeomFromText(:wkt, 4326))) as pvc
-                FROM rasters.soilgrids_isric WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+                FROM rasters.nasa_forest_2020
+                WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
             ) as subquery
-            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 1 AND 12
-            GROUP BY texture_code ORDER BY pixel_count DESC LIMIT 1
+            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 1 AND 3
+            GROUP BY forest_class
         """)
-        result = db.execute(query, {"wkt": wkt}).first()
-        if result:
-            code = int(result.texture_code)
-            if code in texture_map:
-                return {"soil_texture": texture_map[code]}
+
+        results = db.execute(query, {"wkt": wkt}).fetchall()
+
+        if results:
+            total_pixels = sum(r.pixel_count for r in results)
+            percentages = {}
+            dominant = None
+            max_pct = 0
+
+            for r in results:
+                class_code = int(r.forest_class)
+                if class_code in forest_type_map:
+                    pct = (r.pixel_count / total_pixels * 100) if total_pixels > 0 else 0
+                    class_name = forest_type_map[class_code]
+                    percentages[class_name] = round(pct, 2)
+
+                    if pct > max_pct:
+                        max_pct = pct
+                        dominant = class_name
+
+            return {
+                "nasa_forest_2020_percentages": percentages,
+                "nasa_forest_2020_dominant": dominant
+            }
     except Exception as e:
-        print(f"Error analyzing soil for geometry: {e}")
-    return {"soil_texture": None}
+        print(f"Error analyzing NASA forest 2020: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return {
+        "nasa_forest_2020_percentages": None,
+        "nasa_forest_2020_dominant": None
+    }
+
+
+def analyze_landcover_1984_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze 1984 landcover using vector polygon intersection
+
+    This analyzes historical land cover from 1984 vector data (landcover schema)
+    Uses spatial intersection to calculate area of each landcover type within boundary
+
+    Returns:
+        landcover_1984_dominant: Most common landcover type by area
+        landcover_1984_percentages: Percentage breakdown by landcover type
+    """
+    try:
+        # Detect UTM zone for accurate area calculation
+        centroid_query = text("""
+            SELECT ST_X(ST_Centroid(ST_GeomFromText(:wkt, 4326))) as longitude
+        """)
+        centroid_result = db.execute(centroid_query, {"wkt": wkt}).first()
+
+        if not centroid_result:
+            return {"landcover_1984_dominant": None, "landcover_1984_percentages": {}}
+
+        longitude = centroid_result.longitude
+        utm_zone = int((longitude + 180) / 6) + 1
+        utm_srid = 32600 + utm_zone if longitude >= 0 else 32700 + utm_zone
+
+        # Calculate intersection areas for each landcover type
+        query = text(f"""
+            WITH input_geom AS (
+                SELECT ST_GeomFromText(:wkt, 4326) as geom
+            ),
+            total_area AS (
+                SELECT ST_Area(ST_Transform(geom, {utm_srid})) as area
+                FROM input_geom
+            ),
+            intersections AS (
+                SELECT
+                    lc.landuse_yr1984 as landcover_type,
+                    ST_Area(
+                        ST_Transform(
+                            ST_Intersection(lc.geom, i.geom),
+                            {utm_srid}
+                        )
+                    ) as intersection_area
+                FROM landcover.landcover_1984 lc, input_geom i
+                WHERE ST_Intersects(lc.geom, i.geom)
+                AND lc.landuse_yr1984 IS NOT NULL
+            )
+            SELECT
+                landcover_type,
+                intersection_area,
+                (intersection_area / (SELECT area FROM total_area)) * 100 as percentage
+            FROM intersections
+            WHERE intersection_area > 0
+            ORDER BY percentage DESC
+        """)
+
+        results = db.execute(query, {"wkt": wkt}).fetchall()
+
+        if not results:
+            return {"landcover_1984_dominant": None, "landcover_1984_percentages": {}}
+
+        landcover_percentages = {}
+        dominant_type = None
+        max_percentage = 0
+
+        for r in results:
+            landcover_type = r.landcover_type.strip() if r.landcover_type else "Unknown"
+            percentage = float(r.percentage)
+            landcover_percentages[landcover_type] = round(percentage, 2)
+
+            if percentage > max_percentage:
+                max_percentage = percentage
+                dominant_type = landcover_type
+
+        return {
+            "landcover_1984_dominant": dominant_type,
+            "landcover_1984_percentages": landcover_percentages
+        }
+
+    except Exception as e:
+        print(f"Error analyzing landcover 1984 for geometry: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return {"landcover_1984_dominant": None, "landcover_1984_percentages": {}}
+
+
+def analyze_hansen2000_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze Hansen 2000 forest classification (raster)
+
+    Hansen 2000 Classified Forest Data from rasters.hansen2000_classified
+    Legend:
+        0 = Non forest
+        1 = Bush/Shrub
+        2 = Poor forest
+        3 = Moderate forest
+        4 = Good forest
+
+    Returns:
+        hansen2000_dominant: Most common forest class by pixel count
+        hansen2000_percentages: Percentage breakdown by forest class
+    """
+    try:
+        forest_class_map = {
+            0: "Non forest",
+            1: "Bush/Shrub",
+            2: "Poor forest",
+            3: "Moderate forest",
+            4: "Good forest"
+        }
+
+        query = text("""
+            SELECT
+                (pvc).value as forest_class,
+                SUM((pvc).count) as pixel_count
+            FROM (
+                SELECT ST_ValueCount(ST_Clip(rast, ST_GeomFromText(:wkt, 4326))) as pvc
+                FROM rasters.hansen2000_classified
+                WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+            ) as subquery
+            WHERE (pvc).value IS NOT NULL AND (pvc).value BETWEEN 0 AND 4
+            GROUP BY forest_class
+            ORDER BY pixel_count DESC
+        """)
+
+        results = db.execute(query, {"wkt": wkt}).fetchall()
+
+        if not results:
+            return {"hansen2000_dominant": None, "hansen2000_percentages": {}}
+
+        total_pixels = sum(r.pixel_count for r in results)
+        percentages = {}
+        dominant_class = None
+        max_percentage = 0
+
+        for r in results:
+            class_code = int(r.forest_class)
+            if class_code in forest_class_map:
+                percentage = (r.pixel_count / total_pixels * 100) if total_pixels > 0 else 0
+                class_name = forest_class_map[class_code]
+                percentages[class_name] = round(percentage, 2)
+
+                if percentage > max_percentage:
+                    max_percentage = percentage
+                    dominant_class = class_name
+
+        return {
+            "hansen2000_dominant": dominant_class,
+            "hansen2000_percentages": percentages
+        }
+
+    except Exception as e:
+        print(f"Error analyzing Hansen 2000 for geometry: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return {"hansen2000_dominant": None, "hansen2000_percentages": {}}
+
+
+def analyze_potential_tree_species(forest_type_percentages: Dict[str, float], db: Session) -> Dict[str, Any]:
+    """
+    Analyze potential tree species based on forest type distribution
+
+    Uses forest_type → species associations to suggest likely species for a block/forest
+    Orders species by:
+    1. Availability rank (Dominant > Co-dominant > Associate > Occasional)
+    2. Economic value (high-value timber species prioritized)
+    3. Frequency in the forest type
+
+    Args:
+        forest_type_percentages: Dict of {forest_type_name: percentage}
+        db: Database session
+
+    Returns:
+        {
+            "potential_species": [
+                {
+                    "scientific_name": str,
+                    "local_name": str,
+                    "role": str (Dominant/Co-dominant/Associate/Occasional),
+                    "availability_rank": int (1-4),
+                    "forest_types": [str] (which forest types this species is found in),
+                    "combined_score": float (for ranking),
+                    "economic_value": str (High/Medium/Low)
+                }
+            ],
+            "species_count": int
+        }
+    """
+    try:
+        if not forest_type_percentages:
+            return {"potential_species": [], "species_count": 0}
+
+        # Define high-value timber species in Nepal
+        HIGH_VALUE_SPECIES = {
+            'Shorea robusta', 'Dalbergia sissoo', 'Tectona grandis', 'Acacia catechu',
+            'Cedrus deodara', 'Pinus roxburghii', 'Alnus nepalensis', 'Juglans regia',
+            'Cedrela toona', 'Michelia champaca'
+        }
+
+        MEDIUM_VALUE_SPECIES = {
+            'Schima wallichii', 'Castanopsis indica', 'Terminalia spp', 'Albizia spp',
+            'Bombax ceiba', 'Adina cardifolia', 'Lagerstroemia parviflora'
+        }
+
+        # Get forest type names and normalize them
+        # Database has " Forest" suffix, but analysis may not
+        forest_type_names = []
+        for ft_name in forest_type_percentages.keys():
+            # Add " Forest" suffix if not already present
+            if not ft_name.endswith(" Forest") and not ft_name.endswith(" forest"):
+                forest_type_names.append(ft_name + " Forest")
+            else:
+                forest_type_names.append(ft_name)
+
+        query = text("""
+            SELECT
+                ft.forest_type_name,
+                tsc.scientific_name,
+                tsc.local_name,
+                fsa.availability_rank,
+                fsa.role,
+                fsa.frequency_percent,
+                fsa.canopy_coverage_percent
+            FROM forest_species_association fsa
+            JOIN forest_types ft ON fsa.forest_type_id = ft.id
+            JOIN tree_species_coefficients tsc ON fsa.species_id = tsc.id
+            WHERE ft.forest_type_name = ANY(:forest_types)
+            ORDER BY fsa.availability_rank, fsa.frequency_percent DESC NULLS LAST
+        """)
+
+        results = db.execute(query, {"forest_types": forest_type_names}).fetchall()
+
+        results = db.execute(query, {"forest_types": forest_type_names}).fetchall()
+
+        if not results:
+            return {"potential_species": [], "species_count": 0}
+
+        # Aggregate species data across all forest types
+        species_data = {}
+
+        for r in results:
+            scientific_name = r.scientific_name
+
+            if scientific_name not in species_data:
+                # Determine economic value
+                if any(scientific_name.startswith(hvs.split()[0]) for hvs in HIGH_VALUE_SPECIES):
+                    economic_value = "High"
+                    value_score = 3
+                elif any(scientific_name.startswith(mvs.split()[0]) for mvs in MEDIUM_VALUE_SPECIES):
+                    economic_value = "Medium"
+                    value_score = 2
+                else:
+                    economic_value = "Low"
+                    value_score = 1
+
+                species_data[scientific_name] = {
+                    "scientific_name": scientific_name,
+                    "local_name": r.local_name or "Unknown",
+                    "role": r.role,
+                    "availability_rank": r.availability_rank,
+                    "economic_value": economic_value,
+                    "forest_types": [r.forest_type_name],
+                    "frequency_percent": r.frequency_percent or 0,
+                    "value_score": value_score
+                }
+            else:
+                # Species appears in multiple forest types - update
+                if r.forest_type_name not in species_data[scientific_name]["forest_types"]:
+                    species_data[scientific_name]["forest_types"].append(r.forest_type_name)
+
+                # Use the best (lowest) availability rank
+                if r.availability_rank < species_data[scientific_name]["availability_rank"]:
+                    species_data[scientific_name]["availability_rank"] = r.availability_rank
+                    species_data[scientific_name]["role"] = r.role
+
+        # Calculate combined score for sorting
+        # Lower score = higher priority
+        # Score = availability_rank * 10 - value_score * 3 - (frequency_percent/10)
+        for species in species_data.values():
+            species["combined_score"] = (
+                species["availability_rank"] * 10  # Lower rank = better (10-40)
+                - species["value_score"] * 3  # Higher value = better (-9 to -3)
+                - (species["frequency_percent"] / 10)  # Higher frequency = better (-10 to 0)
+            )
+
+        # Sort by combined score (lower is better)
+        sorted_species = sorted(species_data.values(), key=lambda x: x["combined_score"])
+
+        # Remove internal scoring fields from output
+        for species in sorted_species:
+            del species["value_score"]
+            del species["combined_score"]
+            del species["frequency_percent"]
+
+        return {
+            "potential_species": sorted_species,
+            "species_count": len(sorted_species)
+        }
+
+    except Exception as e:
+        print(f"Error analyzing potential tree species: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"potential_species": [], "species_count": 0}
