@@ -20,6 +20,9 @@ from pathlib import Path
 import io
 from PIL import Image
 import os
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 import contextily as cx
 from shapely.geometry import shape, mapping
@@ -62,6 +65,66 @@ class MapGenerator:
         plt.rcParams['axes.titlesize'] = 11
         plt.rcParams['legend.fontsize'] = 7
         plt.rcParams['figure.dpi'] = dpi
+
+        # Configure requests session with timeout for basemap tiles
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=2,  # Only 2 retries (fast fail)
+            backoff_factor=0.5,  # Short backoff
+            status_forcelist=[429, 500, 502, 503, 504]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+    def add_basemap_with_timeout(self, ax, crs='EPSG:4326', timeout=5, alpha=0.7, zorder=1):
+        """
+        Add basemap with timeout to prevent hanging.
+
+        Args:
+            ax: Matplotlib axes
+            crs: Coordinate reference system
+            timeout: Timeout in seconds (default: 5)
+            alpha: Transparency (default: 0.7)
+            zorder: Layer order (default: 1)
+
+        Returns:
+            bool: True if basemap added successfully, False otherwise
+        """
+        try:
+            # Configure contextily to use our session with timeout
+            import contextily.tile as ctx_tile
+
+            # Store original session
+            original_session = getattr(ctx_tile, '_session', None)
+
+            # Create a new session with timeout
+            session_with_timeout = requests.Session()
+            session_with_timeout.request = lambda *args, **kwargs: requests.Session.request(
+                session_with_timeout, *args, timeout=timeout, **kwargs
+            )
+
+            # Temporarily replace contextily's session
+            ctx_tile._session = session_with_timeout
+
+            # Add basemap with timeout
+            cx.add_basemap(
+                ax,
+                crs=crs,
+                source=cx.providers.OpenStreetMap.Mapnik,
+                alpha=alpha,
+                zorder=zorder
+            )
+
+            # Restore original session
+            if original_session is not None:
+                ctx_tile._session = original_session
+
+            return True
+
+        except Exception as e:
+            print(f"Warning: Could not add basemap (timeout or connection error): {e}")
+            return False
 
     def create_figure(
         self,
@@ -696,18 +759,19 @@ class MapGenerator:
         ax.set_xlim(min_x - padding, max_x + padding)
         ax.set_ylim(min_y - padding, max_y + padding)
 
-        # Add OpenStreetMap basemap (contextily will handle WGS84 to Web Mercator conversion)
-        try:
-            cx.add_basemap(
-                ax,
-                crs='EPSG:4326',  # Our data is in WGS84
-                source=cx.providers.OpenStreetMap.Mapnik,
-                alpha=0.7,  # Semi-transparent to see our boundary clearly
-                zorder=1  # Behind our boundary
-            )
-        except Exception as e:
-            print(f"Warning: Could not add basemap: {e}")
-            # Continue without basemap - map will still work
+        # Add OpenStreetMap basemap with timeout (5 seconds)
+        basemap_success = self.add_basemap_with_timeout(
+            ax,
+            crs='EPSG:4326',  # Our data is in WGS84
+            timeout=5,  # 5 second timeout for fast failure
+            alpha=0.7,  # Semi-transparent to see our boundary clearly
+            zorder=1  # Behind our boundary
+        )
+
+        if not basemap_success:
+            # Add a simple background color if basemap fails
+            ax.set_facecolor('#f0f0f0')
+            print("Basemap failed - using plain background")
 
         # Query and plot schools within buffer
         schools = []
