@@ -148,9 +148,9 @@ class ClassNormalizer:
                         'message': message
                     })
 
-            # Update DataFrame
+            # Update DataFrame (convert to string to match column dtype)
             if normalized is not None:
-                df.at[idx, class_column] = normalized
+                df.at[idx, class_column] = str(normalized)
             else:
                 df.at[idx, class_column] = None
 
