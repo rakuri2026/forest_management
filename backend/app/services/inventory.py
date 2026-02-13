@@ -20,6 +20,7 @@ from ..models.inventory import (
     InventoryTree,
     TreeSpeciesCoefficient
 )
+from ..utils.diameter_classifier import DiameterClassifier
 
 
 class InventoryService:
@@ -570,35 +571,56 @@ class InventoryService:
             print(f"[INVENTORY] Step 2/6: Volumes calculated successfully")
 
             # 3. Initially mark all trees
-            print(f"[INVENTORY] Step 3/6: Marking seedlings vs felling trees...")
+            print(f"[INVENTORY] Step 3/7: Marking seedlings vs felling trees...")
             df['remark'] = df.apply(
                 lambda row: 'Seedling' if row[diameter_col] < 10 else 'Felling Tree',
                 axis=1
             )
             df['grid_cell_id'] = None
-            print(f"[INVENTORY] Step 3/6: Marked {len(df[df['remark'] == 'Seedling'])} seedlings, {len(df[df['remark'] == 'Felling Tree'])} felling trees")
+            print(f"[INVENTORY] Step 3/7: Marked {len(df[df['remark'] == 'Seedling'])} seedlings, {len(df[df['remark'] == 'Felling Tree'])} felling trees")
 
-            # 4. Store trees in database FIRST (needed for PostGIS mother tree selection)
-            print(f"[INVENTORY] Step 4/6: Storing {len(df)} trees in database...")
+            # 4. Add diameter classification (stand_type and dbh_class)
+            print(f"[INVENTORY] Step 4/7: Classifying trees by diameter...")
+            df['stand_type'] = df[diameter_col].apply(DiameterClassifier.classify_simple)
+            df['dbh_class'] = df[diameter_col].apply(DiameterClassifier.classify_detailed)
+
+            # Count trees by classification
+            stand_type_counts = df['stand_type'].value_counts().to_dict()
+            print(f"[INVENTORY] Step 4/7: Classified trees - Regeneration: {stand_type_counts.get('Regeneration', 0)}, Pole: {stand_type_counts.get('Pole', 0)}, Tree: {stand_type_counts.get('Tree', 0)}")
+
+            # 5. Assign polygon boundary name to each tree
+            print(f"[INVENTORY] Step 5/7: Assigning polygon boundaries...")
+            # Get boundary geometry from calculation
+            if inventory.calculation and inventory.calculation.boundary_geom:
+                # Extract block name from calculation (if available)
+                block_name = inventory.calculation.block_name or inventory.calculation.forest_name or 'Main Block'
+                df['polygon_boundary'] = block_name
+                print(f"[INVENTORY] Step 5/7: Assigned all trees to boundary '{block_name}'")
+            else:
+                df['polygon_boundary'] = 'Unknown'
+                print(f"[INVENTORY] Step 5/7: Warning - No boundary geometry found, using 'Unknown'")
+
+            # 6. Store trees in database FIRST (needed for PostGIS mother tree selection)
+            print(f"[INVENTORY] Step 6/7: Storing {len(df)} trees in database...")
             await self._store_trees_simple(
                 inventory_id, df, species_col, diameter_col, height_col,
                 class_col, lon_col, lat_col
             )
-            print(f"[INVENTORY] Step 4/6: Successfully stored {len(df)} trees")
+            print(f"[INVENTORY] Step 6/7: Successfully stored {len(df)} trees")
 
-            # 5. Identify mother trees using PostGIS
-            print(f"[INVENTORY] Step 5/6: Identifying mother trees (grid: {grid_spacing_meters}m, EPSG: {inventory.projection_epsg})...")
+            # 7. Identify mother trees using PostGIS
+            print(f"[INVENTORY] Step 7/7: Identifying mother trees (grid: {grid_spacing_meters}m, EPSG: {inventory.projection_epsg})...")
             mother_tree_count = await self._identify_mother_trees_postgis(
                 inventory_id,
                 grid_spacing_meters,
                 inventory.projection_epsg
             )
-            print(f"[INVENTORY] Step 5/6: Identified {mother_tree_count} mother trees")
+            print(f"[INVENTORY] Step 7/7: Identified {mother_tree_count} mother trees")
 
-            # 6. Calculate summary statistics from database
-            print(f"[INVENTORY] Step 6/6: Calculating summary statistics...")
+            # 8. Calculate summary statistics from database
+            print(f"[INVENTORY] Step 7/7: Calculating summary statistics...")
             summary = await self._calculate_summary_from_db(inventory_id)
-            print(f"[INVENTORY] Step 6/6: Summary calculated")
+            print(f"[INVENTORY] Step 7/7: Summary calculated")
 
             # 6. Update inventory record (convert numpy types to Python types)
             inventory.total_trees = int(summary['total_trees'])
@@ -656,7 +678,8 @@ class InventoryService:
             species_col, diameter_col, height_col, class_col, lon_col, lat_col,
             'local_name', 'stem_volume', 'branch_volume', 'tree_volume',
             'gross_volume', 'net_volume', 'net_volume_cft', 'firewood_m3',
-            'firewood_chatta', 'remark', 'grid_cell_id'
+            'firewood_chatta', 'remark', 'grid_cell_id',
+            'stand_type', 'dbh_class', 'polygon_boundary'  # New classification columns
         }
 
         # Identify ALL extra columns upfront (not row by row)

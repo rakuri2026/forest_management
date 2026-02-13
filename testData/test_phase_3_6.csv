@@ -1,0 +1,21 @@
+species,dia_cm,height_m,class,longitude,latitude,plot_id,surveyor
+18,5.2,,A,85.04201,27.44501,P-001,John
+Sal,8.5,3.2,B,85.04305,27.44605,P-002,Jane
+14,15.5,12.8,C,85.04108,27.44312,P-003,Bob
+Sissoo,22.3,15.5,D,85.04412,27.44715,P-004,Alice
+9,6.8,,I,85.03901,27.44205,P-005,John
+Shorea robusta,12.5,10.2,II,85.04515,27.44820,P-006,Jane
+Pinus roxburghii,25.8,18.5,III,85.04220,27.44425,P-007,Bob
+Alnus nepalensis,35.2,20.3,IV,85.03805,27.44115,P-008,Alice
+Schima wallichii,45.8,22.1,i,85.04625,27.44930,P-009,John
+Castanopsis indica,55.3,24.5,ii,85.04330,27.44535,P-010,Jane
+Quercus semecarpifolia,65.7,26.8,iii,85.03715,27.44025,P-011,Bob
+Abies spectabilis,75.2,28.2,iv,85.04735,27.45040,P-012,Alice
+18,3.5,,,85.04440,27.44645,P-013,John
+Sal,18.5,14.2,क,85.03625,27.43935,P-014,Jane
+14,28.3,16.5,ख,85.04845,27.45150,P-015,Bob
+Sissoo,38.7,18.9,ग,85.04550,27.44755,P-016,Alice
+9,48.2,20.5,घ,85.03535,27.43845,P-017,John
+Shorea robusta,58.9,22.8,1,85.04955,27.45260,P-018,Jane
+Pinus roxburghii,68.5,24.3,2,85.04660,27.44865,P-019,Bob
+Alnus nepalensis,7.2,,,85.03445,27.43755,P-020,Alice

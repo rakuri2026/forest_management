@@ -11,6 +11,8 @@ from .validators.species_matcher import SpeciesMatcher
 from .validators.species_code_validator import SpeciesCodeValidator
 from .validators.coordinate_detector import CoordinateDetector
 from .validators.diameter_detector import DiameterDetector
+from .validators.class_normalizer import ClassNormalizer
+from .validators.regeneration_validator import RegenerationValidator
 
 
 class InventoryValidator:
@@ -30,6 +32,8 @@ class InventoryValidator:
         self.species_code_validator = SpeciesCodeValidator(db)
         self.coord_detector = CoordinateDetector()
         self.diameter_detector = DiameterDetector()
+        self.class_normalizer = ClassNormalizer()
+        self.regeneration_validator = RegenerationValidator()
 
     async def validate_inventory_file(
         self,
@@ -223,7 +227,51 @@ class InventoryValidator:
         if duplicate_check:
             report['warnings'].append(duplicate_check)
 
-        # 9. Summary statistics
+        # 9. Normalize class column (A/B/C/D, I/II/III/IV, क/ख/ग/घ → 1/2/3/4)
+        class_col = self._detect_class_column(df)
+        if class_col:
+            df, class_report = self.class_normalizer.normalize_dataframe(df, class_col)
+            if class_report['status'] == 'completed':
+                report['data_detection']['class_normalization'] = class_report
+                if class_report['total_conversions'] > 0:
+                    report['corrections'].append({
+                        'type': 'class_normalization',
+                        'column': class_col,
+                        'affected_rows': class_report['total_conversions'],
+                        'statistics': class_report['statistics'],
+                        'samples': class_report['conversions'][:5]
+                    })
+                if class_report['invalid_values']:
+                    for invalid in class_report['invalid_values']:
+                        report['warnings'].append({
+                            'row': invalid['row'] + 1,
+                            'column': class_col,
+                            'value': invalid['original_value'],
+                            'message': invalid['message'],
+                            'severity': 'warning'
+                        })
+
+        # 10. Validate regeneration trees (DBH 1-10 cm should not have height/class)
+        if diameter_col:
+            regen_report = self.regeneration_validator.validate_dataframe(
+                df,
+                diameter_col,
+                height_col,
+                class_col
+            )
+            if regen_report['status'] == 'completed':
+                report['data_detection']['regeneration'] = regen_report
+                if regen_report['needs_user_confirmation']:
+                    report['warnings'].append({
+                        'type': 'regeneration_confirmation_needed',
+                        'severity': 'warning',
+                        'message': f"{regen_report['trees_with_issues']} regeneration trees have height/class values",
+                        'details': regen_report['trees_with_issues_list'][:5],
+                        'action_required': 'User confirmation needed to remove height/class from regeneration trees',
+                        'total_affected': regen_report['trees_with_issues']
+                    })
+
+        # 11. Summary statistics
         report['summary'] = self._calculate_summary(df, report)
 
         return report
@@ -247,6 +295,14 @@ class InventoryValidator:
     def _detect_height_column(self, df: pd.DataFrame) -> Optional[str]:
         """Detect height column"""
         possible_names = ['height_m', 'height', 'tree_height', 'ht', 'h']
+        for col in df.columns:
+            if col.lower() in possible_names:
+                return col
+        return None
+
+    def _detect_class_column(self, df: pd.DataFrame) -> Optional[str]:
+        """Detect class column"""
+        possible_names = ['class', 'tree_class', 'quality_class', 'quality', 'grade']
         for col in df.columns:
             if col.lower() in possible_names:
                 return col
