@@ -9,7 +9,7 @@ import type {
   Calculation,
 } from '../types';
 
-export const API_BASE_URL = 'http://localhost:8001';
+export const API_BASE_URL = 'http://localhost:3001';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -90,12 +90,28 @@ export const forestApi = {
   uploadBoundary: async (
     file: File,
     forestName?: string,
-    blockName?: string
+    blockName?: string,
+    analysisOptions?: Record<string, boolean>,
+    mapOptions?: Record<string, boolean>
   ): Promise<Calculation> => {
     const formData = new FormData();
     formData.append('file', file);
     if (forestName) formData.append('forest_name', forestName);
     if (blockName) formData.append('block_name', blockName);
+
+    // Append analysis options as form fields
+    if (analysisOptions) {
+      Object.entries(analysisOptions).forEach(([key, value]) => {
+        formData.append(key, String(value));
+      });
+    }
+
+    // Append map options as form fields
+    if (mapOptions) {
+      Object.entries(mapOptions).forEach(([key, value]) => {
+        formData.append(key, String(value));
+      });
+    }
 
     const response = await api.post<Calculation>('/api/forests/upload', formData, {
       headers: {
@@ -121,6 +137,43 @@ export const forestApi = {
 
   deleteCalculation: async (id: string): Promise<void> => {
     await api.delete(`/api/forests/calculations/${id}`);
+  },
+
+  reanalyze: async (
+    id: string,
+    analysisOptions: Partial<Record<string, boolean>>
+  ): Promise<Calculation> => {
+    const response = await api.post<Calculation>(
+      `/api/forests/calculations/${id}/reanalyze`,
+      analysisOptions
+    );
+    return response.data;
+  },
+
+  generateMaps: async (
+    id: string,
+    mapOptions: Record<string, boolean>
+  ): Promise<{
+    calculation_id: string;
+    status: string;
+    generated_maps: Array<{
+      map_type: string;
+      status: string;
+      download_url: string;
+    }>;
+    failed_maps: Array<{
+      map_type: string;
+      status: string;
+      error: string;
+    }>;
+    not_implemented: string[];
+    message: string;
+  }> => {
+    const response = await api.post(
+      `/api/forests/calculations/${id}/generate-maps`,
+      mapOptions
+    );
+    return response.data;
   },
 };
 
@@ -231,6 +284,48 @@ export const inventoryApi = {
     formData.append("file", file);
 
     const response = await api.post(`/api/inventory/${inventoryId}/accept-corrections`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  // Column Mapping endpoints
+  previewColumnMapping: async (file: File): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post("/api/inventory/preview-mapping", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  confirmColumnMapping: async (
+    file: File,
+    mapping: Record<string, string>,
+    savePreference: boolean = false,
+    gridSpacing: number = 20.0,
+    calculationId?: string,
+    projectionEpsg?: number
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mapping", JSON.stringify(mapping));
+    formData.append("save_preference", savePreference.toString());
+    formData.append("grid_spacing_meters", gridSpacing.toString());
+
+    if (calculationId) {
+      formData.append("calculation_id", calculationId);
+    }
+    if (projectionEpsg) {
+      formData.append("projection_epsg", projectionEpsg.toString());
+    }
+
+    const response = await api.post("/api/inventory/confirm-mapping", formData, {
       headers: {
         "Content-Type": "multipart/form-data",
       },

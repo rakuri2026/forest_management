@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { inventoryApi } from '../services/api';
 import { CorrectionPreviewDialog } from './CorrectionPreviewDialog';
+import ColumnMappingPreview from './ColumnMappingPreview';
 
 interface TreeMappingTabProps {
   calculationId: string;
@@ -21,6 +22,10 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
   const [validationResult, setValidationResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Column mapping state
+  const [showColumnMapping, setShowColumnMapping] = useState(false);
+  const [columnMappingData, setColumnMappingData] = useState<any>(null);
 
   // Boundary correction state
   const [showCorrectionDialog, setShowCorrectionDialog] = useState(false);
@@ -106,10 +111,42 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
       setUploading(true);
       setError(null);
 
+      // Step 1: Preview column mapping
+      const previewData = await inventoryApi.previewColumnMapping(file);
+      setColumnMappingData(previewData);
+      setShowColumnMapping(true);
+      setUploading(false);
+
+    } catch (err: any) {
+      console.error('Preview error:', err);
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to preview file';
+      setError(errorMessage);
+      setUploading(false);
+    }
+  };
+
+  const handleConfirmMapping = async (
+    mapping: Record<string, string>,
+    savePreference: boolean
+  ) => {
+    if (!file) return;
+
+    try {
+      setUploading(true);
+      setShowColumnMapping(false);
+      setError(null);
+
       const epsg = projectionEpsg ? parseInt(projectionEpsg) : undefined;
 
-      // Step 1: Upload and validate
-      const result = await inventoryApi.uploadInventory(file, gridSpacing, epsg, calculationId);
+      // Step 2: Confirm mapping and upload
+      const result = await inventoryApi.confirmColumnMapping(
+        file,
+        mapping,
+        savePreference,
+        gridSpacing,
+        calculationId,
+        epsg
+      );
       setValidationResult(result);
 
       // Step 2: Check if boundary corrections are needed
@@ -146,7 +183,13 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
           setFile(null);
           setValidationResult(null);
         } catch (processErr: any) {
-          setError(processErr.response?.data?.detail || 'Processing failed');
+          console.error('Processing error:', processErr);
+          console.error('Error response:', processErr.response);
+          console.error('Error data:', processErr.response?.data);
+
+          const errorMessage = processErr.response?.data?.detail || processErr.message || 'Processing failed';
+          setError(errorMessage);
+          setValidationResult(null); // Clear validation result to show error
         }
       }
     } catch (err: any) {
@@ -235,6 +278,11 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
     setFile(null);
     setValidationResult(null);
     setError('Upload cancelled. Please fix the data manually or try again.');
+  };
+
+  const handleCancelMapping = () => {
+    setShowColumnMapping(false);
+    setColumnMappingData(null);
   };
 
   const handleViewDetails = () => {
@@ -567,6 +615,15 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
           onAccept={handleAcceptCorrections}
           onCancel={handleCancelCorrections}
           isProcessing={applyingCorrections}
+        />
+      )}
+
+      {/* Column Mapping Modal */}
+      {showColumnMapping && columnMappingData && (
+        <ColumnMappingPreview
+          previewData={columnMappingData}
+          onConfirm={handleConfirmMapping}
+          onCancel={handleCancelMapping}
         />
       )}
     </div>

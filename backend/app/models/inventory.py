@@ -73,6 +73,9 @@ class InventoryCalculation(Base):
     grid_spacing_meters = Column(Float, default=20.0, nullable=False)
     projection_epsg = Column(Integer, default=32644, nullable=False)
 
+    # Column mapping (stores user's column mapping for processing)
+    column_mapping = Column(JSONB, nullable=True)
+
     # Processing status
     status = Column(String(50), default='processing', nullable=False)
     processing_time_seconds = Column(Integer, nullable=True)

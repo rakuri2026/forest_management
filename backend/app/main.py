@@ -2,6 +2,22 @@
 Main FastAPI application
 Community Forest Management System
 """
+import os
+import sys
+
+# Set PROJ_LIB environment variable for PROJ database
+# This must be set before importing any libraries that use PROJ (pyproj, rasterio, etc.)
+if not os.environ.get('PROJ_LIB'):
+    # Get the path to the venv site-packages
+    venv_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    proj_data_path = os.path.join(venv_path, 'venv', 'Lib', 'site-packages', 'pyproj', 'proj_dir', 'share', 'proj')
+
+    if os.path.exists(os.path.join(proj_data_path, 'proj.db')):
+        os.environ['PROJ_LIB'] = proj_data_path
+        print(f"Set PROJ_LIB to: {proj_data_path}")
+    else:
+        print(f"Warning: Could not find proj.db at {proj_data_path}")
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -238,6 +254,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=3001,
         reload=settings.DEBUG
     )

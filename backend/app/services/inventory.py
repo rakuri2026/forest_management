@@ -491,10 +491,10 @@ class InventoryService:
             df.columns = df.columns.str.lower()
 
             # Map possible column names
-            species_col = 'species'
+            species_col = next((col for col in df.columns if 'species' in col or 'scientific' in col), 'species')
             diameter_col = next((col for col in df.columns if 'dia' in col or 'dbh' in col), 'dia_cm')
             height_col = next((col for col in df.columns if 'height' in col), 'height_m')
-            class_col = next((col for col in df.columns if 'class' in col), 'class')
+            class_col = next((col for col in df.columns if 'class' in col or 'quality' in col), 'class')
             lon_col = next((col for col in df.columns if 'lon' in col or col == 'x'), 'longitude')
             lat_col = next((col for col in df.columns if 'lat' in col or col == 'y'), 'latitude')
 

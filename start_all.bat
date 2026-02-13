@@ -19,7 +19,7 @@ start "Frontend Server (Port 3000)" cmd /k "cd /d D:\forest_management && start_
 echo.
 echo ========================================
 echo Servers are starting...
-echo Backend:  http://localhost:8001/docs
+echo Backend:  http://localhost:3001/docs
 echo Frontend: http://localhost:3000
 echo ========================================
 echo.

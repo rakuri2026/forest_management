@@ -30,6 +30,12 @@ from ..schemas.inventory import (
 from ..utils.auth import get_current_active_user
 from ..services.inventory_validator import InventoryValidator
 from ..services.inventory import InventoryService
+from ..utils.column_mapper import ColumnMapper
+from ..utils.column_mapping_helpers import (
+    merge_auto_mapping_with_preferences,
+    save_user_column_preferences,
+    validate_and_prepare_dataframe
+)
 
 import logging
 
@@ -102,6 +108,357 @@ async def download_template(
             "Content-Disposition": "attachment; filename=TreeInventory_Template.csv"
         }
     )
+
+
+@router.post("/preview-mapping")
+async def preview_column_mapping(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Preview automatic column mapping for uploaded CSV file.
+
+    Analyzes the CSV column names and returns:
+    - Automatic mapping suggestions
+    - Confidence scores
+    - Sample data preview (first 5 rows)
+    - Missing required columns
+    - Duplicate mappings
+    - User's saved preferences (if any)
+
+    Use this endpoint BEFORE uploading inventory data to confirm column mapping.
+    """
+    # Validate file type
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV files are supported"
+        )
+
+    # Read CSV file (first 10 rows for preview)
+    try:
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content), nrows=10)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error reading CSV file: {str(e)}"
+        )
+
+    if len(df) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="CSV file is empty"
+        )
+
+    # Get automatic mapping merged with user preferences
+    try:
+        mapping_result = merge_auto_mapping_with_preferences(
+            db, current_user.id, df.columns.tolist()
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error analyzing columns: {str(e)}"
+        )
+
+    # Prepare sample data (first 5 rows)
+    sample_data = df.head(5).replace({np.nan: None}).to_dict('records')
+
+    # Determine if user input is needed
+    needs_user_input = (
+        len(mapping_result["missing_required"]) > 0 or
+        len(mapping_result["duplicates"]) > 0 or
+        any(score < 85 for score in mapping_result["confidence"].values())
+    )
+
+    response = {
+        "success": True,
+        "filename": file.filename,
+        "total_rows": len(df),
+        "csv_columns": df.columns.tolist(),
+        "sample_data": sample_data,
+        "mapping": mapping_result["mapped"],
+        "confidence": mapping_result["confidence"],
+        "unmapped_columns": mapping_result["unmapped"],
+        "suggestions": mapping_result["suggestions"],
+        "missing_required": mapping_result["missing_required"],
+        "duplicates": mapping_result["duplicates"],
+        "needs_user_input": needs_user_input,
+        "required_columns": ["species", "dia_cm", "height_m", "LONGITUDE", "LATITUDE"],
+        "optional_columns": ["class"]
+    }
+
+    return convert_numpy_types(response)
+
+
+@router.post("/confirm-mapping")
+async def confirm_and_upload_with_mapping(
+    file: UploadFile = File(...),
+    mapping: str = Form(...),  # JSON string of {csv_col: std_col}
+    save_preference: bool = Form(False),
+    calculation_id: Optional[str] = Form(None),
+    grid_spacing_meters: float = Form(20.0),
+    projection_epsg: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Confirm column mapping and upload inventory CSV.
+
+    This endpoint:
+    1. Validates the confirmed mapping
+    2. Applies column renaming to the uploaded CSV
+    3. Saves user preferences (if requested)
+    4. Processes the inventory upload (same as /upload endpoint)
+
+    Args:
+        file: CSV file to upload
+        mapping: JSON string of column mapping {csv_col: standard_col}
+        save_preference: Whether to save this mapping for future uploads
+        calculation_id: Optional link to boundary calculation
+        grid_spacing_meters: Grid spacing for plot creation
+        projection_epsg: Optional projection EPSG code
+    """
+    # Validate file type
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV files are supported"
+        )
+
+    # Parse mapping JSON
+    import json
+    try:
+        mapping_dict = json.loads(mapping)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid mapping JSON format"
+        )
+
+    # Read CSV file
+    try:
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content))
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error reading CSV file: {str(e)}"
+        )
+
+    # Validate and apply mapping
+    try:
+        mapper = ColumnMapper()
+        validation = mapper.validate_mapping(mapping_dict)
+
+        if not validation["valid"]:
+            return {
+                "success": False,
+                "errors": validation["errors"],
+                "warnings": validation.get("warnings", [])
+            }
+
+        # Apply mapping to dataframe
+        result = mapper.apply_mapping(df, mapping_dict)
+        df_renamed = result["df"]
+
+        logger.info(f"Applied column mapping. Renamed columns: {result['renamed_columns']}")
+        logger.info(f"Preserved columns: {result['preserved_columns']}")
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error applying column mapping: {str(e)}"
+        )
+
+    # Save user preferences if requested
+    if save_preference:
+        try:
+            save_user_column_preferences(
+                db, current_user.id, mapping_dict
+            )
+            logger.info(f"Saved column mapping preferences for user {current_user.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save user preferences: {str(e)}")
+            # Don't fail the upload if preference saving fails
+
+    # Store column mapping in calculation metadata
+    column_mapping_metadata = {
+        "original_columns": list(mapping_dict.keys()),
+        "mapped": mapping_dict,
+        "confidence": {},  # Will be populated if we have confidence data
+        "preserved_columns": result["preserved_columns"]
+    }
+
+    # Now proceed with normal inventory upload validation
+    # (Re-use existing validation logic from /upload endpoint)
+
+    # Check if tree mapping already exists for this calculation
+    if calculation_id:
+        existing_mapping = db.query(InventoryCalculation).filter(
+            InventoryCalculation.calculation_id == UUID(calculation_id),
+            InventoryCalculation.user_id == current_user.id
+        ).first()
+
+        if existing_mapping:
+            raise HTTPException(
+                status_code=400,
+                detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
+            )
+
+    # Validate data with renamed columns
+    validator = InventoryValidator(db)
+    validation_report = await validator.validate_inventory_file(
+        df_renamed,
+        user_specified_crs=projection_epsg
+    )
+
+    # Check boundary if calculation_id is provided
+    boundary_check_result = None
+    if calculation_id and validation_report['summary'].get('ready_for_processing'):
+        try:
+            from app.services.boundary_validator import validate_inventory_boundary
+
+            # Get coordinate columns
+            coord_cols = validation_report['data_detection'].get('coordinate_columns', {})
+            x_col = coord_cols.get('x')
+            y_col = coord_cols.get('y')
+
+            if x_col and y_col and x_col in df_renamed.columns and y_col in df_renamed.columns:
+                # Extract tree points (lon, lat, row_number)
+                tree_points = [
+                    (float(row[x_col]), float(row[y_col]), idx + 1)
+                    for idx, row in df_renamed.iterrows()
+                    if pd.notna(row[x_col]) and pd.notna(row[y_col])
+                ]
+
+                # Validate boundary
+                boundary_check_result = validate_inventory_boundary(
+                    db,
+                    UUID(calculation_id),
+                    tree_points,
+                    tolerance_percent=5.0
+                )
+
+                # Add boundary check to validation report
+                validation_report['boundary_check'] = {
+                    'total_points': boundary_check_result['total_points'],
+                    'out_of_boundary_count': boundary_check_result['out_of_boundary_count'],
+                    'out_of_boundary_percentage': boundary_check_result['out_of_boundary_percentage'],
+                    'within_tolerance': boundary_check_result['within_tolerance'],
+                    'needs_correction': boundary_check_result['needs_correction']
+                }
+
+                # Generate correction preview if corrections are needed
+                if boundary_check_result['needs_correction']:
+                    from app.services.boundary_corrector import generate_correction_preview
+
+                    species_col = validation_report['data_detection'].get('species_column', 'Species')
+
+                    corrections_preview = generate_correction_preview(
+                        df_renamed,
+                        boundary_check_result['boundary_wkt'],
+                        boundary_check_result['out_of_boundary_points'],
+                        x_col,
+                        y_col,
+                        species_col
+                    )
+
+                    validation_report['boundary_check']['corrections'] = corrections_preview['corrections']
+                    validation_report['boundary_check']['correction_summary'] = corrections_preview['summary']
+
+                # If too many points outside boundary, fail validation
+                if not boundary_check_result['within_tolerance']:
+                    validation_report['summary']['ready_for_processing'] = False
+                    validation_report['errors'].append({
+                        'type': 'boundary_error',
+                        'severity': 'error',
+                        'message': boundary_check_result.get('error_message', 'Too many trees outside boundary')
+                    })
+
+        except Exception as e:
+            # Log boundary check error but don't fail upload
+            import logging
+            logging.error(f"Boundary check failed: {str(e)}")
+            validation_report['warnings'].append({
+                'type': 'boundary_check_error',
+                'severity': 'warning',
+                'message': f'Could not validate boundary: {str(e)}'
+            })
+
+    # If validation passed, create inventory calculation record
+    if validation_report['summary'].get('ready_for_processing'):
+        # Determine CRS
+        detected_crs = validation_report['data_detection'].get('crs', {}).get('epsg')
+        if detected_crs == 'UNKNOWN':
+            detected_crs = projection_epsg or 4326
+        elif isinstance(detected_crs, str):
+            detected_crs = 4326
+
+        # Determine projection CRS for grid creation
+        if projection_epsg and projection_epsg >= 32600:
+            final_projection_epsg = projection_epsg
+        elif detected_crs == 4326 or detected_crs == 'WGS84':
+            # Data is in lat/lon - auto-detect UTM zone
+            coord_cols = validation_report['data_detection'].get('coordinate_columns', {})
+            x_col = coord_cols.get('x')
+            if x_col and x_col in df_renamed.columns:
+                mean_lon = float(df_renamed[x_col].mean())
+
+                if mean_lon < 84.0:
+                    final_projection_epsg = 32644  # UTM 44N
+                    validation_report['info'] = validation_report.get('info', [])
+                    validation_report['info'].append({
+                        'type': 'auto_utm_detection',
+                        'message': f'Auto-detected UTM Zone 44N (EPSG:32644) based on longitude {mean_lon:.2f}°E (< 84°E)'
+                    })
+                else:
+                    final_projection_epsg = 32645  # UTM 45N
+                    validation_report['info'] = validation_report.get('info', [])
+                    validation_report['info'].append({
+                        'type': 'auto_utm_detection',
+                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E (≥ 84°E)'
+                    })
+            else:
+                final_projection_epsg = 32645
+        else:
+            final_projection_epsg = projection_epsg or detected_crs
+
+        inventory = InventoryCalculation(
+            user_id=current_user.id,
+            calculation_id=UUID(calculation_id) if calculation_id else None,
+            uploaded_filename=file.filename,
+            grid_spacing_meters=grid_spacing_meters,
+            projection_epsg=final_projection_epsg,
+            column_mapping=mapping_dict,  # Store column mapping for processing
+            status='validated'
+        )
+        db.add(inventory)
+
+        try:
+            db.commit()
+            db.refresh(inventory)
+        except Exception as e:
+            db.rollback()
+            if 'uq_inventory_calculations_calculation_id' in str(e) or 'duplicate key value' in str(e):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
+                )
+            raise
+
+        validation_report['inventory_id'] = str(inventory.id)
+        validation_report['next_step'] = 'POST /api/inventory/{inventory_id}/process'
+
+    # Add column mapping info to report
+    validation_report['column_mapping'] = column_mapping_metadata
+    validation_report['mapping_applied'] = True
+
+    return convert_numpy_types(validation_report)
 
 
 @router.post("/upload", response_model=dict)
@@ -319,6 +676,9 @@ async def process_inventory(
 
     Requires re-uploading the CSV file for processing
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     inventory = db.query(InventoryCalculation).filter(
         InventoryCalculation.id == inventory_id,
         InventoryCalculation.user_id == current_user.id
@@ -342,6 +702,22 @@ async def process_inventory(
             status_code=400,
             detail=f"Error reading CSV file: {str(e)}"
         )
+
+    # Apply column mapping if it was saved during upload
+    if inventory.column_mapping:
+        logger.info(f"Applying saved column mapping: {inventory.column_mapping}")
+        try:
+            from ..utils.column_mapper import ColumnMapper
+            mapper = ColumnMapper()
+            result = mapper.apply_mapping(df, inventory.column_mapping)
+            df = result["df"]
+            logger.info(f"Column mapping applied. Renamed columns: {result['renamed_columns']}")
+        except Exception as e:
+            logger.error(f"Failed to apply column mapping: {str(e)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error applying column mapping: {str(e)}"
+            )
 
     # Check if corrections were applied and need to be used
     from app.models.inventory import TreeCorrectionLog
