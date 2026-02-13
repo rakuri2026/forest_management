@@ -144,3 +144,38 @@ class MyForestsResponse(BaseModel):
     forests: List[Dict[str, Any]]
     total_count: int
     total_area_hectares: float
+
+
+class ReanalysisRequest(BaseModel):
+    """Schema for re-running analysis with different options"""
+    # Analysis options (all optional, if not provided will use stored defaults)
+    run_raster_analysis: Optional[bool] = None
+    run_elevation: Optional[bool] = None
+    run_slope: Optional[bool] = None
+    run_aspect: Optional[bool] = None
+    run_canopy: Optional[bool] = None
+    run_biomass: Optional[bool] = None
+    run_forest_health: Optional[bool] = None
+    run_forest_type: Optional[bool] = None
+    run_landcover: Optional[bool] = None
+    run_forest_loss: Optional[bool] = None
+    run_forest_gain: Optional[bool] = None
+    run_fire_loss: Optional[bool] = None
+    run_temperature: Optional[bool] = None
+    run_precipitation: Optional[bool] = None
+    run_soil: Optional[bool] = None
+    run_proximity: Optional[bool] = None
+
+
+class GenerateMapsRequest(BaseModel):
+    """Schema for requesting map generation"""
+    # Map types to generate (all optional, at least one should be True)
+    generate_boundary_map: bool = False
+    generate_topographic_map: bool = False
+    generate_slope_map: bool = False
+    generate_aspect_map: bool = False
+    generate_forest_type_map: bool = False
+    generate_canopy_height_map: bool = False
+    generate_landcover_change_map: bool = False
+    generate_soil_map: bool = False
+    generate_forest_health_map: bool = False

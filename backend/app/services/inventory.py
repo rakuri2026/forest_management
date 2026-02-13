@@ -157,6 +157,63 @@ class InventoryService:
             self.db.commit()
             raise
 
+    async def _convert_species_to_scientific(
+        self,
+        df: pd.DataFrame,
+        species_col: str,
+        calculation_id: UUID = None
+    ) -> pd.DataFrame:
+        """
+        Convert species codes and local names to scientific names + local names
+
+        Args:
+            df: DataFrame with tree data
+            species_col: Name of the species column
+            calculation_id: Optional calculation ID for physiographic zone detection
+
+        Returns:
+            DataFrame with converted species names and added local_name column
+        """
+        from ..services.validators.species_code_validator import SpeciesCodeValidator
+
+        # Initialize validator
+        validator = SpeciesCodeValidator(self.db)
+
+        # Determine physiographic zone (disabled for performance - defaults to Hill spp)
+        physiographic_zone = None
+
+        # Add local_name column if it doesn't exist
+        if 'local_name' not in df.columns:
+            df['local_name'] = ''
+
+        # Convert each species value
+        converted_count = 0
+        for idx, row in df.iterrows():
+            original_species = row[species_col]
+
+            # Convert code/local name to scientific name
+            scientific_name, species_code, method, confidence, warning = validator.validate_species_value(
+                original_species,
+                physiographic_zone
+            )
+
+            # Update the species column with scientific name
+            if scientific_name != original_species:
+                df.at[idx, species_col] = scientific_name
+                converted_count += 1
+                print(f"[SPECIES] Row {idx+1}: '{original_species}' → '{scientific_name}' (method: {method})")
+
+            # Get local name from species_by_code
+            local_name = None
+            if species_code and species_code in validator.species_by_code:
+                local_name = validator.species_by_code[species_code]['local_name']
+
+            if local_name:
+                df.at[idx, 'local_name'] = local_name
+
+        print(f"[SPECIES] Converted {converted_count} species codes/local names to scientific names")
+        return df
+
     def calculate_tree_volumes(
         self,
         df: pd.DataFrame,
@@ -486,9 +543,11 @@ class InventoryService:
             # Update status
             inventory.status = 'processing'
             self.db.commit()
+            print(f"[INVENTORY] Processing inventory {inventory_id} with {len(df)} trees")
 
             # Detect column names (case-insensitive)
             df.columns = df.columns.str.lower()
+            print(f"[INVENTORY] Available columns: {list(df.columns)}")
 
             # Map possible column names
             species_col = next((col for col in df.columns if 'species' in col or 'scientific' in col), 'species')
@@ -498,35 +557,48 @@ class InventoryService:
             lon_col = next((col for col in df.columns if 'lon' in col or col == 'x'), 'longitude')
             lat_col = next((col for col in df.columns if 'lat' in col or col == 'y'), 'latitude')
 
-            # 1. Calculate volumes for all trees
-            df = self.calculate_tree_volumes(df, species_col, diameter_col, height_col, class_col)
+            print(f"[INVENTORY] Column mapping: species={species_col}, dia={diameter_col}, height={height_col}, class={class_col}, lon={lon_col}, lat={lat_col}")
 
-            # 2. Initially mark all trees
+            # 1. Convert species codes and local names to scientific names
+            print(f"[INVENTORY] Step 1/5: Converting species codes to scientific names...")
+            df = await self._convert_species_to_scientific(df, species_col, inventory.calculation_id)
+            print(f"[INVENTORY] Step 1/5: Species conversion completed")
+
+            # 2. Calculate volumes for all trees
+            print(f"[INVENTORY] Step 2/6: Calculating volumes...")
+            df = self.calculate_tree_volumes(df, species_col, diameter_col, height_col, class_col)
+            print(f"[INVENTORY] Step 2/6: Volumes calculated successfully")
+
+            # 3. Initially mark all trees
+            print(f"[INVENTORY] Step 3/6: Marking seedlings vs felling trees...")
             df['remark'] = df.apply(
                 lambda row: 'Seedling' if row[diameter_col] < 10 else 'Felling Tree',
                 axis=1
             )
             df['grid_cell_id'] = None
+            print(f"[INVENTORY] Step 3/6: Marked {len(df[df['remark'] == 'Seedling'])} seedlings, {len(df[df['remark'] == 'Felling Tree'])} felling trees")
 
-            # 3. Store trees in database FIRST (needed for PostGIS mother tree selection)
-            print(f"Storing {len(df)} trees in database...")
+            # 4. Store trees in database FIRST (needed for PostGIS mother tree selection)
+            print(f"[INVENTORY] Step 4/6: Storing {len(df)} trees in database...")
             await self._store_trees_simple(
                 inventory_id, df, species_col, diameter_col, height_col,
                 class_col, lon_col, lat_col
             )
-            print(f"Successfully stored {len(df)} trees")
+            print(f"[INVENTORY] Step 4/6: Successfully stored {len(df)} trees")
 
-            # 4. Identify mother trees using PostGIS
-            print(f"Identifying mother trees with grid spacing: {grid_spacing_meters}m...")
+            # 5. Identify mother trees using PostGIS
+            print(f"[INVENTORY] Step 5/6: Identifying mother trees (grid: {grid_spacing_meters}m, EPSG: {inventory.projection_epsg})...")
             mother_tree_count = await self._identify_mother_trees_postgis(
                 inventory_id,
                 grid_spacing_meters,
                 inventory.projection_epsg
             )
-            print(f"Identified {mother_tree_count} mother trees")
+            print(f"[INVENTORY] Step 5/6: Identified {mother_tree_count} mother trees")
 
-            # 5. Calculate summary statistics from database
+            # 6. Calculate summary statistics from database
+            print(f"[INVENTORY] Step 6/6: Calculating summary statistics...")
             summary = await self._calculate_summary_from_db(inventory_id)
+            print(f"[INVENTORY] Step 6/6: Summary calculated")
 
             # 6. Update inventory record (convert numpy types to Python types)
             inventory.total_trees = int(summary['total_trees'])
@@ -579,15 +651,46 @@ class InventoryService:
         trees_to_insert = []
         batch_size = 1000  # Insert in batches to avoid memory issues
 
+        # Define known columns that are stored in specific fields
+        known_columns = {
+            species_col, diameter_col, height_col, class_col, lon_col, lat_col,
+            'local_name', 'stem_volume', 'branch_volume', 'tree_volume',
+            'gross_volume', 'net_volume', 'net_volume_cft', 'firewood_m3',
+            'firewood_chatta', 'remark', 'grid_cell_id'
+        }
+
+        # Identify ALL extra columns upfront (not row by row)
+        extra_column_names = [col for col in df.columns if col not in known_columns and col.strip() != '']
+
+        print(f"[EXTRA COLUMNS] All columns in DataFrame: {list(df.columns)}")
+        print(f"[EXTRA COLUMNS] Known columns: {known_columns}")
+        print(f"[EXTRA COLUMNS] Extra columns detected: {extra_column_names}")
+
         try:
             for idx, row in df.iterrows():
-                # Get local name from species coefficients
+                # Get species and local name
                 species = row[species_col]
-                local_name = self.species_coefficients.get(species, {}).get('local_name')
+                local_name = row.get('local_name', None) if 'local_name' in df.columns else None
 
                 # Get coordinates
                 lon = float(row[lon_col])
                 lat = float(row[lat_col])
+
+                # Capture extra columns (preserve even if NULL)
+                extra_cols = {}
+                for col in extra_column_names:
+                    value = row[col]
+                    # Convert numpy types to Python types for JSON serialization
+                    if pd.notna(value):
+                        if hasattr(value, 'item'):  # numpy types
+                            value = value.item()
+                        extra_cols[col] = value
+                    else:
+                        extra_cols[col] = None  # Preserve NULL values
+
+                # Debug first row
+                if idx == 0 and extra_cols:
+                    print(f"[EXTRA COLUMNS] First row extra columns: {extra_cols}")
 
                 tree = InventoryTree(
                     inventory_calculation_id=inventory_id,
@@ -607,7 +710,8 @@ class InventoryService:
                     remark=row['remark'],
                     grid_cell_id=int(row['grid_cell_id']) if pd.notna(row['grid_cell_id']) else None,
                     local_name=local_name,
-                    row_number=idx + 2  # +2 for header and 0-indexing
+                    row_number=idx + 2,  # +2 for header and 0-indexing
+                    extra_columns=extra_cols if extra_cols else None
                 )
 
                 trees_to_insert.append(tree)
@@ -628,6 +732,8 @@ class InventoryService:
             # Commit all inserts
             self.db.commit()
             print("All trees committed to database")
+            if extra_column_names:
+                print(f"[EXTRA COLUMNS] Stored {len(extra_column_names)} extra columns: {extra_column_names}")
 
         except Exception as e:
             print(f"Error storing trees: {e}")
@@ -926,6 +1032,7 @@ class InventoryService:
 
         # Create DataFrame
         data = []
+        extra_cols_found = 0
         for tree in trees:
             # Extract lon, lat from geography
             result = self.db.execute(
@@ -935,7 +1042,7 @@ class InventoryService:
 
             lon, lat = result[0], result[1]
 
-            data.append({
+            row_data = {
                 'species': tree.species,
                 'local_name': tree.local_name,
                 'dia_cm': tree.dia_cm,
@@ -953,9 +1060,24 @@ class InventoryService:
                 'firewood_chatta': tree.firewood_chatta,
                 'remark': tree.remark,
                 'grid_cell_id': tree.grid_cell_id
-            })
+            }
+
+            # Add extra columns if they exist
+            if tree.extra_columns:
+                row_data.update(tree.extra_columns)
+                extra_cols_found += 1
+                if extra_cols_found == 1:
+                    print(f"[EXPORT] First tree with extra columns: {tree.extra_columns}")
+
+            data.append(row_data)
+
+        if extra_cols_found > 0:
+            print(f"[EXPORT] Found {extra_cols_found} trees with extra columns")
+        else:
+            print(f"[EXPORT] No trees with extra columns found")
 
         df = pd.DataFrame(data)
+        print(f"[EXPORT] DataFrame columns: {list(df.columns)}")
 
         if export_format == 'csv':
             csv_content = df.to_csv(index=False)

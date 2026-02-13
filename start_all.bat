@@ -8,7 +8,7 @@ echo ========================================
 echo.
 
 REM Start backend in new window
-start "Backend Server (Port 8001)" cmd /k "cd /d D:\forest_management && start_backend.bat"
+start "Backend Server (Port 3001)" cmd /k "cd /d D:\forest_management && start_backend.bat"
 
 REM Wait for backend to start
 timeout /t 5 /nobreak

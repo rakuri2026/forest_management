@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { forestApi } from '../services/api';
+import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
+import MapOptionsPanel from '../components/MapOptionsPanel';
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_MAP_OPTIONS } from '../constants/analysisPresets';
+import type { AnalysisOptions, MapOptions } from '../constants/analysisPresets';
 
 export default function Upload() {
   const navigate = useNavigate();
@@ -10,6 +14,10 @@ export default function Upload() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+
+  // Analysis and map options (default to Complete preset for all options)
+  const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>(DEFAULT_ANALYSIS_OPTIONS);
+  const [mapOptions, setMapOptions] = useState<MapOptions>(DEFAULT_MAP_OPTIONS);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -56,7 +64,14 @@ export default function Upload() {
     setUploading(true);
 
     try {
-      const result = await forestApi.uploadBoundary(file, forestName, blockName);
+      // Pass analysis and map options to API for selective analysis
+      const result = await forestApi.uploadBoundary(
+        file,
+        forestName,
+        blockName,
+        analysisOptions,
+        mapOptions
+      );
       navigate(`/calculations/${result.id}`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Upload failed. Please try again.');
@@ -156,6 +171,20 @@ export default function Upload() {
             />
           </div>
         </div>
+
+        {/* Analysis Options Panel */}
+        <AnalysisOptionsPanel
+          options={analysisOptions}
+          onChange={setAnalysisOptions}
+          disabled={uploading}
+        />
+
+        {/* Map Options Panel */}
+        <MapOptionsPanel
+          options={mapOptions}
+          onChange={setMapOptions}
+          disabled={uploading}
+        />
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">

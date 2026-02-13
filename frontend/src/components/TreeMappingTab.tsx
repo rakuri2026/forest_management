@@ -149,10 +149,21 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
       );
       setValidationResult(result);
 
+      // DEBUG: Log validation response
+      console.log('[TREE MAPPING] Validation result:', result);
+      console.log('[TREE MAPPING] ready_for_processing:', result.summary?.ready_for_processing);
+      console.log('[TREE MAPPING] inventory_id:', result.inventory_id);
+      console.log('[TREE MAPPING] boundary_check:', result.boundary_check);
+      console.log('[TREE MAPPING] ERRORS:', result.errors);
+      console.log('[TREE MAPPING] WARNINGS:', result.warnings);
+      console.log('[TREE MAPPING] Full summary:', result.summary);
+
       // Step 2: Check if boundary corrections are needed
       if (result.summary?.ready_for_processing && result.inventory_id) {
+        console.log('[TREE MAPPING] Condition met - proceeding with processing check');
         // Check for boundary issues
         if (result.boundary_check?.needs_correction) {
+          console.log('[TREE MAPPING] Boundary corrections needed - showing dialog');
           // Show correction dialog
           setCorrectionData({
             inventoryId: result.inventory_id,
@@ -164,6 +175,7 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
           return;
         }
 
+        console.log('[TREE MAPPING] No boundary corrections needed - proceeding with processing');
         // No corrections needed - proceed with normal processing
         // Update status to show processing
         setValidationResult({
@@ -175,15 +187,17 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
         });
 
         try {
+          console.log('[TREE MAPPING] Calling processInventory API...');
           // Process the inventory (re-upload file)
           await inventoryApi.processInventory(result.inventory_id, file);
+          console.log('[TREE MAPPING] Processing completed successfully');
 
           // Reload tree mapping data
           await checkTreeMapping();
           setFile(null);
           setValidationResult(null);
         } catch (processErr: any) {
-          console.error('Processing error:', processErr);
+          console.error('[TREE MAPPING] Processing error:', processErr);
           console.error('Error response:', processErr.response);
           console.error('Error data:', processErr.response?.data);
 
@@ -191,6 +205,10 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
           setError(errorMessage);
           setValidationResult(null); // Clear validation result to show error
         }
+      } else {
+        console.log('[TREE MAPPING] Condition NOT met - not calling processInventory');
+        console.log('[TREE MAPPING] ready_for_processing:', result.summary?.ready_for_processing);
+        console.log('[TREE MAPPING] inventory_id:', result.inventory_id);
       }
     } catch (err: any) {
       console.error('Upload error:', err);

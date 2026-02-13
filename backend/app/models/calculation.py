@@ -46,6 +46,10 @@ class Calculation(Base):
     # Analysis results stored as JSONB
     result_data = Column(JSONB, nullable=True)
 
+    # User's selected analysis and map options (for re-analysis and tracking)
+    analysis_options = Column(JSONB, nullable=True)  # e.g., {"run_elevation": true, "run_slope": false, ...}
+    map_options = Column(JSONB, nullable=True)  # e.g., {"boundary": true, "slope": true, ...}
+
     # Processing metadata
     status = Column(SQLEnum(CalculationStatus), nullable=False, default=CalculationStatus.PROCESSING)
     processing_time_seconds = Column(Integer, nullable=True)

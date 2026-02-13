@@ -150,6 +150,9 @@ class InventoryTree(Base):
     local_name = Column(String(100), nullable=True)
     row_number = Column(Integer, nullable=True)
 
+    # Extra columns from uploaded CSV (JSONB)
+    extra_columns = Column(JSONB, nullable=True)
+
     # Boundary correction tracking
     was_corrected = Column(Boolean, default=False, nullable=False)
     original_x = Column(Float, nullable=True)  # Original longitude before correction

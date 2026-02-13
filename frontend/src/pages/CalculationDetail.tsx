@@ -9,6 +9,9 @@ import { TreeMappingTab } from '../components/TreeMappingTab';
 import BiodiversityTab from '../components/BiodiversityTab';
 import AnalysisTabContent from '../components/AnalysisTabContent';
 import MapsTab from '../components/MapsTab';
+import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
+import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
+import type { AnalysisOptions } from '../constants/analysisPresets';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -100,6 +103,11 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemapping' | 'biodiversity' | 'maps'>('analysis');
 
+  // Re-analysis modal state
+  const [showReanalysisModal, setShowReanalysisModal] = useState(false);
+  const [reanalysisOptions, setReanalysisOptions] = useState<AnalysisOptions>(DEFAULT_ANALYSIS_OPTIONS);
+  const [reanalyzing, setReanalyzing] = useState(false);
+
   useEffect(() => {
     if (id) {
       loadCalculation();
@@ -137,6 +145,22 @@ export default function CalculationDetail() {
       setError(err.response?.data?.detail || 'Failed to load calculation');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReanalyze = async () => {
+    if (!calculation) return;
+
+    try {
+      setReanalyzing(true);
+      const updatedCalculation = await forestApi.reanalyze(calculation.id, reanalysisOptions);
+      setCalculation(updatedCalculation);
+      setShowReanalysisModal(false);
+    } catch (err: any) {
+      console.error('Reanalysis failed:', err);
+      alert(err.response?.data?.detail || 'Failed to reanalyze. Please try again.');
+    } finally {
+      setReanalyzing(false);
     }
   };
 
@@ -315,20 +339,33 @@ export default function CalculationDetail() {
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {/* Header Section */}
         <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-green-50 to-green-100">
-          <h1 className="text-3xl font-bold text-gray-900">{calculation.forest_name}</h1>
-          <div className="mt-2 flex items-center text-sm text-gray-600">
-            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <span>Uploaded: {formatDate(calculation.created_at)}</span>
-            <span className="mx-2">•</span>
-            <span className="font-medium">{calculation.uploaded_filename}</span>
-          </div>
-          {totalBlocks > 1 && (
-            <div className="mt-2 text-sm text-green-700 font-medium">
-              {totalBlocks} Blocks {processingInfo.partitioned && '(Partitioned using division lines)'}
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">{calculation.forest_name}</h1>
+              <div className="mt-2 flex items-center text-sm text-gray-600">
+                <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Uploaded: {formatDate(calculation.created_at)}</span>
+                <span className="mx-2">•</span>
+                <span className="font-medium">{calculation.uploaded_filename}</span>
+              </div>
+              {totalBlocks > 1 && (
+                <div className="mt-2 text-sm text-green-700 font-medium">
+                  {totalBlocks} Blocks {processingInfo.partitioned && '(Partitioned using division lines)'}
+                </div>
+              )}
             </div>
-          )}
+            <button
+              onClick={() => setShowReanalysisModal(true)}
+              className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium"
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Re-run Analysis
+            </button>
+          </div>
         </div>
 
         {/* Tab Navigation */}
@@ -1797,6 +1834,83 @@ export default function CalculationDetail() {
           </div>
         )}
       </div>
+
+      {/* Re-analysis Modal */}
+      {showReanalysisModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Re-run Analysis</h2>
+              <button
+                onClick={() => setShowReanalysisModal(false)}
+                disabled={reanalyzing}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <div className="mb-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start">
+                    <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium">Re-run analysis without re-uploading your boundary file</p>
+                      <p className="mt-1">
+                        Select which analyses you want to run. Your existing results will be preserved and only new analyses will be added.
+                        This is useful if you want to add more analyses that you didn't run initially.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <AnalysisOptionsPanel
+                options={reanalysisOptions}
+                onChange={setReanalysisOptions}
+                disabled={reanalyzing}
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex items-center justify-between">
+              <button
+                onClick={() => setShowReanalysisModal(false)}
+                disabled={reanalyzing}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReanalyze}
+                disabled={reanalyzing}
+                className="inline-flex items-center px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {reanalyzing ? (
+                  <>
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Re-analyzing...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Re-run Analysis
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

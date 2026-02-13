@@ -109,7 +109,11 @@
       "Bash(.\\venv\\Scripts\\pip install:*)",
       "Bash(cmd /c \"rmdir /s /q D:\\forest_management\\venv\\Lib\\site-packages\\~yproj\")",
       "Bash(venv/Scripts/pip install:*)",
-      "Bash(../venv/Scripts/pip:*)"
+      "Bash(../venv/Scripts/pip:*)",
+      "Bash(/d/forest_management/token.txt)",
+      "Bash(venvScriptspython test_column_mapping_api.py)",
+      "Bash(cmd /c \"netstat -ano | findstr :8001\")",
+      "Bash(venvScriptspython test_species_code_validation.py)"
     ],
     "deny": [],
     "ask": []

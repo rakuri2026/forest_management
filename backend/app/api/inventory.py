@@ -314,7 +314,8 @@ async def confirm_and_upload_with_mapping(
     validator = InventoryValidator(db)
     validation_report = await validator.validate_inventory_file(
         df_renamed,
-        user_specified_crs=projection_epsg
+        user_specified_crs=projection_epsg,
+        calculation_id=calculation_id
     )
 
     # Check boundary if calculation_id is provided

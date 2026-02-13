@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { inventoryApi } from '../services/api';
+import ColumnMappingPreview from '../components/ColumnMappingPreview';
 
 export default function InventoryUpload() {
   const navigate = useNavigate();
@@ -10,6 +11,8 @@ export default function InventoryUpload() {
   const [uploading, setUploading] = useState(false);
   const [validationResult, setValidationResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showColumnMapping, setShowColumnMapping] = useState(false);
+  const [columnMappingData, setColumnMappingData] = useState<any>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -45,13 +48,45 @@ export default function InventoryUpload() {
       setUploading(true);
       setError(null);
 
+      // Step 1: Preview column mapping
+      const previewData = await inventoryApi.previewColumnMapping(file);
+      setColumnMappingData(previewData);
+      setShowColumnMapping(true);
+      setUploading(false);
+
+    } catch (err: any) {
+      console.error('Preview error:', err);
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to preview file';
+      setError(errorMessage);
+      setUploading(false);
+    }
+  };
+
+  const handleConfirmMapping = async (
+    mapping: Record<string, string>,
+    savePreference: boolean
+  ) => {
+    if (!file) return;
+
+    try {
+      setUploading(true);
+      setShowColumnMapping(false);
+      setError(null);
+
       const epsg = projectionEpsg ? parseInt(projectionEpsg) : undefined;
 
-      // Step 1: Upload and validate
-      const result = await inventoryApi.uploadInventory(file, gridSpacing, epsg);
+      // Step 2: Confirm mapping and upload
+      const result = await inventoryApi.confirmColumnMapping(
+        file,
+        mapping,
+        savePreference,
+        gridSpacing,
+        undefined, // calculationId
+        epsg
+      );
       setValidationResult(result);
 
-      // Step 2: If ready for processing, automatically process
+      // Step 3: If ready for processing, automatically process
       if (result.summary?.ready_for_processing && result.inventory_id) {
         // Update status to show processing
         setValidationResult({
@@ -84,6 +119,11 @@ export default function InventoryUpload() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleCancelMapping = () => {
+    setShowColumnMapping(false);
+    setColumnMappingData(null);
   };
 
   return (
@@ -326,6 +366,15 @@ export default function InventoryUpload() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Column Mapping Modal */}
+      {showColumnMapping && columnMappingData && (
+        <ColumnMappingPreview
+          previewData={columnMappingData}
+          onConfirm={handleConfirmMapping}
+          onCancel={handleCancelMapping}
+        />
       )}
     </div>
   );

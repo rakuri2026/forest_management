@@ -8,6 +8,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from .validators.species_matcher import SpeciesMatcher
+from .validators.species_code_validator import SpeciesCodeValidator
 from .validators.coordinate_detector import CoordinateDetector
 from .validators.diameter_detector import DiameterDetector
 
@@ -26,13 +27,15 @@ class InventoryValidator:
         """
         self.db = db
         self.species_matcher = SpeciesMatcher(db)
+        self.species_code_validator = SpeciesCodeValidator(db)
         self.coord_detector = CoordinateDetector()
         self.diameter_detector = DiameterDetector()
 
     async def validate_inventory_file(
         self,
         df: pd.DataFrame,
-        user_specified_crs: Optional[int] = None
+        user_specified_crs: Optional[int] = None,
+        calculation_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Comprehensive validation of inventory CSV data
@@ -40,6 +43,7 @@ class InventoryValidator:
         Args:
             df: DataFrame with inventory data
             user_specified_crs: Optional EPSG code from user
+            calculation_id: Optional calculation UUID for physiographic zone detection
 
         Returns:
             Comprehensive validation report dict
@@ -52,6 +56,11 @@ class InventoryValidator:
             'info': [],
             'corrections': []
         }
+
+        # Physiographic zone detection (currently disabled for performance)
+        # TODO: Re-enable as background task or cache result
+        physiographic_zone = None
+        # NOTE: When physiographic_zone is None, unknown species default to Hill spp (safe fallback)
 
         # 1. Detect coordinate columns
         x_col, y_col = self.coord_detector.detect_coordinate_columns(df)
@@ -170,15 +179,15 @@ class InventoryValidator:
                 'confidence': diameter_detection.get('confidence', 'high')
             })
 
-        # 5. Validate species names
+        # 5. Validate species names (supports both codes 1-23 and scientific names)
         species_col = self._detect_species_column(df)
         if species_col:
-            species_validation = self._validate_species(df, species_col)
+            species_validation = self._validate_species(df, species_col, physiographic_zone)
             report['warnings'].extend(species_validation['warnings'])
             report['errors'].extend(species_validation['errors'])
             if species_validation['corrections']:
                 report['corrections'].append({
-                    'type': 'species_fuzzy_match',
+                    'type': 'species_validation',
                     'column': species_col,
                     'affected_rows': len(species_validation['corrections']),
                     'samples': list(species_validation['corrections'].values())[:5]
@@ -243,8 +252,16 @@ class InventoryValidator:
                 return col
         return None
 
-    def _validate_species(self, df: pd.DataFrame, species_col: str) -> Dict:
-        """Validate all species names"""
+    def _validate_species(
+        self,
+        df: pd.DataFrame,
+        species_col: str,
+        physiographic_zone: Optional[str] = None
+    ) -> Dict:
+        """
+        Validate all species values - supports both numeric codes (1-23) and scientific names
+        Uses physiographic zone for fallback species selection
+        """
         result = {
             'warnings': [],
             'errors': [],
@@ -252,33 +269,87 @@ class InventoryValidator:
         }
 
         for idx, row in df.iterrows():
-            species_name = row[species_col]
-            matched, confidence, method = self.species_matcher.match_species(species_name)
+            species_value = row[species_col]
 
-            if method == 'fuzzy':
-                result['warnings'].append({
-                    'row': idx + 2,  # +2 for header and 0-indexing
-                    'column': species_col,
-                    'original': species_name,
-                    'corrected': matched,
-                    'confidence': round(confidence, 2),
-                    'message': f'Species name auto-corrected ({int(confidence*100)}% match)'
-                })
-                df.at[idx, species_col] = matched
+            # Validate species using new code validator
+            (
+                scientific_name,
+                species_code,
+                method,
+                confidence,
+                warning_message
+            ) = self.species_code_validator.validate_species_value(
+                species_value,
+                physiographic_zone
+            )
+
+            # Handle different validation results
+            if method == 'code':
+                # Numeric code entered (1-23) - convert to scientific name
+                df.at[idx, species_col] = scientific_name
                 result['corrections'][idx] = {
-                    'original': species_name,
-                    'corrected': matched,
+                    'original': species_value,
+                    'corrected': scientific_name,
+                    'method': 'code_conversion',
+                    'species_code': species_code,
                     'confidence': confidence
                 }
 
+            elif method == 'fuzzy':
+                # Fuzzy match on scientific name
+                result['warnings'].append({
+                    'row': idx + 2,  # +2 for header and 0-indexing
+                    'column': species_col,
+                    'original': species_value,
+                    'corrected': scientific_name,
+                    'species_code': species_code,
+                    'confidence': round(confidence, 2),
+                    'message': f'Species name auto-corrected ({int(confidence*100)}% match)'
+                })
+                df.at[idx, species_col] = scientific_name
+                result['corrections'][idx] = {
+                    'original': species_value,
+                    'corrected': scientific_name,
+                    'method': 'fuzzy_match',
+                    'species_code': species_code,
+                    'confidence': confidence
+                }
+
+            elif method == 'fallback':
+                # Unknown species - using Terai/Hill spp fallback
+                result['warnings'].append({
+                    'row': idx + 2,
+                    'column': species_col,
+                    'original': species_value,
+                    'corrected': scientific_name,
+                    'species_code': species_code,
+                    'confidence': round(confidence, 2),
+                    'message': warning_message,
+                    'severity': 'warning'
+                })
+                df.at[idx, species_col] = scientific_name
+                result['corrections'][idx] = {
+                    'original': species_value,
+                    'corrected': scientific_name,
+                    'method': 'fallback',
+                    'species_code': species_code,
+                    'confidence': confidence,
+                    'reason': warning_message
+                }
+
+            elif method == 'exact' or method == 'alias':
+                # Perfect match - no correction needed
+                if scientific_name != str(species_value).strip():
+                    df.at[idx, species_col] = scientific_name
+
             elif method == 'no_match':
-                suggestions = self.species_matcher.get_suggestions(species_name)
+                # Complete failure - couldn't match or fallback
                 result['errors'].append({
                     'row': idx + 2,
                     'column': species_col,
-                    'value': species_name,
-                    'message': 'Species not recognized',
-                    'suggestions': suggestions[:3]
+                    'value': species_value,
+                    'message': warning_message or 'Species not recognized and fallback failed',
+                    'suggestions': self.species_matcher.get_suggestions(str(species_value))[:3]
                 })
 
         return result
