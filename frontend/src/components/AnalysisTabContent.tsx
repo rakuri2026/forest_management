@@ -1,8 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import MetricCard from './MetricCard';
 import CollapsibleSection from './CollapsibleSection';
 import PercentageBar from './PercentageBar';
 import { EditableCell } from './EditableCell';
+import SpeciesTable from './SpeciesTable';
+import AddSpeciesModal from './AddSpeciesModal';
+import SpeciesCoverageChart from './SpeciesCoverageChart';
+import ConfirmationPieChart from './ConfirmationPieChart';
+import SpeciesSummaryTable from './SpeciesSummaryTable';
+import { forestApi } from '../services/api';
 
 interface AnalysisTabContentProps {
   calculation: any;
@@ -14,6 +20,11 @@ interface AnalysisTabContentProps {
   handleSaveBlockExtent: (blockIndex: number, field: string, value: any) => Promise<void>;
   handleSaveBlockField: (blockIndex: number, field: string, value: any) => Promise<void>;
   handleSaveBlockPercentages: (blockIndex: number, field: string, key: string, value: any) => Promise<void>;
+  onRefresh?: () => void;
+  optimisticConfirmations?: Map<string, boolean>;
+  confirmingSpecies?: Set<string>;
+  getConfirmedStatus?: (species: any) => boolean;
+  handleToggleSpeciesConfirmation?: (species: any) => Promise<void>;
 }
 
 const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
@@ -25,9 +36,37 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
   handleSaveWholePercentages,
   handleSaveBlockExtent,
   handleSaveBlockField,
-  handleSaveBlockPercentages
+  handleSaveBlockPercentages,
+  onRefresh,
+  optimisticConfirmations,
+  confirmingSpecies,
+  getConfirmedStatus,
+  handleToggleSpeciesConfirmation
 }) => {
+  const [isAddSpeciesModalOpen, setIsAddSpeciesModalOpen] = useState(false);
+  const [speciesSummary, setSpeciesSummary] = useState<any>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
   const data = calculation.result_data || {};
+
+  // Fetch species summary data for analytics dashboard
+  useEffect(() => {
+    const fetchSpeciesSummary = async () => {
+      if (!calculation?.id || totalBlocks === 0) return;
+
+      setLoadingSummary(true);
+      try {
+        const data = await forestApi.getSpeciesSummary(calculation.id);
+        setSpeciesSummary(data);
+      } catch (err) {
+        console.error('Error fetching species summary:', err);
+        setSpeciesSummary(null);
+      } finally {
+        setLoadingSummary(false);
+      }
+    };
+
+    fetchSpeciesSummary();
+  }, [calculation?.id, totalBlocks, optimisticConfirmations]);
 
   // Prepare slope data for percentage bar
   const slopeData = data.slope_percentages
@@ -130,6 +169,93 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
           />
         </div>
       </div>
+
+      {/* Species Distribution Analytics Dashboard - Phase 2 */}
+      {totalBlocks > 0 && (
+        <CollapsibleSection
+          title="Species Distribution Analytics"
+          icon="📊"
+          defaultExpanded={false}
+          headerColor="purple"
+        >
+          <div className="p-6 space-y-8">
+            {loadingSummary ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading species analytics...</p>
+                </div>
+              </div>
+            ) : speciesSummary && speciesSummary.species_details && speciesSummary.species_details.length > 0 ? (
+              <>
+                {/* Summary Stats */}
+                <div className="bg-gradient-to-r from-purple-50 to-green-50 p-4 rounded-lg border border-purple-200">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Block-Level Species Analysis</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    This dashboard shows species distribution across all {totalBlocks} forest blocks.
+                    Species confirmations are auto-calculated from block-level data.
+                  </p>
+                  <div className="grid grid-cols-4 gap-4">
+                    <div className="bg-white p-3 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-gray-900">{speciesSummary.total_species}</p>
+                      <p className="text-xs text-gray-600 mt-1">Total Species</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-green-600">{speciesSummary.confirmed_species}</p>
+                      <p className="text-xs text-gray-600 mt-1">Confirmed</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-gray-600">{speciesSummary.unconfirmed_species}</p>
+                      <p className="text-xs text-gray-600 mt-1">Unconfirmed</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-purple-600">{speciesSummary.total_blocks}</p>
+                      <p className="text-xs text-gray-600 mt-1">Total Blocks</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Charts Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Bar Chart - Species Coverage */}
+                  <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                    <SpeciesCoverageChart
+                      speciesData={speciesSummary.species_details}
+                      totalBlocks={speciesSummary.total_blocks}
+                    />
+                  </div>
+
+                  {/* Pie Chart - Confirmation Status */}
+                  <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                    <ConfirmationPieChart
+                      confirmedCount={speciesSummary.confirmed_species}
+                      unconfirmedCount={speciesSummary.unconfirmed_species}
+                    />
+                  </div>
+                </div>
+
+                {/* Detailed Table */}
+                <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                  <SpeciesSummaryTable speciesData={speciesSummary.species_details} />
+                </div>
+
+                {/* Info Note */}
+                <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                  <p className="text-sm text-blue-900">
+                    <strong>Note:</strong> This dashboard auto-calculates whole forest species from block-level confirmations.
+                    When you confirm a species in any block (using the species table above or block-wise sections below),
+                    the changes are reflected here automatically. A species is marked as "confirmed" if it's confirmed in at least one block.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-gray-500">No species data available for analytics</p>
+              </div>
+            )}
+          </div>
+        </CollapsibleSection>
+      )}
 
       {/* Section 1: Forest Characteristics */}
       <CollapsibleSection
@@ -284,32 +410,24 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
             </div>
           )}
 
-          {/* Potential Species */}
+          {/* Potential Species - Enhanced Table View */}
           {data.potential_species && data.potential_species.length > 0 && (
-            <div>
-              <h4 className="text-md font-semibold text-gray-900 mb-3">
-                Potential Tree Species ({data.potential_species.length} species)
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {data.potential_species.slice(0, 10).map((species: any, idx: number) => (
-                  <div key={idx} className="inline-flex items-center bg-green-50 border border-green-200 rounded-md px-3 py-2 text-sm">
-                    <span className="font-semibold text-green-900">{species.local_name}</span>
-                    <span className="text-gray-500 ml-2 italic">({species.scientific_name})</span>
-                    {species.economic_value === 'High' && (
-                      <span className="ml-2 px-2 py-0.5 bg-green-200 text-green-800 rounded text-xs font-medium">High Value</span>
-                    )}
-                    {species.economic_value === 'Medium' && (
-                      <span className="ml-2 px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs font-medium">Med Value</span>
-                    )}
-                  </div>
-                ))}
-                {data.potential_species.length > 10 && (
-                  <div className="text-sm text-gray-500 italic self-center">
-                    +{data.potential_species.length - 10} more species
-                  </div>
-                )}
-              </div>
-            </div>
+            <SpeciesTable
+              species={data.potential_species}
+              calculationId={calculation.id}
+              removedSpecies={data.removed_species || []}
+              onSpeciesToggle={(speciesName, enabled) => {
+                console.log(`Species ${speciesName} ${enabled ? 'enabled' : 'disabled'}`);
+                // TODO: Trigger forest type recalculation
+              }}
+              onAddSpecies={() => setIsAddSpeciesModalOpen(true)}
+              onSpeciesRemoved={onRefresh}
+              onSpeciesConfirmed={onRefresh}
+              optimisticConfirmations={optimisticConfirmations}
+              confirmingSpecies={confirmingSpecies}
+              getConfirmedStatus={getConfirmedStatus}
+              handleToggleSpeciesConfirmation={handleToggleSpeciesConfirmation}
+            />
           )}
         </div>
       </CollapsibleSection>
@@ -862,6 +980,19 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
           </div>
         </div>
       </CollapsibleSection>
+
+      {/* Add Species Modal */}
+      <AddSpeciesModal
+        isOpen={isAddSpeciesModalOpen}
+        onClose={() => setIsAddSpeciesModalOpen(false)}
+        calculationId={calculation.id}
+        onSpeciesAdded={() => {
+          setIsAddSpeciesModalOpen(false);
+          if (onRefresh) {
+            onRefresh();
+          }
+        }}
+      />
 
     </div>
   );

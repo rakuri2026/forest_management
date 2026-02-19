@@ -5,6 +5,7 @@ import type { Calculation } from '../types';
 import { EditableCell } from '../components/EditableCell';
 import { FieldbookTab } from '../components/FieldbookTab';
 import { SamplingTab } from '../components/SamplingTab';
+import TreeModelGenerator from '../components/TreeModelGenerator';
 import { TreeMappingTab } from '../components/TreeMappingTab';
 import BiodiversityTab from '../components/BiodiversityTab';
 import AnalysisTabContent from '../components/AnalysisTabContent';
@@ -101,12 +102,19 @@ export default function CalculationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemapping' | 'biodiversity' | 'maps'>('analysis');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps'>('analysis');
 
   // Re-analysis modal state
   const [showReanalysisModal, setShowReanalysisModal] = useState(false);
   const [reanalysisOptions, setReanalysisOptions] = useState<AnalysisOptions>(DEFAULT_ANALYSIS_OPTIONS);
   const [reanalyzing, setReanalyzing] = useState(false);
+
+  // Species confirmation state (shared across whole forest and blocks)
+  const [optimisticConfirmations, setOptimisticConfirmations] = useState<Map<string, boolean>>(new Map());
+  const [confirmingSpecies, setConfirmingSpecies] = useState<Set<string>>(new Set());
+
+  // NEW: Track which block species lists are expanded
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (id) {
@@ -145,6 +153,61 @@ export default function CalculationDetail() {
       setError(err.response?.data?.detail || 'Failed to load calculation');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Helper function to get confirmed status (checks optimistic state first)
+  // NEW: Accepts optional blockName for block-specific confirmation status
+  const getConfirmedStatus = (species: any, blockName?: string): boolean => {
+    const scientificName = species.scientific_name;
+    const optimisticKey = blockName ? `${blockName}:${scientificName}` : scientificName;
+
+    if (optimisticConfirmations.has(optimisticKey)) {
+      return optimisticConfirmations.get(optimisticKey)!;
+    }
+    return species.confirmed ?? false;
+  };
+
+  // Handle species confirmation toggle (used by both whole forest and block species)
+  // NEW: Accepts blockName parameter for block-specific confirmation
+  const handleToggleSpeciesConfirmation = async (species: any, blockName?: string) => {
+    const scientificName = species.scientific_name;
+    const currentConfirmed = getConfirmedStatus(species);
+    const newConfirmed = !currentConfirmed;
+
+    // Create a unique key for optimistic updates (includes block context)
+    const optimisticKey = blockName ? `${blockName}:${scientificName}` : scientificName;
+
+    // Optimistic update - change UI immediately
+    setOptimisticConfirmations(prev => {
+      const newMap = new Map(prev);
+      newMap.set(optimisticKey, newConfirmed);
+      return newMap;
+    });
+
+    setConfirmingSpecies(prev => new Set(prev).add(optimisticKey));
+
+    try {
+      // NEW: Pass blockName to API for block-specific confirmation
+      await forestApi.toggleSpeciesConfirmation(id!, scientificName, newConfirmed, blockName);
+      // Success - optimistic update is correct, no page refresh needed
+    } catch (err: any) {
+      console.error('Error confirming species:', err);
+      const context = blockName ? ` in ${blockName}` : '';
+      alert(`Failed to update species${context}: ` + (err.response?.data?.detail || err.message));
+
+      // Revert optimistic update on error
+      setOptimisticConfirmations(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(optimisticKey);
+        return newMap;
+      });
+    } finally {
+      setConfirmingSpecies(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(optimisticKey);
+        return newSet;
+      });
     }
   };
 
@@ -402,6 +465,16 @@ export default function CalculationDetail() {
               Sampling
             </button>
             <button
+              onClick={() => setActiveTab('treemodel')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'treemodel'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Tree Model
+            </button>
+            <button
               onClick={() => setActiveTab('treemapping')}
               className={`px-6 py-3 border-b-2 font-medium text-sm ${
                 activeTab === 'treemapping'
@@ -447,6 +520,12 @@ export default function CalculationDetail() {
           </div>
         )}
 
+        {activeTab === 'treemodel' && (
+          <div className="p-6">
+            <TreeModelGenerator calculationId={calculation.id} onRefresh={loadCalculation} />
+          </div>
+        )}
+
         {activeTab === 'treemapping' && (
           <div className="p-6">
             <TreeMappingTab calculationId={calculation.id} />
@@ -480,6 +559,11 @@ export default function CalculationDetail() {
             handleSaveBlockExtent={handleSaveBlockExtent}
             handleSaveBlockField={handleSaveBlock}
             handleSaveBlockPercentages={handleSaveBlockPercentages}
+            onRefresh={loadCalculation}
+            optimisticConfirmations={optimisticConfirmations}
+            confirmingSpecies={confirmingSpecies}
+            getConfirmedStatus={getConfirmedStatus}
+            handleToggleSpeciesConfirmation={handleToggleSpeciesConfirmation}
           />
         )}
 
@@ -1292,23 +1376,69 @@ export default function CalculationDetail() {
                             <td className="px-4 py-3 text-sm font-medium text-gray-900">Potential Tree Species</td>
                             <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
                               <div className="flex flex-wrap gap-2">
-                                {block.potential_species.slice(0, 8).map((species: any, speciesIdx: number) => (
-                                  <div key={speciesIdx} className="inline-flex items-center bg-gray-100 rounded-md px-2 py-1 text-xs">
-                                    <span className="font-semibold">{species.local_name}</span>
-                                    <span className="text-gray-500 ml-1 text-xs">({species.scientific_name})</span>
-                                    {species.economic_value === 'High' && (
-                                      <span className="ml-1 px-1 py-0.5 bg-green-200 text-green-800 rounded text-xs">$$</span>
-                                    )}
-                                    {species.economic_value === 'Medium' && (
-                                      <span className="ml-1 px-1 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">$</span>
-                                    )}
-                                  </div>
-                                ))}
-                                {block.potential_species.length > 8 && (
-                                  <div className="text-xs text-gray-500 italic">
-                                    +{block.potential_species.length - 8} more
-                                  </div>
-                                )}
+                                {(() => {
+                                  // Use expandedBlocks state to track which blocks are expanded
+                                  const blockKey = `block-${index}`;
+                                  const isExpanded = expandedBlocks.has(blockKey);
+                                  const speciesToShow = isExpanded ? block.potential_species : block.potential_species.slice(0, 8);
+
+                                  return (
+                                    <>
+                                      {speciesToShow.map((species: any, speciesIdx: number) => {
+                                        // NEW: Pass block.block_name for block-specific confirmation
+                                        const isConfirmed = getConfirmedStatus(species, block.block_name);
+                                        const optimisticKey = `${block.block_name}:${species.scientific_name}`;
+                                        const isConfirming = confirmingSpecies.has(optimisticKey);
+
+                                        return (
+                                          <div
+                                            key={speciesIdx}
+                                            onClick={() => !isConfirming && handleToggleSpeciesConfirmation(species, block.block_name)}
+                                            className={`inline-flex items-center rounded-md px-2 py-1 text-xs transition-all cursor-pointer ${
+                                              isConfirmed
+                                                ? 'bg-green-100 border-2 border-green-500 opacity-100'
+                                                : 'bg-gray-100 border-2 border-dashed border-gray-400 opacity-60'
+                                            } ${isConfirming ? 'opacity-50 cursor-wait' : 'hover:opacity-90'}`}
+                                            title={isConfirmed ? `Click to unconfirm in ${block.block_name}` : `Click to confirm in ${block.block_name}`}
+                                          >
+                                            <span className="font-semibold">{species.local_name}</span>
+                                            <span className={`ml-1 text-xs ${isConfirmed ? 'text-green-700' : 'text-gray-500'}`}>
+                                              ({species.scientific_name})
+                                            </span>
+                                            {species.economic_value === 'High' && (
+                                              <span className="ml-1 px-1 py-0.5 bg-green-200 text-green-800 rounded text-xs">$$</span>
+                                            )}
+                                            {species.economic_value === 'Medium' && (
+                                              <span className="ml-1 px-1 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">$</span>
+                                            )}
+                                            {isConfirming && <span className="ml-1">⏳</span>}
+                                          </div>
+                                        );
+                                      })}
+                                      {block.potential_species.length > 8 && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedBlocks(prev => {
+                                              const newSet = new Set(prev);
+                                              if (isExpanded) {
+                                                newSet.delete(blockKey);
+                                              } else {
+                                                newSet.add(blockKey);
+                                              }
+                                              return newSet;
+                                            });
+                                          }}
+                                          className="text-xs text-blue-600 hover:text-blue-800 underline cursor-pointer italic"
+                                        >
+                                          {isExpanded
+                                            ? '▲ Show less'
+                                            : `▼ +${block.potential_species.length - 8} more species`}
+                                        </button>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </td>
                           </tr>
