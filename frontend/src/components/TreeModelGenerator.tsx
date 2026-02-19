@@ -7,6 +7,7 @@ interface TreeModelConfig {
   min_height_m: number;
   max_trees_per_ha: number;
   spatial_distribution: string;
+  plot_buffer_meters: number;
   algorithm_version: string;
 }
 
@@ -49,6 +50,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
     min_height_m: 5.0,
     max_trees_per_ha: 1000,
     spatial_distribution: 'random',
+    plot_buffer_meters: 25.0,
     algorithm_version: 'v1.0'
   });
 
@@ -211,7 +213,13 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                 <p className="font-medium mb-1">What is this?</p>
                 <p className="mb-2">
                   This tool generates a synthetic tree distribution map (GPKG file) showing estimated locations
-                  of individual trees based on canopy height data and species analysis.
+                  of individual trees based on canopy height data and species analysis. Trees are automatically
+                  assigned to sample plots based on the buffer distance.
+                </p>
+                <p className="font-medium text-orange-700 mb-1">📋 Requirement:</p>
+                <p className="mb-2 text-orange-900">
+                  You must create a <strong>sampling design</strong> first (from the Sampling tab) before
+                  generating tree models. Trees will be assigned to sample plots using the specified buffer.
                 </p>
                 <p className="font-medium text-red-700 mb-1">⚠️ Important Disclaimer:</p>
                 <ul className="list-disc list-inside space-y-1 text-red-900">
@@ -277,6 +285,23 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                   disabled={generating}
                 />
                 <p className="text-xs text-gray-500 mt-1">Upper density cap (default: 1000)</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Sample Plot Buffer (m)
+                </label>
+                <input
+                  type="number"
+                  value={config.plot_buffer_meters}
+                  onChange={(e) => setConfig({ ...config, plot_buffer_meters: parseFloat(e.target.value) })}
+                  min="5"
+                  max="100"
+                  step="1"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                  disabled={generating}
+                />
+                <p className="text-xs text-gray-500 mt-1">Buffer radius for plot assignment (default: 25m)</p>
               </div>
 
               <div>

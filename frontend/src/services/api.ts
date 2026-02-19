@@ -9,10 +9,12 @@ import type {
   Calculation,
 } from '../types';
 
-export const API_BASE_URL = 'http://localhost:3001';
+export const API_BASE_URL = 'http://localhost:8001';
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  // In dev mode, use relative URLs so Vite proxy handles them
+  // In production, use absolute URL
+  baseURL: import.meta.env.DEV ? undefined : API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -20,6 +22,16 @@ const api = axios.create({
     'Expires': '0',
   },
 });
+
+// Debug interceptor to log full URL
+api.interceptors.request.use(
+  (config) => {
+    const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;
+    console.log('Axios request URL:', fullUrl);
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // Request interceptor to add auth token
 api.interceptors.request.use(
@@ -173,6 +185,78 @@ export const forestApi = {
       `/api/forests/calculations/${id}/generate-maps`,
       mapOptions
     );
+    return response.data;
+  },
+
+  // Species confirmation endpoints
+  toggleSpeciesConfirmation: async (
+    calculationId: string,
+    scientificName: string,
+    confirmed: boolean,
+    blockName?: string  // NEW: Optional block identifier
+  ): Promise<Calculation> => {
+    const response = await api.patch<Calculation>(
+      `/api/forests/calculations/${calculationId}/species/${encodeURIComponent(scientificName)}/confirm`,
+      {
+        confirmed,
+        block_name: blockName  // NEW: Pass block_name if provided
+      }
+    );
+    return response.data;
+  },
+
+  confirmAllSpecies: async (
+    calculationId: string,
+    confirmed: boolean
+  ): Promise<Calculation> => {
+    const response = await api.post<Calculation>(
+      `/api/forests/calculations/${calculationId}/species/confirm-all`,
+      { confirmed }
+    );
+    return response.data;
+  },
+
+  getSpeciesSummary: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/forests/calculations/${calculationId}/species-summary`);
+    return response.data;
+  },
+};
+
+// Tree Model endpoints
+export const treeModelApi = {
+  generate: async (calculationId: string, config?: {
+    min_dbh_cm?: number;
+    min_height_m?: number;
+    max_trees_per_ha?: number;
+    spatial_distribution?: string;
+    plot_buffer_meters?: number;
+    algorithm_version?: string;
+  }) => {
+    const response = await api.post(`/api/calculations/${calculationId}/generate-tree-model`, {
+      config: config || null
+    });
+    return response.data;
+  },
+
+  getModel: async (modelId: string) => {
+    const response = await api.get(`/api/tree-models/${modelId}`);
+    return response.data;
+  },
+
+  listModels: async (calculationId: string) => {
+    const response = await api.get(`/api/calculations/${calculationId}/tree-models`);
+    return response.data;
+  },
+
+  download: async (modelId: string) => {
+    const response = await api.get(`/api/tree-models/${modelId}/download`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  delete: async (modelId: string) => {
+    const response = await api.delete(`/api/tree-models/${modelId}`);
     return response.data;
   },
 };
