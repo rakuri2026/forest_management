@@ -257,9 +257,13 @@ class InventoryService:
 
             coef = self.species_coefficients[species]
 
-            # Get or estimate height
-            if height_col and pd.notna(row[height_col]):
-                height_m = row[height_col]
+            # Get or estimate height (avoid Series ambiguity)
+            height_val = None
+            if height_col and height_col in df.columns:
+                height_val = row[height_col]
+
+            if height_val and pd.notna(height_val):
+                height_m = float(height_val)
             else:
                 # Estimate height using default H/D ratio
                 height_m = dbh_cm * 0.8  # Default ratio for missing heights
@@ -299,11 +303,28 @@ class InventoryService:
                 gross_volume = stem_volume * 0.85  # Default 85% is merchantable
 
             # 5. Calculate net volume (after defects)
-            tree_class = row[class_col] if class_col and pd.notna(row[class_col]) else 'B'
-            if tree_class == 'A':
-                net_volume = gross_volume * 0.9  # 10% defect
+            # Get class value safely (avoid Series ambiguity)
+            class_val = None
+            if class_col is not None and class_col in df.columns:
+                try:
+                    class_val = row[class_col]
+                    # Handle empty strings or NaN
+                    if pd.isna(class_val) or (isinstance(class_val, str) and class_val.strip() == ''):
+                        class_val = None
+                except (KeyError, TypeError):
+                    class_val = None
+
+            # Use class for defect calculation (default to 'B' if not provided)
+            if class_val is not None:
+                tree_class = str(class_val)
             else:
-                net_volume = gross_volume * 0.8  # 20% defect
+                tree_class = 'B'
+
+            # Apply defect factor based on class
+            if tree_class == '1' or tree_class.upper() == 'A':
+                net_volume = gross_volume * 0.9  # 10% defect (Class A/1)
+            else:
+                net_volume = gross_volume * 0.8  # 20% defect (Class B/2/3/4)
 
             # 6. Convert net volume to cubic feet
             net_volume_cft = net_volume * 35.3147
@@ -448,12 +469,20 @@ class InventoryService:
             # Get coordinates
             lon, lat = row.geometry.x, row.geometry.y
 
+            # Get height and class values
+            height_val = row[height_col] if height_col else None
+            class_val = row[class_col] if class_col else None
+
+            # Convert empty strings to None for class (from class normalization)
+            if isinstance(class_val, str) and class_val.strip() == '':
+                class_val = None
+
             tree = InventoryTree(
                 inventory_calculation_id=inventory_id,
                 species=species,
                 dia_cm=float(row[diameter_col]),
-                height_m=float(row[height_col]) if height_col and pd.notna(row[height_col]) else None,
-                tree_class=row[class_col] if class_col and pd.notna(row[class_col]) else None,
+                height_m=float(height_val) if pd.notna(height_val) else None,
+                tree_class=class_val if pd.notna(class_val) else None,
                 location=f'SRID=4326;POINT({lon} {lat})',
                 stem_volume=float(row['stem_volume']),
                 branch_volume=float(row['branch_volume']),
@@ -715,12 +744,20 @@ class InventoryService:
                 if idx == 0 and extra_cols:
                     print(f"[EXTRA COLUMNS] First row extra columns: {extra_cols}")
 
+                # Get height and class values, handling potential NaN/empty strings
+                height_val = row.get(height_col) if height_col and height_col in df.columns else None
+                class_val = row.get(class_col) if class_col and class_col in df.columns else None
+
+                # Convert empty strings to None for class (from class normalization)
+                if isinstance(class_val, str) and class_val.strip() == '':
+                    class_val = None
+
                 tree = InventoryTree(
                     inventory_calculation_id=inventory_id,
                     species=species,
                     dia_cm=float(row[diameter_col]),
-                    height_m=float(row[height_col]) if pd.notna(row.get(height_col)) else None,
-                    tree_class=row[class_col] if pd.notna(row.get(class_col)) else None,
+                    height_m=float(height_val) if pd.notna(height_val) else None,
+                    tree_class=class_val if pd.notna(class_val) else None,
                     location=f'SRID=4326;POINT({lon} {lat})',
                     stem_volume=float(row['stem_volume']),
                     branch_volume=float(row['branch_volume']),
@@ -821,7 +858,7 @@ class InventoryService:
             Number of mother trees identified
         """
         try:
-            # Step 1: Create temporary table with eligible trees (DBH >= 10 cm)
+            # Step 1: Create temporary table with eligible trees (DBH > 30 cm)
             # and transform to projected CRS
             self.db.execute(text("""
                 DROP TABLE IF EXISTS temp_eligible_trees;
@@ -832,7 +869,7 @@ class InventoryService:
                     location::geometry AS geom_wgs84
                 FROM public.inventory_trees
                 WHERE inventory_calculation_id = :inventory_id
-                  AND dia_cm >= 10
+                  AND dia_cm > 30
                   AND remark != 'Seedling';
             """), {
                 "inventory_id": str(inventory_id),

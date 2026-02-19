@@ -113,6 +113,10 @@ class ClassNormalizer:
         self.conversions = []
         self.invalid_values = []
 
+        # Convert column to string dtype for categorical data (1,2,3,4,A,B,C,D,etc.)
+        # Replace NaN with empty string first to avoid "nan" string values
+        df[class_column] = df[class_column].fillna('').astype(str)
+
         # Statistics
         stats = {
             'total_rows': len(df),
@@ -148,11 +152,11 @@ class ClassNormalizer:
                         'message': message
                     })
 
-            # Update DataFrame (convert to string to match column dtype)
+            # Update DataFrame with string values (class is categorical, not numeric)
             if normalized is not None:
                 df.at[idx, class_column] = str(normalized)
             else:
-                df.at[idx, class_column] = None
+                df.at[idx, class_column] = ''  # Empty string instead of None for string column
 
         # Generate report
         report = {

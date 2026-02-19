@@ -400,11 +400,11 @@ class ColumnMapper:
                 reverse_map[std_col] = []
             reverse_map[std_col].append(csv_col)
 
-        # Return only those with multiple mappings
+        # Return only those with multiple mappings, but allow multiple columns to map to '_ignore'
         duplicates = {
             std_col: csv_cols
             for std_col, csv_cols in reverse_map.items()
-            if len(csv_cols) > 1
+            if len(csv_cols) > 1 and std_col != '_ignore'
         }
 
         return duplicates

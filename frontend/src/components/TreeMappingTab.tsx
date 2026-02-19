@@ -206,9 +206,12 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
           setValidationResult(null); // Clear validation result to show error
         }
       } else {
+        // CRITICAL FIX: If not ready for processing (e.g., boundary error),
+        // stop loading immediately so user can see the error
         console.log('[TREE MAPPING] Condition NOT met - not calling processInventory');
         console.log('[TREE MAPPING] ready_for_processing:', result.summary?.ready_for_processing);
         console.log('[TREE MAPPING] inventory_id:', result.inventory_id);
+        setUploading(false);
       }
     } catch (err: any) {
       console.error('Upload error:', err);
@@ -489,17 +492,58 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
       )}
 
       {validationResult && (
-        <div className={`border rounded-lg p-4 ${
+        <div className={`border rounded-lg p-6 ${
           validationResult.summary?.ready_for_processing
             ? 'bg-green-50 border-green-200'
-            : 'bg-yellow-50 border-yellow-200'
+            : 'bg-red-50 border-red-200'
         }`}>
-          <h3 className="font-semibold mb-2">
-            {validationResult.summary?.ready_for_processing ? 'Validation Successful' : 'Validation Results'}
+          <h3 className="font-semibold mb-2 text-lg">
+            {validationResult.summary?.ready_for_processing ? 'Validation Successful' : 'Validation Failed'}
           </h3>
-          <p className="text-sm">
-            {validationResult.summary?.status || 'Processing...'}
-          </p>
+
+          {/* Show errors if validation failed */}
+          {!validationResult.summary?.ready_for_processing && validationResult.errors && validationResult.errors.length > 0 && (
+            <div className="space-y-2">
+              {validationResult.errors.map((err: any, idx: number) => (
+                <div key={idx} className="bg-red-100 border border-red-300 rounded-md p-3">
+                  <p className="text-sm font-medium text-red-800">{err.type || 'Error'}</p>
+                  <p className="text-sm text-red-700 mt-1">{err.message}</p>
+                </div>
+              ))}
+
+              {/* Boundary check details */}
+              {validationResult.boundary_check && (
+                <div className="mt-4 p-3 bg-white rounded-md border border-red-200">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Boundary Check Details:</h4>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-gray-600">Total Points:</span>
+                      <span className="ml-2 font-semibold">{validationResult.boundary_check.total_points}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Outside Boundary:</span>
+                      <span className="ml-2 font-semibold text-red-600">
+                        {validationResult.boundary_check.out_of_boundary_count} ({validationResult.boundary_check.out_of_boundary_percentage}%)
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Within Tolerance:</span>
+                      <span className="ml-2 font-semibold">
+                        {validationResult.boundary_check.within_tolerance ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Show status if ready for processing */}
+          {validationResult.summary?.ready_for_processing && (
+            <p className="text-sm text-green-700">
+              {validationResult.summary?.status || 'Ready for processing'}
+            </p>
+          )}
         </div>
       )}
 

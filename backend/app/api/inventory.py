@@ -203,6 +203,7 @@ async def confirm_and_upload_with_mapping(
     calculation_id: Optional[str] = Form(None),
     grid_spacing_meters: float = Form(20.0),
     projection_epsg: Optional[int] = Form(None),
+    correction_strategy: str = Form("nearest_tree"),  # "nearest_tree" or "boundary_edge"
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -310,52 +311,124 @@ async def confirm_and_upload_with_mapping(
                 detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
             )
 
-    # Validate data with renamed columns
-    validator = InventoryValidator(db)
-    validation_report = await validator.validate_inventory_file(
-        df_renamed,
-        user_specified_crs=projection_epsg,
-        calculation_id=calculation_id
-    )
-
-    # Check boundary if calculation_id is provided
+    # IMPORTANT: Check boundary FIRST if calculation_id provided
+    # This gives fast feedback if >20% outside, before expensive validation
     boundary_check_result = None
-    if calculation_id and validation_report['summary'].get('ready_for_processing'):
+    if calculation_id:
+        print(f"[BOUNDARY] Checking boundary first (fast fail for >20%)...")
         try:
             from app.services.boundary_validator import validate_inventory_boundary
 
-            # Get coordinate columns
-            coord_cols = validation_report['data_detection'].get('coordinate_columns', {})
-            x_col = coord_cols.get('x')
-            y_col = coord_cols.get('y')
+            # Get coordinate columns from mapping
+            # Find longitude/latitude columns
+            x_col = None
+            y_col = None
+            for csv_col, std_col in mapping_dict.items():
+                if std_col.upper() == 'LONGITUDE':
+                    x_col = std_col
+                elif std_col.upper() == 'LATITUDE':
+                    y_col = std_col
 
             if x_col and y_col and x_col in df_renamed.columns and y_col in df_renamed.columns:
-                # Extract tree points (lon, lat, row_number)
+                # Quick boundary check BEFORE full validation
                 tree_points = [
                     (float(row[x_col]), float(row[y_col]), idx + 1)
                     for idx, row in df_renamed.iterrows()
                     if pd.notna(row[x_col]) and pd.notna(row[y_col])
                 ]
 
-                # Validate boundary
                 boundary_check_result = validate_inventory_boundary(
                     db,
                     UUID(calculation_id),
                     tree_points,
-                    tolerance_percent=5.0
+                    tolerance_percent=20.0
                 )
 
-                # Add boundary check to validation report
-                validation_report['boundary_check'] = {
-                    'total_points': boundary_check_result['total_points'],
-                    'out_of_boundary_count': boundary_check_result['out_of_boundary_count'],
-                    'out_of_boundary_percentage': boundary_check_result['out_of_boundary_percentage'],
-                    'within_tolerance': boundary_check_result['within_tolerance'],
-                    'needs_correction': boundary_check_result['needs_correction']
-                }
+                print(f"[BOUNDARY] Quick check: {boundary_check_result['out_of_boundary_percentage']}% outside, tolerance: {boundary_check_result['within_tolerance']}")
 
-                # Generate correction preview if corrections are needed
-                if boundary_check_result['needs_correction']:
+                # If >20% outside, return error IMMEDIATELY (before full validation)
+                if not boundary_check_result['within_tolerance']:
+                    print(f"[BOUNDARY] REJECTED: {boundary_check_result['out_of_boundary_percentage']}% exceeds 20% tolerance")
+                    error_response = {
+                        'success': False,
+                        'summary': {
+                            'total_rows': len(df_renamed),
+                            'ready_for_processing': False,
+                            'has_critical_errors': True
+                        },
+                        'boundary_check': {
+                            'total_points': boundary_check_result['total_points'],
+                            'out_of_boundary_count': boundary_check_result['out_of_boundary_count'],
+                            'out_of_boundary_percentage': boundary_check_result['out_of_boundary_percentage'],
+                            'within_tolerance': False,
+                            'needs_correction': False,
+                            'correction_strategy': correction_strategy
+                        },
+                        'errors': [{
+                            'type': 'boundary_error',
+                            'severity': 'error',
+                            'message': boundary_check_result.get('error_message', 'Too many trees outside boundary')
+                        }],
+                        'warnings': [],
+                        'data_detection': {},
+                        'corrections': []
+                    }
+                    print(f"[BOUNDARY] Returning error response with {len(error_response['errors'])} errors")
+                    return convert_numpy_types(error_response)
+        except Exception as e:
+            print(f"[BOUNDARY] Quick check failed: {str(e)}")
+            # Continue with normal validation if boundary check fails
+            pass
+
+    # Validate data with renamed columns (only if boundary check passed or not applicable)
+    print(f"[VALIDATION] Starting full inventory validation for {len(df_renamed)} rows...")
+    validator = InventoryValidator(db)
+    validation_report = await validator.validate_inventory_file(
+        df_renamed,
+        user_specified_crs=projection_epsg,
+        calculation_id=calculation_id
+    )
+    print(f"[VALIDATION] Inventory validation complete. Ready for processing: {validation_report['summary'].get('ready_for_processing')}")
+
+    # Add boundary check to validation report if we already have it from quick check
+    if boundary_check_result and calculation_id and validation_report['summary'].get('ready_for_processing'):
+        print(f"[BOUNDARY] Adding boundary check to validation report...")
+        validation_report['boundary_check'] = {
+            'total_points': boundary_check_result['total_points'],
+            'out_of_boundary_count': boundary_check_result['out_of_boundary_count'],
+            'out_of_boundary_percentage': boundary_check_result['out_of_boundary_percentage'],
+            'within_tolerance': boundary_check_result['within_tolerance'],
+            'needs_correction': boundary_check_result['needs_correction'],
+            'correction_strategy': correction_strategy
+        }
+
+        # Generate correction preview if corrections are needed (already checked tolerance in quick check)
+        if boundary_check_result['needs_correction']:
+            try:
+                # Get coordinate columns for correction generation
+                coord_cols = validation_report['data_detection'].get('coordinate_columns', {})
+                x_col = coord_cols.get('x')
+                y_col = coord_cols.get('y')
+
+                if correction_strategy == "nearest_tree":
+                    # Use tree-to-tree correction
+                    from app.services.tree_to_tree_corrector import TreeToTreeCorrector
+
+                    corrector = TreeToTreeCorrector(db)
+                    corrections_result = corrector.generate_corrections(
+                        df_renamed[[x_col, y_col, 'row_number'] if 'row_number' in df_renamed.columns else df_renamed[[x_col, y_col]].assign(row_number=range(1, len(df_renamed)+1))].rename(columns={x_col: 'longitude', y_col: 'latitude'}),
+                        boundary_check_result['boundary_wkt'],
+                        str(UUID(calculation_id))
+                    )
+
+                    validation_report['boundary_check']['corrections'] = corrections_result['corrections']
+                    validation_report['boundary_check']['correction_summary'] = corrections_result['correction_summary']
+                    validation_report['boundary_check']['correctable'] = corrections_result['correctable']
+                    validation_report['boundary_check']['uncorrectable'] = corrections_result['uncorrectable']
+                    validation_report['boundary_check']['recommendation'] = corrections_result['recommendation']
+
+                else:
+                    # Use boundary edge correction (existing method)
                     from app.services.boundary_corrector import generate_correction_preview
 
                     species_col = validation_report['data_detection'].get('species_column', 'Species')
@@ -372,24 +445,16 @@ async def confirm_and_upload_with_mapping(
                     validation_report['boundary_check']['corrections'] = corrections_preview['corrections']
                     validation_report['boundary_check']['correction_summary'] = corrections_preview['summary']
 
-                # If too many points outside boundary, fail validation
-                if not boundary_check_result['within_tolerance']:
-                    validation_report['summary']['ready_for_processing'] = False
-                    validation_report['errors'].append({
-                        'type': 'boundary_error',
-                        'severity': 'error',
-                        'message': boundary_check_result.get('error_message', 'Too many trees outside boundary')
-                    })
-
-        except Exception as e:
-            # Log boundary check error but don't fail upload
-            import logging
-            logging.error(f"Boundary check failed: {str(e)}")
-            validation_report['warnings'].append({
-                'type': 'boundary_check_error',
-                'severity': 'warning',
-                'message': f'Could not validate boundary: {str(e)}'
-            })
+            except Exception as e:
+                # Log correction generation error but don't fail upload
+                import logging
+                logging.error(f"Correction generation failed: {str(e)}")
+                print(f"[BOUNDARY] Correction generation failed: {str(e)}")
+                validation_report['warnings'].append({
+                    'type': 'correction_generation_error',
+                    'severity': 'warning',
+                    'message': f'Could not generate correction preview: {str(e)}'
+                })
 
     # If validation passed, create inventory calculation record
     if validation_report['summary'].get('ready_for_processing'):
@@ -1210,13 +1275,13 @@ async def accept_corrections(
         if pd.notna(row[x_col]) and pd.notna(row[y_col])
     ]
 
-    # Validate boundary
+    # Validate boundary with updated 20% tolerance
     try:
         boundary_check = validate_inventory_boundary(
             db,
             inventory.calculation_id,
             tree_points,
-            tolerance_percent=5.0
+            tolerance_percent=20.0
         )
     except Exception as e:
         logger.error(f"Boundary validation failed: {str(e)}")
@@ -1236,9 +1301,9 @@ async def accept_corrections(
         elif not boundary_check['within_tolerance']:
             raise HTTPException(
                 status_code=400,
-                detail=f"Too many trees outside boundary ({boundary_check['out_of_boundary_percentage']}% > 5%). "
+                detail=f"Too many trees outside boundary ({boundary_check['out_of_boundary_percentage']}% > 20%). "
                        f"Please check your data: verify coordinates, EPSG code, and boundary selection. "
-                       f"Automatic correction is only available when <5% of trees are outside the boundary."
+                       f"Automatic correction is only available when <20% of trees are outside the boundary."
             )
         else:
             raise HTTPException(

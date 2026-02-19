@@ -113,7 +113,12 @@
       "Bash(/d/forest_management/token.txt)",
       "Bash(venvScriptspython test_column_mapping_api.py)",
       "Bash(cmd /c \"netstat -ano | findstr :8001\")",
-      "Bash(venvScriptspython test_species_code_validation.py)"
+      "Bash(venvScriptspython test_species_code_validation.py)",
+      "Bash(cmd /c \"dir /b D:\\forest_management\\testData\\tree_mapping_test_data\\*.csv\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODY0NmQxMS1iYTQ1LTRhMzktOGFiNS05NTFjOTA3ODZmMmEiLCJlbWFpbCI6ImRlbW9AZm9yZXN0LmNvbSIsImV4cCI6MTc3MTA2OTk5OCwidHlwZSI6ImFjY2VzcyJ9.ipsLgNZP1ewNFphXzj1zAZ8pHdgjYn7esRK9J5Rl37E\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODY0NmQxMS1iYTQ1LTRhMzktOGFiNS05NTFjOTA3ODZmMmEiLCJlbWFpbCI6ImRlbW9AZm9yZXN0LmNvbSIsImV4cCI6MTc3MTA4NTA1NiwidHlwZSI6ImFjY2VzcyJ9.UWZ2fzkZXbDzumA6q39uhsTcyHT0Crhs2AnKHoFfJuc\")",
+      "Bash(/d/forest_management/preview_test.json)",
+      "Bash(/d/forest_management/upload_test.json)"
     ],
     "deny": [],
     "ask": []

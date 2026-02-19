@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def check_points_in_boundary(
     points: List[Tuple[float, float, int]],  # [(lon, lat, row_number), ...]
     boundary_geom_wkt: str,
-    tolerance_percent: float = 5.0
+    tolerance_percent: float = 20.0
 ) -> Dict:
     """
     Check if tree points fall within boundary polygon
@@ -144,7 +144,7 @@ def validate_inventory_boundary(
     db: Session,
     calculation_id: UUID,
     tree_points: List[Tuple[float, float, int]],
-    tolerance_percent: float = 5.0
+    tolerance_percent: float = 20.0
 ) -> Dict:
     """
     Complete boundary validation for tree inventory

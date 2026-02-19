@@ -14,6 +14,19 @@ interface ColumnMappingPreviewProps {
     needs_user_input: boolean;
     required_columns: string[];
     optional_columns: string[];
+    boundary_check?: {
+      total_points: number;
+      out_of_boundary_count: number;
+      out_of_boundary_percentage: number;
+      within_tolerance: boolean;
+      needs_correction: boolean;
+      correction_strategy?: string;
+      correctable?: number;
+      uncorrectable?: number;
+      recommendation?: string;
+      corrections?: any[];
+      correction_summary?: string;
+    };
   };
   onConfirm: (mapping: Record<string, string>, savePreference: boolean) => void;
   onCancel: () => void;
@@ -71,7 +84,9 @@ export default function ColumnMappingPreview({
     (cols) => cols.length > 1
   );
 
-  const canConfirm = missingRequired.length === 0 && !hasDuplicates;
+  // Check if upload is allowed (no missing fields, no duplicates, and ready for processing)
+  const isReadyForProcessing = previewData.summary?.ready_for_processing !== false;
+  const canConfirm = missingRequired.length === 0 && !hasDuplicates && isReadyForProcessing;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -292,6 +307,118 @@ export default function ColumnMappingPreview({
               Remember this mapping for future uploads
             </label>
           </div>
+
+          {/* Boundary Check Results */}
+          {previewData.boundary_check && previewData.boundary_check.out_of_boundary_count > 0 && (
+            <div className="border-t border-gray-200 pt-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                Boundary Validation
+              </h3>
+
+              {previewData.boundary_check.within_tolerance ? (
+                <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3 flex-1">
+                      <h4 className="text-sm font-medium text-yellow-800">
+                        Boundary Correction Available
+                      </h4>
+                      <div className="mt-2 text-sm text-yellow-700">
+                        <p>{previewData.boundary_check.correction_summary}</p>
+
+                        <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <span className="font-semibold">Strategy:</span>{' '}
+                            {previewData.boundary_check.correction_strategy === 'nearest_tree'
+                              ? 'Snap to Nearest Tree'
+                              : 'Snap to Boundary Edge'}
+                          </div>
+                          <div>
+                            <span className="font-semibold">Out of Boundary:</span>{' '}
+                            {previewData.boundary_check.out_of_boundary_count} trees ({previewData.boundary_check.out_of_boundary_percentage}%)
+                          </div>
+                          {previewData.boundary_check.correctable !== undefined && (
+                            <>
+                              <div>
+                                <span className="font-semibold">Correctable:</span>{' '}
+                                <span className="text-green-700">{previewData.boundary_check.correctable} trees</span>
+                              </div>
+                              {previewData.boundary_check.uncorrectable! > 0 && (
+                                <div>
+                                  <span className="font-semibold">Uncorrectable:</span>{' '}
+                                  <span className="text-red-700">{previewData.boundary_check.uncorrectable} trees</span>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+
+                        {previewData.boundary_check.correction_strategy === 'nearest_tree' &&
+                         previewData.boundary_check.uncorrectable! > 0 && (
+                          <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded">
+                            <div className="flex">
+                              <svg className="h-5 w-5 text-orange-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                              <p className="ml-2 text-sm text-orange-800">
+                                <span className="font-semibold">Note:</span> {previewData.boundary_check.uncorrectable} trees
+                                have no valid neighbor within 50 meters and cannot be auto-corrected.
+                                These trees will be excluded from processing.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded">
+                          <p className="text-sm text-green-800">
+                            ✓ Corrections will be applied automatically during processing.
+                            You can proceed with upload.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-red-50 border-l-4 border-red-400 p-4">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <h4 className="text-sm font-medium text-red-800">
+                        Too Many Trees Outside Boundary
+                      </h4>
+                      <div className="mt-2 text-sm text-red-700">
+                        <p>
+                          {previewData.boundary_check.out_of_boundary_count} trees ({previewData.boundary_check.out_of_boundary_percentage}%)
+                          are outside the boundary polygon. This exceeds the 20% tolerance limit.
+                        </p>
+                        <p className="mt-2">
+                          Please check your data:
+                        </p>
+                        <ul className="list-disc list-inside ml-2 mt-1">
+                          <li>Verify the coordinate system (EPSG code)</li>
+                          <li>Ensure coordinates are in the correct format</li>
+                          <li>Check if the correct boundary polygon was selected</li>
+                          <li>Review the tree location data for errors</li>
+                        </ul>
+                        <div className="mt-4 p-3 bg-red-100 border border-red-300 rounded font-semibold text-red-900">
+                          ⛔ Upload blocked: Please fix the boundary issues before proceeding.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -305,13 +432,20 @@ export default function ColumnMappingPreview({
           <button
             onClick={() => onConfirm(mapping, savePreference)}
             disabled={!canConfirm}
+            title={
+              !isReadyForProcessing
+                ? 'Upload blocked: Too many trees outside boundary (>20%)'
+                : !canConfirm
+                ? 'Please fix validation errors first'
+                : 'Confirm column mapping and upload inventory'
+            }
             className={`px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 ${
               canConfirm
                 ? 'bg-green-600 hover:bg-green-700'
                 : 'bg-gray-300 cursor-not-allowed'
             }`}
           >
-            Confirm & Upload
+            {!isReadyForProcessing ? 'Upload Blocked - Fix Boundary Issues' : 'Confirm & Upload'}
           </button>
         </div>
       </div>

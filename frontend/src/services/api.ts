@@ -310,13 +310,15 @@ export const inventoryApi = {
     savePreference: boolean = false,
     gridSpacing: number = 20.0,
     calculationId?: string,
-    projectionEpsg?: number
+    projectionEpsg?: number,
+    correctionStrategy: string = "nearest_tree"
   ): Promise<any> => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("mapping", JSON.stringify(mapping));
     formData.append("save_preference", savePreference.toString());
     formData.append("grid_spacing_meters", gridSpacing.toString());
+    formData.append("correction_strategy", correctionStrategy);
 
     if (calculationId) {
       formData.append("calculation_id", calculationId);

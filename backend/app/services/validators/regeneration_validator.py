@@ -149,15 +149,19 @@ class RegenerationValidator:
             if self.REGENERATION_MIN_DBH <= dbh_value < self.REGENERATION_MAX_DBH:
                 # Remove height
                 if height_column and height_column in df.columns:
-                    if pd.notna(df.at[idx, height_column]) and df.at[idx, height_column] != '':
-                        df.at[idx, height_column] = None
-                        modifications += 1
+                    height_val = df.at[idx, height_column]
+                    if pd.notna(height_val):
+                        if height_val != '':
+                            df.at[idx, height_column] = None
+                            modifications += 1
 
                 # Remove class
                 if class_column and class_column in df.columns:
-                    if pd.notna(df.at[idx, class_column]) and df.at[idx, class_column] != '':
-                        df.at[idx, class_column] = None
-                        modifications += 1
+                    class_val = df.at[idx, class_column]
+                    if pd.notna(class_val):
+                        if class_val != '':
+                            df.at[idx, class_column] = None
+                            modifications += 1
 
         return df, modifications
 

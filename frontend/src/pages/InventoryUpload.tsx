@@ -8,6 +8,8 @@ export default function InventoryUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [gridSpacing, setGridSpacing] = useState(20);
   const [projectionEpsg, setProjectionEpsg] = useState<string>('');
+  const [calculationId, setCalculationId] = useState<string>('');
+  const [correctionStrategy, setCorrectionStrategy] = useState<string>('nearest_tree');
   const [uploading, setUploading] = useState(false);
   const [validationResult, setValidationResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,9 +83,12 @@ export default function InventoryUpload() {
         mapping,
         savePreference,
         gridSpacing,
-        undefined, // calculationId
-        epsg
+        calculationId || undefined, // calculationId (optional)
+        epsg,
+        correctionStrategy
       );
+
+      console.log('API Response:', result);
       setValidationResult(result);
 
       // Step 3: If ready for processing, automatically process
@@ -108,6 +113,10 @@ export default function InventoryUpload() {
         } catch (processErr: any) {
           setError(processErr.response?.data?.detail || 'Processing failed');
         }
+      } else {
+        // CRITICAL FIX: If not ready for processing (e.g., boundary error),
+        // stop loading immediately so user can see the error
+        setUploading(false);
       }
     } catch (err: any) {
       console.error('Upload error:', err);
@@ -235,6 +244,76 @@ export default function InventoryUpload() {
                 <p className="mt-1 text-xs text-gray-500">
                   Leave empty for geographic coordinates (4326). Use 32644 for UTM 44N or 32645 for UTM 45N.
                 </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Link to Forest Boundary (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={calculationId}
+                  onChange={(e) => setCalculationId(e.target.value)}
+                  placeholder="Enter Calculation ID (e.g., 5c0b76cc-5557-49e8-8576-a686a5eca5c0)"
+                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500 sm:text-sm font-mono text-xs"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Link to an existing boundary to enable boundary validation and auto-correction.
+                  Leave empty to upload without boundary check.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Boundary Correction Strategy
+                </label>
+                <p className="text-xs text-gray-500 mb-3">
+                  If some trees fall outside the boundary (up to 20%), choose how to auto-correct their positions:
+                </p>
+                <div className="space-y-3">
+                  <label className="flex items-start p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                         style={{ borderColor: correctionStrategy === 'nearest_tree' ? '#059669' : '#d1d5db' }}>
+                    <input
+                      type="radio"
+                      name="correction_strategy"
+                      value="nearest_tree"
+                      checked={correctionStrategy === 'nearest_tree'}
+                      onChange={(e) => setCorrectionStrategy(e.target.value)}
+                      className="mt-1 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300"
+                    />
+                    <div className="ml-3 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">Snap to Nearest Tree</span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                          Recommended
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Corrects GPS errors by moving out-of-boundary trees near their nearest valid neighbor within 50 meters.
+                        Maintains natural forest structure and spatial relationships.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                         style={{ borderColor: correctionStrategy === 'boundary_edge' ? '#059669' : '#d1d5db' }}>
+                    <input
+                      type="radio"
+                      name="correction_strategy"
+                      value="boundary_edge"
+                      checked={correctionStrategy === 'boundary_edge'}
+                      onChange={(e) => setCorrectionStrategy(e.target.value)}
+                      className="mt-1 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300"
+                    />
+                    <div className="ml-3 flex-1">
+                      <div className="font-medium text-gray-900">Snap to Boundary Edge</div>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Moves trees to the nearest point on the polygon boundary.
+                        May create artificial clustering at boundary edges.
+                      </p>
+                    </div>
+                  </label>
+                </div>
               </div>
 
               <button
