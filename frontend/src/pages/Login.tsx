@@ -34,6 +34,19 @@ const Login: React.FC = () => {
     });
   };
 
+  const quickLogin = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      await login({ email: 'demo@forest.com', password: 'Demo1234' });
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Quick login failed.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
@@ -86,13 +99,22 @@ const Login: React.FC = () => {
             </div>
           </div>
 
-          <div>
+          <div className="space-y-3">
             <button
               type="submit"
               disabled={isLoading}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-gray-400"
             >
               {isLoading ? 'Signing in...' : 'Sign in'}
+            </button>
+
+            <button
+              type="button"
+              onClick={quickLogin}
+              disabled={isLoading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-green-300 text-sm font-medium rounded-md text-green-700 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-gray-100"
+            >
+              Quick Login (Demo Account)
             </button>
           </div>
 

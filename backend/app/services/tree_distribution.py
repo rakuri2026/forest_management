@@ -34,7 +34,7 @@ from ..core.config import settings
 # Configuration Constants (Nepal-specific standards)
 MIN_DBH_CM = 10.0          # Commercial inventory threshold
 MIN_HEIGHT_M = 5.0         # Minimum tree height
-MAX_TREES_PER_HA = 1000    # Upper cap on density
+MAX_TREES_PER_HA = 500     # Upper cap on density
 CANOPY_HEIGHT_PIXEL_SIZE = 30  # meters
 PIXEL_AREA_HA = 0.09       # 900m² = 0.09 hectares
 
@@ -264,6 +264,42 @@ def calculate_dbh_from_height(height: float, species: Dict[str, Any]) -> float:
     return round(dbh, 1)
 
 
+def calculate_tree_biomass(dbh: float, height: Optional[float], species: Dict[str, Any]) -> float:
+    """
+    Calculate above-ground biomass (AGB) for a single tree using allometric equations.
+
+    Uses Nepal-appropriate allometric equations:
+    1. Generic equation: AGB (kg) = 0.0673 × (DBH^2.7395)  [Chave et al. 2005]
+    2. If height available: height adjustment for large trees
+
+    Args:
+        dbh: Diameter at breast height in centimeters
+        height: Tree height in meters (optional)
+        species: Species dictionary (for future species-specific coefficients)
+
+    Returns:
+        Above-ground biomass in megagrams (Mg) = metric tons
+    """
+    if dbh < 1.0:
+        return 0.0  # Regeneration has negligible biomass
+
+    # Calculate biomass in kilograms using Chave et al. (2005) equation
+    # AGB (kg) = 0.0673 × (DBH^2.7395)
+    agb_kg = 0.0673 * (dbh ** 2.7395)
+
+    # Optional: Adjust for height if available and tree is large
+    if height and height > 10 and dbh > 30:
+        # Height adjustment factor (empirical for Nepal)
+        height_factor = 1.0 + (height - 15) * 0.02  # +2% per meter above 15m
+        height_factor = max(0.8, min(1.3, height_factor))  # Constrain to 0.8-1.3
+        agb_kg *= height_factor
+
+    # Convert kg to Mg (megagrams = metric tons)
+    agb_mg = agb_kg / 1000.0
+
+    return round(agb_mg, 4)  # 4 decimal places for precision
+
+
 def assign_tree_class(dbh: float, height: float, species: Dict[str, Any]) -> int:
     """
     Assign tree class (1=25%, 2=50%, 3=75%, 4=100% firewood potential)
@@ -403,22 +439,29 @@ def assign_block_names_to_trees(
         return trees  # No blocks defined - keep existing block_name
 
     # Parse block polygons and names
+    from shapely.geometry import shape
+
     block_polygons = []
     for idx, block in enumerate(blocks_data):
-        block_wkt = block.get('wkt')
-        if not block_wkt:
+        # Get geometry from GeoJSON format (stored in result_data)
+        block_geojson = block.get('geometry')
+        if not block_geojson:
             continue
 
         try:
-            block_geom = wkt.loads(block_wkt)
-            # Use block['name'] if exists, otherwise use index
-            block_name = block.get('name', f"Block_{idx+1}")
+            # Convert GeoJSON to Shapely geometry
+            block_geom = shape(block_geojson)
+
+            # Use block['block_name'] if exists (from database), otherwise use index
+            block_name = block.get('block_name', f"Block_{idx+1}")
+
             block_polygons.append({
                 'geometry': block_geom,
                 'name': block_name,
                 'index': idx
             })
-        except Exception:
+        except Exception as e:
+            print(f"Warning: Could not parse block {idx}: {e}")
             continue
 
     if not block_polygons:
@@ -753,7 +796,7 @@ def generate_synthetic_trees(
         'max_trees_per_ha': MAX_TREES_PER_HA,
         'spatial_distribution': 'random',
         'algorithm_version': 'v1.0',
-        'plot_buffer_meters': 25.0  # Default buffer for sample plot assignment
+        'plot_buffer_meters': 12.62  # Default buffer for sample plot assignment (radius for 500m² plot)
     }
     config = {**default_config, **(config or {})}
 
@@ -932,6 +975,89 @@ def generate_synthetic_trees(
     if not heights_mature:
         heights_mature = [0]
 
+    # DBH Class distribution per forest block
+    # Group trees by block_name
+    trees_by_block = {}
+    for tree in trees:
+        block_name = tree.get('block_name', 'Unknown')
+        if block_name not in trees_by_block:
+            trees_by_block[block_name] = []
+        trees_by_block[block_name].append(tree)
+
+    # Count plots per block (from sample_plot_number assignments)
+    plots_per_block = {}
+    for tree in trees:
+        block_name = tree.get('block_name', 'Unknown')
+        plot_num = tree.get('sample_plot_number')
+        if plot_num:
+            if block_name not in plots_per_block:
+                plots_per_block[block_name] = set()
+            # Handle comma-separated plot numbers
+            for pn in str(plot_num).split(','):
+                plots_per_block[block_name].add(pn.strip())
+
+    # Calculate DBH class distribution per block
+    block_dbh_distribution = {}
+    for block_name, block_trees in trees_by_block.items():
+        num_plots_in_block = len(plots_per_block.get(block_name, set())) or 1  # Avoid division by zero
+
+        dbh_counts = {
+            'unestablished_regen': len([t for t in block_trees if 1 <= t['dbh_cm'] < 4]),
+            'established_regen': len([t for t in block_trees if 4 <= t['dbh_cm'] < 10]),
+            'small_pole': len([t for t in block_trees if 10 <= t['dbh_cm'] < 20]),
+            'large_pole': len([t for t in block_trees if 20 <= t['dbh_cm'] < 30]),
+            'small_tree': len([t for t in block_trees if 30 <= t['dbh_cm'] < 40]),
+            'medium_tree': len([t for t in block_trees if 40 <= t['dbh_cm'] < 50]),
+            'large_tree': len([t for t in block_trees if 50 <= t['dbh_cm'] < 60]),
+            'very_large_tree': len([t for t in block_trees if t['dbh_cm'] >= 60]),
+        }
+
+        # Average per plot for this block
+        avg_regen = dbh_counts['unestablished_regen'] / num_plots_in_block
+        avg_sapling = dbh_counts['established_regen'] / num_plots_in_block
+        avg_pole = (dbh_counts['small_pole'] + dbh_counts['large_pole']) / num_plots_in_block
+        avg_tree = (dbh_counts['small_tree'] + dbh_counts['medium_tree'] +
+                    dbh_counts['large_tree'] + dbh_counts['very_large_tree']) / num_plots_in_block
+
+        # Simplified 4-class system with per-hectare conversion
+        # Expansion factors: Regeneration×1000, Sapling×400, Pole×100, Tree×20
+        dbh_per_ha = {
+            'regeneration_1_4cm': round(avg_regen * 1000, 1),  # Regeneration per ha
+            'sapling_4_10cm': round(avg_sapling * 400, 1),      # Sapling per ha
+            'pole_10_30cm': round(avg_pole * 100, 1),           # Pole per ha
+            'tree_above_30cm': round(avg_tree * 20, 1),         # Tree per ha
+        }
+
+        # Calculate biomass and volume per block
+        total_biomass_mg = 0.0
+        for tree in block_trees:
+            tree_biomass = calculate_tree_biomass(
+                dbh=tree['dbh_cm'],
+                height=tree.get('height_m'),
+                species=tree.get('species', {})
+            )
+            total_biomass_mg += tree_biomass
+
+        # Convert to per-hectare (plot area in hectares)
+        plot_buffer_m = config.get('plot_buffer_meters', 10)
+        plot_area_ha = (3.14159 * (plot_buffer_m ** 2)) / 10000.0  # hectares per plot
+        total_sampled_area_ha = plot_area_ha * num_plots_in_block
+        biomass_per_ha = total_biomass_mg / total_sampled_area_ha if total_sampled_area_ha > 0 else 0.0
+
+        # Convert biomass (Mg/ha) to volume (m³/ha) using average wood density
+        # Average wood density for Nepal forests: 0.6 Mg/m³ (600 kg/m³)
+        # Volume (m³) = Biomass (Mg) / Wood Density (Mg/m³)
+        avg_wood_density = 0.6  # Mg/m³ (typical for mixed Nepal forests)
+        volume_per_ha = biomass_per_ha / avg_wood_density if avg_wood_density > 0 else 0.0
+
+        block_dbh_distribution[block_name] = {
+            'total_trees': len(block_trees),
+            'num_plots': num_plots_in_block,
+            'dbh_per_ha': dbh_per_ha,  # Per hectare values
+            'biomass_per_ha': round(biomass_per_ha, 2),  # Mg/ha (metric tons per hectare)
+            'volume_per_ha': round(volume_per_ha, 2),  # m³/ha (cubic meters per hectare)
+        }
+
     statistics = {
         'total_trees': len(trees),
         'total_trees_generated': total_trees_generated,  # Before filtering
@@ -953,6 +1079,7 @@ def generate_synthetic_trees(
         'species_count': len(set(t['species_scientific'] for t in trees if t.get('species_scientific'))),
         'plot_buffer_meters': config['plot_buffer_meters'],
         'total_sample_plots': sampling_design.total_points,
+        'block_dbh_distribution': block_dbh_distribution,  # Block-wise DBH class distribution
     }
 
     processing_time = (datetime.now() - start_time).total_seconds()

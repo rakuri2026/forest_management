@@ -46,6 +46,13 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
   const [isAddSpeciesModalOpen, setIsAddSpeciesModalOpen] = useState(false);
   const [speciesSummary, setSpeciesSummary] = useState<any>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+
+  // Accessible forest area state (Phase 2)
+  const [accessibleAreaData, setAccessibleAreaData] = useState<any>(null);
+  const [loadingAccessibleArea, setLoadingAccessibleArea] = useState(false);
+  const [showSlopeFilter, setShowSlopeFilter] = useState(false);
+  const [maxSlopeForView, setMaxSlopeForView] = useState(45.0);
+
   const data = calculation.result_data || {};
 
   // Fetch species summary data for analytics dashboard
@@ -67,6 +74,29 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
 
     fetchSpeciesSummary();
   }, [calculation?.id, totalBlocks, optimisticConfirmations]);
+
+  // Fetch accessible forest area data (Phase 2)
+  useEffect(() => {
+    const fetchAccessibleArea = async () => {
+      if (!calculation?.id) return;
+
+      setLoadingAccessibleArea(true);
+      try {
+        const data = await forestApi.getAccessibleForestArea(calculation.id, {
+          filter_slope: showSlopeFilter,
+          max_slope_degrees: maxSlopeForView
+        });
+        setAccessibleAreaData(data);
+      } catch (err) {
+        console.error('Error fetching accessible area:', err);
+        setAccessibleAreaData(null);
+      } finally {
+        setLoadingAccessibleArea(false);
+      }
+    };
+
+    fetchAccessibleArea();
+  }, [calculation?.id, showSlopeFilter, maxSlopeForView]);
 
   // Prepare slope data for percentage bar
   const slopeData = data.slope_percentages
@@ -170,13 +200,175 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
         </div>
       </div>
 
+      {/* Accessible Forest Area (Phase 2) */}
+      <CollapsibleSection
+        title="Accessible Forest Area Analysis"
+        icon="🌲"
+        defaultExpanded={true}
+        headerColor="green"
+      >
+        <div className="p-6 space-y-6">
+          <p className="text-sm text-gray-600 mb-4">
+            Analysis of forest areas suitable for field sampling based on tree cover and optional slope filtering.
+            This helps optimize sampling design by excluding non-forest areas and inaccessible steep slopes.
+          </p>
+
+          {/* Slope Filter Controls */}
+          <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showSlopeFilter}
+                onChange={(e) => setShowSlopeFilter(e.target.checked)}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <span className="text-sm font-medium text-gray-700">Apply Slope Filter</span>
+            </label>
+
+            {showSlopeFilter && (
+              <select
+                value={maxSlopeForView}
+                onChange={(e) => setMaxSlopeForView(parseFloat(e.target.value))}
+                className="px-3 py-1.5 border border-gray-300 rounded-md bg-white text-sm"
+              >
+                <option value="30">Max 30°</option>
+                <option value="45">Max 45°</option>
+                <option value="60">Max 60°</option>
+              </select>
+            )}
+          </div>
+
+          {loadingAccessibleArea ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Calculating accessible forest area...</p>
+              </div>
+            </div>
+          ) : accessibleAreaData && accessibleAreaData.blocks ? (
+            <div className="space-y-4">
+              {/* Summary Cards */}
+              {accessibleAreaData.blocks.map((block: any, index: number) => (
+                <div key={index} className="bg-white border rounded-lg overflow-hidden">
+                  <div className="bg-gray-100 px-4 py-2 border-b">
+                    <h4 className="font-semibold text-gray-900">{block.block_name}</h4>
+                    <p className="text-xs text-gray-600">Total Area: {block.total_boundary_area_ha?.toFixed(2)} ha</p>
+                  </div>
+
+                  <div className="p-4 space-y-3">
+                    {/* Accessible Forest */}
+                    <div className="flex justify-between items-center py-2 bg-green-50 px-3 rounded border border-green-200">
+                      <div>
+                        <span className="text-sm font-medium text-green-900">✅ Accessible Forest</span>
+                        <p className="text-xs text-green-700 mt-0.5">
+                          Tree cover {showSlopeFilter && `+ slope ≤ ${maxSlopeForView}°`} • Can establish sample plots
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-green-700 text-lg">
+                          {block.accessible_forest_area_ha?.toFixed(2)} ha
+                        </span>
+                        <p className="text-xs text-green-600">
+                          ({block.accessible_forest_percentage?.toFixed(1)}%)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Inaccessible Forest (if slope filter is on) */}
+                    {showSlopeFilter && block.inaccessible_steep_forest_ha > 0 && (
+                      <div className="flex justify-between items-center py-2 bg-yellow-50 px-3 rounded border border-yellow-200">
+                        <div>
+                          <span className="text-sm font-medium text-yellow-900">⚠️ Inaccessible Forest</span>
+                          <p className="text-xs text-yellow-700 mt-0.5">
+                            Tree cover + slope &gt; {maxSlopeForView}° • Too steep for sampling
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-yellow-700 text-lg">
+                            {block.inaccessible_steep_forest_ha?.toFixed(2)} ha
+                          </span>
+                          <p className="text-xs text-yellow-600">
+                            ({block.inaccessible_steep_percentage?.toFixed(1)}%)
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Non-forest */}
+                    {block.non_forest_area_ha > 0 && (
+                      <div className="flex justify-between items-center py-2 bg-gray-100 px-3 rounded border border-gray-300">
+                        <div>
+                          <span className="text-sm font-medium text-gray-700">❌ Non-forest</span>
+                          <p className="text-xs text-gray-600 mt-0.5">
+                            Grassland, cropland, water, settlements
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-gray-600 text-lg">
+                            {block.non_forest_area_ha?.toFixed(2)} ha
+                          </span>
+                          <p className="text-xs text-gray-500">
+                            ({block.non_forest_percentage?.toFixed(1)}%)
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Visual Progress Bar */}
+                    <div className="mt-2">
+                      <div className="flex h-8 rounded-md overflow-hidden border border-gray-300">
+                        <div
+                          className="bg-green-500 flex items-center justify-center text-xs font-semibold text-white"
+                          style={{ width: `${block.accessible_forest_percentage}%` }}
+                        >
+                          {block.accessible_forest_percentage >= 15 && `${block.accessible_forest_percentage?.toFixed(0)}%`}
+                        </div>
+                        {showSlopeFilter && block.inaccessible_steep_percentage > 0 && (
+                          <div
+                            className="bg-yellow-500 flex items-center justify-center text-xs font-semibold text-white"
+                            style={{ width: `${block.inaccessible_steep_percentage}%` }}
+                          >
+                            {block.inaccessible_steep_percentage >= 15 && `${block.inaccessible_steep_percentage?.toFixed(0)}%`}
+                          </div>
+                        )}
+                        {block.non_forest_percentage > 0 && (
+                          <div
+                            className="bg-gray-400 flex items-center justify-center text-xs font-semibold text-white"
+                            style={{ width: `${block.non_forest_percentage}%` }}
+                          >
+                            {block.non_forest_percentage >= 15 && `${block.non_forest_percentage?.toFixed(0)}%`}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Important Note */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                <p className="text-sm text-blue-900">
+                  <span className="font-semibold">💡 Note:</span> When creating a sampling design, you can enable these filters
+                  to ensure sample plots are placed only in accessible forest areas. This optimizes field work efficiency
+                  and reduces wasted trips to inaccessible or non-forest locations.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              Unable to load accessible forest area data. Please try refreshing the page.
+            </div>
+          )}
+        </div>
+      </CollapsibleSection>
+
       {/* Species Distribution Analytics Dashboard - Phase 2 */}
       {totalBlocks > 0 && (
         <CollapsibleSection
           title="Species Distribution Analytics"
           icon="📊"
           defaultExpanded={false}
-          headerColor="purple"
+          headerColor="green"
         >
           <div className="p-6 space-y-8">
             {loadingSummary ? (

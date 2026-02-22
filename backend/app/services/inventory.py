@@ -250,6 +250,11 @@ class InventoryService:
             species = row[species_col]
             dbh_cm = row[diameter_col]
 
+            # REGENERATION: Skip volume calculation for trees < 10 cm (too small for commercial use)
+            if dbh_cm < 10:
+                # All volumes remain 0.0 (already initialized)
+                continue
+
             # Get species coefficients
             if species not in self.species_coefficients:
                 # Skip if species not found (should not happen after validation)
@@ -268,10 +273,6 @@ class InventoryService:
                 # Estimate height using default H/D ratio
                 height_m = dbh_cm * 0.8  # Default ratio for missing heights
 
-            # For seedlings (DBH < 10 cm), use default H/D ratio
-            if dbh_cm < 10:
-                height_m = dbh_cm * 0.8
-
             # 1. Calculate stem volume
             # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
             if coef['a'] is not None and coef['b'] is not None and coef['c'] is not None:
@@ -284,9 +285,8 @@ class InventoryService:
                 # Use generic formula for species without coefficients
                 stem_volume = 0.0
 
-            # 2. Calculate branch volume
-            branch_ratio = 0.1 if dbh_cm < 10 else 0.2
-            branch_volume = stem_volume * branch_ratio
+            # 2. Calculate branch volume (20% of stem for trees >= 10 cm)
+            branch_volume = stem_volume * 0.2
 
             # 3. Total tree volume
             tree_volume = stem_volume + branch_volume
@@ -309,7 +309,7 @@ class InventoryService:
                 try:
                     class_val = row[class_col]
                     # Handle empty strings or NaN
-                    if pd.isna(class_val) or (isinstance(class_val, str) and class_val.strip() == ''):
+                    if pd.isna(class_val) or (isinstance(class_val, str) and str(class_val).strip() == ''):
                         class_val = None
                 except (KeyError, TypeError):
                     class_val = None
@@ -744,13 +744,26 @@ class InventoryService:
                 if idx == 0 and extra_cols:
                     print(f"[EXTRA COLUMNS] First row extra columns: {extra_cols}")
 
-                # Get height and class values, handling potential NaN/empty strings
-                height_val = row.get(height_col) if height_col and height_col in df.columns else None
-                class_val = row.get(class_col) if class_col and class_col in df.columns else None
+                # Get height and class values safely (avoid Series ambiguity)
+                height_val = None
+                if height_col and height_col in df.columns:
+                    try:
+                        height_val = row[height_col]
+                        # Convert empty strings or NaN to None
+                        if pd.isna(height_val) or (isinstance(height_val, str) and str(height_val).strip() == ''):
+                            height_val = None
+                    except (KeyError, TypeError):
+                        height_val = None
 
-                # Convert empty strings to None for class (from class normalization)
-                if isinstance(class_val, str) and class_val.strip() == '':
-                    class_val = None
+                class_val = None
+                if class_col and class_col in df.columns:
+                    try:
+                        class_val = row[class_col]
+                        # Convert empty strings or NaN to None
+                        if pd.isna(class_val) or (isinstance(class_val, str) and str(class_val).strip() == ''):
+                            class_val = None
+                    except (KeyError, TypeError):
+                        class_val = None
 
                 tree = InventoryTree(
                     inventory_calculation_id=inventory_id,
@@ -769,6 +782,8 @@ class InventoryService:
                     firewood_chatta=float(row['firewood_chatta']),
                     remark=row['remark'],
                     grid_cell_id=int(row['grid_cell_id']) if pd.notna(row['grid_cell_id']) else None,
+                    stand_type=row.get('stand_type'),  # NEW: Simple classification
+                    dbh_class=row.get('dbh_class'),    # NEW: Detailed classification
                     local_name=local_name,
                     row_number=idx + 2,  # +2 for header and 0-indexing
                     extra_columns=extra_cols if extra_cols else None
@@ -1108,6 +1123,8 @@ class InventoryService:
                 'dia_cm': tree.dia_cm,
                 'height_m': tree.height_m,
                 'tree_class': tree.tree_class,
+                'stand_type': tree.stand_type,      # NEW: Simple classification
+                'dbh_class': tree.dbh_class,        # NEW: Detailed classification
                 'longitude': lon,
                 'latitude': lat,
                 'stem_volume': tree.stem_volume,
@@ -1161,6 +1178,8 @@ class InventoryService:
                         'dia_cm': float(row['dia_cm']) if pd.notna(row['dia_cm']) else None,
                         'height_m': float(row['height_m']) if pd.notna(row['height_m']) else None,
                         'tree_class': row['tree_class'],
+                        'stand_type': row['stand_type'],      # NEW: Simple classification
+                        'dbh_class': row['dbh_class'],        # NEW: Detailed classification
                         'stem_volume': float(row['stem_volume']) if pd.notna(row['stem_volume']) else None,
                         'branch_volume': float(row['branch_volume']) if pd.notna(row['branch_volume']) else None,
                         'tree_volume': float(row['tree_volume']) if pd.notna(row['tree_volume']) else None,

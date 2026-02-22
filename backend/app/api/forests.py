@@ -14,6 +14,7 @@ from ..models.user import User
 from ..models.community_forest import CommunityForest
 from ..models.forest_manager import ForestManager
 from ..models.calculation import Calculation, CalculationStatus
+from ..models.synthetic_tree_model import SyntheticTreeModel
 from ..schemas.forest import (
     CommunityForestResponse,
     ForestManagerCreate,
@@ -22,6 +23,13 @@ from ..schemas.forest import (
     MyForestsResponse,
     ReanalysisRequest,
     GenerateMapsRequest,
+    AddSpeciesRequest,
+)
+from ..schemas.tree_model import (
+    GenerateTreeModelRequest,
+    TreeModelResponse,
+    TreeModelListResponse,
+    TreeModelConfigBase,
 )
 from ..utils.auth import get_current_active_user, require_super_admin
 try:
@@ -34,6 +42,7 @@ from ..services.analysis import analyze_forest_boundary
 from ..services.fieldbook import generate_fieldbook_points
 from ..services.sampling import create_sampling_design
 from ..services.map_generator import get_map_generator
+from ..services.tree_cover_analysis import calculate_accessible_forest_area
 from shapely.geometry import mapping
 from shapely import wkb
 from fastapi.responses import StreamingResponse
@@ -523,6 +532,24 @@ async def upload_forest_boundary(
 
     geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
 
+    # Filter out removed species from potential_species
+    result_data = calculation.result_data or {}
+    if result_data:
+        # Make a copy to avoid modifying the database object
+        result_data = dict(result_data)
+
+        # Get list of removed species
+        removed_species = result_data.get("removed_species", [])
+
+        # Filter potential_species to exclude removed ones
+        if "potential_species" in result_data and removed_species:
+            result_data["potential_species"] = [
+                sp for sp in result_data["potential_species"]
+                if sp.get("scientific_name") not in removed_species
+            ]
+            # Update count
+            result_data["species_count"] = len(result_data["potential_species"])
+
     return CalculationResponse(
         id=calculation.id,
         user_id=calculation.user_id,
@@ -535,7 +562,7 @@ async def upload_forest_boundary(
         created_at=calculation.created_at,
         completed_at=calculation.completed_at,
         geometry=geometry_json,
-        result_data=calculation.result_data
+        result_data=result_data
     )
 
 
@@ -696,6 +723,24 @@ async def reanalyze_calculation(
 
     geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
 
+    # Filter out removed species from potential_species
+    result_data = calculation.result_data or {}
+    if result_data:
+        # Make a copy to avoid modifying the database object
+        result_data = dict(result_data)
+
+        # Get list of removed species
+        removed_species = result_data.get("removed_species", [])
+
+        # Filter potential_species to exclude removed ones
+        if "potential_species" in result_data and removed_species:
+            result_data["potential_species"] = [
+                sp for sp in result_data["potential_species"]
+                if sp.get("scientific_name") not in removed_species
+            ]
+            # Update count
+            result_data["species_count"] = len(result_data["potential_species"])
+
     return CalculationResponse(
         id=calculation.id,
         user_id=calculation.user_id,
@@ -708,7 +753,7 @@ async def reanalyze_calculation(
         created_at=calculation.created_at,
         completed_at=calculation.completed_at,
         geometry=geometry_json,
-        result_data=calculation.result_data
+        result_data=result_data
     )
 
 
@@ -867,6 +912,104 @@ async def generate_maps(
     }
 
 
+@router.get("/calculations/{calculation_id}/accessible-area")
+async def get_accessible_forest_area(
+    calculation_id: UUID,
+    filter_slope: bool = False,
+    max_slope_degrees: float = 45.0,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate accessible forest area for calculation blocks.
+
+    Returns area breakdown per block showing:
+    - Accessible forest area (tree cover + slope OK)
+    - Inaccessible steep forest (tree cover but too steep)
+    - Non-forest area
+
+    **Parameters:**
+    - `filter_slope`: If True, exclude steep slopes (default: False)
+    - `max_slope_degrees`: Maximum slope threshold in degrees (default: 45.0)
+
+    **Note:** Tree cover filtering (ESA WorldCover value=10) is always enabled.
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    from ..models.user import UserRole
+    if calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this calculation"
+        )
+
+    # Get blocks from result_data
+    result_data = calculation.result_data or {}
+    blocks = result_data.get("blocks", [])
+
+    if not blocks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no blocks. Analysis may not be complete."
+        )
+
+    # Calculate accessible area for each block
+    results = []
+    for block in blocks:
+        block_number = block.get("block_number")
+        block_name = block.get("block_name", f"Block {block_number}")
+        block_area_ha = block.get("area_hectares", 0)
+
+        # Get block geometry
+        block_geom_wkt = block.get("geometry_wkt")
+        if not block_geom_wkt:
+            # Skip blocks without geometry
+            continue
+
+        # Calculate accessible forest area
+        try:
+            area_info = calculate_accessible_forest_area(
+                db=db,
+                geometry_wkt=block_geom_wkt,
+                filter_tree_cover=True,  # Always filter to tree cover
+                filter_slope=filter_slope,
+                max_slope_degrees=max_slope_degrees
+            )
+
+            results.append({
+                "block_name": block_name,
+                "block_number": block_number,
+                "block_area_ha": block_area_ha,
+                **area_info
+            })
+        except Exception as e:
+            # Log error and continue with next block
+            print(f"Error calculating accessible area for {block_name}: {e}")
+            results.append({
+                "block_name": block_name,
+                "block_number": block_number,
+                "block_area_ha": block_area_ha,
+                "error": str(e)
+            })
+
+    return {
+        "calculation_id": str(calculation_id),
+        "forest_name": calculation.forest_name,
+        "filter_slope": filter_slope,
+        "max_slope_degrees": max_slope_degrees,
+        "total_blocks": len(results),
+        "blocks": results
+    }
+
+
 @router.get("/calculations/{calculation_id}", response_model=CalculationResponse)
 async def get_calculation(
     calculation_id: UUID,
@@ -901,6 +1044,24 @@ async def get_calculation(
 
     geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
 
+    # Filter out removed species from potential_species
+    result_data = calculation.result_data or {}
+    if result_data:
+        # Make a copy to avoid modifying the database object
+        result_data = dict(result_data)
+
+        # Get list of removed species
+        removed_species = result_data.get("removed_species", [])
+
+        # Filter potential_species to exclude removed ones
+        if "potential_species" in result_data and removed_species:
+            result_data["potential_species"] = [
+                sp for sp in result_data["potential_species"]
+                if sp.get("scientific_name") not in removed_species
+            ]
+            # Update count
+            result_data["species_count"] = len(result_data["potential_species"])
+
     return CalculationResponse(
         id=calculation.id,
         user_id=calculation.user_id,
@@ -913,7 +1074,7 @@ async def get_calculation(
         created_at=calculation.created_at,
         completed_at=calculation.completed_at,
         geometry=geometry_json,
-        result_data=calculation.result_data
+        result_data=result_data
     )
 
 
@@ -1595,3 +1756,551 @@ async def generate_forest_health_map_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating forest health map: {str(e)}"
         )
+
+
+@router.post("/calculations/{calculation_id}/add-species")
+async def add_species_to_calculation(
+    calculation_id: UUID,
+    request: AddSpeciesRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Add a species to a calculation's species list
+
+    This endpoint allows users to manually add species that may have been missed
+    by the automatic analysis or to include species found during field surveys.
+
+    The species will be added to the calculation's result_data.potential_species list
+    with the specified role and availability rank.
+    """
+    # Get existing calculation
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check ownership
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this calculation"
+        )
+
+    # Get species details from database
+    species_query = text("""
+        SELECT
+            id,
+            scientific_name,
+            local_name,
+            family,
+            growth_rate,
+            min_altitude_m,
+            max_altitude_m,
+            economic_value,
+            main_uses,
+            nitrogen_fixing,
+            rarity_status,
+            ecological_role
+        FROM tree_species_coefficients
+        WHERE id = :species_id
+    """)
+
+    species_result = db.execute(species_query, {"species_id": request.species_id}).fetchone()
+
+    if not species_result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Species with ID {request.species_id} not found"
+        )
+
+    # Create species data object
+    new_species = {
+        "scientific_name": species_result.scientific_name,
+        "local_name": species_result.local_name or "Unknown",
+        "role": request.role,
+        "availability_rank": request.availability_rank,
+        "economic_value": species_result.economic_value or "Medium",
+        "growth_rate": species_result.growth_rate,
+        "min_altitude_m": species_result.min_altitude_m,
+        "max_altitude_m": species_result.max_altitude_m,
+        "main_uses": species_result.main_uses,
+        "nitrogen_fixing": species_result.nitrogen_fixing or False,
+        "rarity_status": species_result.rarity_status or "Common",
+        "family": species_result.family,
+        "forest_types": ["User Added"],
+        "manually_added": True  # Flag to indicate this was manually added
+    }
+
+    # Get current result_data
+    result_data = calculation.result_data or {}
+
+    # Initialize potential_species if it doesn't exist
+    if "potential_species" not in result_data:
+        result_data["potential_species"] = []
+
+    # Check if species already exists
+    existing_species = [
+        s for s in result_data["potential_species"]
+        if s.get("scientific_name") == new_species["scientific_name"]
+    ]
+
+    if existing_species:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Species {new_species['scientific_name']} already exists in this calculation"
+        )
+
+    # Add new species to the list
+    result_data["potential_species"].append(new_species)
+    result_data["species_count"] = len(result_data["potential_species"])
+
+    # Update calculation
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")  # Mark JSONB column as modified
+    db.commit()
+    db.refresh(calculation)
+
+    return {
+        "success": True,
+        "message": f"Successfully added {new_species['scientific_name']} ({new_species['local_name']}) to the species list",
+        "species": new_species,
+        "total_species": result_data["species_count"]
+    }
+
+
+@router.delete("/calculations/{calculation_id}/remove-species/{scientific_name}")
+async def remove_species_from_calculation(
+    calculation_id: UUID,
+    scientific_name: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Remove a species from the calculation's species list.
+
+    This marks the species as removed by the user. It will not appear
+    in future queries for this calculation's species list.
+
+    For system-generated species: Adds to removed_species list
+    For manually-added species: Removes from potential_species list
+    """
+    from datetime import datetime
+
+    # Get calculation
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check ownership
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this calculation"
+        )
+
+    # Initialize result_data if needed
+    if not calculation.result_data:
+        calculation.result_data = {}
+
+    result_data = calculation.result_data
+
+    # Initialize removed_species array if needed
+    if "removed_species" not in result_data:
+        result_data["removed_species"] = []
+
+    # Check if this is a manually added species
+    manually_added = False
+    if "potential_species" in result_data:
+        for species in result_data["potential_species"]:
+            if species.get("scientific_name") == scientific_name:
+                if species.get("manually_added"):
+                    manually_added = True
+                break
+
+    if manually_added:
+        # Remove manually-added species completely from the list
+        result_data["potential_species"] = [
+            sp for sp in result_data["potential_species"]
+            if sp.get("scientific_name") != scientific_name
+        ]
+        result_data["species_count"] = len(result_data["potential_species"])
+        message = f"Manually added species '{scientific_name}' removed completely"
+    else:
+        # For system-generated species, add to removed list
+        if scientific_name not in result_data["removed_species"]:
+            result_data["removed_species"].append(scientific_name)
+        message = f"System-generated species '{scientific_name}' hidden from list"
+
+    # Mark as modified
+    result_data["species_list_modified"] = True
+    result_data["species_last_modified"] = datetime.utcnow().isoformat()
+
+    # Update calculation
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+    db.refresh(calculation)
+
+    return {
+        "success": True,
+        "message": message,
+        "removed_species": result_data.get("removed_species", []),
+        "manually_added_removed": manually_added
+    }
+
+
+@router.patch("/calculations/{calculation_id}/species/{scientific_name}/confirm")
+async def toggle_species_confirmation(
+    calculation_id: UUID,
+    scientific_name: str,
+    request_body: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Toggle species confirmation status.
+
+    Supports block-specific confirmation:
+    - If block_name is provided: Only confirms species in that specific block
+    - If block_name is None/omitted: Confirms species at whole forest level (not in blocks)
+
+    Confirmed species appear colorful in UI and are included in operational plans.
+    Unconfirmed species appear grey and are excluded from final reports.
+    """
+    from datetime import datetime
+
+    # Get confirmed value and optional block_name from request body
+    confirmed = request_body.get("confirmed", False)
+    block_name = request_body.get("block_name", None)  # NEW: Optional block identifier
+
+    # Get calculation
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check ownership
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    # Get result_data
+    result_data = calculation.result_data or {}
+
+    # NEW: Block-specific confirmation logic
+    if block_name is not None:
+        # Confirm species in specific block only
+        species_found = False
+        if "blocks" in result_data:
+            for block in result_data["blocks"]:
+                if block.get("block_name") == block_name and "potential_species" in block:
+                    for block_species in block["potential_species"]:
+                        if block_species.get("scientific_name") == scientific_name:
+                            block_species["confirmed"] = confirmed
+                            species_found = True
+                            break
+                    if species_found:
+                        break
+
+        if not species_found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Species '{scientific_name}' not found in block '{block_name}'"
+            )
+
+        # Mark as modified
+        result_data["species_list_modified"] = True
+        result_data["species_last_modified"] = datetime.utcnow().isoformat()
+
+        # Save
+        calculation.result_data = result_data
+        flag_modified(calculation, "result_data")
+        db.commit()
+        db.refresh(calculation)
+
+        return {
+            "success": True,
+            "message": f"Species '{scientific_name}' {'confirmed' if confirmed else 'unconfirmed'} in {block_name}",
+            "confirmed": confirmed,
+            "block_name": block_name,
+            "scope": "block"
+        }
+
+    # Original: Whole forest confirmation (does NOT sync to blocks anymore)
+    if "potential_species" not in result_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No species data found"
+        )
+
+    # Find and update species in whole forest list ONLY
+    species_found = False
+    for species in result_data["potential_species"]:
+        if species.get("scientific_name") == scientific_name:
+            species["confirmed"] = confirmed
+            species_found = True
+            break
+
+    if not species_found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Species not found in whole forest list"
+        )
+
+    # REMOVED: No longer syncs to blocks automatically
+    # Each block maintains independent species confirmations
+
+    # Mark as modified
+    result_data["species_list_modified"] = True
+    result_data["species_last_modified"] = datetime.utcnow().isoformat()
+
+    # Save
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+    db.refresh(calculation)
+
+    # Count confirmed species (whole forest level)
+    removed = result_data.get("removed_species", [])
+    confirmed_count = sum(1 for sp in result_data["potential_species"]
+                         if sp.get("confirmed", False) and
+                         sp.get("scientific_name") not in removed)
+
+    return {
+        "success": True,
+        "message": f"Species '{scientific_name}' {'confirmed' if confirmed else 'unconfirmed'} at whole forest level",
+        "confirmed": confirmed,
+        "confirmed_count": confirmed_count,
+        "total_species": len([sp for sp in result_data["potential_species"]
+                             if sp.get("scientific_name") not in removed]),
+        "scope": "whole_forest"
+    }
+
+
+@router.post("/calculations/{calculation_id}/species/confirm-all")
+async def confirm_all_species(
+    calculation_id: UUID,
+    request_body: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm or unconfirm all species at once.
+    Useful for 'Confirm All' or 'Clear All' buttons.
+    """
+    from datetime import datetime
+
+    # Get confirmed value from request body
+    confirmed = request_body.get("confirmed", False)
+
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    result_data = calculation.result_data or {}
+
+    if "potential_species" not in result_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No species data found"
+        )
+
+    # Update all species in whole forest list
+    for species in result_data["potential_species"]:
+        species["confirmed"] = confirmed
+
+    # PHASE 1: Sync confirmation to all blocks
+    blocks_updated = 0
+    if "blocks" in result_data:
+        for block in result_data["blocks"]:
+            if "potential_species" in block:
+                for block_species in block["potential_species"]:
+                    block_species["confirmed"] = confirmed
+                    blocks_updated += 1
+
+    # Mark as modified
+    result_data["species_list_modified"] = True
+    result_data["species_last_modified"] = datetime.utcnow().isoformat()
+
+    # Save
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+
+    removed = result_data.get("removed_species", [])
+    affected_count = len([sp for sp in result_data["potential_species"]
+                         if sp.get("scientific_name") not in removed])
+
+    return {
+        "success": True,
+        "message": f"{'Confirmed' if confirmed else 'Unconfirmed'} {affected_count} species",
+        "count": affected_count
+    }
+
+
+@router.get("/calculations/{calculation_id}/species-summary")
+async def get_species_summary(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get whole forest species summary auto-calculated from block-level confirmations.
+
+    Returns:
+    - Total species count
+    - Species-by-species statistics (which blocks, coverage %, confirmed count)
+    - Role distribution
+    - Confirmation statistics
+    """
+
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    result_data = calculation.result_data or {}
+    blocks = result_data.get("blocks", [])
+    removed_species = result_data.get("removed_species", [])
+
+    # Build species map from all blocks
+    species_map = {}
+    total_blocks = len(blocks)
+
+    for block_idx, block in enumerate(blocks):
+        block_species_list = block.get("potential_species", [])
+
+        for species in block_species_list:
+            scientific_name = species.get("scientific_name")
+
+            # Skip removed species
+            if scientific_name in removed_species:
+                continue
+
+            if scientific_name not in species_map:
+                species_map[scientific_name] = {
+                    "scientific_name": scientific_name,
+                    "local_name": species.get("local_name"),
+                    "family": species.get("family"),
+                    "economic_value": species.get("economic_value"),
+                    "growth_rate": species.get("growth_rate"),
+                    "min_altitude_m": species.get("min_altitude_m"),
+                    "max_altitude_m": species.get("max_altitude_m"),
+                    "nitrogen_fixing": species.get("nitrogen_fixing"),
+                    "blocks": [],
+                    "block_indices": [],
+                    "roles": set(),
+                    "confirmed_in_blocks": 0,
+                    "unconfirmed_in_blocks": 0
+                }
+
+            # Track which blocks this species appears in
+            block_name = block.get("block_name", f"Block {block_idx + 1}")
+            species_map[scientific_name]["blocks"].append(block_name)
+            species_map[scientific_name]["block_indices"].append(block_idx)
+
+            # Track roles
+            role = species.get("role", "Associate")
+            species_map[scientific_name]["roles"].add(role)
+
+            # Track confirmation status per block
+            if species.get("confirmed", False):
+                species_map[scientific_name]["confirmed_in_blocks"] += 1
+            else:
+                species_map[scientific_name]["unconfirmed_in_blocks"] += 1
+
+    # Convert to list with calculated statistics
+    species_summary = []
+    for species_data in species_map.values():
+        present_in_blocks = len(species_data["blocks"])
+        coverage_percentage = (present_in_blocks / total_blocks * 100) if total_blocks > 0 else 0
+
+        species_summary.append({
+            "scientific_name": species_data["scientific_name"],
+            "local_name": species_data["local_name"],
+            "family": species_data["family"],
+            "economic_value": species_data["economic_value"],
+            "growth_rate": species_data["growth_rate"],
+            "min_altitude_m": species_data["min_altitude_m"],
+            "max_altitude_m": species_data["max_altitude_m"],
+            "nitrogen_fixing": species_data["nitrogen_fixing"],
+            "blocks": species_data["blocks"],
+            "block_indices": species_data["block_indices"],
+            "present_in_blocks": present_in_blocks,
+            "total_blocks": total_blocks,
+            "coverage_percentage": round(coverage_percentage, 1),
+            "roles": sorted(list(species_data["roles"])),
+            "confirmed_in_blocks": species_data["confirmed_in_blocks"],
+            "unconfirmed_in_blocks": species_data["unconfirmed_in_blocks"],
+            "confirmed": species_data["confirmed_in_blocks"] > 0  # At least one block confirmed
+        })
+
+    # Sort by coverage percentage (descending)
+    species_summary.sort(key=lambda x: x["coverage_percentage"], reverse=True)
+
+    # Calculate statistics
+    total_species = len(species_summary)
+    confirmed_species = sum(1 for s in species_summary if s["confirmed"])
+    unconfirmed_species = total_species - confirmed_species
+
+    # Role distribution
+    role_counts = {}
+    for species in species_summary:
+        for role in species["roles"]:
+            role_counts[role] = role_counts.get(role, 0) + 1
+
+    return {
+        "total_species": total_species,
+        "confirmed_species": confirmed_species,
+        "unconfirmed_species": unconfirmed_species,
+        "total_blocks": total_blocks,
+        "species_details": species_summary,
+        "role_distribution": role_counts,
+        "confirmation_stats": {
+            "confirmed": confirmed_species,
+            "unconfirmed": unconfirmed_species,
+            "percentage_confirmed": round((confirmed_species / total_species * 100) if total_species > 0 else 0, 1)
+        }
+    }

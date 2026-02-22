@@ -21,12 +21,7 @@ from app.models.sampling import SamplingDesign
 from app.schemas.sampling import SamplingGenerateResponse, BlockSamplingInfo
 from app.services.tree_cover_analysis import (
     calculate_accessible_forest_area,
-    extract_accessible_forest_mask,
-    point_in_accessible_forest
-)
-# Use OPTIMIZED version for slope filtering (much faster!)
-from app.services.tree_cover_analysis_optimized import (
-    extract_tree_cover_pixel_centers_FAST as extract_tree_cover_pixel_centers
+    extract_accessible_forest_mask
 )
 
 logger = logging.getLogger(__name__)
@@ -113,75 +108,6 @@ def apply_boundary_buffer(polygon_wkt: str, buffer_meters: float = 50.0) -> str:
         return polygon_wkt
 
     return buffered_wgs84.wkt
-
-
-
-
-def validate_point_distance_from_boundary(
-    points: List[Tuple[float, float]],
-    boundary_wkt: str,
-    min_distance_meters: float = 20.0
-) -> List[Tuple[float, float]]:
-    """
-    Validate that all points are at least min_distance_meters from the boundary edge.
-    Filters out points that are too close to the boundary.
-
-    Args:
-        points: List of (lon, lat) tuples
-        boundary_wkt: WKT of boundary polygon
-        min_distance_meters: Minimum distance from boundary edge (default 20m = 2 pixels of tree cover)
-
-    Returns:
-        Filtered list of points that are safely inside the boundary
-    """
-    from shapely import wkt as shapely_wkt
-    from shapely.ops import transform
-    from pyproj import Transformer
-    from shapely.geometry import Point
-
-    if not points:
-        return points
-
-    # Load boundary
-    boundary = shapely_wkt.loads(boundary_wkt)
-    centroid = boundary.centroid
-
-    # Determine UTM zone for Nepal
-    utm_zone = 44 if centroid.x < 84.0 else 45
-    utm_epsg = f"EPSG:326{utm_zone}"
-
-    # Create transformers
-    to_utm = Transformer.from_crs("EPSG:4326", utm_epsg, always_xy=True)
-
-    # Transform boundary to UTM
-    boundary_utm = transform(to_utm.transform, boundary)
-    boundary_line_utm = boundary_utm.boundary
-
-    # Filter points
-    valid_points = []
-    filtered_count = 0
-
-    for lon, lat in points:
-        # Transform point to UTM
-        point_utm_coords = to_utm.transform(lon, lat)
-        point_utm = Point(point_utm_coords)
-
-        # Calculate distance to boundary edge
-        distance = point_utm.distance(boundary_line_utm)
-
-        if distance >= min_distance_meters:
-            valid_points.append((lon, lat))
-        else:
-            filtered_count += 1
-
-    if filtered_count > 0:
-        logger.warning(
-            f"Filtered {filtered_count} points that were < {min_distance_meters}m from boundary. "
-            f"Kept {len(valid_points)} valid points."
-        )
-
-    return valid_points
-
 
 
 def generate_systematic_grid(
@@ -417,7 +343,7 @@ def extract_blocks_from_calculation(
 
     blocks = []
     for row in results:
-        block_number = row.block_number if row.block_number is not None else 1
+        block_number = row.block_number
         block_wkt = row.block_wkt
         area_hectares = float(row.area_hectares)
         blocks_data = row.blocks_data if row.blocks_data else []
@@ -585,12 +511,11 @@ def create_sampling_design(
         effective_block_area = block_area_ha  # Default to total area
 
         if filter_tree_cover or filter_slope:
-            # NOTE: Slope filtering DISABLED - too slow and causes server hang
             accessible_area_info = calculate_accessible_forest_area(
                 db=db,
                 geometry_wkt=block_wkt,
                 filter_tree_cover=filter_tree_cover,
-                filter_slope=False,  # ALWAYS False - slope filtering disabled
+                filter_slope=filter_slope,
                 max_slope_degrees=max_slope_degrees
             )
 
@@ -620,8 +545,8 @@ def create_sampling_design(
             min_samples = block_min_samples_per_block
 
         # Calculate samples based on intensity (use EFFECTIVE area)
-        sample_area_hectares = float(effective_block_area) * (float(block_intensity_percent) / 100.0)
-        samples_from_intensity = int(sample_area_hectares / float(plot_area_hectares))
+        sample_area_hectares = effective_block_area * (float(block_intensity_percent) / 100.0)
+        samples_from_intensity = int(sample_area_hectares / plot_area_hectares)
 
         # Apply minimum
         samples_for_block = max(min_samples, samples_from_intensity)
@@ -633,121 +558,68 @@ def create_sampling_design(
             f"(minimum {'enforced' if minimum_enforced else 'not needed'})"
         )
 
-        # NEW PIXEL-BASED APPROACH: Extract tree cover pixel centers as candidate locations
-        candidate_pixels = []
+        # NEW: Extract accessible forest mask if filtering is enabled
+        sampling_polygon_wkt = block_wkt  # Default to full block
 
         if filter_tree_cover or filter_slope:
-            # Extract tree cover pixel centers
-            # NOTE: Slope filtering DISABLED - too slow and causes server hang
-            # Always extract tree cover only, regardless of filter_slope setting
-            if filter_slope:
-                logger.warning(
-                    f"    ⚠️ Slope filtering requested but DISABLED (too slow). "
-                    f"Sampling from all tree cover pixels instead."
-                )
-
-            logger.info(f"    - Extracting tree cover pixel centers (no slope filter)...")
-
-            candidate_pixels = extract_tree_cover_pixel_centers(
+            accessible_mask_wkt = extract_accessible_forest_mask(
                 db=db,
                 geometry_wkt=block_wkt,
-                filter_slope=False,  # ALWAYS False - slope filtering disabled
-                max_slope_degrees=max_slope_degrees,
-                min_distance_from_boundary_meters=20.0  # 2 pixels (10m each) from edge
+                filter_slope=filter_slope,
+                max_slope_degrees=max_slope_degrees
             )
 
-            if not candidate_pixels:
+            if accessible_mask_wkt:
+                sampling_polygon_wkt = accessible_mask_wkt
+                logger.info(f"    - Using accessible forest mask for point generation")
+            else:
                 logger.warning(
-                    f"  {block_name}: No accessible tree pixels found. "
-                    f"Try: (1) Disable slope filter, (2) Increase max slope, or (3) Disable tree cover filter."
+                    f"  {block_name}: No accessible forest found with current filters. "
+                    f"Using full boundary."
                 )
-                # Fall back to full boundary sampling
-                candidate_pixels = None
 
-            else:
-                logger.info(f"    - Found {len(candidate_pixels)} candidate tree pixels")
+        # Generate points for this block (using accessible mask if available)
+        if block_sampling_type == "systematic":
+            # Calculate grid spacing to get desired number of samples
+            block_area_sqm = effective_block_area * 10000.0  # Use effective area
+            spacing_meters = math.sqrt(block_area_sqm / samples_for_block)
 
-        # Generate points for this block
-        if candidate_pixels:
-            # PIXEL-BASED SAMPLING: Sample from tree cover pixel centers
-            # Convert pixel centers to (lon, lat) tuples for compatibility
-            pixel_points = [(lon, lat) for lon, lat, slope in candidate_pixels]
+            bounds = get_polygon_bounds(sampling_polygon_wkt)  # Use accessible mask
+            block_points = generate_systematic_grid(
+                bounds[0], bounds[1], bounds[2], bounds[3],
+                int(spacing_meters),
+                sampling_polygon_wkt,  # Use accessible mask
+                block_boundary_buffer
+            )
 
-            if block_sampling_type == "systematic":
-                # Systematic sampling from pixel grid
-                # Calculate spacing to get approximately the desired number of samples
-                if len(pixel_points) <= samples_for_block:
-                    # Use all pixels if we have fewer than needed
-                    block_points = pixel_points
-                else:
-                    # Subsample systematically: take every Nth pixel
-                    step = max(1, len(pixel_points) // samples_for_block)
-                    block_points = pixel_points[::step][:samples_for_block]
-
-                logger.info(f"    - Systematic sampling: selected {len(block_points)}/{len(pixel_points)} pixels")
-
-            elif block_sampling_type == "random":
-                # Random sampling from pixel centers
-                if len(pixel_points) <= samples_for_block:
-                    block_points = pixel_points
-                else:
-                    import random as rand
-                    block_points = rand.sample(pixel_points, samples_for_block)
-
-                logger.info(f"    - Random sampling: selected {len(block_points)}/{len(pixel_points)} pixels")
-
-            elif block_sampling_type == "stratified":
-                # Stratified sampling from pixel centers
-                # Divide pixels into strata based on spatial distribution
-                if len(pixel_points) <= samples_for_block:
-                    block_points = pixel_points
-                else:
-                    # Simple stratified: divide pixels into groups by lat/lon
-                    # Sort by latitude, then take evenly spaced samples
-                    sorted_pixels = sorted(pixel_points, key=lambda p: (p[1], p[0]))
-                    step = max(1, len(sorted_pixels) // samples_for_block)
-                    block_points = sorted_pixels[::step][:samples_for_block]
-
-                logger.info(f"    - Stratified sampling: selected {len(block_points)}/{len(pixel_points)} pixels")
-
-            else:
-                raise ValueError(f"Invalid sampling_type: {block_sampling_type}")
-
-        else:
-            # POLYGON-BASED SAMPLING: Fall back to original approach (no filtering)
-            logger.info(f"    - Using full boundary for sampling (no tree cover filter)")
-            sampling_polygon_wkt = block_wkt
-
-            if block_sampling_type == "systematic":
-                block_area_sqm = float(effective_block_area) * 10000.0
-                spacing_meters = math.sqrt(block_area_sqm / float(samples_for_block))
-
-                bounds = get_polygon_bounds(sampling_polygon_wkt)
+            # If we got fewer points than needed, adjust spacing and retry
+            if len(block_points) < samples_for_block:
+                spacing_meters = spacing_meters * 0.8  # Reduce spacing by 20%
                 block_points = generate_systematic_grid(
                     bounds[0], bounds[1], bounds[2], bounds[3],
                     int(spacing_meters),
-                    sampling_polygon_wkt,
+                    sampling_polygon_wkt,  # Use accessible mask
                     block_boundary_buffer
                 )
 
-            elif block_sampling_type == "random":
-                block_points = generate_random_points(
-                    sampling_polygon_wkt,
-                    samples_for_block,
-                    block_min_distance,
-                    block_boundary_buffer
-                )
+        elif block_sampling_type == "random":
+            block_points = generate_random_points(
+                sampling_polygon_wkt,  # Use accessible mask
+                samples_for_block,
+                block_min_distance,
+                block_boundary_buffer
+            )
 
-            elif block_sampling_type == "stratified":
-                block_points = generate_stratified_points(
-                    sampling_polygon_wkt,
-                    samples_for_block,
-                    num_strata=max(4, samples_for_block // 2),
-                    boundary_buffer_meters=block_boundary_buffer
-                )
+        elif block_sampling_type == "stratified":
+            block_points = generate_stratified_points(
+                sampling_polygon_wkt,  # Use accessible mask
+                samples_for_block,
+                num_strata=max(4, samples_for_block // 2),
+                boundary_buffer_meters=block_boundary_buffer
+            )
 
-            else:
-                raise ValueError(f"Invalid sampling_type: {block_sampling_type}")
+        else:
+            raise ValueError(f"Invalid sampling_type: {block_sampling_type}")
 
         # Store points with block assignment
         for point in block_points:
@@ -759,8 +631,7 @@ def create_sampling_design(
             })
 
         # Calculate actual intensity for this block (based on effective area)
-        # Convert all to float to avoid Decimal/float mixing errors
-        actual_intensity_pct = Decimal(str((len(block_points) * plot_area_hectares / float(effective_block_area)) * 100)) if effective_block_area > 0 else Decimal("0")
+        actual_intensity_pct = Decimal(str((len(block_points) * plot_area_hectares / effective_block_area) * 100)) if effective_block_area > 0 else Decimal("0")
 
         # Store block info with accessible area information
         block_info_dict = {
@@ -794,27 +665,7 @@ def create_sampling_design(
     logger.info(f"Generated total {len(points)} sampling points across {len(blocks)} blocks")
 
     if not points:
-        if filter_slope or filter_tree_cover:
-            filter_description = []
-            if filter_tree_cover:
-                filter_description.append("tree cover pixels")
-            if filter_slope:
-                filter_description.append(f"slope ≤ {max_slope_degrees}°")
-
-            raise ValueError(
-                f"No accessible forest pixels found with filters: {' AND '.join(filter_description)}. "
-                f"\n\nPossible reasons:"
-                f"\n  • No tree cover detected in boundary (check ESA WorldCover data)"
-                f"\n  • All slopes exceed {max_slope_degrees}° threshold"
-                f"\n  • Boundary too small or outside data coverage"
-                f"\n\nSolutions:"
-                f"\n  1. Disable slope filter to sample all tree cover"
-                f"\n  2. Increase max slope threshold to 60° or 90°"
-                f"\n  3. Disable tree cover filter to sample entire boundary"
-                f"\n  4. Check if boundary overlaps with forest area"
-            )
-        else:
-            raise ValueError("No sampling points generated - check polygon and parameters")
+        raise ValueError("No sampling points generated - check polygon and parameters")
 
     # Create MultiPoint geometry WKT
     points_wkt = "MULTIPOINT(" + ", ".join([f"{lon} {lat}" for lon, lat in points]) + ")"
@@ -823,7 +674,7 @@ def create_sampling_design(
     sampling_design = SamplingDesign(
         calculation_id=calculation_id,
         sampling_type=sampling_type,
-        intensity_per_hectare=Decimal(str(len(points) / float(total_forest_area))),  # Calculated (convert to float to avoid type errors)
+        intensity_per_hectare=Decimal(str(len(points) / total_forest_area)),  # Calculated
         grid_spacing_meters=None,  # Not used with intensity-based approach
         min_distance_meters=min_distance_meters,
         plot_shape=plot_shape,
@@ -897,11 +748,11 @@ def create_sampling_design(
 
     db.commit()
 
-    # Calculate statistics (convert to float to avoid Decimal/float mixing errors)
-    actual_intensity = Decimal(str(len(points) / float(total_forest_area)))
+    # Calculate statistics
+    actual_intensity = Decimal(str(len(points) / total_forest_area))
     total_sampled_area_sqm = plot_area_sqm * len(points)
     total_sampled_area_hectares = Decimal(str(total_sampled_area_sqm / 10000.0))
-    sampling_percentage = Decimal(str((total_sampled_area_sqm / (float(total_forest_area) * 10000.0)) * 100))
+    sampling_percentage = Decimal(str((total_sampled_area_sqm / (total_forest_area * 10000.0)) * 100))
 
     return SamplingGenerateResponse(
         sampling_design_id=sampling_design.id,
@@ -921,110 +772,54 @@ def create_sampling_design(
 
 def get_sampling_points_geojson(db: Session, design_id: UUID) -> dict:
     """
-    Get sampling points as GeoJSON with complete field data.
-    Includes: plot_number, block, coordinates, elevation, UTM, distance from boundary
+    Get sampling points as GeoJSON.
 
     Args:
         db: Database session
         design_id: Sampling design ID
 
     Returns:
-        GeoJSON FeatureCollection with complete properties
+        GeoJSON FeatureCollection
     """
-    # Get sampling design
-    design = db.query(SamplingDesign).filter(SamplingDesign.id == design_id).first()
-    if not design:
-        raise ValueError(f"Sampling design {design_id} not found")
-
     query = text("""
         SELECT
-            ST_AsText(points_geometry) as wkt,
-            points_block_assignment
+            ST_AsGeoJSON(points_geometry) as geojson,
+            sampling_type,
+            total_points
         FROM public.sampling_designs
         WHERE id = :design_id
     """)
 
     result = db.execute(query, {"design_id": str(design_id)}).first()
 
-    if not result or not result.wkt:
-        raise ValueError(f"Sampling design {design_id} not found or has no points")
+    if not result:
+        raise ValueError(f"Sampling design {design_id} not found")
 
-    # Parse MultiPoint geometry
-    from shapely import wkt as shapely_wkt
-    multipoint = shapely_wkt.loads(result.wkt)
-    block_assignment = result.points_block_assignment or []
+    import json
+    geojson_data = json.loads(result.geojson)
 
-    # Get calculation boundary for distance calculation
-    from app.models.calculation import Calculation
-    calc = db.query(Calculation).filter(Calculation.id == design.calculation_id).first()
-    boundary_wkt = None
-    if calc:
-        boundary_query = text("""
-            SELECT ST_AsText(boundary_geom) as wkt
-            FROM public.calculations
-            WHERE id = :calc_id
-        """)
-        boundary_result = db.execute(boundary_query, {"calc_id": str(design.calculation_id)}).first()
-        if boundary_result:
-            boundary_wkt = boundary_result.wkt
-
-    # Import required modules for calculations
-    from app.utils.geospatial import extract_elevation_at_point
-    from pyproj import Transformer
-
-    # Convert to FeatureCollection with individual points and complete data
+    # Convert to FeatureCollection with individual points
     features = []
-    for i, point in enumerate(multipoint.geoms):
-        lon, lat = point.x, point.y
-
-        # Find block assignment for this point
-        block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
-        block_number = block_info.get('block_number', '') if block_info else ''
-        block_name = block_info.get('block_name', '') if block_info else ''
-
-        # Calculate UTM coordinates
-        utm_zone = 44 if lon < 84 else 45  # Nepal is in zones 44N and 45N
-        transformer = Transformer.from_crs(f"EPSG:4326", f"EPSG:326{utm_zone}", always_xy=True)
-        utm_easting, utm_northing = transformer.transform(lon, lat)
-
-        # Extract elevation (ASLM - Above Sea Level Meter)
-        elevation_m = extract_elevation_at_point(db, lon, lat)
-
-        # Calculate distance from boundary (if available)
-        distance_from_boundary = None
-        if boundary_wkt:
-            try:
-                boundary_geom = shapely_wkt.loads(boundary_wkt)
-                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320  # Convert degrees to meters (approximate)
-            except:
-                pass
-
-        feature = {
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [lon, lat]
-            },
-            "properties": {
-                "plot_number": i + 1,
-                "block_number": block_number,
-                "block_name": block_name,
-                "longitude": float(f"{lon:.7f}"),
-                "latitude": float(f"{lat:.7f}"),
-                "elevation_m": int(elevation_m) if elevation_m else None,
-                "utm_easting": float(f"{utm_easting:.2f}"),
-                "utm_northing": float(f"{utm_northing:.2f}"),
-                "utm_zone": f"{utm_zone}N",
-                "distance_from_boundary_m": float(f"{distance_from_boundary:.2f}") if distance_from_boundary else None,
-                "sampling_type": design.sampling_type
+    if geojson_data['type'] == 'MultiPoint':
+        for i, coord in enumerate(geojson_data['coordinates'], 1):
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": coord
+                },
+                "properties": {
+                    "plot_number": i,
+                    "sampling_type": result.sampling_type
+                }
             }
-        }
-        features.append(feature)
+            features.append(feature)
 
     return {
         "type": "FeatureCollection",
         "features": features
     }
+
 
 def assign_blocks_to_sampling(db: Session, design_id: UUID, calculation_id: UUID):
     """

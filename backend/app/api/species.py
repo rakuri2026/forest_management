@@ -2,11 +2,14 @@
 Species API endpoints for testing species matcher
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.services.species_matcher import get_species_matcher
+from app.core.database import get_db
 
 
 router = APIRouter()
@@ -140,24 +143,72 @@ async def get_all_species():
     }
 
 
-@router.get("/{code}")
-async def get_species_by_code(code: int):
+@router.get("/search")
+async def search_species(
+    q: str = Query("", description="Search query (scientific name, local name, or family)"),
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    db: Session = Depends(get_db)
+):
     """
-    Get species by numeric code
+    Search all species in tree_species_coefficients with full characteristics
 
-    Example:
-    - /api/species/18 → Returns Shorea robusta
+    Supports searching by:
+    - Scientific name (e.g., "Shorea robusta")
+    - Local name (e.g., "Sal")
+    - Family name (e.g., "Dipterocarpaceae")
+
+    Returns species with all characteristics including:
+    - Growth rate, altitude range, economic value
+    - Main uses, nitrogen fixing, rarity status
     """
-    matcher = get_species_matcher()
-    species = matcher.get_species_by_code(code)
+    query_text = text("""
+        SELECT
+            id,
+            scientific_name,
+            local_name,
+            family,
+            growth_rate,
+            min_altitude_m,
+            max_altitude_m,
+            economic_value,
+            main_uses,
+            nitrogen_fixing,
+            rarity_status,
+            ecological_role
+        FROM tree_species_coefficients
+        WHERE
+            LOWER(scientific_name) LIKE LOWER(:search)
+            OR LOWER(local_name) LIKE LOWER(:search)
+            OR LOWER(family) LIKE LOWER(:search)
+        ORDER BY scientific_name
+        LIMIT :limit
+    """)
 
-    if species:
-        return {
-            "success": True,
-            "species": species
-        }
-    else:
-        raise HTTPException(status_code=404, detail=f"Species with code {code} not found")
+    search_pattern = f"%{q}%"
+    results = db.execute(query_text, {"search": search_pattern, "limit": limit}).fetchall()
+
+    species_list = []
+    for r in results:
+        species_list.append({
+            "id": r.id,
+            "scientific_name": r.scientific_name,
+            "local_name": r.local_name or "Unknown",
+            "family": r.family,
+            "growth_rate": r.growth_rate,
+            "min_altitude_m": r.min_altitude_m,
+            "max_altitude_m": r.max_altitude_m,
+            "economic_value": r.economic_value,
+            "main_uses": r.main_uses,
+            "nitrogen_fixing": r.nitrogen_fixing or False,
+            "rarity_status": r.rarity_status or "Common",
+            "ecological_role": r.ecological_role
+        })
+
+    return {
+        "species": species_list,
+        "count": len(species_list),
+        "query": q
+    }
 
 
 @router.post("/validate-column")
@@ -179,3 +230,23 @@ async def validate_species_column(request: BatchIdentifyRequest):
     validation = matcher.validate_species_column(request.species_list, min_confidence=0.6)
 
     return validation
+
+
+@router.get("/{code}")
+async def get_species_by_code(code: int):
+    """
+    Get species by numeric code
+
+    Example:
+    - /api/species/18 → Returns Shorea robusta
+    """
+    matcher = get_species_matcher()
+    species = matcher.get_species_by_code(code)
+
+    if species:
+        return {
+            "success": True,
+            "species": species
+        }
+    else:
+        raise HTTPException(status_code=404, detail=f"Species with code {code} not found")

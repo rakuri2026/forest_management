@@ -220,6 +220,21 @@ export const forestApi = {
     const response = await api.get(`/api/forests/calculations/${calculationId}/species-summary`);
     return response.data;
   },
+
+  // Accessible forest area endpoint (Phase 2)
+  getAccessibleForestArea: async (
+    calculationId: string,
+    params?: {
+      filter_slope?: boolean;
+      max_slope_degrees?: number;
+    }
+  ): Promise<any> => {
+    const response = await api.get(
+      `/api/forests/calculations/${calculationId}/accessible-area`,
+      { params }
+    );
+    return response.data;
+  },
 };
 
 // Tree Model endpoints
@@ -477,6 +492,10 @@ export const samplingApi = {
       plot_length_meters?: number;
       plot_width_meters?: number;
       notes?: string;
+      // Accessible forest filtering (Phase 2)
+      filter_tree_cover?: boolean; // Filter to tree cover only (default: true)
+      filter_slope?: boolean; // Filter by slope (default: false)
+      max_slope_degrees?: number; // Max slope threshold (default: 45.0)
     }
   ): Promise<any> => {
     const response = await api.post(
@@ -496,9 +515,21 @@ export const samplingApi = {
     return response.data;
   },
 
-  getPoints: async (designId: string, format?: "json" | "geojson"): Promise<any> => {
+  getPoints: async (
+    designId: string,
+    options?: {
+      format?: "json" | "geojson";
+      include_elevation?: boolean;
+      include_topographic_features?: boolean;
+    }
+  ): Promise<any> => {
+    const params: any = {};
+    if (options?.format) params.format = options.format;
+    if (options?.include_elevation !== undefined) params.include_elevation = options.include_elevation;
+    if (options?.include_topographic_features !== undefined) params.include_topographic_features = options.include_topographic_features;
+
     const response = await api.get(`/api/sampling/${designId}/points`, {
-      params: format ? { format } : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
     });
     return response.data;
   },
@@ -515,6 +546,33 @@ export const samplingApi = {
       params: { format },
       responseType: "blob",
     });
+    return response.data;
+  },
+
+  getMapLayers: async (designId: string): Promise<any> => {
+    const response = await api.get(`/api/sampling/${designId}/map-layers`);
+    return response.data;
+  },
+
+  previewAccessibleForest: async (
+    calculationId: string,
+    options: {
+      filter_tree_cover?: boolean;
+      filter_slope?: boolean;
+      max_slope_degrees?: number;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/calculations/${calculationId}/preview-accessible-forest`,
+      null,
+      {
+        params: {
+          filter_tree_cover: options.filter_tree_cover ?? true,
+          filter_slope: options.filter_slope ?? false,
+          max_slope_degrees: options.max_slope_degrees ?? 45.0,
+        },
+      }
+    );
     return response.data;
   },
 };

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { samplingApi, forestApi } from '../services/api';
+import { SamplingMapView } from './SamplingMapView';
+import { AccessibleForestPreview } from './AccessibleForestPreview';
 
 interface SamplingTabProps {
   calculationId: string;
@@ -26,6 +28,10 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const [samplingPoints, setSamplingPoints] = useState<any[]>([]);
   const [loadingPoints, setLoadingPoints] = useState(false);
 
+  // Navigation support options (Phase 2 enhancement)
+  const [includeElevation, setIncludeElevation] = useState(true); // Default: ON
+  const [includeTopoFeatures, setIncludeTopoFeatures] = useState(true); // Default: ON (ridge/river info)
+
   // Calculation and blocks data
   const [calculation, setCalculation] = useState<any>(null);
   const [blocks, setBlocks] = useState<any[]>([]);
@@ -44,6 +50,16 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const [plotShape, setPlotShape] = useState<'circular' | 'square'>('circular');
   const [plotRadius, setPlotRadius] = useState(12.6156);
   const [plotSide, setPlotSide] = useState(10);
+
+  // Accessible forest filtering (Phase 2)
+  const [filterTreeCover, setFilterTreeCover] = useState(true); // Default: ON
+  const [filterSlope, setFilterSlope] = useState(false); // Default: OFF
+  const [maxSlopeDegrees, setMaxSlopeDegrees] = useState(45.0); // Default: 45°
+
+  // Forest area preview
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     loadDesigns();
@@ -89,13 +105,52 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const loadSamplingPoints = async (designId: string) => {
     setLoadingPoints(true);
     try {
-      const data = await samplingApi.getPoints(designId);
+      const data = await samplingApi.getPoints(designId, {
+        include_elevation: includeElevation,
+        include_topographic_features: includeTopoFeatures,
+      });
       setSamplingPoints(data.points || []);
       setSelectedDesignId(designId);
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to load sampling points');
     } finally {
       setLoadingPoints(false);
+    }
+  };
+
+  const handlePreviewForestAreas = async () => {
+    setLoadingPreview(true);
+    setPreviewData(null);
+    setError(null);
+
+    try {
+      const data = await samplingApi.previewAccessibleForest(calculationId, {
+        filter_tree_cover: filterTreeCover,
+        filter_slope: filterSlope,
+        max_slope_degrees: maxSlopeDegrees,
+      });
+      setPreviewData(data);
+      setShowPreview(true);
+    } catch (err: any) {
+      const errorDetail = err.response?.data?.detail || 'Failed to preview forest areas';
+
+      // Check if it's a timeout error (408 status)
+      if (err.response?.status === 408) {
+        setError(
+          `⏱️ Preview Timeout: ${errorDetail}\n\n` +
+          `For large forest areas with slope filtering, the preview can be slow.\n\n` +
+          `Options:\n` +
+          `1. Disable "Filter by Slope" for faster preview\n` +
+          `2. Skip preview and create sampling design directly\n` +
+          `   (Slope filtering will still work during sampling, it's just slower for visualization)`
+        );
+      } else {
+        setError(errorDetail);
+      }
+
+      setShowPreview(false);
+    } finally {
+      setLoadingPreview(false);
     }
   };
 
@@ -109,6 +164,10 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
         min_samples_per_block: minSamplesPerBlock, // NEW: Minimum for blocks >= 1ha
         min_samples_small_blocks: minSamplesSmallBlocks, // NEW: Minimum for blocks < 1ha
         plot_shape: plotShape,
+        // Accessible forest filtering (Phase 2)
+        filter_tree_cover: filterTreeCover,
+        filter_slope: filterSlope,
+        max_slope_degrees: maxSlopeDegrees,
       };
 
       // For random sampling, add minimum distance
@@ -398,6 +457,196 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                 />
               </div>
             )}
+
+            {/* Accessible Forest Filtering (Phase 2) */}
+            <div className="border-t pt-6 mt-6">
+              <h4 className="text-md font-semibold text-gray-900 mb-3">
+                Sampling Area Filters
+              </h4>
+              <p className="text-xs text-gray-600 mb-4">
+                Control which areas are eligible for sample plot placement
+              </p>
+
+              {/* Tree Cover Filter */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start justify-between">
+                  <label className="flex items-start space-x-3 cursor-pointer flex-1">
+                    <input
+                      type="checkbox"
+                      checked={filterTreeCover}
+                      onChange={(e) => setFilterTreeCover(e.target.checked)}
+                      className="mt-1 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Filter to Tree Cover Only</div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Exclude non-forest areas (grassland, cropland, water bodies, settlements)
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Uses ESA WorldCover data (10m resolution) to identify tree-covered pixels
+                      </p>
+                    </div>
+                  </label>
+                  <span className="ml-3 text-xs bg-green-100 text-green-800 px-2 py-1 rounded whitespace-nowrap">
+                    Recommended
+                  </span>
+                </div>
+              </div>
+
+              {/* Slope Filter */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start justify-between">
+                  <label className="flex items-start space-x-3 cursor-pointer flex-1">
+                    <input
+                      type="checkbox"
+                      checked={filterSlope}
+                      onChange={(e) => setFilterSlope(e.target.checked)}
+                      className="mt-1 h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Filter by Slope Accessibility</div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Exclude steep slopes that may be difficult or unsafe to access
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Calculated from DEM (Digital Elevation Model) data
+                      </p>
+                    </div>
+                  </label>
+                  <span className="ml-3 text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded whitespace-nowrap">
+                    Optional
+                  </span>
+                </div>
+
+                {/* Max Slope Selector */}
+                {filterSlope && (
+                  <div className="mt-4 ml-8">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Maximum Slope Threshold
+                    </label>
+                    <select
+                      value={maxSlopeDegrees}
+                      onChange={(e) => setMaxSlopeDegrees(parseFloat(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                    >
+                      <option value="30">30° - Conservative (gentle slopes only)</option>
+                      <option value="45">45° - Standard (moderate slopes)</option>
+                      <option value="60">60° - Aggressive (steep slopes OK)</option>
+                    </select>
+                    <p className="mt-2 text-xs text-gray-500">
+                      <span className="font-medium">Slope Reference:</span><br/>
+                      • 0-15°: Flat to gentle (easy walking)<br/>
+                      • 15-30°: Moderate (hiking with caution)<br/>
+                      • 30-45°: Steep (difficult, experienced crews)<br/>
+                      • 45-60°: Very steep (safety equipment needed)<br/>
+                      • 60-90°: Extremely steep to cliff (inaccessible)
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Filter Summary */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <div className="text-xs text-gray-700">
+                  <span className="font-semibold">Active Filters:</span>
+                  {filterTreeCover && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                      Tree Cover
+                    </span>
+                  )}
+                  {filterSlope && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 line-through">
+                      Slope ≤ {maxSlopeDegrees}° (DISABLED)
+                    </span>
+                  )}
+                  {!filterTreeCover && !filterSlope && (
+                    <span className="ml-2 text-gray-500">None - Sampling across entire boundary</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Slope Filter Disabled Warning */}
+              {filterSlope && (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-4">
+                  <h5 className="text-sm font-semibold text-red-900 mb-2">
+                    ⚠️ SLOPE FILTERING TEMPORARILY DISABLED
+                  </h5>
+                  <p className="text-sm text-red-800 mb-2">
+                    Slope filtering causes severe server hangs and has been <strong>completely disabled</strong> for system stability.
+                  </p>
+                  <p className="text-sm text-red-700 mb-2">
+                    <strong>Current Behavior:</strong> Sampling design will use <strong>tree cover filter ONLY</strong>,
+                    regardless of slope checkbox status.
+                  </p>
+                  <p className="text-xs text-red-600">
+                    <strong>Recommendation:</strong> Uncheck the "Filter by Slope" option to avoid confusion.
+                    All tree-covered areas will be eligible for sampling.
+                  </p>
+                </div>
+              )}
+
+              {/* Preview Button */}
+              {(filterTreeCover || filterSlope) && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4">
+                  <h5 className="text-sm font-semibold text-yellow-900 mb-2">
+                    📊 Preview Forest Classification
+                  </h5>
+                  <p className="text-xs text-yellow-800 mb-3">
+                    Before creating the sampling design, preview which areas will be classified as "Accessible" (green) vs "Protected" (red) based on your filter settings.
+                  </p>
+                  {filterSlope && (
+                    <div className="bg-orange-100 border border-orange-300 rounded px-3 py-2 mb-3">
+                      <p className="text-xs text-orange-800">
+                        ⚠️ <strong>Slope filtering enabled:</strong> Preview may take 30-120 seconds for large areas.
+                        {calculation && calculation.result_data?.total_area > 100 && (
+                          <span className="block mt-1">
+                            Your forest is {calculation.result_data.total_area.toFixed(0)} ha - expect slower processing.
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                  <button
+                    onClick={handlePreviewForestAreas}
+                    disabled={loadingPreview}
+                    className="w-full bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700 disabled:bg-gray-400 font-medium transition-colors"
+                  >
+                    {loadingPreview ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Analyzing forest areas... {filterSlope ? '(may take 30-120s)' : ''}</span>
+                      </span>
+                    ) : '🗺️ Preview Accessible & Protected Forest Areas'}
+                  </button>
+                  {!showPreview && (
+                    <p className="text-xs text-gray-600 mt-2 text-center">
+                      Or skip preview and create sampling design directly below
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Preview Visualization */}
+              {showPreview && previewData && (
+                <div className="border-t pt-4 mt-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="text-md font-semibold text-gray-900">
+                      Forest Area Preview
+                    </h4>
+                    <button
+                      onClick={() => setShowPreview(false)}
+                      className="text-sm text-gray-600 hover:text-gray-800"
+                    >
+                      ✕ Hide Preview
+                    </button>
+                  </div>
+                  <AccessibleForestPreview previewData={previewData} />
+                </div>
+              )}
+            </div>
 
             {/* Block Overrides Section */}
             {blocks.length > 1 && (
@@ -707,6 +956,46 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                 </div>
 
                 <div className="space-y-2">
+                  {/* Navigation Support Options */}
+                  <div className="bg-gray-50 border border-gray-200 rounded p-3 mb-2">
+                    <div className="text-xs font-semibold text-gray-700 mb-2">Field Navigation Support:</div>
+                    <div className="flex gap-4 text-sm">
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={includeElevation}
+                          onChange={(e) => {
+                            setIncludeElevation(e.target.checked);
+                            // Reload points if currently viewing them
+                            if (selectedDesignId === design.id && samplingPoints.length > 0) {
+                              setTimeout(() => loadSamplingPoints(design.id), 100);
+                            }
+                          }}
+                          className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span className="text-gray-700">Elevation (ASLM)</span>
+                      </label>
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={includeTopoFeatures}
+                          onChange={(e) => {
+                            setIncludeTopoFeatures(e.target.checked);
+                            // Reload points if currently viewing them
+                            if (selectedDesignId === design.id && samplingPoints.length > 0) {
+                              setTimeout(() => loadSamplingPoints(design.id), 100);
+                            }
+                          }}
+                          className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span className="text-gray-700">Nearest Ridge/Valley</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Help field crews navigate to sampling points with elevation and topographic landmarks
+                    </p>
+                  </div>
+
                   {/* Toggle Points Button */}
                   <button
                     onClick={() => {
@@ -778,9 +1067,19 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Longitude</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latitude</th>
+                              {includeElevation && samplingPoints.some(p => p.elevation_m !== undefined) && (
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-blue-50">
+                                  Elevation (m)
+                                </th>
+                              )}
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Easting</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Northing</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Zone</th>
+                              {includeTopoFeatures && samplingPoints.some(p => p.topographic_context) && (
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase bg-green-50">
+                                  Nearest Ridge/Valley
+                                </th>
+                              )}
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Distance from Boundary (m)</th>
                             </tr>
                           </thead>
@@ -795,9 +1094,19 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                                 </td>
                                 <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.longitude).toFixed(7)}</td>
                                 <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.latitude).toFixed(7)}</td>
+                                {includeElevation && samplingPoints.some(p => p.elevation_m !== undefined) && (
+                                  <td className="px-4 py-2 text-sm font-semibold bg-blue-50">
+                                    {point.elevation_m ? `${point.elevation_m}m` : 'N/A'}
+                                  </td>
+                                )}
                                 <td className="px-4 py-2 text-sm font-mono">{point.utm_easting ? parseFloat(point.utm_easting).toFixed(2) : 'N/A'}</td>
                                 <td className="px-4 py-2 text-sm font-mono">{point.utm_northing ? parseFloat(point.utm_northing).toFixed(2) : 'N/A'}</td>
                                 <td className="px-4 py-2 text-sm">{point.utm_zone || 'N/A'}</td>
+                                {includeTopoFeatures && samplingPoints.some(p => p.topographic_context) && (
+                                  <td className="px-4 py-2 text-sm bg-green-50" title={point.nearest_feature_type ? `${point.nearest_feature_type} at bearing ${point.nearest_feature_bearing}°` : undefined}>
+                                    {point.topographic_context || 'N/A'}
+                                  </td>
+                                )}
                                 <td className="px-4 py-2 text-sm">{point.distance_from_boundary ? parseFloat(point.distance_from_boundary).toFixed(2) : 'N/A'}</td>
                               </tr>
                             ))}
@@ -810,6 +1119,29 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                         )}
                       </div>
                     )}
+
+                    {/* Interactive Map Visualization */}
+                    <div className="mt-8">
+                      <h4 className="text-md font-semibold text-gray-700 mb-4">
+                        📍 Interactive Map - Sampling Points & Accessible Forest Area
+                      </h4>
+                      <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-200">
+                        <div className="text-sm text-gray-700">
+                          <strong>Map Features:</strong>
+                          <ul className="list-disc list-inside mt-1 text-xs text-gray-600 space-y-1">
+                            <li>🛰️ <strong>Satellite basemap</strong> - Switch using layer control (top-right)</li>
+                            <li>🔷 <strong>Forest boundary</strong> - Blue outline</li>
+                            {design.default_parameters && (design.default_parameters.filter_tree_cover || design.default_parameters.filter_slope) && (
+                              <li>🟢 <strong>Accessible forest area</strong> - Green shaded area (filtered by tree cover/slope)</li>
+                            )}
+                            <li>📍 <strong>Sample plot locations</strong> - Red markers (click for details)</li>
+                            <li>🧭 <strong>North arrow</strong> - Top-right corner</li>
+                            <li>📏 <strong>Scale bar</strong> - Bottom-left corner</li>
+                          </ul>
+                        </div>
+                      </div>
+                      <SamplingMapView designId={design.id} />
+                    </div>
                   </div>
                 )}
               </div>

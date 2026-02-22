@@ -15,6 +15,7 @@ interface TreeModel {
   id: string;
   calculation_id: string;
   model_version: string;
+  algorithm_config?: any;
   status: 'processing' | 'completed' | 'failed';
   progress_percent: number;
   current_step: string;
@@ -48,9 +49,9 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
   const [config, setConfig] = useState<TreeModelConfig>({
     min_dbh_cm: 10.0,
     min_height_m: 5.0,
-    max_trees_per_ha: 1000,
+    max_trees_per_ha: 500,
     spatial_distribution: 'random',
-    plot_buffer_meters: 25.0,
+    plot_buffer_meters: 12.62,
     algorithm_version: 'v1.0'
   });
 
@@ -284,7 +285,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
                   disabled={generating}
                 />
-                <p className="text-xs text-gray-500 mt-1">Upper density cap (default: 1000)</p>
+                <p className="text-xs text-gray-500 mt-1">Upper density cap (default: 500)</p>
               </div>
 
               <div>
@@ -297,11 +298,11 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                   onChange={(e) => setConfig({ ...config, plot_buffer_meters: parseFloat(e.target.value) })}
                   min="5"
                   max="100"
-                  step="1"
+                  step="0.01"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
                   disabled={generating}
                 />
-                <p className="text-xs text-gray-500 mt-1">Buffer radius for plot assignment (default: 25m)</p>
+                <p className="text-xs text-gray-500 mt-1">Buffer radius for plot assignment (default: 12.62m)</p>
               </div>
 
               <div>
@@ -426,32 +427,76 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
 
                     {/* Statistics (if completed) */}
                     {model.status === 'completed' && model.total_trees && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                        <div>
-                          <p className="text-xs text-gray-500">Total Trees</p>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {model.total_trees.toLocaleString()}
-                          </p>
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                          <div>
+                            <p className="text-xs text-gray-500">Total Trees</p>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {model.total_trees.toLocaleString()}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Trees/ha</p>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {model.trees_per_hectare?.toFixed(1)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">DBH Range</p>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {model.min_dbh_cm?.toFixed(1)} - {model.max_dbh_cm?.toFixed(1)} cm
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">File Size</p>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {model.file_size_mb ? formatFileSize(model.file_size_mb) : 'N/A'}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Trees/ha</p>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {model.trees_per_hectare?.toFixed(1)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">DBH Range</p>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {model.min_dbh_cm?.toFixed(1)} - {model.max_dbh_cm?.toFixed(1)} cm
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">File Size</p>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {model.file_size_mb ? formatFileSize(model.file_size_mb) : 'N/A'}
-                          </p>
-                        </div>
-                      </div>
+
+                        {/* Block-wise DBH Class Distribution (Per Hectare) */}
+                        {model.algorithm_config?.block_dbh_distribution && (
+                          <div className="mb-3">
+                            <p className="text-xs text-gray-500 mb-2">Stand Density & Volume by Block (per hectare):</p>
+                            <div className="space-y-2">
+                              {Object.entries(model.algorithm_config.block_dbh_distribution).map(([blockName, blockData]: [string, any]) => (
+                                <div key={blockName} className="bg-gray-50 p-2 rounded">
+                                  <p className="text-xs font-medium text-gray-700 mb-1">{blockName} ({blockData.num_plots} plots):</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {/* Volume per hectare - prominent display */}
+                                    {blockData.volume_per_ha !== undefined && blockData.volume_per_ha > 0 && (
+                                      <span className="px-2 py-0.5 bg-orange-100 text-orange-900 text-xs rounded-full font-semibold">
+                                        Volume: {blockData.volume_per_ha.toFixed(1)} m³/ha
+                                      </span>
+                                    )}
+                                    {blockData.dbh_per_ha?.regeneration_1_4cm > 0 && (
+                                      <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
+                                        Regen (1-4cm): {blockData.dbh_per_ha.regeneration_1_4cm.toLocaleString()}
+                                      </span>
+                                    )}
+                                    {blockData.dbh_per_ha?.sapling_4_10cm > 0 && (
+                                      <span className="px-2 py-0.5 bg-green-200 text-green-900 text-xs rounded-full">
+                                        Sapling (4-10cm): {blockData.dbh_per_ha.sapling_4_10cm.toLocaleString()}
+                                      </span>
+                                    )}
+                                    {blockData.dbh_per_ha?.pole_10_30cm > 0 && (
+                                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full">
+                                        Pole (10-30cm): {blockData.dbh_per_ha.pole_10_30cm.toLocaleString()}
+                                      </span>
+                                    )}
+                                    {blockData.dbh_per_ha?.tree_above_30cm > 0 && (
+                                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-full">
+                                        Tree (&gt;30cm): {blockData.dbh_per_ha.tree_above_30cm.toLocaleString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {/* Error Message (if failed) */}

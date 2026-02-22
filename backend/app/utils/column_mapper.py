@@ -344,6 +344,35 @@ class ColumnMapper:
         # Check for duplicate mappings (multiple CSV columns mapped to same standard column)
         duplicates = self._check_duplicates(mapped)
 
+        # AUTO-RESOLVE DUPLICATES: Keep best match using smart tie-breaking
+        if duplicates:
+            for std_col, csv_cols in duplicates.items():
+                # Smart tie-breaking: prefer exact matches, then highest confidence, then shortest name
+                def match_priority(col):
+                    conf = confidence[col]
+                    is_exact = (self.normalize(col) == self.normalize(std_col))  # Exact match
+                    col_len = len(col)  # Shorter is better
+                    # Return tuple: (is_exact DESC, confidence DESC, length ASC)
+                    return (is_exact, conf, -col_len)
+
+                # Find best mapping using priority
+                best_csv_col = max(csv_cols, key=match_priority)
+
+                # Demote other mappings to unmapped with suggestions
+                for csv_col in csv_cols:
+                    if csv_col != best_csv_col:
+                        # Move to unmapped
+                        unmapped.append(csv_col)
+                        # Remove from mapped
+                        del mapped[csv_col]
+                        # Add suggestions showing it was close to std_col
+                        suggestions[csv_col] = [(std_col, confidence[csv_col])] + self._get_suggestions(csv_col, top_n=2)
+                        # Remove confidence
+                        del confidence[csv_col]
+
+            # Recalculate duplicates after resolution
+            duplicates = self._check_duplicates(mapped)
+
         # Validate required columns are present
         missing_required = self._check_missing_required(mapped)
 

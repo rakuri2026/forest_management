@@ -2960,7 +2960,15 @@ def analyze_potential_tree_species(forest_type_percentages: Dict[str, float], db
                 fsa.availability_rank,
                 fsa.role,
                 fsa.frequency_percent,
-                fsa.canopy_coverage_percent
+                fsa.canopy_coverage_percent,
+                tsc.growth_rate,
+                tsc.min_altitude_m,
+                tsc.max_altitude_m,
+                tsc.main_uses,
+                tsc.nitrogen_fixing,
+                tsc.rarity_status,
+                tsc.family,
+                tsc.economic_value as stored_economic_value
             FROM forest_species_association fsa
             JOIN forest_types ft ON fsa.forest_type_id = ft.id
             JOIN tree_species_coefficients tsc ON fsa.species_id = tsc.id
@@ -2998,10 +3006,17 @@ def analyze_potential_tree_species(forest_type_percentages: Dict[str, float], db
                     "local_name": r.local_name or "Unknown",
                     "role": r.role,
                     "availability_rank": r.availability_rank,
-                    "economic_value": economic_value,
+                    "economic_value": r.stored_economic_value or economic_value,
                     "forest_types": [r.forest_type_name],
                     "frequency_percent": r.frequency_percent or 0,
-                    "value_score": value_score
+                    "value_score": value_score,
+                    "growth_rate": r.growth_rate,
+                    "min_altitude_m": r.min_altitude_m,
+                    "max_altitude_m": r.max_altitude_m,
+                    "main_uses": r.main_uses,
+                    "nitrogen_fixing": r.nitrogen_fixing or False,
+                    "rarity_status": r.rarity_status or "Common",
+                    "family": r.family
                 }
             else:
                 # Species appears in multiple forest types - update

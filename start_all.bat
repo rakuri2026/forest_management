@@ -1,27 +1,50 @@
 @echo off
-REM Start Both Backend and Frontend Servers
+title Community Forest Management - Starting Servers
 
+cls
+echo.
 echo ========================================
-echo Community Forest Management System
-echo Starting Backend and Frontend...
+echo  Community Forest Management System
+echo  Starting All Servers...
 echo ========================================
 echo.
 
-REM Start backend in new window
-start "Backend Server (Port 3001)" cmd /k "cd /d D:\forest_management && start_backend.bat"
+REM Stop any existing servers first
+echo Stopping any existing servers...
+taskkill /F /IM python.exe >nul 2>&1
+taskkill /F /IM node.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+echo Done.
+echo.
+
+REM Start Backend Server in new window
+echo [1/2] Starting Backend Server (Port 8001)...
+start "Backend Server - Port 8001" cmd /k "cd /d D:\forest_management\backend && ..\venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8001"
+echo Backend server window opened
+echo.
 
 REM Wait for backend to start
-timeout /t 5 /nobreak
-
-REM Start frontend in new window
-start "Frontend Server (Port 3000)" cmd /k "cd /d D:\forest_management && start_frontend.bat"
-
+echo Waiting for backend to initialize (3 seconds)...
+timeout /t 3 /nobreak >nul
 echo.
+
+REM Start Frontend Server in new window
+echo [2/2] Starting Frontend Server (Port 3001)...
+start "Frontend Server - Port 3001" cmd /k "cd /d D:\forest_management\frontend && npm run dev"
+echo Frontend server window opened
+echo.
+
 echo ========================================
-echo Servers are starting...
-echo Backend:  http://localhost:3001/docs
-echo Frontend: http://localhost:3000
+echo  Servers Started Successfully!
 echo ========================================
 echo.
-echo Press any key to close this window (servers will continue running)
+echo  Backend:  http://localhost:8001
+echo  Docs:     http://localhost:8001/docs
+echo  Frontend: http://localhost:3001
+echo.
+echo  Login:    demo@forest.com / Demo1234
+echo.
+echo  2 new windows opened - check them!
+echo ========================================
+echo.
 pause

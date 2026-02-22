@@ -269,8 +269,16 @@ def export_fieldbook_geojson(db: Session, calculation_id: UUID) -> Dict[str, Any
 
 def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
     """
-    Export sampling points to CSV format.
+    Export sampling points to CSV format with complete field data.
+    Includes: Plot No, Block, Longitude, Latitude, Elevation, UTM Easting, UTM Northing, UTM Zone, Distance from Boundary
     """
+    # CRITICAL: Rollback any previous failed transactions at the START
+    # This prevents "InFailedSqlTransaction" errors from cascading
+    try:
+        db.rollback()
+    except:
+        pass
+
     design = db.query(SamplingDesign).filter(SamplingDesign.id == design_id).first()
 
     if not design or not design.points_geometry:
@@ -289,32 +297,176 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
         raise ValueError("Failed to retrieve geometry as WKT")
 
     # Parse MultiPoint geometry
-    from shapely import wkt
-    multipoint = wkt.loads(result.wkt)
+    from shapely import wkt as shapely_wkt
+    multipoint = shapely_wkt.loads(result.wkt)
 
     # Get block assignment
     block_assignment = design.points_block_assignment or []
+
+    # Get calculation boundary for distance calculation
+    from app.models.calculation import Calculation
+    calc = db.query(Calculation).filter(Calculation.id == design.calculation_id).first()
+    boundary_wkt = None
+    if calc:
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM public.calculations
+            WHERE id = :calc_id
+        """)
+        boundary_result = db.execute(boundary_query, {"calc_id": str(design.calculation_id)}).first()
+        if boundary_result:
+            boundary_wkt = boundary_result.wkt
 
     # Create CSV
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Write header
-    writer.writerow(['Plot No', 'Longitude', 'Latitude', 'Block No', 'Block Name'])
+    # Write header with all displayed fields including topographic features
+    writer.writerow([
+        'Plot No',
+        'Block',
+        'Longitude',
+        'Latitude',
+        'Elevation (m)',
+        'UTM Easting',
+        'UTM Northing',
+        'UTM Zone',
+        'Distance from Boundary (m)',
+        'Nearest Feature',
+        'Feature Type',
+        'Distance to Feature (m)',
+        'Direction to Feature'
+    ])
 
-    # Write points
+    # Import required modules for calculations
+    from app.utils.geospatial import extract_elevation_at_point
+    from app.utils.geospatial_vector_optimized import (
+        preclip_topographic_features,
+        find_nearest_topographic_feature_optimized
+    )
+    from pyproj import Transformer
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Pre-clip ridge/river data ONCE for performance (20-100x faster!)
+    # IMPORTANT: Wrap in transaction handling to prevent "InFailedSqlTransaction" errors
+    clipped_features = None
+    if boundary_wkt:
+        try:
+            # Rollback any previous failed transactions
+            try:
+                db.rollback()
+            except:
+                pass
+
+            clipped_features = preclip_topographic_features(
+                db=db,
+                boundary_wkt=boundary_wkt,
+                buffer_meters=1000.0
+            )
+            # DEBUG: Log what we got
+            if clipped_features:
+                ridge_count = len(clipped_features.get('ridges', []))
+                river_count = len(clipped_features.get('rivers', []))
+                logger.info(f"Pre-clipped {ridge_count} ridges and {river_count} rivers for CSV export")
+                if ridge_count == 0 and river_count == 0:
+                    logger.warning("Pre-clipping returned 0 features - ridge/river columns will be empty!")
+            else:
+                logger.warning("Pre-clipping returned None - ridge/river columns will be empty!")
+        except Exception as e:
+            logger.error(f"Failed to pre-clip topographic features: {e}", exc_info=True)
+            # Rollback the failed transaction
+            try:
+                db.rollback()
+            except:
+                pass
+            clipped_features = None
+
+    # Write points with complete data
     for i, point in enumerate(multipoint.geoms):
+        lon, lat = point.x, point.y
+
         # Find block assignment for this point
         block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
         block_number = block_info.get('block_number', '') if block_info else ''
         block_name = block_info.get('block_name', '') if block_info else ''
 
+        # Calculate UTM coordinates
+        utm_zone = 44 if lon < 84 else 45  # Nepal is in zones 44N and 45N
+        transformer = Transformer.from_crs(f"EPSG:4326", f"EPSG:326{utm_zone}", always_xy=True)
+        utm_easting, utm_northing = transformer.transform(lon, lat)
+
+        # Extract elevation (ASLM - Above Sea Level Meter)
+        # Wrap in try-except with rollback to prevent transaction abort
+        elevation_m = None
+        try:
+            elevation_m = extract_elevation_at_point(db, lon, lat)
+        except Exception as e:
+            logger.debug(f"Failed to extract elevation for point {i+1}: {e}")
+            try:
+                db.rollback()
+            except:
+                pass
+
+        # Calculate distance from boundary (if available)
+        distance_from_boundary = None
+        if boundary_wkt:
+            try:
+                boundary_geom = shapely_wkt.loads(boundary_wkt)
+                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320  # Convert degrees to meters (approximate)
+            except:
+                pass
+
+        # Extract topographic features (ridge/river)
+        topo_feature = None
+        feature_name = ''
+        feature_type = ''
+        feature_distance = ''
+        feature_direction = ''
+
+        if clipped_features:
+            try:
+                topo_feature = find_nearest_topographic_feature_optimized(
+                    db=db,
+                    longitude=lon,
+                    latitude=lat,
+                    clipped_features=clipped_features,
+                    search_radius_meters=1000.0,
+                    prefer_rivers=True,
+                    min_distance_threshold=20.0
+                )
+
+                if topo_feature:
+                    feature_name = topo_feature.get("feature_name", "")
+                    feature_type = topo_feature.get("feature_type", "")
+                    feature_distance = f'{int(topo_feature.get("distance_meters", 0))}'
+                    feature_direction = topo_feature.get("direction", "")
+                    # DEBUG: Log successful extraction
+                    if i == 0:  # Only log first point to avoid spam
+                        logger.info(f"Point 1: Found {feature_type} '{feature_name}' at {feature_distance}m {feature_direction}")
+                else:
+                    if i == 0:
+                        logger.warning(f"Point 1: No topographic feature found within 1000m")
+            except Exception as e:
+                logger.warning(f"Failed to find topographic feature for point {i+1}: {e}", exc_info=True)
+        else:
+            if i == 0:
+                logger.warning(f"Point 1: clipped_features is None, skipping topographic extraction")
+
         writer.writerow([
             i + 1,  # Plot number starts at 1
-            f'{point.x:.7f}',
-            f'{point.y:.7f}',
-            block_number,
-            block_name
+            block_name,
+            f'{lon:.7f}',
+            f'{lat:.7f}',
+            f'{int(elevation_m)}' if elevation_m and elevation_m > 0 else 'N/A',
+            f'{utm_easting:.2f}',
+            f'{utm_northing:.2f}',
+            f'{utm_zone}N',
+            f'{distance_from_boundary:.2f}' if distance_from_boundary else '',
+            feature_name,
+            feature_type,
+            feature_distance,
+            feature_direction
         ])
 
     return output.getvalue().encode('utf-8')
@@ -322,7 +474,8 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
 
 def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
     """
-    Export sampling points to GPX format.
+    Export sampling points to GPX format with complete field data.
+    Includes elevation, UTM coordinates, and block information.
     """
     design = db.query(SamplingDesign).filter(SamplingDesign.id == design_id).first()
 
@@ -342,8 +495,35 @@ def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
         raise ValueError("Failed to retrieve geometry as WKT")
 
     # Parse MultiPoint geometry
-    from shapely import wkt
-    multipoint = wkt.loads(result.wkt)
+    from shapely import wkt as shapely_wkt
+    multipoint = shapely_wkt.loads(result.wkt)
+
+    # Get block assignment
+    block_assignment = design.points_block_assignment or []
+
+    # Get calculation boundary for distance calculation
+    from app.models.calculation import Calculation
+    calc = db.query(Calculation).filter(Calculation.id == design.calculation_id).first()
+    boundary_wkt = None
+    if calc:
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM public.calculations
+            WHERE id = :calc_id
+        """)
+        boundary_result = db.execute(boundary_query, {"calc_id": str(design.calculation_id)}).first()
+        if boundary_result:
+            boundary_wkt = boundary_result.wkt
+
+    # Import required modules for calculations
+    from app.utils.geospatial import extract_elevation_at_point
+    from app.utils.geospatial_vector_optimized import (
+        preclip_topographic_features,
+        find_nearest_topographic_feature_optimized
+    )
+    from pyproj import Transformer
+    import logging
+    logger = logging.getLogger(__name__)
 
     # Create GPX XML
     gpx = ET.Element('gpx', {
@@ -356,19 +536,55 @@ def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
     ET.SubElement(metadata, 'name').text = f'Sampling Points - {design.sampling_type}'
     ET.SubElement(metadata, 'desc').text = f'{design.total_points} sampling plots'
 
-    for i, point in enumerate(multipoint.geoms, start=1):
+    for i, point in enumerate(multipoint.geoms):
+        lon, lat = point.x, point.y
+
+        # Find block assignment for this point
+        block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
+        block_name = block_info.get('block_name', f'Plot {i+1}') if block_info else f'Plot {i+1}'
+
+        # Calculate UTM coordinates
+        utm_zone = 44 if lon < 84 else 45
+        transformer = Transformer.from_crs(f"EPSG:4326", f"EPSG:326{utm_zone}", always_xy=True)
+        utm_easting, utm_northing = transformer.transform(lon, lat)
+
+        # Extract elevation
+        elevation_m = extract_elevation_at_point(db, lon, lat)
+
+        # Calculate distance from boundary
+        distance_from_boundary = None
+        if boundary_wkt:
+            try:
+                boundary_geom = shapely_wkt.loads(boundary_wkt)
+                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320
+            except:
+                pass
+
         wpt = ET.SubElement(gpx, 'wpt', {
-            'lat': f'{point.y:.7f}',
-            'lon': f'{point.x:.7f}'
+            'lat': f'{lat:.7f}',
+            'lon': f'{lon:.7f}'
         })
-        ET.SubElement(wpt, 'name').text = f'Plot {i}'
+        ET.SubElement(wpt, 'name').text = f'Plot {i+1}'
         ET.SubElement(wpt, 'type').text = 'sampling_plot'
 
+        # Add elevation
+        if elevation_m:
+            ET.SubElement(wpt, 'ele').text = f'{int(elevation_m)}'
+
+        # Build description with all fields
+        desc_parts = []
+        desc_parts.append(f'Block: {block_name}')
+        desc_parts.append(f'UTM: {utm_easting:.2f}E, {utm_northing:.2f}N ({utm_zone}N)')
+        if elevation_m:
+            desc_parts.append(f'Elevation: {int(elevation_m)}m')
+        if distance_from_boundary:
+            desc_parts.append(f'Distance from Boundary: {distance_from_boundary:.2f}m')
         if design.plot_shape:
-            desc = f'{design.plot_shape} plot'
+            desc_parts.append(f'Plot: {design.plot_shape}')
             if design.plot_radius_meters:
-                desc += f' (r={design.plot_radius_meters}m)'
-            ET.SubElement(wpt, 'desc').text = desc
+                desc_parts.append(f'Radius: {design.plot_radius_meters}m')
+
+        ET.SubElement(wpt, 'desc').text = ' | '.join(desc_parts)
 
     # Convert to bytes
     tree = ET.ElementTree(gpx)
@@ -380,7 +596,8 @@ def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
 
 def export_sampling_kml(db: Session, design_id: UUID) -> bytes:
     """
-    Export sampling points to KML format (Google Earth).
+    Export sampling points to KML format (Google Earth) with complete field data.
+    Includes elevation, UTM coordinates, and block information.
     """
     design = db.query(SamplingDesign).filter(SamplingDesign.id == design_id).first()
 
@@ -400,8 +617,36 @@ def export_sampling_kml(db: Session, design_id: UUID) -> bytes:
         raise ValueError("Failed to retrieve geometry as WKT")
 
     # Parse MultiPoint geometry
-    from shapely import wkt
-    multipoint = wkt.loads(result.wkt)
+    from shapely import wkt as shapely_wkt
+    multipoint = shapely_wkt.loads(result.wkt)
+
+    # Get block assignment
+    block_assignment = design.points_block_assignment or []
+
+    # Get calculation boundary for distance calculation
+    from app.models.calculation import Calculation
+    calc = db.query(Calculation).filter(Calculation.id == design.calculation_id).first()
+    boundary_wkt = None
+    if calc:
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM public.calculations
+            WHERE id = :calc_id
+        """)
+        boundary_result = db.execute(boundary_query, {"calc_id": str(design.calculation_id)}).first()
+        if boundary_result:
+            boundary_wkt = boundary_result.wkt
+
+    # Import required modules for calculations
+    from app.utils.geospatial import extract_elevation_at_point
+    from app.utils.geospatial_vector_optimized import (
+        preclip_topographic_features,
+        find_nearest_topographic_feature_optimized
+    )
+    from pyproj import Transformer
+    import logging
+    logger = logging.getLogger(__name__)
+    import math
 
     # Create KML XML
     kml = ET.Element('kml', {'xmlns': 'http://www.opengis.net/kml/2.2'})
@@ -425,28 +670,65 @@ def export_sampling_kml(db: Session, design_id: UUID) -> bytes:
     folder = ET.SubElement(document, 'Folder')
     ET.SubElement(folder, 'name').text = 'Sampling Plots'
 
-    for i, point in enumerate(multipoint.geoms, start=1):
+    for i, point in enumerate(multipoint.geoms):
+        lon, lat = point.x, point.y
+
+        # Find block assignment for this point
+        block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
+        block_name = block_info.get('block_name', f'Plot {i+1}') if block_info else f'Plot {i+1}'
+
+        # Calculate UTM coordinates
+        utm_zone = 44 if lon < 84 else 45
+        transformer = Transformer.from_crs(f"EPSG:4326", f"EPSG:326{utm_zone}", always_xy=True)
+        utm_easting, utm_northing = transformer.transform(lon, lat)
+
+        # Extract elevation
+        elevation_m = extract_elevation_at_point(db, lon, lat)
+
+        # Calculate distance from boundary
+        distance_from_boundary = None
+        if boundary_wkt:
+            try:
+                boundary_geom = shapely_wkt.loads(boundary_wkt)
+                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320
+            except:
+                pass
+
         placemark = ET.SubElement(folder, 'Placemark')
-        ET.SubElement(placemark, 'name').text = f'Plot {i}'
+        ET.SubElement(placemark, 'name').text = f'Plot {i+1}'
         ET.SubElement(placemark, 'styleUrl').text = '#samplingPlot'
 
+        # Build HTML description with all fields
+        desc = f'<b>Plot {i+1}</b><br/>'
+        desc += f'Block: {block_name}<br/>'
+        desc += f'Longitude: {lon:.7f}<br/>'
+        desc += f'Latitude: {lat:.7f}<br/>'
+        if elevation_m:
+            desc += f'Elevation: {int(elevation_m)}m ASLM<br/>'
+        desc += f'UTM Easting: {utm_easting:.2f}<br/>'
+        desc += f'UTM Northing: {utm_northing:.2f}<br/>'
+        desc += f'UTM Zone: {utm_zone}N<br/>'
+        if distance_from_boundary:
+            desc += f'Distance from Boundary: {distance_from_boundary:.2f}m<br/>'
+
         if design.plot_shape:
-            desc = f'Shape: {design.plot_shape}<br/>'
+            desc += f'<br/><b>Plot Details:</b><br/>'
+            desc += f'Shape: {design.plot_shape}<br/>'
             if design.plot_radius_meters:
-                # Calculate plot area for circular plots: π * r²
-                import math
                 plot_area = math.pi * float(design.plot_radius_meters) ** 2
                 desc += f'Radius: {design.plot_radius_meters}m<br/>'
                 desc += f'Area: {plot_area:.2f} m²'
             elif design.plot_length_meters and design.plot_width_meters:
-                # Calculate plot area for rectangular plots
                 plot_area = float(design.plot_length_meters) * float(design.plot_width_meters)
                 desc += f'Length: {design.plot_length_meters}m x Width: {design.plot_width_meters}m<br/>'
                 desc += f'Area: {plot_area:.2f} m²'
-            ET.SubElement(placemark, 'description').text = desc
+
+        ET.SubElement(placemark, 'description').text = desc
 
         point_elem = ET.SubElement(placemark, 'Point')
-        ET.SubElement(point_elem, 'coordinates').text = f'{point.x:.7f},{point.y:.7f},0'
+        # KML format: lon,lat,elevation
+        elev_val = int(elevation_m) if elevation_m else 0
+        ET.SubElement(point_elem, 'coordinates').text = f'{lon:.7f},{lat:.7f},{elev_val}'
 
     # Convert to bytes
     tree = ET.ElementTree(kml)

@@ -385,6 +385,51 @@ export default function CalculationDetail() {
     resultDataKeys: calculation.result_data ? Object.keys(calculation.result_data) : []
   });
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-700">Loading calculation...</h2>
+          <p className="text-gray-500 mt-2">Please wait while we fetch the data</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-red-800 mb-2">Error Loading Calculation</h2>
+          <p className="text-red-600">{error}</p>
+          <button
+            onClick={() => navigate('/my-uploads')}
+            className="mt-4 text-red-700 hover:text-red-900 font-medium"
+          >
+            ← Back to My Uploads
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!calculation) {
+    return (
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-yellow-800">Calculation Not Found</h2>
+          <button
+            onClick={() => navigate('/my-uploads')}
+            className="mt-4 text-yellow-700 hover:text-yellow-900 font-medium"
+          >
+            ← Back to My Uploads
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
       <div className="mb-6">
