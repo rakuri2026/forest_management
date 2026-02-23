@@ -693,22 +693,19 @@ def export_to_gpkg(
     output_dir: str = "exports"
 ) -> Tuple[str, float]:
     """
-    Export trees to GPKG file using GeoPandas
+    Export trees to GPKG file using GeoPandas in REGULATION FORMAT
 
-    FIELD-OPTIMIZED OUTPUT:
-    Only exports essential columns in field-friendly order.
-    Removed: tree_id, species_code, species_role, canopy_height_source,
-             forest_type, generated_date, model_version
+    Forest Regulation 2079 - Standard Format
+    16 columns organized by size class with count columns
 
-    Column Order (optimized for field teams):
-    1. block_name - Which forest block
-    2. sample_plot_number - Which sample plot(s)
-    3. species_scientific - Scientific name for identification
-    4. species_local - Local/Nepali name
-    5. dbh_cm - Diameter measurement
-    6. height_m - Height measurement
-    7. tree_class - Tree class (1-4)
-    8. notes - Important disclaimers
+    Size Classes (based on DBH):
+    - Regeneration: DBH < 10 cm
+    - Sapling: 10 cm <= DBH < 20 cm
+    - Pole: 20 cm <= DBH < 30 cm
+    - Tree: DBH >= 30 cm
+
+    Each tree populates only its size class columns.
+    Count columns default to 1 (one individual tree per row).
 
     Args:
         trees: List of tree dictionaries
@@ -723,45 +720,356 @@ def export_to_gpkg(
 
     # Generate filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"synthetic_trees_{calculation_id}_{timestamp}.gpkg"
+    filename = f"tree_model_{calculation_id}_{timestamp}.gpkg"
     filepath = os.path.join(output_dir, filename)
 
-    # Create list of records - FIELD-OPTIMIZED COLUMNS ONLY
-    # Order matches user specification for field use
+    # Create list of records - REGULATION FORMAT (16 columns)
     records = []
+    fid = 1
+
     for tree in trees:
-        records.append({
-            # Column order: 1, 2, 3, 4, 5, 6, 7, 8
+        dbh = tree['dbh_cm']
+        species_sci = tree.get('species_scientific', '')
+        height = tree.get('height_m')
+        tree_class = tree.get('tree_class')
+
+        # Initialize all columns as None
+        record = {
+            'fid': fid,
             'block_name': tree.get('block_name', ''),
             'sample_plot_number': tree.get('sample_plot_number', ''),
-            'species_scientific': tree.get('species_scientific', ''),
-            'species_local': tree.get('species_local', ''),
-            'dbh_cm': tree['dbh_cm'],
-            'height_m': tree.get('height_m'),  # None for regeneration entries
-            'tree_class': tree.get('tree_class'),  # None for regeneration entries
-            'notes': tree.get('notes', 'SYNTHETIC DATA - Not ground survey'),
+            # Regeneration columns
+            'regen_species_scientific': None,
+            'regen_dbh': None,
+            'regen_count': None,
+            # Sapling columns
+            'sapling_species_scientific': None,
+            'sapling_dbh_cm': None,
+            'sapling_count': None,
+            # Pole columns
+            'pole_species_scientific': None,
+            'pole_dbh_cm': None,
+            'pole_height_m': None,
+            'pole_class': None,
+            # Tree columns
+            'tree_species_scientific': None,
+            'tree_dbh_cm': None,
+            'tree_height_m': None,
+            'tree_class': None,
+            # Geometry
             'geometry': Point(tree['geometry'])
-        })
+        }
 
-    # Create GeoDataFrame with ordered columns
+        # Populate appropriate columns based on DBH (size class)
+        if dbh < 10:
+            # Regeneration
+            record['regen_species_scientific'] = species_sci
+            record['regen_dbh'] = dbh
+            record['regen_count'] = 1
+        elif dbh < 20:
+            # Sapling
+            record['sapling_species_scientific'] = species_sci
+            record['sapling_dbh_cm'] = dbh
+            record['sapling_count'] = 1
+        elif dbh < 30:
+            # Pole
+            record['pole_species_scientific'] = species_sci
+            record['pole_dbh_cm'] = dbh
+            record['pole_height_m'] = height
+            record['pole_class'] = tree_class
+        else:
+            # Tree
+            record['tree_species_scientific'] = species_sci
+            record['tree_dbh_cm'] = dbh
+            record['tree_height_m'] = height
+            record['tree_class'] = tree_class
+
+        records.append(record)
+        fid += 1
+
+    # Create GeoDataFrame with regulation column order
     gdf = gpd.GeoDataFrame(records, crs='EPSG:4326')
 
-    # Ensure column order is preserved (GeoDataFrame may reorder)
+    # Ensure column order matches regulation format (16 columns)
     column_order = [
+        'fid',
         'block_name',
         'sample_plot_number',
-        'species_scientific',
-        'species_local',
-        'dbh_cm',
-        'height_m',
+        'regen_species_scientific',
+        'regen_dbh',
+        'regen_count',
+        'sapling_species_scientific',
+        'sapling_dbh_cm',
+        'sapling_count',
+        'pole_species_scientific',
+        'pole_dbh_cm',
+        'pole_height_m',
+        'pole_class',
+        'tree_species_scientific',
+        'tree_dbh_cm',
+        'tree_height_m',
         'tree_class',
-        'notes',
         'geometry'
     ]
     gdf = gdf[column_order]
 
     # Write to GPKG
-    gdf.to_file(filepath, driver='GPKG', layer='synthetic_trees')
+    gdf.to_file(filepath, driver='GPKG', layer='tree_model')
+
+    # Calculate file size
+    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+
+    return filepath, file_size_mb
+
+
+def export_to_excel(
+    trees: List[Dict[str, Any]],
+    calculation_id: uuid.UUID,
+    output_dir: str = "exports"
+) -> Tuple[str, float]:
+    """
+    Export trees to Excel file (.xlsx) in REGULATION FORMAT
+
+    Same structure as GPKG export but in Excel format for field teams.
+    Includes lat/lon columns for easy coordinate reference.
+
+    Forest Regulation 2079 - Standard Format
+    16 columns + latitude/longitude for convenience
+
+    Args:
+        trees: List of tree dictionaries
+        calculation_id: UUID of calculation
+        output_dir: Directory to save Excel files
+
+    Returns:
+        Tuple of (filepath, file_size_mb)
+    """
+    # Create output directory if needed
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"tree_model_{calculation_id}_{timestamp}.xlsx"
+    filepath = os.path.join(output_dir, filename)
+
+    # Create list of records - REGULATION FORMAT (16 columns + lat/lon)
+    records = []
+    fid = 1
+
+    for tree in trees:
+        dbh = tree['dbh_cm']
+        species_sci = tree.get('species_scientific', '')
+        species_role = tree.get('species_role', 'associate')  # Get role for sorting
+        height = tree.get('height_m')
+        tree_class = tree.get('tree_class')
+        lon, lat = tree['geometry']
+
+        # Initialize all columns
+        record = {
+            'fid': fid,
+            'block_name': tree.get('block_name', ''),
+            'sample_plot_number': tree.get('sample_plot_number', ''),
+            # Hidden sorting column (removed before export)
+            'species_role': species_role,
+            # Regeneration columns
+            'regen_species_scientific': None,
+            'regen_dbh': None,
+            'regen_count': None,
+            # Sapling columns
+            'sapling_species_scientific': None,
+            'sapling_dbh_cm': None,
+            'sapling_count': None,
+            # Pole columns
+            'pole_species_scientific': None,
+            'pole_dbh_cm': None,
+            'pole_height_m': None,
+            'pole_class': None,
+            # Tree columns
+            'tree_species_scientific': None,
+            'tree_dbh_cm': None,
+            'tree_height_m': None,
+            'tree_class': None,
+            # Coordinates (for Excel convenience)
+            'longitude': lon,
+            'latitude': lat
+        }
+
+        # Populate appropriate columns based on DBH (size class)
+        if dbh < 10:
+            # Regeneration
+            record['regen_species_scientific'] = species_sci
+            record['regen_dbh'] = dbh
+            record['regen_count'] = 1
+        elif dbh < 20:
+            # Sapling
+            record['sapling_species_scientific'] = species_sci
+            record['sapling_dbh_cm'] = dbh
+            record['sapling_count'] = 1
+        elif dbh < 30:
+            # Pole
+            record['pole_species_scientific'] = species_sci
+            record['pole_dbh_cm'] = dbh
+            record['pole_height_m'] = height
+            record['pole_class'] = tree_class
+        else:
+            # Tree
+            record['tree_species_scientific'] = species_sci
+            record['tree_dbh_cm'] = dbh
+            record['tree_height_m'] = height
+            record['tree_class'] = tree_class
+
+        records.append(record)
+        fid += 1
+
+    # Create DataFrame with regulation column order
+    df = pd.DataFrame(records)
+
+    # SORTING LOGIC - Sort by importance before export
+    # Convert sample_plot_number to numeric for proper sorting (1, 2, 3... not 1, 10, 11, 2)
+    df['sample_plot_number_numeric'] = pd.to_numeric(df['sample_plot_number'], errors='coerce').fillna(999999)
+
+    # Define species role priority (dominant first, rare last)
+    role_priority = {
+        'dominant': 1,
+        'co-dominant': 2,
+        'associate': 3,
+        'occasional': 4,
+        'rare': 5
+    }
+    df['role_priority'] = df['species_role'].map(role_priority).fillna(3)  # Default to associate
+
+    # Get species columns for sorting (whichever is not None)
+    df['species_for_sorting'] = (
+        df['tree_species_scientific'].fillna('') +
+        df['pole_species_scientific'].fillna('') +
+        df['sapling_species_scientific'].fillna('') +
+        df['regen_species_scientific'].fillna('')
+    )
+
+    # Sort by:
+    # 1. sample_plot_number (numeric)
+    # 2. role_priority (dominant → co-dominant → associate → occasional → rare)
+    # 3. species name (alphabetical)
+    df = df.sort_values(
+        by=['sample_plot_number_numeric', 'role_priority', 'species_for_sorting'],
+        ascending=[True, True, True]
+    )
+
+    # Drop temporary sorting columns
+    df = df.drop(columns=['sample_plot_number_numeric', 'role_priority', 'species_for_sorting', 'species_role'])
+
+    # Reset index and reassign fid sequentially
+    df = df.reset_index(drop=True)
+    df['fid'] = range(1, len(df) + 1)
+
+    # Add serial numbers (SN) for each category that reset per sample plot
+    # Initialize SN columns
+    df['regen_sn'] = None
+    df['sapling_sn'] = None
+    df['pole_sn'] = None
+    df['tree_sn'] = None
+
+    # Calculate serial numbers per plot per category
+    for plot_num in df['sample_plot_number'].unique():
+        plot_mask = df['sample_plot_number'] == plot_num
+
+        # Regeneration SN (reset per plot)
+        regen_mask = plot_mask & df['regen_species_scientific'].notna()
+        if regen_mask.any():
+            df.loc[regen_mask, 'regen_sn'] = range(1, regen_mask.sum() + 1)
+
+        # Sapling SN (reset per plot)
+        sapling_mask = plot_mask & df['sapling_species_scientific'].notna()
+        if sapling_mask.any():
+            df.loc[sapling_mask, 'sapling_sn'] = range(1, sapling_mask.sum() + 1)
+
+        # Pole SN (reset per plot)
+        pole_mask = plot_mask & df['pole_species_scientific'].notna()
+        if pole_mask.any():
+            df.loc[pole_mask, 'pole_sn'] = range(1, pole_mask.sum() + 1)
+
+        # Tree SN (reset per plot)
+        tree_mask = plot_mask & df['tree_species_scientific'].notna()
+        if tree_mask.any():
+            df.loc[tree_mask, 'tree_sn'] = range(1, tree_mask.sum() + 1)
+
+    # Column order (22 columns total - longitude/latitude moved after sample_plot_number)
+    column_order = [
+        'fid',
+        'block_name',
+        'sample_plot_number',
+        'longitude',
+        'latitude',
+        'regen_sn',
+        'regen_species_scientific',
+        'regen_dbh',
+        'regen_count',
+        'sapling_sn',
+        'sapling_species_scientific',
+        'sapling_dbh_cm',
+        'sapling_count',
+        'pole_sn',
+        'pole_species_scientific',
+        'pole_dbh_cm',
+        'pole_height_m',
+        'pole_class',
+        'tree_sn',
+        'tree_species_scientific',
+        'tree_dbh_cm',
+        'tree_height_m',
+        'tree_class'
+    ]
+    df = df[column_order]
+
+    # REMOVE EMPTY ROWS (rows with no species data in any category)
+    # A row is empty if all species columns are None/NaN
+    has_species_data = (
+        df['regen_species_scientific'].notna() |
+        df['sapling_species_scientific'].notna() |
+        df['pole_species_scientific'].notna() |
+        df['tree_species_scientific'].notna()
+    )
+    df = df[has_species_data].reset_index(drop=True)
+
+    # Reassign FID after removing empty rows
+    df['fid'] = range(1, len(df) + 1)
+
+    # ROUND DBH AND HEIGHT COLUMNS TO 0 DECIMAL PLACES (integers)
+    # DBH columns
+    if 'regen_dbh' in df.columns:
+        df['regen_dbh'] = df['regen_dbh'].round(0).astype('Int64')
+    if 'sapling_dbh_cm' in df.columns:
+        df['sapling_dbh_cm'] = df['sapling_dbh_cm'].round(0).astype('Int64')
+    if 'pole_dbh_cm' in df.columns:
+        df['pole_dbh_cm'] = df['pole_dbh_cm'].round(0).astype('Int64')
+    if 'tree_dbh_cm' in df.columns:
+        df['tree_dbh_cm'] = df['tree_dbh_cm'].round(0).astype('Int64')
+
+    # Height columns
+    if 'pole_height_m' in df.columns:
+        df['pole_height_m'] = df['pole_height_m'].round(0).astype('Int64')
+    if 'tree_height_m' in df.columns:
+        df['tree_height_m'] = df['tree_height_m'].round(0).astype('Int64')
+
+    # Write to Excel with formatting
+    with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Tree Model', index=False)
+
+        # Get workbook and worksheet for formatting
+        worksheet = writer.sheets['Tree Model']
+
+        # Auto-adjust column widths
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
 
     # Calculate file size
     file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
@@ -952,9 +1260,12 @@ def generate_synthetic_trees(
     trees.extend(regeneration_entries)
     report(88, f"Added {regeneration_count} regeneration entries to sample plots")
 
-    # Step 5: Export to GPKG
+    # Step 5: Export to GPKG and Excel
     report(90, "Exporting to GPKG file")
-    filepath, file_size_mb = export_to_gpkg(trees, calculation_id)
+    gpkg_filepath, gpkg_size_mb = export_to_gpkg(trees, calculation_id)
+
+    report(93, "Exporting to Excel file")
+    excel_filepath, excel_size_mb = export_to_excel(trees, calculation_id)
 
     # Step 6: Calculate statistics (separate mature trees from regeneration)
     report(97, "Calculating statistics")
@@ -1087,9 +1398,16 @@ def generate_synthetic_trees(
     report(100, "Complete")
 
     return {
-        'filepath': filepath,
-        'filename': os.path.basename(filepath),
-        'file_size_mb': file_size_mb,
+        'gpkg_filepath': gpkg_filepath,
+        'gpkg_filename': os.path.basename(gpkg_filepath),
+        'gpkg_size_mb': gpkg_size_mb,
+        'excel_filepath': excel_filepath,
+        'excel_filename': os.path.basename(excel_filepath),
+        'excel_size_mb': excel_size_mb,
+        # Legacy compatibility (points to GPKG)
+        'filepath': gpkg_filepath,
+        'filename': os.path.basename(gpkg_filepath),
+        'file_size_mb': gpkg_size_mb,
         'statistics': statistics,
         'processing_time_seconds': int(processing_time),
         'config': config
