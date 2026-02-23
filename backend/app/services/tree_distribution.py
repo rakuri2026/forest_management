@@ -1129,6 +1129,29 @@ def generate_synthetic_trees(
     if not species_list:
         raise ValueError("No species data found in calculation")
 
+    # FILTER: Only use tree species (exclude herbs, shrubs, non-woody plants)
+    # Tree species have wood/timber/fuel/fodder uses
+    tree_species_only = [
+        sp for sp in species_list
+        if sp.get('is_tree_species', True)  # Default TRUE for backward compatibility
+    ]
+
+    if not tree_species_only:
+        raise ValueError(
+            f"No tree species found in calculation. "
+            f"Found {len(species_list)} total species, but none are classified as trees. "
+            f"Tree species must have wood, timber, fuel, or fodder uses."
+        )
+
+    # Log species filtering for transparency
+    if len(tree_species_only) < len(species_list):
+        non_tree_count = len(species_list) - len(tree_species_only)
+        print(f"INFO: Filtered out {non_tree_count} non-tree species (herbs, shrubs). "
+              f"Using {len(tree_species_only)} tree species for model generation.")
+
+    # Use filtered tree species for tree model generation
+    species_list = tree_species_only
+
     forest_type = result_data.get('forest_type', {}).get('dominant_type', 'Unknown')
     area_hectares = result_data.get('area', {}).get('hectares', 0)
 
