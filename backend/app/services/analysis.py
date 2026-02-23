@@ -2968,7 +2968,8 @@ def analyze_potential_tree_species(forest_type_percentages: Dict[str, float], db
                 tsc.nitrogen_fixing,
                 tsc.rarity_status,
                 tsc.family,
-                tsc.economic_value as stored_economic_value
+                tsc.economic_value as stored_economic_value,
+                tsc.is_tree_species
             FROM forest_species_association fsa
             JOIN forest_types ft ON fsa.forest_type_id = ft.id
             JOIN tree_species_coefficients tsc ON fsa.species_id = tsc.id
@@ -3016,7 +3017,8 @@ def analyze_potential_tree_species(forest_type_percentages: Dict[str, float], db
                     "main_uses": r.main_uses,
                     "nitrogen_fixing": r.nitrogen_fixing or False,
                     "rarity_status": r.rarity_status or "Common",
-                    "family": r.family
+                    "family": r.family,
+                    "is_tree_species": r.is_tree_species if hasattr(r, 'is_tree_species') else True
                 }
             else:
                 # Species appears in multiple forest types - update
