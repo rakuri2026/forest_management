@@ -264,6 +264,112 @@ def calculate_dbh_from_height(height: float, species: Dict[str, Any]) -> float:
     return round(dbh, 1)
 
 
+def calculate_tree_volumes(
+    dbh: float,
+    height: float,
+    tree_class: int,
+    species_coefficients: Dict[str, Any]
+) -> Dict[str, float]:
+    """
+    Calculate tree volumes using Forest Regulation 2079 formulas
+
+    Args:
+        dbh: Diameter at breast height in centimeters
+        height: Tree height in meters
+        tree_class: Tree class (1, 2, 3, or 4)
+        species_coefficients: Dictionary with species coefficients (a, b, c, s, m, a1, b1)
+
+    Returns:
+        Dictionary with volume components:
+        - stem_volume: Stem volume in m³
+        - branch_volume: Branch volume in m³
+        - tree_volume: Total tree volume in m³
+        - gross_volume: Gross timber volume in m³ (from stem only)
+        - net_volume: Net timber volume in m³ (after waste)
+        - firewood_m3: Firewood volume in m³
+    """
+    # Skip if regeneration (DBH < 10 cm)
+    if dbh < 10:
+        return {
+            'stem_volume': 0.0,
+            'branch_volume': 0.0,
+            'tree_volume': 0.0,
+            'gross_volume': 0.0,
+            'net_volume': 0.0,
+            'firewood_m3': 0.0
+        }
+
+    coef = species_coefficients
+
+    # 1. Calculate stem volume (Forest Regulation 2079, Table 1)
+    # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
+    if coef.get('a') is not None and coef.get('b') is not None and coef.get('c') is not None:
+        stem_volume = math.exp(
+            coef['a'] +
+            coef['b'] * math.log(dbh) +
+            coef['c'] * math.log(height)
+        ) / 1000.0  # Convert to m³
+    else:
+        stem_volume = 0.0
+
+    # 2. Calculate branch volume (Forest Regulation 2079, Table 2)
+    # Formula: Branch Volume = Stem Volume × Branch Ratio
+    if coef.get('s') is not None and coef.get('m') is not None:
+        # Use s (sano) and m (machilo) coefficients
+        branch_ratio = (float(coef['s']) + float(coef['m'])) / 2.0
+        branch_volume = stem_volume * branch_ratio
+    elif coef.get('b') is not None:
+        # Fallback: approximate from b coefficient
+        branch_ratio = abs(float(coef['b'])) * 0.1
+        branch_volume = stem_volume * branch_ratio
+    else:
+        # Final fallback: 20% default
+        branch_volume = stem_volume * 0.2
+
+    # 3. Total tree volume
+    tree_volume = stem_volume + branch_volume
+
+    # 4. Calculate gross timber volume (Forest Regulation 2079, Section 4)
+    # Formula: Gross Timber = Stem Volume - 10cm Top Stem Volume
+    # NOTE: Gross timber comes ONLY from stem, branches go to firewood
+    if coef.get('a1') is not None and coef.get('b1') is not None:
+        cm10_dia_ratio = math.exp(coef['a1'] + coef['b1'] * math.log(dbh))
+        cm10_top_volume = stem_volume * cm10_dia_ratio  # From stem only
+        gross_volume = stem_volume - cm10_top_volume
+    else:
+        gross_volume = stem_volume * 0.85  # Fallback: 85% merchantable
+
+    # 5. Calculate net timber volume (Forest Regulation 2079, Section 5)
+    # Apply waste factors based on tree class
+    # Class 1: 80% net (20% waste)
+    # Class 2: 60% net (40% waste)
+    # Class 3: 30% net (70% waste)
+    # Class 4: 0% net (100% firewood)
+    if tree_class == 1:
+        net_volume = gross_volume * 0.80
+    elif tree_class == 2:
+        net_volume = gross_volume * 0.60
+    elif tree_class == 3:
+        net_volume = gross_volume * 0.30
+    elif tree_class == 4:
+        net_volume = 0.0
+    else:
+        net_volume = gross_volume * 0.60  # Default to class 2
+
+    # 6. Calculate firewood volume
+    # Firewood = All branches + Stem waste
+    firewood_m3 = tree_volume - net_volume
+
+    return {
+        'stem_volume': round(stem_volume, 6),
+        'branch_volume': round(branch_volume, 6),
+        'tree_volume': round(tree_volume, 6),
+        'gross_volume': round(gross_volume, 6),
+        'net_volume': round(net_volume, 6),
+        'firewood_m3': round(firewood_m3, 6)
+    }
+
+
 def calculate_tree_biomass(dbh: float, height: Optional[float], species: Dict[str, Any]) -> float:
     """
     Calculate above-ground biomass (AGB) for a single tree using allometric equations.
@@ -575,11 +681,11 @@ def generate_regeneration_entries(
     tree_id_start: int
 ) -> List[Dict[str, Any]]:
     """
-    Generate regeneration entries (1-10 cm DBH) for each sample plot.
+    Generate regeneration entries (1-9.9 cm DBH) for each sample plot.
 
     Per sample plot:
-    - Unestablished regeneration (1-4 cm DBH): 2-5 species
-    - Established regeneration/sapling (4-10 cm DBH): 1-4 species
+    - Unestablished regeneration (1-3.9 cm DBH): 2-5 species
+    - Established regeneration/sapling (4-9.9 cm DBH): 1-4 species
 
     Regeneration entries do NOT have height_m or tree_class (field verification needed).
 
@@ -630,7 +736,7 @@ def generate_regeneration_entries(
         plot_number = str(plot['plot_number'])
         center_x, center_y = plot['center']
 
-        # 1. Unestablished Regeneration (1-4 cm DBH): 2-5 species
+        # 1. Unestablished Regeneration (1-3.9 cm DBH): 2-5 species
         num_unestablished = random.randint(2, 5)
         for _ in range(num_unestablished):
             species = weighted_random_choice(species_list)
@@ -646,18 +752,18 @@ def generate_regeneration_entries(
                 'geometry': (x, y),
                 'species_scientific': species.get('scientific_name'),
                 'species_local': species.get('local_name'),
-                'dbh_cm': round(random.uniform(1.0, 4.0), 1),
+                'dbh_cm': round(random.uniform(1.0, 3.9), 1),
                 'height_m': None,  # Not measured for regeneration
                 'tree_class': None,  # Not applicable
                 'block_name': '',  # Will be assigned via spatial join
                 'sample_plot_number': plot_number,
                 'generated_date': datetime.now().isoformat(),
                 'model_version': 'v1.0',
-                'notes': 'REGENERATION (1-4cm DBH) - Field verification required',
+                'notes': 'REGENERATION (1-3.9cm DBH) - Field verification required',
             })
             tree_id += 1
 
-        # 2. Established Regeneration/Sapling (4-10 cm DBH): 1-4 species
+        # 2. Established Regeneration/Sapling (4-9.9 cm DBH): 1-4 species
         num_established = random.randint(1, 4)
         for _ in range(num_established):
             species = weighted_random_choice(species_list)
@@ -673,14 +779,14 @@ def generate_regeneration_entries(
                 'geometry': (x, y),
                 'species_scientific': species.get('scientific_name'),
                 'species_local': species.get('local_name'),
-                'dbh_cm': round(random.uniform(4.0, 10.0), 1),
+                'dbh_cm': round(random.uniform(4.0, 9.9), 1),
                 'height_m': None,  # Not measured for regeneration
                 'tree_class': None,  # Not applicable
                 'block_name': '',  # Will be assigned via spatial join
                 'sample_plot_number': plot_number,
                 'generated_date': datetime.now().isoformat(),
                 'model_version': 'v1.0',
-                'notes': 'SAPLING (4-10cm DBH) - Field verification required',
+                'notes': 'SAPLING (4-9.9cm DBH) - Field verification required',
             })
             tree_id += 1
 
@@ -699,9 +805,9 @@ def export_to_gpkg(
     16 columns organized by size class with count columns
 
     Size Classes (based on DBH):
-    - Regeneration: DBH < 10 cm
-    - Sapling: 10 cm <= DBH < 20 cm
-    - Pole: 20 cm <= DBH < 30 cm
+    - Regeneration: 1 cm <= DBH < 4 cm
+    - Sapling: 4 cm <= DBH < 10 cm
+    - Pole: 10 cm <= DBH < 30 cm
     - Tree: DBH >= 30 cm
 
     Each tree populates only its size class columns.
@@ -733,6 +839,14 @@ def export_to_gpkg(
         height = tree.get('height_m')
         tree_class = tree.get('tree_class')
 
+        # Get volumes (Forest Regulation 2079)
+        stem_vol = tree.get('stem_volume', 0.0)
+        branch_vol = tree.get('branch_volume', 0.0)
+        tree_vol = tree.get('tree_volume', 0.0)
+        gross_vol = tree.get('gross_volume', 0.0)
+        net_vol = tree.get('net_volume', 0.0)
+        firewood_vol = tree.get('firewood_m3', 0.0)
+
         # Initialize all columns as None
         record = {
             'fid': fid,
@@ -751,38 +865,75 @@ def export_to_gpkg(
             'pole_dbh_cm': None,
             'pole_height_m': None,
             'pole_class': None,
+            'pole_stem_volume_m3': None,
+            'pole_branch_volume_m3': None,
+            'pole_tree_volume_m3': None,
+            'pole_gross_volume_m3': None,
+            'pole_net_volume_m3': None,
+            'pole_firewood_m3': None,
             # Tree columns
             'tree_species_scientific': None,
             'tree_dbh_cm': None,
             'tree_height_m': None,
             'tree_class': None,
+            'tree_stem_volume_m3': None,
+            'tree_branch_volume_m3': None,
+            'tree_tree_volume_m3': None,
+            'tree_gross_volume_m3': None,
+            'tree_net_volume_m3': None,
+            'tree_firewood_m3': None,
             # Geometry
             'geometry': Point(tree['geometry'])
         }
 
         # Populate appropriate columns based on DBH (size class)
-        if dbh < 10:
-            # Regeneration
+        # FIXED: Correct DBH thresholds for regeneration (1-3.99) and sapling (4-9.99)
+        if dbh < 4:
+            # Regeneration (1-3.99 cm DBH - unestablished regeneration)
             record['regen_species_scientific'] = species_sci
             record['regen_dbh'] = dbh
             record['regen_count'] = 1
-        elif dbh < 20:
-            # Sapling
+        elif dbh < 10:
+            # Sapling (4-9.99 cm DBH - established regeneration)
             record['sapling_species_scientific'] = species_sci
             record['sapling_dbh_cm'] = dbh
             record['sapling_count'] = 1
-        elif dbh < 30:
-            # Pole
+        elif dbh < 20:
+            # Small Pole (10-19.99 cm DBH - with volumes)
             record['pole_species_scientific'] = species_sci
             record['pole_dbh_cm'] = dbh
             record['pole_height_m'] = height
             record['pole_class'] = tree_class
+            record['pole_stem_volume_m3'] = stem_vol if stem_vol > 0 else None
+            record['pole_branch_volume_m3'] = branch_vol if branch_vol > 0 else None
+            record['pole_tree_volume_m3'] = tree_vol if tree_vol > 0 else None
+            record['pole_gross_volume_m3'] = gross_vol if gross_vol > 0 else None
+            record['pole_net_volume_m3'] = net_vol if net_vol > 0 else None
+            record['pole_firewood_m3'] = firewood_vol if firewood_vol > 0 else None
+        elif dbh < 30:
+            # Large Pole (20-29.99 cm DBH - with volumes)
+            record['pole_species_scientific'] = species_sci
+            record['pole_dbh_cm'] = dbh
+            record['pole_height_m'] = height
+            record['pole_class'] = tree_class
+            record['pole_stem_volume_m3'] = stem_vol if stem_vol > 0 else None
+            record['pole_branch_volume_m3'] = branch_vol if branch_vol > 0 else None
+            record['pole_tree_volume_m3'] = tree_vol if tree_vol > 0 else None
+            record['pole_gross_volume_m3'] = gross_vol if gross_vol > 0 else None
+            record['pole_net_volume_m3'] = net_vol if net_vol > 0 else None
+            record['pole_firewood_m3'] = firewood_vol if firewood_vol > 0 else None
         else:
-            # Tree
+            # Tree (>=30 cm DBH - with volumes)
             record['tree_species_scientific'] = species_sci
             record['tree_dbh_cm'] = dbh
             record['tree_height_m'] = height
             record['tree_class'] = tree_class
+            record['tree_stem_volume_m3'] = stem_vol if stem_vol > 0 else None
+            record['tree_branch_volume_m3'] = branch_vol if branch_vol > 0 else None
+            record['tree_tree_volume_m3'] = tree_vol if tree_vol > 0 else None
+            record['tree_gross_volume_m3'] = gross_vol if gross_vol > 0 else None
+            record['tree_net_volume_m3'] = net_vol if net_vol > 0 else None
+            record['tree_firewood_m3'] = firewood_vol if firewood_vol > 0 else None
 
         records.append(record)
         fid += 1
@@ -790,7 +941,7 @@ def export_to_gpkg(
     # Create GeoDataFrame with regulation column order
     gdf = gpd.GeoDataFrame(records, crs='EPSG:4326')
 
-    # Ensure column order matches regulation format (16 columns)
+    # Ensure column order matches regulation format (with volume columns)
     column_order = [
         'fid',
         'block_name',
@@ -805,10 +956,22 @@ def export_to_gpkg(
         'pole_dbh_cm',
         'pole_height_m',
         'pole_class',
+        'pole_stem_volume_m3',
+        'pole_branch_volume_m3',
+        'pole_tree_volume_m3',
+        'pole_gross_volume_m3',
+        'pole_net_volume_m3',
+        'pole_firewood_m3',
         'tree_species_scientific',
         'tree_dbh_cm',
         'tree_height_m',
         'tree_class',
+        'tree_stem_volume_m3',
+        'tree_branch_volume_m3',
+        'tree_tree_volume_m3',
+        'tree_gross_volume_m3',
+        'tree_net_volume_m3',
+        'tree_firewood_m3',
         'geometry'
     ]
     gdf = gdf[column_order]
@@ -825,6 +988,7 @@ def export_to_gpkg(
 def export_to_excel(
     trees: List[Dict[str, Any]],
     calculation_id: uuid.UUID,
+    db: Session = None,
     output_dir: str = "exports"
 ) -> Tuple[str, float]:
     """
@@ -839,6 +1003,7 @@ def export_to_excel(
     Args:
         trees: List of tree dictionaries
         calculation_id: UUID of calculation
+        db: Database session (optional, for validation enhancement)
         output_dir: Directory to save Excel files
 
     Returns:
@@ -864,6 +1029,14 @@ def export_to_excel(
         tree_class = tree.get('tree_class')
         lon, lat = tree['geometry']
 
+        # Get volumes (Forest Regulation 2079)
+        stem_vol = tree.get('stem_volume', 0.0)
+        branch_vol = tree.get('branch_volume', 0.0)
+        tree_vol = tree.get('tree_volume', 0.0)
+        gross_vol = tree.get('gross_volume', 0.0)
+        net_vol = tree.get('net_volume', 0.0)
+        firewood_vol = tree.get('firewood_m3', 0.0)
+
         # Initialize all columns
         record = {
             'fid': fid,
@@ -884,39 +1057,76 @@ def export_to_excel(
             'pole_dbh_cm': None,
             'pole_height_m': None,
             'pole_class': None,
+            'pole_stem_volume_m3': None,
+            'pole_branch_volume_m3': None,
+            'pole_tree_volume_m3': None,
+            'pole_gross_volume_m3': None,
+            'pole_net_volume_m3': None,
+            'pole_firewood_m3': None,
             # Tree columns
             'tree_species_scientific': None,
             'tree_dbh_cm': None,
             'tree_height_m': None,
             'tree_class': None,
+            'tree_stem_volume_m3': None,
+            'tree_branch_volume_m3': None,
+            'tree_tree_volume_m3': None,
+            'tree_gross_volume_m3': None,
+            'tree_net_volume_m3': None,
+            'tree_firewood_m3': None,
             # Coordinates (for Excel convenience)
             'longitude': lon,
             'latitude': lat
         }
 
         # Populate appropriate columns based on DBH (size class)
-        if dbh < 10:
-            # Regeneration
+        # FIXED: Correct DBH thresholds for regeneration (1-3.99) and sapling (4-9.99)
+        if dbh < 4:
+            # Regeneration (1-3.99 cm DBH - unestablished regeneration)
             record['regen_species_scientific'] = species_sci
             record['regen_dbh'] = dbh
             record['regen_count'] = 1
-        elif dbh < 20:
-            # Sapling
+        elif dbh < 10:
+            # Sapling (4-9.99 cm DBH - established regeneration)
             record['sapling_species_scientific'] = species_sci
             record['sapling_dbh_cm'] = dbh
             record['sapling_count'] = 1
-        elif dbh < 30:
-            # Pole
+        elif dbh < 20:
+            # Small Pole (10-19.99 cm DBH - with volumes)
             record['pole_species_scientific'] = species_sci
             record['pole_dbh_cm'] = dbh
             record['pole_height_m'] = height
             record['pole_class'] = tree_class
+            record['pole_stem_volume_m3'] = stem_vol if stem_vol > 0 else None
+            record['pole_branch_volume_m3'] = branch_vol if branch_vol > 0 else None
+            record['pole_tree_volume_m3'] = tree_vol if tree_vol > 0 else None
+            record['pole_gross_volume_m3'] = gross_vol if gross_vol > 0 else None
+            record['pole_net_volume_m3'] = net_vol if net_vol > 0 else None
+            record['pole_firewood_m3'] = firewood_vol if firewood_vol > 0 else None
+        elif dbh < 30:
+            # Large Pole (20-29.99 cm DBH - with volumes)
+            record['pole_species_scientific'] = species_sci
+            record['pole_dbh_cm'] = dbh
+            record['pole_height_m'] = height
+            record['pole_class'] = tree_class
+            record['pole_stem_volume_m3'] = stem_vol if stem_vol > 0 else None
+            record['pole_branch_volume_m3'] = branch_vol if branch_vol > 0 else None
+            record['pole_tree_volume_m3'] = tree_vol if tree_vol > 0 else None
+            record['pole_gross_volume_m3'] = gross_vol if gross_vol > 0 else None
+            record['pole_net_volume_m3'] = net_vol if net_vol > 0 else None
+            record['pole_firewood_m3'] = firewood_vol if firewood_vol > 0 else None
         else:
-            # Tree
+            # Tree (>=30 cm DBH - with volumes)
             record['tree_species_scientific'] = species_sci
             record['tree_dbh_cm'] = dbh
             record['tree_height_m'] = height
             record['tree_class'] = tree_class
+            record['tree_stem_volume_m3'] = stem_vol if stem_vol > 0 else None
+            record['tree_branch_volume_m3'] = branch_vol if branch_vol > 0 else None
+            record['tree_tree_volume_m3'] = tree_vol if tree_vol > 0 else None
+            record['tree_gross_volume_m3'] = gross_vol if gross_vol > 0 else None
+            record['tree_net_volume_m3'] = net_vol if net_vol > 0 else None
+            record['tree_firewood_m3'] = firewood_vol if firewood_vol > 0 else None
 
         records.append(record)
         fid += 1
@@ -993,7 +1203,7 @@ def export_to_excel(
         if tree_mask.any():
             df.loc[tree_mask, 'tree_sn'] = range(1, tree_mask.sum() + 1)
 
-    # Column order (22 columns total - longitude/latitude moved after sample_plot_number)
+    # Column order (with volume columns - Forest Regulation 2079 compliant)
     column_order = [
         'fid',
         'block_name',
@@ -1013,11 +1223,23 @@ def export_to_excel(
         'pole_dbh_cm',
         'pole_height_m',
         'pole_class',
+        'pole_stem_volume_m3',
+        'pole_branch_volume_m3',
+        'pole_tree_volume_m3',
+        'pole_gross_volume_m3',
+        'pole_net_volume_m3',
+        'pole_firewood_m3',
         'tree_sn',
         'tree_species_scientific',
         'tree_dbh_cm',
         'tree_height_m',
-        'tree_class'
+        'tree_class',
+        'tree_stem_volume_m3',
+        'tree_branch_volume_m3',
+        'tree_tree_volume_m3',
+        'tree_gross_volume_m3',
+        'tree_net_volume_m3',
+        'tree_firewood_m3'
     ]
     df = df[column_order]
 
@@ -1035,21 +1257,24 @@ def export_to_excel(
     df['fid'] = range(1, len(df) + 1)
 
     # ROUND DBH AND HEIGHT COLUMNS TO 0 DECIMAL PLACES (integers)
+    # Handle None values properly before rounding to avoid "NoneType has no __round__ method" error
+    # Use pd.Series.apply() with conditional rounding for nullable columns
+
     # DBH columns
     if 'regen_dbh' in df.columns:
-        df['regen_dbh'] = df['regen_dbh'].round(0).astype('Int64')
+        df['regen_dbh'] = df['regen_dbh'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
     if 'sapling_dbh_cm' in df.columns:
-        df['sapling_dbh_cm'] = df['sapling_dbh_cm'].round(0).astype('Int64')
+        df['sapling_dbh_cm'] = df['sapling_dbh_cm'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
     if 'pole_dbh_cm' in df.columns:
-        df['pole_dbh_cm'] = df['pole_dbh_cm'].round(0).astype('Int64')
+        df['pole_dbh_cm'] = df['pole_dbh_cm'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
     if 'tree_dbh_cm' in df.columns:
-        df['tree_dbh_cm'] = df['tree_dbh_cm'].round(0).astype('Int64')
+        df['tree_dbh_cm'] = df['tree_dbh_cm'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
 
     # Height columns
     if 'pole_height_m' in df.columns:
-        df['pole_height_m'] = df['pole_height_m'].round(0).astype('Int64')
+        df['pole_height_m'] = df['pole_height_m'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
     if 'tree_height_m' in df.columns:
-        df['tree_height_m'] = df['tree_height_m'].round(0).astype('Int64')
+        df['tree_height_m'] = df['tree_height_m'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
 
     # Write to Excel with formatting
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
@@ -1073,6 +1298,30 @@ def export_to_excel(
 
     # Calculate file size
     file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+
+    # Add validation enhancement if database session provided
+    if db is not None:
+        try:
+            from .excel_validator import add_validation_to_excel
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("Adding validation to Excel file...")
+            filepath, file_size_mb = add_validation_to_excel(filepath, db)
+            logger.info(f"Validation added successfully! New size: {file_size_mb:.2f} MB")
+        except Exception as e:
+            # Log error but don't fail the export
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to add validation to Excel: {e}")
+            logger.error(traceback.format_exc())
+            print(f"Warning: Could not add validation to Excel: {e}")
+            traceback.print_exc()
+            # Continue with basic Excel export
+    else:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("Database session not provided - skipping Excel validation enhancement")
 
     return filepath, file_size_mb
 
@@ -1155,6 +1404,28 @@ def generate_synthetic_trees(
     forest_type = result_data.get('forest_type', {}).get('dominant_type', 'Unknown')
     area_hectares = result_data.get('area', {}).get('hectares', 0)
 
+    # Step 1.2: Load species coefficients for volume calculations
+    report(11, "Loading species coefficients")
+    species_coefficients = {}
+
+    # Load species coefficients from database
+    from sqlalchemy import text as sql_text
+    coef_query = sql_text("""
+        SELECT scientific_name, a, b, c, s, m, a1, b1
+        FROM tree_species_coefficients
+    """)
+    coef_result = db.execute(coef_query)
+    for row in coef_result:
+        species_coefficients[row.scientific_name] = {
+            'a': row.a,
+            'b': row.b,
+            'c': row.c,
+            's': row.s,
+            'm': row.m,
+            'a1': row.a1,
+            'b1': row.b1
+        }
+
     # Step 1.5: Check if sampling design exists (REQUIRED)
     report(12, "Checking for sampling design")
     sampling_design = db.query(SamplingDesign).filter(
@@ -1224,12 +1495,25 @@ def generate_synthetic_trees(
             # Assign tree class
             tree_class = assign_tree_class(dbh, tree_height, species)
 
+            # Calculate volumes using Forest Regulation 2079 formulas
+            volumes = {'stem_volume': 0.0, 'branch_volume': 0.0, 'tree_volume': 0.0,
+                      'gross_volume': 0.0, 'net_volume': 0.0, 'firewood_m3': 0.0}
+
+            scientific_name = species.get('scientific_name')
+            if scientific_name and scientific_name in species_coefficients:
+                volumes = calculate_tree_volumes(
+                    dbh=dbh,
+                    height=tree_height,
+                    tree_class=tree_class,
+                    species_coefficients=species_coefficients[scientific_name]
+                )
+
             # Create tree record
             trees.append({
                 'tree_id': tree_id,
                 'geometry': (x, y),
                 'species_code': species.get('species_code'),
-                'species_scientific': species.get('scientific_name'),
+                'species_scientific': scientific_name,
                 'species_local': species.get('local_name'),
                 'species_role': role,
                 'height_m': tree_height,
@@ -1241,7 +1525,14 @@ def generate_synthetic_trees(
                 'generated_date': datetime.now().isoformat(),
                 'model_version': config['algorithm_version'],
                 'notes': 'SYNTHETIC DATA - Not ground survey',
-                'sample_plot_number': None  # Will be assigned later
+                'sample_plot_number': None,  # Will be assigned later
+                # Volume calculations (Forest Regulation 2079)
+                'stem_volume': volumes['stem_volume'],
+                'branch_volume': volumes['branch_volume'],
+                'tree_volume': volumes['tree_volume'],
+                'gross_volume': volumes['gross_volume'],
+                'net_volume': volumes['net_volume'],
+                'firewood_m3': volumes['firewood_m3']
             })
             tree_id += 1
 
@@ -1288,7 +1579,7 @@ def generate_synthetic_trees(
     gpkg_filepath, gpkg_size_mb = export_to_gpkg(trees, calculation_id)
 
     report(93, "Exporting to Excel file")
-    excel_filepath, excel_size_mb = export_to_excel(trees, calculation_id)
+    excel_filepath, excel_size_mb = export_to_excel(trees, calculation_id, db=db)
 
     # Step 6: Calculate statistics (separate mature trees from regeneration)
     report(97, "Calculating statistics")
@@ -1362,35 +1653,61 @@ def generate_synthetic_trees(
             'tree_above_30cm': round(avg_tree * 20, 1),         # Tree per ha
         }
 
-        # Calculate biomass and volume per block
-        total_biomass_mg = 0.0
-        for tree in block_trees:
-            tree_biomass = calculate_tree_biomass(
-                dbh=tree['dbh_cm'],
-                height=tree.get('height_m'),
-                species=tree.get('species', {})
-            )
-            total_biomass_mg += tree_biomass
+        # Calculate volumes per block (Forest Regulation 2079)
+        total_stem_volume = sum(t.get('stem_volume', 0.0) for t in block_trees)
+        total_branch_volume = sum(t.get('branch_volume', 0.0) for t in block_trees)
+        total_tree_volume = sum(t.get('tree_volume', 0.0) for t in block_trees)
+        total_gross_volume = sum(t.get('gross_volume', 0.0) for t in block_trees)
+        total_net_volume = sum(t.get('net_volume', 0.0) for t in block_trees)
+        total_firewood = sum(t.get('firewood_m3', 0.0) for t in block_trees)
 
         # Convert to per-hectare (plot area in hectares)
         plot_buffer_m = config.get('plot_buffer_meters', 10)
         plot_area_ha = (3.14159 * (plot_buffer_m ** 2)) / 10000.0  # hectares per plot
         total_sampled_area_ha = plot_area_ha * num_plots_in_block
-        biomass_per_ha = total_biomass_mg / total_sampled_area_ha if total_sampled_area_ha > 0 else 0.0
 
-        # Convert biomass (Mg/ha) to volume (m³/ha) using average wood density
-        # Average wood density for Nepal forests: 0.6 Mg/m³ (600 kg/m³)
-        # Volume (m³) = Biomass (Mg) / Wood Density (Mg/m³)
-        avg_wood_density = 0.6  # Mg/m³ (typical for mixed Nepal forests)
-        volume_per_ha = biomass_per_ha / avg_wood_density if avg_wood_density > 0 else 0.0
+        if total_sampled_area_ha > 0:
+            stem_volume_per_ha = total_stem_volume / total_sampled_area_ha
+            branch_volume_per_ha = total_branch_volume / total_sampled_area_ha
+            tree_volume_per_ha = total_tree_volume / total_sampled_area_ha
+            gross_volume_per_ha = total_gross_volume / total_sampled_area_ha
+            net_volume_per_ha = total_net_volume / total_sampled_area_ha
+            firewood_per_ha = total_firewood / total_sampled_area_ha
+        else:
+            stem_volume_per_ha = 0.0
+            branch_volume_per_ha = 0.0
+            tree_volume_per_ha = 0.0
+            gross_volume_per_ha = 0.0
+            net_volume_per_ha = 0.0
+            firewood_per_ha = 0.0
 
         block_dbh_distribution[block_name] = {
             'total_trees': len(block_trees),
             'num_plots': num_plots_in_block,
             'dbh_per_ha': dbh_per_ha,  # Per hectare values
-            'biomass_per_ha': round(biomass_per_ha, 2),  # Mg/ha (metric tons per hectare)
-            'volume_per_ha': round(volume_per_ha, 2),  # m³/ha (cubic meters per hectare)
+            # Volume totals (Forest Regulation 2079)
+            'stem_volume_m3': round(total_stem_volume, 2),
+            'branch_volume_m3': round(total_branch_volume, 2),
+            'tree_volume_m3': round(total_tree_volume, 2),
+            'gross_volume_m3': round(total_gross_volume, 2),
+            'net_volume_m3': round(total_net_volume, 2),
+            'firewood_m3': round(total_firewood, 2),
+            # Per-hectare values
+            'stem_volume_per_ha': round(stem_volume_per_ha, 2),
+            'branch_volume_per_ha': round(branch_volume_per_ha, 2),
+            'tree_volume_per_ha': round(tree_volume_per_ha, 2),
+            'gross_volume_per_ha': round(gross_volume_per_ha, 2),
+            'net_volume_per_ha': round(net_volume_per_ha, 2),
+            'firewood_per_ha': round(firewood_per_ha, 2),
         }
+
+    # Calculate overall volume totals (Forest Regulation 2079)
+    total_stem_volume_all = sum(t.get('stem_volume', 0.0) for t in trees)
+    total_branch_volume_all = sum(t.get('branch_volume', 0.0) for t in trees)
+    total_tree_volume_all = sum(t.get('tree_volume', 0.0) for t in trees)
+    total_gross_volume_all = sum(t.get('gross_volume', 0.0) for t in trees)
+    total_net_volume_all = sum(t.get('net_volume', 0.0) for t in trees)
+    total_firewood_all = sum(t.get('firewood_m3', 0.0) for t in trees)
 
     statistics = {
         'total_trees': len(trees),
@@ -1413,6 +1730,20 @@ def generate_synthetic_trees(
         'species_count': len(set(t['species_scientific'] for t in trees if t.get('species_scientific'))),
         'plot_buffer_meters': config['plot_buffer_meters'],
         'total_sample_plots': sampling_design.total_points,
+        # Volume totals (Forest Regulation 2079)
+        'total_stem_volume_m3': round(total_stem_volume_all, 2),
+        'total_branch_volume_m3': round(total_branch_volume_all, 2),
+        'total_tree_volume_m3': round(total_tree_volume_all, 2),
+        'total_gross_volume_m3': round(total_gross_volume_all, 2),
+        'total_net_volume_m3': round(total_net_volume_all, 2),
+        'total_firewood_m3': round(total_firewood_all, 2),
+        # Per-hectare values
+        'stem_volume_per_ha': round(total_stem_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
+        'branch_volume_per_ha': round(total_branch_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
+        'tree_volume_per_ha': round(total_tree_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
+        'gross_volume_per_ha': round(total_gross_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
+        'net_volume_per_ha': round(total_net_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
+        'firewood_per_ha': round(total_firewood_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
         'block_dbh_distribution': block_dbh_distribution,  # Block-wise DBH class distribution
     }
 

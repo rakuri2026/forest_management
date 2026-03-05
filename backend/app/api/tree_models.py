@@ -66,7 +66,7 @@ def background_tree_generation(
             progress_callback=update_progress
         )
 
-        # Update model with results
+        # Update model with results (both GPKG and Excel)
         model.status = "completed"
         model.total_trees = result['statistics']['total_trees']
         model.area_hectares = result['statistics']['area_hectares']
@@ -75,9 +75,15 @@ def background_tree_generation(
         model.max_dbh_cm = result['statistics']['max_dbh_cm']
         model.min_height_m = result['statistics']['min_height_m']
         model.max_height_m = result['statistics']['max_height_m']
-        model.gpkg_filename = result['filename']
-        model.file_size_mb = result['file_size_mb']
-        model.file_path = result['filepath']
+        # GPKG file (primary)
+        model.gpkg_filename = result.get('gpkg_filename', result.get('filename'))
+        model.file_size_mb = result.get('gpkg_size_mb', result.get('file_size_mb'))
+        model.file_path = result.get('gpkg_filepath', result.get('filepath'))
+        # Excel file (additional)
+        model.excel_filename = result.get('excel_filename')
+        model.excel_size_mb = result.get('excel_size_mb')
+        model.excel_path = result.get('excel_filepath')
+        # General info
         model.processing_time_seconds = result['processing_time_seconds']
         model.completed_at = datetime.utcnow()
         model.progress_percent = 100
@@ -332,6 +338,69 @@ async def download_tree_model(
         media_type="application/geopackage+sqlite3",
         headers={
             "Content-Disposition": f"attachment; filename={model.gpkg_filename}"
+        }
+    )
+
+
+
+@router.get("/tree-models/{model_id}/download-excel")
+async def download_tree_model_excel(
+    model_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download tree model Excel file (regulation format)
+
+    Returns the generated Excel file containing synthetic tree points
+    in Forest Regulation 2079 standard format.
+
+    **File Format:** Excel 2007+ (.xlsx)
+
+    **Regulation Format Columns:**
+    - fid, block_name, sample_plot_number
+    - regen_species_scientific, regen_dbh, regen_count
+    - sapling_species_scientific, sapling_dbh_cm, sapling_count
+    - pole_species_scientific, pole_dbh_cm, pole_height_m, pole_class
+    - tree_species_scientific, tree_dbh_cm, tree_height_m, tree_class
+    - longitude, latitude
+    """
+    model = db.query(SyntheticTreeModel).filter(SyntheticTreeModel.id == model_id).first()
+
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tree model not found"
+        )
+
+    # Check user authorization
+    if model.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to download this tree model"
+        )
+
+    # Check status
+    if model.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tree model generation not completed"
+        )
+
+    # Check file exists
+    if not model.excel_path or not os.path.exists(model.excel_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Excel file not found"
+        )
+
+    # Return file
+    return FileResponse(
+        path=model.excel_path,
+        filename=model.excel_filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={model.excel_filename}"
         }
     )
 

@@ -28,6 +28,8 @@ interface TreeModel {
   max_height_m: number | null;
   gpkg_filename: string | null;
   file_size_mb: number | null;
+  excel_filename: string | null;
+  excel_size_mb: number | null;
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
@@ -126,7 +128,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
     }
   };
 
-  // Download model
+  // Download model (GPKG)
   const handleDownload = async (modelId: string, filename: string) => {
     try {
       const response = await api.get(`/api/tree-models/${modelId}/download`, {  // Fixed: Added /api prefix
@@ -145,6 +147,28 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
 
     } catch (err: any) {
       alert('Failed to download file: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  // Download Excel
+  const handleDownloadExcel = async (modelId: string, filename: string) => {
+    try {
+      const response = await api.get(`/api/tree-models/${modelId}/download-excel`, {
+        responseType: 'blob'
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+    } catch (err: any) {
+      alert('Failed to download Excel file: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -213,9 +237,10 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
               <div className="text-sm text-blue-900">
                 <p className="font-medium mb-1">What is this?</p>
                 <p className="mb-2">
-                  This tool generates a synthetic tree distribution map (GPKG file) showing estimated locations
-                  of individual trees based on canopy height data and species analysis. Trees are automatically
-                  assigned to sample plots based on the buffer distance.
+                  This tool generates a synthetic tree distribution in two formats: <strong>GPKG</strong> (GIS mapping)
+                  and <strong>Excel</strong> (Forest Regulation 2079 format). Shows estimated locations of individual
+                  trees based on canopy height data and species analysis. Trees are automatically assigned to sample
+                  plots based on the buffer distance.
                 </p>
                 <p className="font-medium text-orange-700 mb-1">📋 Requirement:</p>
                 <p className="mb-2 text-orange-900">
@@ -507,7 +532,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                     )}
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {model.status === 'completed' && model.gpkg_filename && (
                         <button
                           onClick={() => handleDownload(model.id, model.gpkg_filename!)}
@@ -515,6 +540,17 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                         >
                           <Download className="w-4 h-4" />
                           Download GPKG
+                          {model.file_size_mb && <span className="text-xs opacity-80">({formatFileSize(model.file_size_mb)})</span>}
+                        </button>
+                      )}
+                      {model.status === 'completed' && model.excel_filename && (
+                        <button
+                          onClick={() => handleDownloadExcel(model.id, model.excel_filename!)}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download Excel
+                          {model.excel_size_mb && <span className="text-xs opacity-80">({formatFileSize(model.excel_size_mb)})</span>}
                         </button>
                       )}
                       <button

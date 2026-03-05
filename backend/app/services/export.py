@@ -19,8 +19,15 @@ from app.models.sampling import SamplingDesign
 
 def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
     """
-    Export fieldbook to CSV format.
+    Export fieldbook to CSV format with topographic features.
+    Uses optimized pre-clipping algorithm (same as sampling export).
     """
+    # CRITICAL: Rollback any previous failed transactions at the START
+    try:
+        db.rollback()
+    except:
+        pass
+
     points = db.query(Fieldbook).filter(
         Fieldbook.calculation_id == calculation_id
     ).order_by(Fieldbook.point_number).all()
@@ -28,12 +35,68 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
     if not points:
         raise ValueError("No fieldbook points found for this calculation")
 
+    # Get calculation boundary for pre-clipping topographic features
+    from app.models.calculation import Calculation
+    from sqlalchemy import text
+    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    boundary_wkt = None
+    if calc:
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM public.calculations
+            WHERE id = :calc_id
+        """)
+        boundary_result = db.execute(boundary_query, {"calc_id": str(calculation_id)}).first()
+        if boundary_result:
+            boundary_wkt = boundary_result.wkt
+
+    # Import required modules for topographic feature extraction
+    from app.utils.geospatial_vector_optimized import (
+        preclip_topographic_features,
+        find_nearest_topographic_feature_optimized
+    )
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Pre-clip ridge/river data ONCE for performance (20-100x faster!)
+    clipped_features = None
+    if boundary_wkt:
+        try:
+            # Rollback any previous failed transactions
+            try:
+                db.rollback()
+            except:
+                pass
+
+            clipped_features = preclip_topographic_features(
+                db=db,
+                boundary_wkt=boundary_wkt,
+                buffer_meters=200.0
+            )
+            # DEBUG: Log what we got
+            if clipped_features:
+                ridge_count = len(clipped_features.get('ridges', []))
+                river_count = len(clipped_features.get('rivers', []))
+                logger.info(f"Pre-clipped {ridge_count} ridges and {river_count} rivers for fieldbook CSV export")
+            else:
+                logger.warning("Pre-clipping returned None - ridge/river columns will be empty!")
+        except Exception as e:
+            logger.error(f"Failed to pre-clip topographic features: {e}", exc_info=True)
+            # Rollback the failed transaction
+            try:
+                db.rollback()
+            except:
+                pass
+            clipped_features = None
+
     # Create CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Write header
+    # Write header with topographic features
+    # If you see "TEST_NEW_CODE" as first column, the new code loaded successfully!
     writer.writerow([
+        'TEST_NEW_CODE_LOADED',  # DEBUG: If you see this, new code is running!
         'Point No',
         'Type',
         'Block No',
@@ -46,13 +109,44 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
         'Azimuth (deg)',
         'Distance (m)',
         'Elevation (m)',
+        'Nearest Feature',
+        'Feature Type',
+        'Distance to Feature (m)',
+        'Direction to Feature',
         'Verified',
         'Remarks'
     ])
 
-    # Write data rows
+    # Write data rows with topographic features
     for point in points:
+        # Extract topographic features (ridge/river) using optimized algorithm
+        feature_name = ''
+        feature_type = ''
+        feature_distance = ''
+        feature_direction = ''
+
+        if clipped_features and point.longitude and point.latitude:
+            try:
+                topo_feature = find_nearest_topographic_feature_optimized(
+                    db=db,
+                    longitude=float(point.longitude),
+                    latitude=float(point.latitude),
+                    clipped_features=clipped_features,
+                    search_radius_meters=300.0,
+                    prefer_rivers=True,
+                    min_distance_threshold=20.0
+                )
+
+                if topo_feature:
+                    feature_name = topo_feature.get("feature_name", "")
+                    feature_type = topo_feature.get("feature_type", "")
+                    feature_distance = f'{int(topo_feature.get("distance_meters", 0))}'
+                    feature_direction = topo_feature.get("direction", "")
+            except Exception as e:
+                logger.warning(f"Failed to find topographic feature for point {point.point_number}: {e}")
+
         writer.writerow([
+            'YES',  # DEBUG marker - proves new code is running
             f'P{point.point_number}',
             point.point_type,
             point.block_number if point.block_number else '',
@@ -65,6 +159,10 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
             f'{point.azimuth_to_next:.2f}' if point.azimuth_to_next else '',
             f'{point.distance_to_next:.2f}' if point.distance_to_next else '',
             f'{point.elevation:.2f}' if point.elevation else '',
+            feature_name,
+            feature_type,
+            feature_distance,
+            feature_direction,
             'Yes' if point.is_verified else 'No',
             point.remarks if point.remarks else ''
         ])
@@ -74,7 +172,8 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
 
 def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
     """
-    Export fieldbook to Excel format.
+    Export fieldbook to Excel format with topographic features.
+    Uses optimized pre-clipping algorithm (same as sampling export).
     """
     try:
         from openpyxl import Workbook
@@ -82,12 +181,72 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
     except ImportError:
         raise ImportError("openpyxl is required for Excel export. Install with: pip install openpyxl")
 
+    # CRITICAL: Rollback any previous failed transactions at the START
+    try:
+        db.rollback()
+    except:
+        pass
+
     points = db.query(Fieldbook).filter(
         Fieldbook.calculation_id == calculation_id
     ).order_by(Fieldbook.point_number).all()
 
     if not points:
         raise ValueError("No fieldbook points found for this calculation")
+
+    # Get calculation boundary for pre-clipping topographic features
+    from app.models.calculation import Calculation
+    from sqlalchemy import text
+    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    boundary_wkt = None
+    if calc:
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM public.calculations
+            WHERE id = :calc_id
+        """)
+        boundary_result = db.execute(boundary_query, {"calc_id": str(calculation_id)}).first()
+        if boundary_result:
+            boundary_wkt = boundary_result.wkt
+
+    # Import required modules for topographic feature extraction
+    from app.utils.geospatial_vector_optimized import (
+        preclip_topographic_features,
+        find_nearest_topographic_feature_optimized
+    )
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Pre-clip ridge/river data ONCE for performance (20-100x faster!)
+    clipped_features = None
+    if boundary_wkt:
+        try:
+            # Rollback any previous failed transactions
+            try:
+                db.rollback()
+            except:
+                pass
+
+            clipped_features = preclip_topographic_features(
+                db=db,
+                boundary_wkt=boundary_wkt,
+                buffer_meters=200.0
+            )
+            # DEBUG: Log what we got
+            if clipped_features:
+                ridge_count = len(clipped_features.get('ridges', []))
+                river_count = len(clipped_features.get('rivers', []))
+                logger.info(f"Pre-clipped {ridge_count} ridges and {river_count} rivers for fieldbook Excel export")
+            else:
+                logger.warning("Pre-clipping returned None - ridge/river columns will be empty!")
+        except Exception as e:
+            logger.error(f"Failed to pre-clip topographic features: {e}", exc_info=True)
+            # Rollback the failed transaction
+            try:
+                db.rollback()
+            except:
+                pass
+            clipped_features = None
 
     # Create workbook
     wb = Workbook()
@@ -119,11 +278,12 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
     # Points sheet
     ws_points = wb.create_sheet("Points")
 
-    # Header row
+    # Header row with topographic features
     headers = [
-        'Point No', 'Type', 'Longitude', 'Latitude',
+        'Point No', 'Type', 'Block No', 'Block Name', 'Longitude', 'Latitude',
         'Easting UTM', 'Northing UTM', 'UTM Zone',
         'Azimuth (deg)', 'Distance (m)', 'Elevation (m)',
+        'Nearest Feature', 'Feature Type', 'Distance to Feature (m)', 'Direction to Feature',
         'Verified', 'Remarks'
     ]
 
@@ -133,30 +293,62 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
         cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
         cell.alignment = Alignment(horizontal='center')
 
-    # Data rows
+    # Data rows with topographic features
     for row, point in enumerate(points, start=2):
+        # Extract topographic features (ridge/river) using optimized algorithm
+        feature_name = ''
+        feature_type = ''
+        feature_distance = ''
+        feature_direction = ''
+
+        if clipped_features and point.longitude and point.latitude:
+            try:
+                topo_feature = find_nearest_topographic_feature_optimized(
+                    db=db,
+                    longitude=float(point.longitude),
+                    latitude=float(point.latitude),
+                    clipped_features=clipped_features,
+                    search_radius_meters=300.0,
+                    prefer_rivers=True,
+                    min_distance_threshold=20.0
+                )
+
+                if topo_feature:
+                    feature_name = topo_feature.get("feature_name", "")
+                    feature_type = topo_feature.get("feature_type", "")
+                    feature_distance = int(topo_feature.get("distance_meters", 0))
+                    feature_direction = topo_feature.get("direction", "")
+            except Exception as e:
+                logger.warning(f"Failed to find topographic feature for point {point.point_number}: {e}")
+
         ws_points.cell(row=row, column=1, value=f'P{point.point_number}')
         ws_points.cell(row=row, column=2, value=point.point_type)
-        ws_points.cell(row=row, column=3, value=round(point.longitude, 7) if point.longitude else '')
-        ws_points.cell(row=row, column=4, value=round(point.latitude, 7) if point.latitude else '')
-        ws_points.cell(row=row, column=5, value=round(point.easting_utm, 2) if point.easting_utm else '')
-        ws_points.cell(row=row, column=6, value=round(point.northing_utm, 2) if point.northing_utm else '')
-        ws_points.cell(row=row, column=7, value=point.utm_zone if point.utm_zone else '')
-        ws_points.cell(row=row, column=8, value=round(point.azimuth_to_next, 2) if point.azimuth_to_next else '')
-        ws_points.cell(row=row, column=9, value=round(point.distance_to_next, 2) if point.distance_to_next else '')
-        ws_points.cell(row=row, column=10, value=round(point.elevation, 2) if point.elevation else '')
-        ws_points.cell(row=row, column=11, value='Yes' if point.is_verified else 'No')
-        ws_points.cell(row=row, column=12, value=point.remarks if point.remarks else '')
+        ws_points.cell(row=row, column=3, value=point.block_number if point.block_number else '')
+        ws_points.cell(row=row, column=4, value=point.block_name if point.block_name else '')
+        ws_points.cell(row=row, column=5, value=round(point.longitude, 7) if point.longitude else '')
+        ws_points.cell(row=row, column=6, value=round(point.latitude, 7) if point.latitude else '')
+        ws_points.cell(row=row, column=7, value=round(point.easting_utm, 2) if point.easting_utm else '')
+        ws_points.cell(row=row, column=8, value=round(point.northing_utm, 2) if point.northing_utm else '')
+        ws_points.cell(row=row, column=9, value=point.utm_zone if point.utm_zone else '')
+        ws_points.cell(row=row, column=10, value=round(point.azimuth_to_next, 2) if point.azimuth_to_next else '')
+        ws_points.cell(row=row, column=11, value=round(point.distance_to_next, 2) if point.distance_to_next else '')
+        ws_points.cell(row=row, column=12, value=round(point.elevation, 2) if point.elevation else '')
+        ws_points.cell(row=row, column=13, value=feature_name)
+        ws_points.cell(row=row, column=14, value=feature_type)
+        ws_points.cell(row=row, column=15, value=feature_distance)
+        ws_points.cell(row=row, column=16, value=feature_direction)
+        ws_points.cell(row=row, column=17, value='Yes' if point.is_verified else 'No')
+        ws_points.cell(row=row, column=18, value=point.remarks if point.remarks else '')
 
         # Highlight verified points
         if point.is_verified:
-            for col in range(1, 13):
+            for col in range(1, 19):
                 ws_points.cell(row=row, column=col).fill = PatternFill(
                     start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"
                 )
 
     # Adjust column widths
-    for col in range(1, 13):
+    for col in range(1, 19):
         ws_points.column_dimensions[chr(64 + col)].width = 15
 
     # Save to bytes
@@ -362,7 +554,7 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
             clipped_features = preclip_topographic_features(
                 db=db,
                 boundary_wkt=boundary_wkt,
-                buffer_meters=1000.0
+                buffer_meters=200.0
             )
             # DEBUG: Log what we got
             if clipped_features:
@@ -431,7 +623,7 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
                     longitude=lon,
                     latitude=lat,
                     clipped_features=clipped_features,
-                    search_radius_meters=1000.0,
+                    search_radius_meters=300.0,
                     prefer_rivers=True,
                     min_distance_threshold=20.0
                 )
