@@ -26,8 +26,9 @@ import time
 
 from .core.config import settings
 from .core.database import check_db_connection, Base, engine
-from .api import auth_router, forests_router, inventory_router, species_router
-from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity
+from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router
+from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
+from .api import location_search
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -176,6 +177,27 @@ app.include_router(
     biodiversity.router,
     prefix="/api",
     tags=["Biodiversity"]
+)
+
+# Include tree models router
+app.include_router(
+    tree_models_router,
+    prefix="/api",
+    tags=["Tree Distribution Models"]
+)
+
+# Include field inventory router
+app.include_router(
+    field_inventory.router,
+    prefix="/api/field-inventory",
+    tags=["Field Inventory"]
+)
+
+# Include location search router
+app.include_router(
+    location_search.router,
+    prefix="/api/location",
+    tags=["Location Search"]
 )
 
 
