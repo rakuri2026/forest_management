@@ -1017,6 +1017,35 @@ def export_to_excel(
     filename = f"tree_model_{calculation_id}_{timestamp}.xlsx"
     filepath = os.path.join(output_dir, filename)
 
+    # Get sample plot center coordinates from sampling design
+    plot_coordinates = {}
+    if db is not None:
+        try:
+            sampling_design = db.query(SamplingDesign).filter(
+                SamplingDesign.calculation_id == calculation_id
+            ).first()
+            
+            if sampling_design and sampling_design.points_geometry:
+                # Extract coordinates from MULTIPOINT geometry
+                # Query uses ST_DumpPoints to get each point with its index
+                query = text("""
+                    SELECT 
+                        (ST_DumpPoints(points_geometry)).path[1] - 1 as point_index,
+                        ST_X((ST_DumpPoints(points_geometry)).geom) as lon,
+                        ST_Y((ST_DumpPoints(points_geometry)).geom) as lat
+                    FROM sampling_designs
+                    WHERE id = :design_id
+                """)
+                result = db.execute(query, {"design_id": sampling_design.id})
+                for row in result:
+                    # point_index is 0-based, plot numbers are typically 1-based
+                    plot_number = str(row[0] + 1)
+                    plot_coordinates[plot_number] = (row[1], row[2])
+                
+                print(f"[Excel Export] Loaded {len(plot_coordinates)} plot coordinates from sampling design")
+        except Exception as e:
+            print(f"[Excel Export] Warning: Could not load plot coordinates: {e}")
+
     # Create list of records - REGULATION FORMAT (16 columns + lat/lon)
     records = []
     fid = 1
@@ -1027,7 +1056,16 @@ def export_to_excel(
         species_role = tree.get('species_role', 'associate')  # Get role for sorting
         height = tree.get('height_m')
         tree_class = tree.get('tree_class')
-        lon, lat = tree['geometry']
+        
+        # Get sample plot number for coordinate lookup
+        sample_plot_num = str(tree.get('sample_plot_number', ''))
+        
+        # Use sample plot center coordinates instead of individual tree coordinates
+        if sample_plot_num and sample_plot_num in plot_coordinates:
+            lon, lat = plot_coordinates[sample_plot_num]
+        else:
+            # Fallback to tree's own coordinates if plot not found
+            lon, lat = tree['geometry']
 
         # Get volumes (Forest Regulation 2079)
         stem_vol = tree.get('stem_volume', 0.0)
@@ -1138,40 +1176,6 @@ def export_to_excel(
     # Convert sample_plot_number to numeric for proper sorting (1, 2, 3... not 1, 10, 11, 2)
     df['sample_plot_number_numeric'] = pd.to_numeric(df['sample_plot_number'], errors='coerce').fillna(999999)
 
-    # Define species role priority (dominant first, rare last)
-    role_priority = {
-        'dominant': 1,
-        'co-dominant': 2,
-        'associate': 3,
-        'occasional': 4,
-        'rare': 5
-    }
-    df['role_priority'] = df['species_role'].map(role_priority).fillna(3)  # Default to associate
-
-    # Get species columns for sorting (whichever is not None)
-    df['species_for_sorting'] = (
-        df['tree_species_scientific'].fillna('') +
-        df['pole_species_scientific'].fillna('') +
-        df['sapling_species_scientific'].fillna('') +
-        df['regen_species_scientific'].fillna('')
-    )
-
-    # Sort by:
-    # 1. sample_plot_number (numeric)
-    # 2. role_priority (dominant → co-dominant → associate → occasional → rare)
-    # 3. species name (alphabetical)
-    df = df.sort_values(
-        by=['sample_plot_number_numeric', 'role_priority', 'species_for_sorting'],
-        ascending=[True, True, True]
-    )
-
-    # Drop temporary sorting columns
-    df = df.drop(columns=['sample_plot_number_numeric', 'role_priority', 'species_for_sorting', 'species_role'])
-
-    # Reset index and reassign fid sequentially
-    df = df.reset_index(drop=True)
-    df['fid'] = range(1, len(df) + 1)
-
     # Add serial numbers (SN) for each category that reset per sample plot
     # Initialize SN columns
     df['regen_sn'] = None
@@ -1203,6 +1207,82 @@ def export_to_excel(
         if tree_mask.any():
             df.loc[tree_mask, 'tree_sn'] = range(1, tree_mask.sum() + 1)
 
+    # Define species role priority (dominant first, rare last)
+    role_priority = {
+        'dominant': 1,
+        'co-dominant': 2,
+        'associate': 3,
+        'occasional': 4,
+        'rare': 5
+    }
+    df['role_priority'] = df['species_role'].map(role_priority).fillna(3)  # Default to associate
+
+    # Get species columns for sorting (whichever is not None)
+    df['species_for_sorting'] = (
+        df['tree_species_scientific'].fillna('') +
+        df['pole_species_scientific'].fillna('') +
+        df['sapling_species_scientific'].fillna('') +
+        df['regen_species_scientific'].fillna('')
+    )
+
+    # COMPACT FORMAT: Sort BEFORE merge by sample_plot_number, then regen_sn, sapling_sn, pole_sn, tree_sn
+    # This groups rows so that after merge, they consolidate properly
+    # Pad with leading zeros for proper sorting (01, 02... 09, 10, 11)
+    df['_s1'] = df['sample_plot_number'].astype(str).str.zfill(4)
+    df['_s2'] = df['regen_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
+    df['_s3'] = df['sapling_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
+    df['_s4'] = df['pole_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
+    df['_s5'] = df['tree_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
+    
+    df = df.sort_values(by=['_s1', '_s2', '_s3', '_s4', '_s5'])
+    df = df.drop(columns=['_s1', '_s2', '_s3', '_s4', '_s5'])
+
+    # Use min_sn as merge key to combine different size classes with same SN
+    df['min_sn'] = df[['tree_sn', 'pole_sn', 'sapling_sn', 'regen_sn']].min(axis=1)
+    df['merge_key'] = df['sample_plot_number'].astype(str) + '_' + df['min_sn'].astype(str)
+    
+    # Define aggregation functions - take first non-null value for each column
+    agg_dict = {
+        'fid': 'first',  # Will reassign later
+        'block_name': 'first',
+        'sample_plot_number': 'first',
+        'longitude': 'first',
+        'latitude': 'first',
+        # Regeneration columns
+        'regen_sn': 'first',
+        'regen_species_scientific': 'first',
+        'regen_dbh': 'first',
+        'regen_count': 'first',
+        # Sapling columns
+        'sapling_sn': 'first',
+        'sapling_species_scientific': 'first',
+        'sapling_dbh_cm': 'first',
+        'sapling_count': 'first',
+        # Pole columns
+        'pole_sn': 'first',
+        'pole_species_scientific': 'first',
+        'pole_dbh_cm': 'first',
+        'pole_height_m': 'first',
+        'pole_class': 'first',
+        # Tree columns
+        'tree_sn': 'first',
+        'tree_species_scientific': 'first',
+        'tree_dbh_cm': 'first',
+        'tree_height_m': 'first',
+        'tree_class': 'first',
+    }
+    
+    # Group by merge_key and aggregate
+    df = df.groupby('merge_key', as_index=False).agg(agg_dict)
+    
+    # Drop temporary columns (use errors='ignore' in case column doesn't exist)
+    cols_to_drop = [col for col in ['merge_key', 'sample_plot_number_numeric'] if col in df.columns]
+    df = df.drop(columns=cols_to_drop)
+
+    # Reset index and reassign fid sequentially
+    df = df.reset_index(drop=True)
+    df['fid'] = range(1, len(df) + 1)
+
     # Column order (with volume columns - Forest Regulation 2079 compliant)
     column_order = [
         'fid',
@@ -1223,23 +1303,25 @@ def export_to_excel(
         'pole_dbh_cm',
         'pole_height_m',
         'pole_class',
-        'pole_stem_volume_m3',
-        'pole_branch_volume_m3',
-        'pole_tree_volume_m3',
-        'pole_gross_volume_m3',
-        'pole_net_volume_m3',
-        'pole_firewood_m3',
+        # Volume columns removed - calculated in field inventory tab
+        # 'pole_stem_volume_m3',
+        # 'pole_branch_volume_m3',
+        # 'pole_tree_volume_m3',
+        # 'pole_gross_volume_m3',
+        # 'pole_net_volume_m3',
+        # 'pole_firewood_m3',
         'tree_sn',
         'tree_species_scientific',
         'tree_dbh_cm',
         'tree_height_m',
         'tree_class',
-        'tree_stem_volume_m3',
-        'tree_branch_volume_m3',
-        'tree_tree_volume_m3',
-        'tree_gross_volume_m3',
-        'tree_net_volume_m3',
-        'tree_firewood_m3'
+        # Volume columns removed - calculated in field inventory tab
+        # 'tree_stem_volume_m3',
+        # 'tree_branch_volume_m3',
+        # 'tree_tree_volume_m3',
+        # 'tree_gross_volume_m3',
+        # 'tree_net_volume_m3',
+        # 'tree_firewood_m3'
     ]
     df = df[column_order]
 
@@ -1315,7 +1397,7 @@ def export_to_excel(
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to add validation to Excel: {e}")
             logger.error(traceback.format_exc())
-            print(f"Warning: Could not add validation to Excel: {e}")
+            print(f"ERROR: Could not add validation to Excel: {e}")
             traceback.print_exc()
             # Continue with basic Excel export
     else:
@@ -1681,6 +1763,9 @@ def generate_synthetic_trees(
             net_volume_per_ha = 0.0
             firewood_per_ha = 0.0
 
+        # Calculate total volume (net timber + firewood) - matches field inventory calculation
+        total_volume_per_ha = net_volume_per_ha + firewood_per_ha
+
         block_dbh_distribution[block_name] = {
             'total_trees': len(block_trees),
             'num_plots': num_plots_in_block,
@@ -1699,6 +1784,8 @@ def generate_synthetic_trees(
             'gross_volume_per_ha': round(gross_volume_per_ha, 2),
             'net_volume_per_ha': round(net_volume_per_ha, 2),
             'firewood_per_ha': round(firewood_per_ha, 2),
+            # Total volume (timber + firewood) - for UI display
+            'volume_per_ha': round(total_volume_per_ha, 2),
         }
 
     # Calculate overall volume totals (Forest Regulation 2079)
