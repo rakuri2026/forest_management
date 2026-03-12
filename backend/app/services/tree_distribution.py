@@ -1227,12 +1227,12 @@ def export_to_excel(
 
     # COMPACT FORMAT: Sort BEFORE merge by sample_plot_number, then regen_sn, sapling_sn, pole_sn, tree_sn
     # This groups rows so that after merge, they consolidate properly
-    # Pad with leading zeros for proper sorting (01, 02... 09, 10, 11)
-    df['_s1'] = df['sample_plot_number'].astype(str).str.zfill(4)
-    df['_s2'] = df['regen_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
-    df['_s3'] = df['sapling_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
-    df['_s4'] = df['pole_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
-    df['_s5'] = df['tree_sn'].fillna(999999).astype(int).astype(str).str.zfill(4)
+    # Use numeric sorting to match Excel's "Sort anything that looks like a number, as a number"
+    df['_s1'] = pd.to_numeric(df['sample_plot_number'], errors='coerce').fillna(999999)
+    df['_s2'] = pd.to_numeric(df['regen_sn'], errors='coerce').fillna(999999)
+    df['_s3'] = pd.to_numeric(df['sapling_sn'], errors='coerce').fillna(999999)
+    df['_s4'] = pd.to_numeric(df['pole_sn'], errors='coerce').fillna(999999)
+    df['_s5'] = pd.to_numeric(df['tree_sn'], errors='coerce').fillna(999999)
     
     df = df.sort_values(by=['_s1', '_s2', '_s3', '_s4', '_s5'])
     df = df.drop(columns=['_s1', '_s2', '_s3', '_s4', '_s5'])
@@ -1274,6 +1274,14 @@ def export_to_excel(
     
     # Group by merge_key and aggregate
     df = df.groupby('merge_key', as_index=False).agg(agg_dict)
+    
+    # FINAL SORT: After groupby, sort by sample_plot_number, regen_sn, sapling_sn, pole_sn, tree_sn numerically
+    df['_s1'] = pd.to_numeric(df['sample_plot_number'], errors='coerce').fillna(999999)
+    df['_s2'] = pd.to_numeric(df['regen_sn'], errors='coerce').fillna(999999)
+    df['_s3'] = pd.to_numeric(df['sapling_sn'], errors='coerce').fillna(999999)
+    df['_s4'] = pd.to_numeric(df['pole_sn'], errors='coerce').fillna(999999)
+    df['_s5'] = pd.to_numeric(df['tree_sn'], errors='coerce').fillna(999999)
+    df = df.sort_values(by=['_s1', '_s2', '_s3', '_s4', '_s5']).drop(columns=['_s1', '_s2', '_s3', '_s4', '_s5'])
     
     # Drop temporary columns (use errors='ignore' in case column doesn't exist)
     cols_to_drop = [col for col in ['merge_key', 'sample_plot_number_numeric'] if col in df.columns]
