@@ -23,6 +23,32 @@ import 'leaflet/dist/leaflet.css';
 // Import leaflet scale control (built-in)
 import 'leaflet/dist/leaflet.css';
 
+// Validate GeoJSON geometry structure
+function isValidGeoJSON(geometry: any): boolean {
+  if (!geometry || typeof geometry !== 'object') {
+    console.error('Geometry validation failed: not an object', geometry);
+    return false;
+  }
+
+  if (!geometry.type) {
+    console.error('Geometry validation failed: missing type', geometry);
+    return false;
+  }
+
+  const validTypes = ['Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection', 'Feature', 'FeatureCollection'];
+  if (!validTypes.includes(geometry.type)) {
+    console.error('Geometry validation failed: invalid type', geometry.type);
+    return false;
+  }
+
+  if (!geometry.coordinates && geometry.type !== 'GeometryCollection' && geometry.type !== 'Feature' && geometry.type !== 'FeatureCollection') {
+    console.error('Geometry validation failed: missing coordinates', geometry);
+    return false;
+  }
+
+  return true;
+}
+
 // Component to handle auto-zoom to layer and add scale control
 function ZoomToLayer({
   geometry,
@@ -56,14 +82,18 @@ function ZoomToLayer({
     scaleControl.addTo(map);
 
     // Auto-zoom to layer on initial load - same behavior for both orientations
-    if (geometry) {
-      const geoJsonLayer = L.geoJSON(geometry);
-      const bounds = geoJsonLayer.getBounds();
-      if (bounds.isValid()) {
-        // Use same padding for both portrait and landscape for consistent zoom behavior
-        const padding = [50, 50] as [number, number];
+    if (geometry && isValidGeoJSON(geometry)) {
+      try {
+        const geoJsonLayer = L.geoJSON(geometry);
+        const bounds = geoJsonLayer.getBounds();
+        if (bounds.isValid()) {
+          // Use same padding for both portrait and landscape for consistent zoom behavior
+          const padding = [50, 50] as [number, number];
 
-        map.fitBounds(bounds, { padding });
+          map.fitBounds(bounds, { padding });
+        }
+      } catch (error) {
+        console.error('Error creating GeoJSON layer for zoom:', error);
       }
     }
 
@@ -103,6 +133,7 @@ export default function CalculationDetail() {
   const [calculation, setCalculation] = useState<Calculation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [geometryError, setGeometryError] = useState<string | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
@@ -130,6 +161,16 @@ export default function CalculationDetail() {
   // Calculate optimal map orientation based on geometry extent
   useEffect(() => {
     if (calculation?.geometry) {
+      // First validate the geometry structure
+      if (!isValidGeoJSON(calculation.geometry)) {
+        const errorMsg = 'The boundary geometry data is in an invalid format. The map may not display correctly.';
+        console.error('Invalid GeoJSON structure detected for calculation:', calculation.id);
+        console.error('Geometry data:', calculation.geometry);
+        setGeometryError(errorMsg);
+        setMapOrientation('portrait');
+        return;
+      }
+
       try {
         const geoJsonLayer = L.geoJSON(calculation.geometry);
         const bounds = geoJsonLayer.getBounds();
@@ -141,13 +182,18 @@ export default function CalculationDetail() {
           // If width > height, use landscape; otherwise portrait
           const orientation = width > height ? 'landscape' : 'portrait';
           setMapOrientation(orientation);
+          setGeometryError(null); // Clear any previous errors
           console.log('Geometry loaded successfully, orientation:', orientation);
         } else {
           console.warn('Invalid geometry bounds for calculation');
+          setGeometryError('The boundary has invalid geographic bounds.');
           setMapOrientation('portrait');
         }
       } catch (error) {
+        const errorMsg = `Error processing boundary geometry: ${error instanceof Error ? error.message : 'Unknown error'}`;
         console.error('Error processing geometry:', error);
+        console.error('Problematic geometry:', JSON.stringify(calculation.geometry));
+        setGeometryError(errorMsg);
         setMapOrientation('portrait');
       }
     }
@@ -1967,8 +2013,34 @@ export default function CalculationDetail() {
           </div>
         )}
 
+        {/* Geometry Error Warning */}
+        {activeTab === 'analysis' && geometryError && (
+          <div className="px-6 pb-4">
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">
+                    <strong>Map Display Issue:</strong> {geometryError}
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-1">
+                    The analysis data is still available above, but the boundary map cannot be displayed. This can happen with certain KML file formats. All other features (sampling, fieldbook, tree models) will work normally.
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-2">
+                    <strong>Recommendation:</strong> If you need the map, try re-uploading the boundary as a GeoJSON or Shapefile format instead.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Map Section */}
-        {activeTab === 'analysis' && calculation.geometry && (
+        {activeTab === 'analysis' && calculation.geometry && !geometryError && (
           <div className="px-6 pb-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900">
@@ -2043,8 +2115,9 @@ export default function CalculationDetail() {
                     maxZoom={17}
                   />
                 )}
-                {boundaryVisible && calculation.geometry && (
+                {boundaryVisible && calculation.geometry && isValidGeoJSON(calculation.geometry) && (
                   <GeoJSON
+                    key={JSON.stringify(calculation.geometry)}
                     data={calculation.geometry}
                     style={{
                       color: '#059669',
