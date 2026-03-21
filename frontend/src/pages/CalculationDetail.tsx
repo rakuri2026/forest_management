@@ -11,8 +11,11 @@ import BiodiversityTab from '../components/BiodiversityTab';
 import AnalysisTabContent from '../components/AnalysisTabContent';
 import MapsTab from '../components/MapsTab';
 import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
+import { UserGroupMapTab } from '../components/UserGroupMapTab';
 import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
 import type { AnalysisOptions } from '../constants/analysisPresets';
+import { RasterLayerControl } from '../components/RasterLayerControl';
+import { RasterClickInfo } from '../components/RasterClickInfo';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -102,7 +105,9 @@ export default function CalculationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps'>('analysis');
+  const [boundaryVisible, setBoundaryVisible] = useState(true);
+  const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup'>('analysis');
 
   // Re-analysis modal state
   const [showReanalysisModal, setShowReanalysisModal] = useState(false);
@@ -549,6 +554,16 @@ export default function CalculationDetail() {
             >
               Maps
             </button>
+            <button
+              onClick={() => setActiveTab('usergroup')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'usergroup'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              User Group Map
+            </button>
           </nav>
         </div>
 
@@ -588,6 +603,15 @@ export default function CalculationDetail() {
             <MapsTab
               calculationId={calculation.id}
               forestName={calculation.forest_name || undefined}
+            />
+          </div>
+        )}
+
+        {activeTab === 'usergroup' && (
+          <div className="p-6">
+            <UserGroupMapTab
+              calculationId={calculation.id}
+              forestBoundary={calculation.geometry}
             />
           </div>
         )}
@@ -1930,21 +1954,45 @@ export default function CalculationDetail() {
               <h2 className="text-xl font-semibold text-gray-900">
                 Boundary Map (A5 - {mapOrientation === 'portrait' ? 'Portrait' : 'Landscape'})
               </h2>
-              <button
-                onClick={handleZoomToLayer}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors shadow-sm"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                </svg>
-                Zoom to Layer
-              </button>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Base Map:</span>
+                  <select
+                    value={basemap}
+                    onChange={(e) => setBasemap(e.target.value as 'satellite' | 'osm' | 'terrain' | 'none')}
+                    className="px-3 py-1.5 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="satellite">Satellite</option>
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="terrain">Terrain</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={boundaryVisible}
+                    onChange={(e) => setBoundaryVisible(e.target.checked)}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Show Forest Boundary</span>
+                </label>
+                <button
+                  onClick={handleZoomToLayer}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors shadow-sm"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                  </svg>
+                  Zoom to Layer
+                </button>
+              </div>
             </div>
             <div
               className="rounded-lg overflow-hidden border-2 border-gray-400 shadow-lg mx-auto relative"
               style={{
-                width: mapOrientation === 'portrait' ? '560px' : '794px',
-                height: mapOrientation === 'portrait' ? '794px' : '560px'
+                width: mapOrientation === 'portrait' ? '900px' : '1200px',
+                height: mapOrientation === 'portrait' ? '1200px' : '900px'
               }}
             >
               <MapContainer
@@ -1954,24 +2002,45 @@ export default function CalculationDetail() {
                 zoomControl={true}
                 attributionControl={true}
               >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <GeoJSON
-                  data={calculation.geometry}
-                  style={{
-                    color: '#059669',
-                    weight: 3,
-                    fillColor: '#34d399',
-                    fillOpacity: 0.3
-                  }}
-                />
+                {basemap === 'satellite' && (
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                )}
+                {basemap === 'osm' && (
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    maxZoom={19}
+                  />
+                )}
+                {basemap === 'terrain' && (
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
+                    url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+                    maxZoom={17}
+                  />
+                )}
+                {boundaryVisible && (
+                  <GeoJSON
+                    data={calculation.geometry}
+                    style={{
+                      color: '#059669',
+                      weight: 3,
+                      fillColor: '#34d399',
+                      fillOpacity: 0
+                    }}
+                  />
+                )}
                 <ZoomToLayer
                   geometry={calculation.geometry}
                   setMapInstance={setMapInstance}
                   orientation={mapOrientation}
                 />
+                <RasterLayerControl calculationId={calculation.id} calculation={calculation} />
+                <RasterClickInfo calculationId={calculation.id} boundaryGeometry={calculation.geometry} />
               </MapContainer>
               <NorthArrow />
             </div>
