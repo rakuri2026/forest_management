@@ -237,8 +237,10 @@ function generateDynamicMinTempColdestLegend(minTemp: number, maxTemp: number): 
 
   // If no classes match (edge case), return a single generic class
   if (relevantClasses.length === 0) {
+    const minVal = minTemp != null ? minTemp.toFixed(1) : 'N/A';
+    const maxVal = maxTemp != null ? maxTemp.toFixed(1) : 'N/A';
     return [
-      { color: '#87CEEB', label: 'Min Temperature', range: `${minTemp.toFixed(1)}-${maxTemp.toFixed(1)}°C` }
+      { color: '#87CEEB', label: 'Min Temperature', range: `${minVal}-${maxVal}°C` }
     ];
   }
 
