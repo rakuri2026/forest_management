@@ -12,10 +12,16 @@ from .config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     poolclass=QueuePool,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_size=settings.DB_POOL_SIZE,  # Now 20
+    max_overflow=settings.DB_MAX_OVERFLOW,  # Now 30
     pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=settings.DB_POOL_RECYCLE,  # Recycle after 1 hour
+    pool_timeout=settings.DB_POOL_TIMEOUT,  # 30 second timeout
     echo=settings.DEBUG,
+    connect_args={
+        "connect_timeout": 10,  # PostgreSQL connection timeout
+        "options": "-c statement_timeout=60000"  # 60 second query timeout
+    }
 )
 
 

@@ -1,4 +1,13 @@
 import * as turf from '@turf/turf';
+import {
+  ensurePolygon,
+  getSafeGeometry,
+  safeIntersect,
+  applyInwardBuffer,
+  validateAndFixGeometry,
+  roundCoordinates,
+  GEOMETRY_CONFIG,
+} from './geometryHelpers';
 
 export interface ValidationResult {
   valid: boolean;
@@ -789,47 +798,72 @@ export const calculateSubAreaByBlock = (
 /**
  * Clean and validate blocks before sending to backend
  * Fixes geometry issues, clips to outer boundary, and removes overlaps
+ * UPDATED: Now uses geometryHelpers for safer geometry operations
  */
 export const cleanAndValidateBlocks = (
   blocks: Array<{ id: string; name: string; geometry: any; area: number }>,
   outerBoundary: any
 ): Array<{ id: string; name: string; geometry: any; area: number }> => {
+  console.log('[cleanAndValidateBlocks] Starting validation with', blocks.length, 'blocks');
+
   try {
     // Validate outer boundary
     if (!outerBoundary) {
-      console.warn('No outer boundary provided, skipping cleaning');
+      console.warn('[cleanAndValidateBlocks] No outer boundary provided, skipping cleaning');
       return blocks;
     }
 
-    const outerFeature = turf.feature(outerBoundary);
+    // Safely extract and convert outer boundary to polygon
+    const outerPoly = ensurePolygon(outerBoundary);
+    if (!outerPoly) {
+      console.error('[cleanAndValidateBlocks] Failed to convert outer boundary to polygon');
+      return blocks;
+    }
+
+    console.log('[cleanAndValidateBlocks] Outer boundary validated successfully');
+
     const cleanedBlocks: Array<{ id: string; name: string; geometry: any; area: number }> = [];
 
     for (const block of blocks) {
       try {
-        // Step 1: Clean the geometry
-        let cleanedGeometry = cleanPolygonGeometry(block.geometry);
+        console.log(`[cleanAndValidateBlocks] Processing block: ${block.name}`);
 
-        // Validate cleaned geometry before intersection
-        if (!cleanedGeometry || !cleanedGeometry.type) {
-          console.warn(`Block ${block.name} has invalid geometry after cleaning, using original`);
+        // Step 1: Validate and fix geometry
+        const validation = validateAndFixGeometry(block.geometry);
+        if (!validation.valid) {
+          console.warn(`[cleanAndValidateBlocks] Block ${block.name} has invalid geometry:`, validation.errors);
+          // Try to use original if fix failed
           cleanedBlocks.push(block);
           continue;
         }
 
-        // Step 2: Clip to outer boundary to ensure it's within
-        try {
-          const cleanedFeature = turf.feature(cleanedGeometry);
-          const clipped = turf.intersect(cleanedFeature, outerFeature);
-          if (clipped && clipped.geometry) {
-            cleanedGeometry = clipped.geometry;
-          }
-        } catch (intersectError) {
-          console.warn(`Could not clip block ${block.name} to outer boundary:`, intersectError);
-          // Keep the cleaned geometry without clipping
+        let cleanedGeometry = validation.geometry;
+        console.log(`[cleanAndValidateBlocks] Block ${block.name} geometry validated`);
+
+        // Step 2: Round coordinates to avoid floating-point drift
+        cleanedGeometry = roundCoordinates(cleanedGeometry);
+
+        // Step 3: Clip to outer boundary using safe intersection
+        const clipped = safeIntersect(cleanedGeometry, outerPoly);
+
+        if (clipped && clipped.geometry) {
+          cleanedGeometry = clipped.geometry;
+          console.log(`[cleanAndValidateBlocks] Block ${block.name} clipped to boundary successfully`);
+        } else {
+          console.warn(`[cleanAndValidateBlocks] Block ${block.name} intersection returned null, keeping original`);
+          // Block might be completely inside - check if it needs inward buffer
         }
 
-        // Step 3: Recalculate area after cleaning
+        // Step 4: Apply micro-inward buffer to ensure it's strictly inside boundary
+        const safeGeometry = applyInwardBuffer(cleanedGeometry, GEOMETRY_CONFIG.BUFFER_INWARD);
+        if (safeGeometry) {
+          cleanedGeometry = safeGeometry;
+          console.log(`[cleanAndValidateBlocks] Block ${block.name} inward buffer applied`);
+        }
+
+        // Step 5: Recalculate area after cleaning
         const newArea = calculateAreaHectares(cleanedGeometry);
+        console.log(`[cleanAndValidateBlocks] Block ${block.name} area: ${newArea.toFixed(4)} ha`);
 
         // Only add if significant area remains (> 0.01 ha)
         if (newArea > 0.01) {
@@ -840,21 +874,24 @@ export const cleanAndValidateBlocks = (
             area: newArea,
           });
         } else {
-          console.warn(`Block ${block.name} has negligible area after cleaning, skipping`);
+          console.warn(`[cleanAndValidateBlocks] Block ${block.name} has negligible area (${newArea.toFixed(4)} ha), skipping`);
         }
       } catch (error) {
-        console.error(`Error cleaning block ${block.name}:`, error);
+        console.error(`[cleanAndValidateBlocks] Error processing block ${block.name}:`, error);
         // Keep original block if cleaning fails
         cleanedBlocks.push(block);
       }
     }
 
-    // Step 4: Fix overlaps between blocks
+    console.log(`[cleanAndValidateBlocks] Cleaned ${cleanedBlocks.length} blocks, now fixing overlaps`);
+
+    // Step 6: Fix overlaps between blocks
     const nonOverlappingBlocks = fixBlockOverlaps(cleanedBlocks);
 
+    console.log(`[cleanAndValidateBlocks] Final result: ${nonOverlappingBlocks.length} blocks`);
     return nonOverlappingBlocks;
   } catch (error) {
-    console.error('Error in cleanAndValidateBlocks:', error);
+    console.error('[cleanAndValidateBlocks] Critical error in validation:', error);
     // Return original blocks if processing fails
     return blocks;
   }
@@ -862,53 +899,72 @@ export const cleanAndValidateBlocks = (
 
 /**
  * Fix overlaps between blocks by subtracting intersections
+ * UPDATED: Now uses safeIntersect and proper error handling
  */
 function fixBlockOverlaps(
   blocks: Array<{ id: string; name: string; geometry: any; area: number }>
 ): Array<{ id: string; name: string; geometry: any; area: number }> {
+  console.log(`[fixBlockOverlaps] Processing ${blocks.length} blocks for overlaps`);
   const result: Array<{ id: string; name: string; geometry: any; area: number }> = [];
 
   for (let i = 0; i < blocks.length; i++) {
     let currentGeometry = blocks[i].geometry;
-    let currentFeature = turf.feature(currentGeometry);
+
+    // Convert to polygon feature safely
+    let currentFeature = ensurePolygon(currentGeometry);
+    if (!currentFeature) {
+      console.warn(`[fixBlockOverlaps] Block ${blocks[i].name} has invalid geometry, skipping`);
+      result.push(blocks[i]);
+      continue;
+    }
 
     // Subtract any overlaps with previously processed blocks
     for (let j = 0; j < i; j++) {
       try {
-        const previousFeature = turf.feature(result[j].geometry);
+        const previousFeature = ensurePolygon(result[j].geometry);
+        if (!previousFeature) continue;
 
         // Check if they intersect
         if (turf.booleanIntersects(currentFeature, previousFeature)) {
-          const intersection = turf.intersect(currentFeature, previousFeature);
+          // Use safe intersection
+          const intersection = safeIntersect(currentFeature, previousFeature);
 
-          if (intersection && turf.area(intersection) > 10) {
-            // Significant overlap (> 10 sqm)
+          // Only process significant overlaps (> configurable threshold)
+          const minOverlapArea = GEOMETRY_CONFIG.MIN_OVERLAP_AREA * 1e10; // Convert to sq meters
+          if (intersection && turf.area(intersection) > minOverlapArea) {
+            console.log(
+              `[fixBlockOverlaps] Found overlap between ${blocks[i].name} and ${result[j].name}: ` +
+              `${turf.area(intersection).toFixed(2)} sqm`
+            );
+
             // Subtract the overlap from current block
-            const difference = turf.difference(currentFeature, previousFeature);
+            const difference = turf.difference(
+              turf.featureCollection([currentFeature, previousFeature])
+            );
 
             if (difference) {
               if (difference.geometry.type === 'Polygon') {
                 currentGeometry = difference.geometry;
-                currentFeature = difference;
+                currentFeature = difference as turf.Feature<turf.Polygon>;
               } else if (difference.geometry.type === 'MultiPolygon') {
                 // Take the largest part
-                const polygons = difference.geometry.coordinates.map((coords: any) => ({
-                  type: 'Polygon',
-                  coordinates: coords,
-                }));
+                const polygons = difference.geometry.coordinates.map((coords: any) =>
+                  turf.polygon(coords)
+                );
                 const largest = polygons.reduce((max: any, current: any) => {
-                  const maxArea = turf.area(turf.feature(max));
-                  const currentArea = turf.area(turf.feature(current));
+                  const maxArea = turf.area(max);
+                  const currentArea = turf.area(current);
                   return currentArea > maxArea ? current : max;
                 });
-                currentGeometry = largest;
-                currentFeature = turf.feature(largest);
+                currentGeometry = largest.geometry;
+                currentFeature = largest;
               }
+              console.log(`[fixBlockOverlaps] Removed overlap from ${blocks[i].name}`);
             }
           }
         }
       } catch (error) {
-        console.error(`Error fixing overlap between blocks ${i} and ${j}:`, error);
+        console.error(`[fixBlockOverlaps] Error fixing overlap between blocks ${i} and ${j}:`, error);
       }
     }
 
@@ -923,10 +979,12 @@ function fixBlockOverlaps(
         geometry: currentGeometry,
         area: finalArea,
       });
+      console.log(`[fixBlockOverlaps] Added ${blocks[i].name} with final area: ${finalArea.toFixed(4)} ha`);
     } else {
-      console.warn(`Block ${blocks[i].name} has negligible area after fixing overlaps, skipping`);
+      console.warn(`[fixBlockOverlaps] Block ${blocks[i].name} has negligible area after fixing overlaps (${finalArea.toFixed(4)} ha), skipping`);
     }
   }
 
+  console.log(`[fixBlockOverlaps] Completed: ${result.length} blocks after overlap resolution`);
   return result;
 }

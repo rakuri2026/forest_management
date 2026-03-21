@@ -215,6 +215,71 @@ def extract_boundary_vertices_with_blocks(geom_wkt: str) -> List[Tuple[float, fl
         raise ValueError(f"Failed to extract vertices with blocks: {str(e)}")
 
 
+def extract_subarea_boundaries(calculation: Calculation) -> List[Tuple[List[Tuple[float, float]], str, bool]]:
+    """
+    Extract sub-area boundaries from calculation result_data.
+
+    Args:
+        calculation: Calculation object with result_data containing sub_areas
+
+    Returns:
+        List of tuples: (vertices_list, sub_area_name, is_excluded)
+        - vertices_list: List of (lon, lat) tuples for the sub-area boundary
+        - sub_area_name: Name of the sub-area
+        - is_excluded: True if this is private/excluded land, False otherwise
+    """
+    subarea_boundaries = []
+
+    if not calculation.result_data or 'sub_areas' not in calculation.result_data:
+        logger.info("No sub-areas found in calculation result_data")
+        return subarea_boundaries
+
+    sub_areas = calculation.result_data['sub_areas']
+    logger.info(f"Extracting boundaries for {len(sub_areas)} sub-areas")
+
+    from shapely.geometry import shape
+
+    for sub_area in sub_areas:
+        try:
+            name = sub_area.get('name', 'Unknown Sub-area')
+            category = sub_area.get('category', '')
+            geometry_data = sub_area.get('geometry')
+
+            if not geometry_data:
+                logger.warning(f"Sub-area '{name}' has no geometry, skipping")
+                continue
+
+            # Convert GeoJSON to shapely geometry
+            geom = shape(geometry_data)
+
+            # Extract vertices
+            vertices = []
+            if geom.geom_type == 'Polygon':
+                # Get exterior ring vertices (exclude last duplicate point)
+                coords = list(geom.exterior.coords)[:-1]
+                vertices = [(coord[0], coord[1]) for coord in coords]
+            elif geom.geom_type == 'MultiPolygon':
+                # Extract from all polygons
+                for polygon in geom.geoms:
+                    coords = list(polygon.exterior.coords)[:-1]
+                    vertices.extend([(coord[0], coord[1]) for coord in coords])
+            else:
+                logger.warning(f"Sub-area '{name}' has unsupported geometry type: {geom.geom_type}")
+                continue
+
+            # Determine if this is excluded area (private land)
+            is_excluded = (category.lower() == 'private')
+
+            subarea_boundaries.append((vertices, name, is_excluded))
+            logger.info(f"  [OK] Extracted {len(vertices)} vertices from '{name}' (excluded: {is_excluded})")
+
+        except Exception as e:
+            logger.error(f"Error extracting sub-area boundary: {str(e)}")
+            continue
+
+    return subarea_boundaries
+
+
 def generate_fieldbook_points(
     db: Session,
     calculation_id: UUID,
@@ -230,15 +295,18 @@ def generate_fieldbook_points(
     3. Calculate azimuth and distance to next point
     4. Extract elevation from DEM
     5. Convert to UTM coordinates
-    6. Optionally calculate reference (nearest landmark) - VERY SLOW!
-    7. Save to database
+    6. Save to database
+
+    Note: Topographic features (ridges/rivers) are calculated during EXPORT, not generation.
+    This uses an optimized pre-clipping algorithm that is 20-100x faster.
+    See export_fieldbook_csv() and export_fieldbook_excel() in services/export.py
 
     Args:
         db: Database session
         calculation_id: ID of calculation
         interpolation_distance: Distance between interpolated points (meters)
         extract_elevation: Whether to extract elevation from DEM
-        calculate_reference: Whether to calculate nearest landmark reference (SLOW: 10-20s per point)
+        calculate_reference: DEPRECATED - References now calculated during export automatically
 
     Returns:
         FieldbookGenerateResponse with summary statistics
@@ -252,7 +320,14 @@ def generate_fieldbook_points(
     db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation_id).delete()
     db.commit()
 
-    # Get boundary geometry as WKT and check if it's multi-polygon
+    # Check if we have individual block geometries in result_data
+    has_individual_blocks = (
+        calculation.result_data and
+        'blocks' in calculation.result_data and
+        len(calculation.result_data['blocks']) > 0
+    )
+
+    # Get boundary geometry as WKT (fallback if no individual blocks)
     geom_wkt_query = text("""
         SELECT
             ST_AsText(boundary_geom) as wkt,
@@ -267,19 +342,14 @@ def generate_fieldbook_points(
 
     geom_wkt = result.wkt
     is_multipolygon = result.geom_type == 'ST_MultiPolygon'
-    num_blocks = result.num_blocks if is_multipolygon else 1
 
-    logger.info(f"Processing {result.geom_type} with {num_blocks} block(s)")
-
-    # Get block names from result_data if available
-    block_names_map = {}
-    if calculation.result_data and 'blocks' in calculation.result_data:
-        for block in calculation.result_data['blocks']:
-            block_index = block.get('block_index')
-            block_name = block.get('block_name')
-            if block_index is not None and block_name:
-                # ST_Dump uses 1-based indexing, result_data uses 0-based
-                block_names_map[block_index + 1] = block_name
+    # Determine number of blocks
+    if has_individual_blocks:
+        num_blocks = len(calculation.result_data['blocks'])
+        logger.info(f"Processing {num_blocks} block(s) from result_data['blocks']")
+    else:
+        num_blocks = result.num_blocks if is_multipolygon else 1
+        logger.info(f"Processing {result.geom_type} with {num_blocks} block(s) from boundary_geom")
 
     # Generate fieldbook points - process each block separately to avoid link lines
     fieldbook_points = []
@@ -288,10 +358,96 @@ def generate_fieldbook_points(
     vertex_count = 0
     interpolated_count = 0
 
-    if is_multipolygon:
-        # Process each polygon block separately - NO link lines between blocks
+    if has_individual_blocks:
+        # Process each block from result_data['blocks']
+        from shapely.geometry import shape
+
+        for block_data in calculation.result_data['blocks']:
+            block_index = block_data.get('block_index', 0)
+            block_num = block_index + 1  # Convert 0-based to 1-based
+            block_name = block_data.get('block_name', f'Block {block_num}')
+            block_geometry = block_data.get('geometry')
+
+            if not block_geometry:
+                logger.warning(f"Block {block_num} has no geometry, skipping")
+                continue
+
+            # Convert GeoJSON to shapely geometry
+            geom = shape(block_geometry)
+
+            # Extract vertices for this block
+            vertices = []
+            if geom.geom_type == 'Polygon':
+                vertices = list(geom.exterior.coords)[:-1]
+            elif geom.geom_type == 'MultiPolygon':
+                # If block is multipolygon, process all parts
+                for polygon in geom.geoms:
+                    vertices.extend(list(polygon.exterior.coords)[:-1])
+            else:
+                logger.warning(f"Block {block_num} has unsupported geometry type: {geom.geom_type}, skipping")
+                continue
+
+            if len(vertices) < 3:
+                logger.warning(f"Block {block_num} has < 3 vertices, skipping")
+                continue
+
+            logger.info(f"Processing Block {block_num} ({block_name}): {len(vertices)} vertices")
+
+            # Process edges within this block ONLY (closed ring)
+            for i in range(len(vertices)):
+                v1 = vertices[i]
+                v2 = vertices[(i + 1) % len(vertices)]  # Wrap to first vertex of THIS block
+
+                lon1, lat1 = float(v1[0]), float(v1[1])
+                lon2, lat2 = float(v2[0]), float(v2[1])
+
+                # Calculate distance
+                edge_distance = calculate_distance(lon1, lat1, lon2, lat2)
+                total_perimeter += edge_distance
+
+                # Add vertex
+                fieldbook_points.append({
+                    'point_number': point_number,
+                    'point_type': 'vertex',
+                    'longitude': lon1,
+                    'latitude': lat1,
+                    'block_number': block_num,
+                    'block_name': block_name,
+                })
+                vertex_count += 1
+                point_number += 1
+
+                # Interpolate points along this edge
+                if edge_distance > interpolation_distance:
+                    num_intervals = int(edge_distance / interpolation_distance)
+                    for j in range(1, num_intervals + 1):
+                        fraction = (j * interpolation_distance) / edge_distance
+                        if fraction < 1.0:
+                            lon_interp, lat_interp = interpolate_point(lon1, lat1, lon2, lat2, fraction)
+                            fieldbook_points.append({
+                                'point_number': point_number,
+                                'point_type': 'interpolated',
+                                'longitude': lon_interp,
+                                'latitude': lat_interp,
+                                'block_number': block_num,
+                                'block_name': block_name,
+                            })
+                            interpolated_count += 1
+                            point_number += 1
+    elif is_multipolygon:
+        # Process multipolygon from boundary_geom (legacy support)
         from shapely import wkt as shapely_wkt
         geom = shapely_wkt.loads(geom_wkt)
+
+        # Get block names from result_data if available
+        block_names_map = {}
+        if calculation.result_data and 'blocks' in calculation.result_data:
+            for block in calculation.result_data['blocks']:
+                block_index = block.get('block_index')
+                block_name = block.get('block_name')
+                if block_index is not None and block_name:
+                    # ST_Dump uses 1-based indexing, result_data uses 0-based
+                    block_names_map[block_index + 1] = block_name
 
         for block_num, polygon in enumerate(geom.geoms, start=1):
             # Get block name
@@ -354,8 +510,10 @@ def generate_fieldbook_points(
 
         logger.info(f"Extracted {len(vertices)} vertices from boundary")
 
-        # Get block name (should be block 1)
-        block_name = block_names_map.get(1, 'Block 1')
+        # Get block name from result_data if available
+        block_name = 'Block 1'
+        if calculation.result_data and 'blocks' in calculation.result_data and len(calculation.result_data['blocks']) > 0:
+            block_name = calculation.result_data['blocks'][0].get('block_name', 'Block 1')
 
         # Process each edge
         for i in range(len(vertices)):
@@ -399,7 +557,71 @@ def generate_fieldbook_points(
                         interpolated_count += 1
                         point_number += 1
 
-    logger.info(f"Generated {len(fieldbook_points)} total points ({vertex_count} vertices + {interpolated_count} interpolated)")
+    # Process sub-area boundaries (private land, religious areas, etc.)
+    subarea_boundaries = extract_subarea_boundaries(calculation)
+    subarea_vertex_count = 0
+    subarea_interpolated_count = 0
+
+    if subarea_boundaries:
+        logger.info(f"🔄 Processing {len(subarea_boundaries)} sub-area boundaries")
+
+        for vertices, sub_area_name, is_excluded in subarea_boundaries:
+            if len(vertices) < 3:
+                logger.warning(f"Sub-area '{sub_area_name}' has < 3 vertices, skipping")
+                continue
+
+            logger.info(f"  Processing sub-area '{sub_area_name}': {len(vertices)} vertices (excluded: {is_excluded})")
+
+            # Process edges within this sub-area (closed ring)
+            for i in range(len(vertices)):
+                v1 = vertices[i]
+                v2 = vertices[(i + 1) % len(vertices)]  # Wrap to first vertex of this sub-area
+
+                lon1, lat1 = v1[0], v1[1]
+                lon2, lat2 = v2[0], v2[1]
+
+                # Calculate distance
+                edge_distance = calculate_distance(lon1, lat1, lon2, lat2)
+
+                # Add vertex
+                fieldbook_points.append({
+                    'point_number': point_number,
+                    'point_type': 'vertex',
+                    'longitude': lon1,
+                    'latitude': lat1,
+                    'block_number': None,  # Sub-areas don't belong to blocks
+                    'block_name': None,
+                    'sub_area_name': sub_area_name,
+                    'is_excluded': is_excluded,
+                })
+                subarea_vertex_count += 1
+                point_number += 1
+
+                # Interpolate points along this edge
+                if edge_distance > interpolation_distance:
+                    num_intervals = int(edge_distance / interpolation_distance)
+                    for j in range(1, num_intervals + 1):
+                        fraction = (j * interpolation_distance) / edge_distance
+                        if fraction < 1.0:
+                            lon_interp, lat_interp = interpolate_point(lon1, lat1, lon2, lat2, fraction)
+                            fieldbook_points.append({
+                                'point_number': point_number,
+                                'point_type': 'interpolated',
+                                'longitude': lon_interp,
+                                'latitude': lat_interp,
+                                'block_number': None,
+                                'block_name': None,
+                                'sub_area_name': sub_area_name,
+                                'is_excluded': is_excluded,
+                            })
+                            subarea_interpolated_count += 1
+                            point_number += 1
+
+        logger.info(f"[OK] Generated {subarea_vertex_count + subarea_interpolated_count} sub-area points "
+                   f"({subarea_vertex_count} vertices + {subarea_interpolated_count} interpolated)")
+
+    logger.info(f"Generated {len(fieldbook_points)} total points "
+               f"({vertex_count + subarea_vertex_count} vertices + {interpolated_count + subarea_interpolated_count} interpolated)")
 
     # Calculate azimuth, distance, elevation, and UTM for each point
     for i in range(len(fieldbook_points)):
@@ -433,13 +655,22 @@ def generate_fieldbook_points(
                 azimuth_to_next=Decimal(str(point['azimuth_to_next'])),
                 distance_to_next=Decimal(str(point['distance_to_next'])),
                 utm_zone=point['utm_zone'],
-                block_number=point.get('block_number'),  # Block assigned during generation
-                block_name=point.get('block_name'),      # Block name from result_data
+                block_number=point.get('block_number'),      # Block assigned during generation
+                block_name=point.get('block_name'),          # Block name from result_data
+                sub_area_name=point.get('sub_area_name'),    # Sub-area name if on sub-area boundary
+                is_excluded=point.get('is_excluded'),        # True if excluded zone (private land)
             )
             fieldbook_objects.append(fb_point)
 
+        logger.info(f"[SAVE] Saving {len(fieldbook_objects)} fieldbook points to database...")
         db.bulk_save_objects(fieldbook_objects)
-        db.commit()
+        db.flush()  # Flush to database
+        db.commit()  # Commit transaction
+        logger.info(f"[OK] Database commit successful - {len(fieldbook_objects)} points saved")
+
+        # Verify data was saved
+        saved_count = db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation_id).count()
+        logger.info(f"[OK] Verification: {saved_count} points found in database for calculation {calculation_id}")
 
         # Update with PostGIS-calculated UTM and elevation
         if extract_elevation:
@@ -467,10 +698,13 @@ def update_utm_and_elevation(db: Session, calculation_id: UUID, calculate_refere
     """
     Update fieldbook points with UTM coordinates and elevation using PostGIS.
 
+    Note: Topographic features are now calculated during EXPORT using optimized algorithm.
+    The calculate_reference parameter is deprecated and ignored.
+
     Args:
         db: Database session
         calculation_id: Calculation ID
-        calculate_reference: Whether to calculate nearest landmark reference (SLOW!)
+        calculate_reference: DEPRECATED - Ignored (features calculated during export)
     """
     # Update UTM coordinates using PostGIS
     utm_update_query = text("""
@@ -507,45 +741,19 @@ def update_utm_and_elevation(db: Session, calculation_id: UUID, calculate_refere
     """)
     db.execute(elevation_update_query, {"calc_id": str(calculation_id)})
 
-    # Update reference (nearest landmark) for each point - OPTIONAL (VERY SLOW!)
-    # Only calculate if explicitly requested by user
+    # Reference calculation is SKIPPED during generation for performance
+    # Instead, topographic features (ridges/rivers) are calculated during EXPORT
+    # using the optimized pre-clipping algorithm (20-100x faster!)
+    # See export_fieldbook_csv() and export_fieldbook_excel() in services/export.py
     if calculate_reference:
-        logger.info(f"Calculating reference landmarks for fieldbook {calculation_id} - This may take 10-20 seconds per point...")
-        # Only show reference when it changes from previous point
-        # OPTIMIZED: Uses find_nearest_feature() which filters within 100m FIRST using ST_DWithin
-        # This leverages spatial indexes and is much faster than scanning all features
-        reference_update_query = text("""
-            WITH references_raw AS (
-                SELECT
-                    id,
-                    point_number,
-                    rasters.find_nearest_feature(longitude, latitude) as ref
-                FROM public.fieldbook
-                WHERE calculation_id = :calc_id
-                ORDER BY point_number
-            ),
-            references_with_lag AS (
-                SELECT
-                    id,
-                    ref,
-                    LAG(ref) OVER (ORDER BY point_number) as prev_ref
-                FROM references_raw
-            )
-            UPDATE public.fieldbook fb
-            SET reference = CASE
-                WHEN rwl.ref IS NOT NULL AND (rwl.prev_ref IS NULL OR rwl.ref != rwl.prev_ref) THEN rwl.ref
-                ELSE NULL
-            END
-            FROM references_with_lag rwl
-            WHERE fb.id = rwl.id
-        """)
-        db.execute(reference_update_query, {"calc_id": str(calculation_id)})
-        logger.info(f"Reference calculation completed for fieldbook {calculation_id}")
+        logger.info(f"Note: Reference calculation during generation is deprecated. "
+                   f"Topographic features (ridges/rivers) are now calculated automatically "
+                   f"during export using the optimized algorithm (much faster!).")
 
     db.commit()
 
-    reference_status = "with references" if calculate_reference else "without references (skipped for performance)"
-    logger.info(f"Updated UTM coordinates and elevation for fieldbook {calculation_id} {reference_status}")
+    logger.info(f"Updated UTM coordinates and elevation for fieldbook {calculation_id}. "
+               f"Topographic features will be calculated during export (optimized algorithm).")
 
 
 def assign_blocks_to_fieldbook(db: Session, calculation_id: UUID):

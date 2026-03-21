@@ -115,12 +115,35 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
       }))
     : [];
 
-  // Prepare canopy data
+  // Prepare canopy data with distinct colors for each class
+  const getCanopyColor = (label: string): string => {
+    const colorMap: { [key: string]: string } = {
+      'high_forest': '#059669',        // dark green
+      'pole_trees': '#10b981',         // green
+      'bush_regenerated': '#84cc16',   // lime
+      'non_forest': '#94a3b8',         // slate gray
+      'dense': '#059669',              // dark green (fallback)
+      'medium': '#10b981',             // green (fallback)
+      'sparse': '#84cc16'              // lime (fallback)
+    };
+
+    // Check exact match first
+    if (colorMap[label]) return colorMap[label];
+
+    // Check if label contains any of the keys
+    for (const [key, color] of Object.entries(colorMap)) {
+      if (label.includes(key)) return color;
+    }
+
+    // Default fallback
+    return '#fbbf24'; // amber
+  };
+
   const canopyData = data.canopy_percentages
     ? Object.entries(data.canopy_percentages).map(([label, value]: [string, any]) => ({
         label: label.replace('_', ' ').charAt(0).toUpperCase() + label.replace('_', ' ').slice(1),
         value: value,
-        color: label.includes('dense') ? '#059669' : label.includes('medium') ? '#10b981' : label.includes('sparse') ? '#84cc16' : '#fbbf24'
+        color: getCanopyColor(label)
       }))
     : [];
 
@@ -931,23 +954,144 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
           {data.soil_texture && (
             <div>
               <h4 className="text-md font-semibold text-gray-900 mb-3">Soil Texture & Composition</h4>
-              <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-700">Texture Class:</span>
-                  <span className="text-sm font-semibold text-gray-900">
-                    <EditableCell value={data.soil_texture} onSave={(v) => handleSaveWholeForest('soil_texture', v)} />
-                    {data.soil_texture_system && (
-                      <span className="text-xs text-gray-500 ml-2">({data.soil_texture_system})</span>
-                    )}
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-5 rounded-lg space-y-4 border border-amber-200">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-700">Texture Class:</span>
+                  <span className="px-4 py-2 bg-white rounded-full text-md font-bold text-amber-900 shadow-sm">
+                    {data.soil_texture}
                   </span>
                 </div>
-                {data.soil_properties && (
-                  <div className="pt-2 border-t border-gray-300 text-xs text-gray-600">
-                    {Object.entries(data.soil_properties)
-                      .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
-                      .join(', ')}
+
+                {data.interpretations?.texture_interpretation && (
+                  <div className="space-y-3 bg-white bg-opacity-60 p-4 rounded-lg">
+                    <p className="text-sm text-gray-800 leading-relaxed">
+                      <strong>Description:</strong> {data.interpretations.texture_interpretation.description}
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                      <div className="bg-blue-50 p-3 rounded border-l-4 border-blue-400">
+                        <p className="font-semibold text-blue-900 mb-1">💧 Water Retention</p>
+                        <p className="text-gray-700">{data.interpretations.texture_interpretation.water_retention}</p>
+                      </div>
+                      <div className="bg-green-50 p-3 rounded border-l-4 border-green-400">
+                        <p className="font-semibold text-green-900 mb-1">🌊 Drainage</p>
+                        <p className="text-gray-700">{data.interpretations.texture_interpretation.drainage}</p>
+                      </div>
+                      <div className="bg-purple-50 p-3 rounded border-l-4 border-purple-400">
+                        <p className="font-semibold text-purple-900 mb-1">⚒️ Workability</p>
+                        <p className="text-gray-700">{data.interpretations.texture_interpretation.workability}</p>
+                      </div>
+                    </div>
+
+                    {data.interpretations.texture_interpretation.suitable_species && data.interpretations.texture_interpretation.suitable_species.length > 0 && (
+                      <div className="bg-green-50 p-3 rounded border-l-4 border-green-500">
+                        <p className="font-semibold text-green-900 text-sm mb-2">🌲 Suitable Tree Species:</p>
+                        <ul className="text-xs text-gray-700 space-y-1">
+                          {data.interpretations.texture_interpretation.suitable_species.map((species: string, idx: number) => (
+                            <li key={idx} className="flex items-start">
+                              <span className="text-green-600 mr-2">✓</span>
+                              <span>{species}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {data.interpretations.texture_interpretation.management_note && (
+                      <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-500">
+                        <p className="font-semibold text-yellow-900 text-sm mb-1">📋 Management Recommendation:</p>
+                        <p className="text-xs text-gray-700">{data.interpretations.texture_interpretation.management_note}</p>
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {data.soil_properties && (
+                  <details className="group">
+                    <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-800 font-medium">
+                      📊 Technical Details (click to expand)
+                    </summary>
+                    <div className="mt-2 pt-2 border-t border-gray-300 text-xs text-gray-600 grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {data.soil_properties.clay_pct !== undefined && (
+                        <div><span className="font-medium">Clay:</span> {data.soil_properties.clay_pct}%</div>
+                      )}
+                      {data.soil_properties.sand_pct !== undefined && (
+                        <div><span className="font-medium">Sand:</span> {data.soil_properties.sand_pct}%</div>
+                      )}
+                      {data.soil_properties.silt_pct !== undefined && (
+                        <div><span className="font-medium">Silt:</span> {data.soil_properties.silt_pct}%</div>
+                      )}
+                      {data.soil_properties.ph_h2o !== undefined && (
+                        <div><span className="font-medium">pH:</span> {data.soil_properties.ph_h2o}</div>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* pH Interpretation */}
+          {data.interpretations?.ph_interpretation && (
+            <div>
+              <h4 className="text-md font-semibold text-gray-900 mb-3">Soil pH & Acidity</h4>
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-5 rounded-lg space-y-3 border border-blue-200">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-700">pH Level:</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-bold text-blue-900">{data.interpretations.ph_interpretation.value.toFixed(1)}</span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      data.interpretations.ph_interpretation.category.includes('Optimal') ? 'bg-green-100 text-green-800' :
+                      data.interpretations.ph_interpretation.category.includes('Acidic') ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-orange-100 text-orange-800'
+                    }`}>
+                      {data.interpretations.ph_interpretation.category}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-white bg-opacity-60 p-3 rounded space-y-2 text-sm">
+                  <p className="text-gray-800">{data.interpretations.ph_interpretation.description}</p>
+                  <div className="bg-blue-50 p-2 rounded border-l-4 border-blue-400">
+                    <p className="font-semibold text-blue-900 text-xs mb-1">Nutrient Availability:</p>
+                    <p className="text-xs text-gray-700">{data.interpretations.ph_interpretation.nutrient_availability}</p>
+                  </div>
+                  <div className="bg-green-50 p-2 rounded border-l-4 border-green-500">
+                    <p className="font-semibold text-green-900 text-xs mb-1">💡 Recommendation:</p>
+                    <p className="text-xs text-gray-700">{data.interpretations.ph_interpretation.recommendation}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Nitrogen Interpretation */}
+          {data.interpretations?.nitrogen_interpretation && (
+            <div>
+              <h4 className="text-md font-semibold text-gray-900 mb-3">Soil Nitrogen Content</h4>
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-5 rounded-lg space-y-3 border border-green-200">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-700">Nitrogen Level:</span>
+                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                    data.interpretations.nitrogen_interpretation.category === 'High' || data.interpretations.nitrogen_interpretation.category === 'Adequate' ? 'bg-green-100 text-green-800' :
+                    data.interpretations.nitrogen_interpretation.category === 'Low' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800'
+                  }`}>
+                    {data.interpretations.nitrogen_interpretation.category}
+                  </span>
+                </div>
+
+                <div className="bg-white bg-opacity-60 p-3 rounded space-y-2 text-sm">
+                  <p className="text-gray-800">{data.interpretations.nitrogen_interpretation.description}</p>
+                  <div className="bg-green-50 p-2 rounded border-l-4 border-green-500">
+                    <p className="font-semibold text-green-900 text-xs mb-1">📋 Management Recommendation:</p>
+                    <p className="text-xs text-gray-700">{data.interpretations.nitrogen_interpretation.recommendation}</p>
+                  </div>
+                </div>
+
+                <div className="text-xs text-gray-600">
+                  Nitrogen content: {data.interpretations.nitrogen_interpretation.value_percent}% ({data.interpretations.nitrogen_interpretation.value_cg_kg} cg/kg)
+                </div>
               </div>
             </div>
           )}
@@ -955,11 +1099,11 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
           {/* Fertility */}
           {data.fertility_class && (
             <div>
-              <h4 className="text-md font-semibold text-gray-900 mb-3">Soil Fertility Assessment</h4>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <div className="flex justify-between items-center mb-3">
+              <h4 className="text-md font-semibold text-gray-900 mb-3">Overall Soil Fertility Assessment</h4>
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-5 rounded-lg border border-purple-200">
+                <div className="flex justify-between items-center mb-4">
                   <span className="text-sm font-medium text-gray-700">Fertility Class:</span>
-                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                  <span className={`px-4 py-2 rounded-full text-md font-bold ${
                     data.fertility_class === 'Very High' ? 'bg-green-100 text-green-800' :
                     data.fertility_class === 'High' ? 'bg-green-50 text-green-700' :
                     data.fertility_class === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
@@ -969,18 +1113,39 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
                     {data.fertility_class}
                   </span>
                 </div>
+
                 {data.fertility_score && (
-                  <div className="text-center mb-3">
-                    <span className="text-3xl font-bold text-gray-900">{data.fertility_score}</span>
-                    <span className="text-sm text-gray-500">/100</span>
+                  <div className="text-center mb-4 bg-white bg-opacity-60 p-4 rounded-lg">
+                    <div className="text-4xl font-bold text-purple-900">{data.fertility_score}<span className="text-2xl text-gray-500">/100</span></div>
+                    <p className="text-xs text-gray-600 mt-1">Fertility Score</p>
                   </div>
                 )}
+
+                {data.interpretations?.fertility_interpretation && (
+                  <div className="bg-white bg-opacity-60 p-3 rounded space-y-2 text-sm">
+                    <p className="text-gray-800">{data.interpretations.fertility_interpretation.description}</p>
+
+                    <div className="bg-blue-50 p-2 rounded border-l-4 border-blue-400">
+                      <p className="font-semibold text-blue-900 text-xs mb-1">📈 Expected Growth Rate:</p>
+                      <p className="text-xs text-gray-700">{data.interpretations.fertility_interpretation.expected_growth}</p>
+                    </div>
+
+                    <div className="bg-green-50 p-2 rounded border-l-4 border-green-500">
+                      <p className="font-semibold text-green-900 text-xs mb-1">💡 Recommendation:</p>
+                      <p className="text-xs text-gray-700">{data.interpretations.fertility_interpretation.recommendation}</p>
+                    </div>
+                  </div>
+                )}
+
                 {data.limiting_factors && data.limiting_factors.length > 0 && (
-                  <div className="pt-3 border-t border-gray-300">
-                    <p className="text-xs font-medium text-gray-600 mb-2">Limiting Factors:</p>
+                  <div className="mt-3 pt-3 border-t border-purple-200">
+                    <p className="text-xs font-semibold text-purple-900 mb-2">⚠️ Limiting Factors:</p>
                     <ul className="text-xs text-gray-700 space-y-1">
                       {data.limiting_factors.map((factor: string, idx: number) => (
-                        <li key={idx}>• {factor}</li>
+                        <li key={idx} className="flex items-start">
+                          <span className="text-orange-500 mr-2">•</span>
+                          <span>{factor}</span>
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -992,19 +1157,41 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
           {/* Carbon Stock */}
           {data.carbon_stock_t_ha && (
             <div>
-              <h4 className="text-md font-semibold text-gray-900 mb-3">Soil Carbon Content</h4>
-              <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="text-md font-semibold text-gray-900 mb-3">Soil Organic Carbon & Climate Impact</h4>
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 p-5 rounded-lg space-y-3 border border-emerald-200">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-700">Organic Carbon Stock:</span>
-                  <span className="text-lg font-bold text-green-700">
-                    <EditableCell
-                      value={data.carbon_stock_t_ha}
-                      displayValue={`${data.carbon_stock_t_ha} t/ha`}
-                      onSave={(v) => handleSaveWholeForest('carbon_stock_t_ha', v)}
-                    />
-                  </span>
+                  <span className="text-sm font-medium text-gray-700">Carbon Stock (topsoil 0-30cm):</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-bold text-emerald-900">{data.carbon_stock_t_ha}</span>
+                    <span className="text-sm text-gray-600">tonnes/ha</span>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-600 mt-2">Topsoil (0-30cm) organic carbon stock</p>
+
+                {data.interpretations?.carbon_interpretation && (
+                  <div>
+                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold mb-3 ${
+                      data.interpretations.carbon_interpretation.category === 'High' ? 'bg-green-100 text-green-800' :
+                      data.interpretations.carbon_interpretation.category === 'Moderate' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-orange-100 text-orange-800'
+                    }`}>
+                      {data.interpretations.carbon_interpretation.category} Carbon Stock
+                    </span>
+
+                    <div className="bg-white bg-opacity-60 p-3 rounded space-y-2 text-sm">
+                      <p className="text-gray-800">{data.interpretations.carbon_interpretation.description}</p>
+
+                      <div className="bg-green-50 p-2 rounded border-l-4 border-green-500">
+                        <p className="font-semibold text-green-900 text-xs mb-1">🌍 Climate Benefit:</p>
+                        <p className="text-xs text-gray-700">{data.interpretations.carbon_interpretation.climate_benefit}</p>
+                      </div>
+
+                      <div className="bg-blue-50 p-2 rounded border-l-4 border-blue-400">
+                        <p className="font-semibold text-blue-900 text-xs mb-1">📋 Management Recommendation:</p>
+                        <p className="text-xs text-gray-700">{data.interpretations.carbon_interpretation.recommendation}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1042,33 +1229,33 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
         headerColor="gray"
       >
         <div className="p-6 space-y-6">
-          {/* Administrative Boundaries */}
+          {/* Forest Location Address */}
           <div>
-            <h4 className="text-md font-semibold text-gray-900 mb-3">Administrative Boundaries</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <div className="text-xs text-gray-600 mb-1">Province</div>
-                <div className="text-sm font-semibold text-gray-900">
-                  <EditableCell value={data.whole_province} onSave={(v) => handleSaveWholeForest('whole_province', v)} />
-                </div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <div className="text-xs text-gray-600 mb-1">District</div>
-                <div className="text-sm font-semibold text-gray-900">
-                  <EditableCell value={data.whole_district} onSave={(v) => handleSaveWholeForest('whole_district', v)} />
-                </div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <div className="text-xs text-gray-600 mb-1">Municipality</div>
-                <div className="text-sm font-semibold text-gray-900">
-                  <EditableCell value={data.whole_municipality} onSave={(v) => handleSaveWholeForest('whole_municipality', v)} />
-                </div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <div className="text-xs text-gray-600 mb-1">Ward</div>
-                <div className="text-sm font-semibold text-gray-900">
-                  <EditableCell value={data.whole_ward} onSave={(v) => handleSaveWholeForest('whole_ward', v)} />
-                </div>
+            <h4 className="text-md font-semibold text-gray-900 mb-3">Forest Location Address</h4>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm font-semibold text-gray-900">
+                <EditableCell
+                  value={data.whole_province}
+                  onSave={(v) => handleSaveWholeForest('whole_province', v)}
+                />{' '}
+                Province, {' '}
+                <EditableCell
+                  value={data.whole_district}
+                  onSave={(v) => handleSaveWholeForest('whole_district', v)}
+                />{' '}
+                District, {' '}
+                <EditableCell
+                  value={data.whole_municipality}
+                  onSave={(v) => handleSaveWholeForest('whole_municipality', v)}
+                />{' '}
+                <EditableCell
+                  value={data.whole_municipality_type}
+                  onSave={(v) => handleSaveWholeForest('whole_municipality_type', v)}
+                />-
+                <EditableCell
+                  value={data.whole_ward}
+                  onSave={(v) => handleSaveWholeForest('whole_ward', v)}
+                />
               </div>
             </div>
           </div>
@@ -1076,18 +1263,16 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
           {/* Watershed & Hydrology */}
           <div>
             <h4 className="text-md font-semibold text-gray-900 mb-3">Watershed & Hydrology</h4>
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-700">Watershed:</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  <EditableCell value={data.whole_watershed} onSave={(v) => handleSaveWholeForest('whole_watershed', v)} />
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-700">Major River Basin:</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  <EditableCell value={data.whole_major_river_basin} onSave={(v) => handleSaveWholeForest('whole_major_river_basin', v)} />
-                </span>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm font-semibold text-gray-900">
+                <EditableCell
+                  value={data.whole_watershed}
+                  onSave={(v) => handleSaveWholeForest('whole_watershed', v)}
+                />, {' '}
+                <EditableCell
+                  value={data.whole_major_river_basin}
+                  onSave={(v) => handleSaveWholeForest('whole_major_river_basin', v)}
+                />
               </div>
             </div>
           </div>

@@ -564,3 +564,162 @@ def point_in_accessible_forest(
     except Exception as e:
         logger.error(f"Error checking point in accessible forest: {e}")
         return False
+
+
+def calculate_block_tree_cover_areas(
+    db: Session,
+    blocks: list
+) -> list:
+    """
+    Calculate tree cover areas for multiple blocks using ratio-based approach.
+
+    This ensures consistency between geometry-based area and pixel-based tree cover:
+    1. Get authoritative boundary area from PostGIS geometry
+    2. Count total pixels within boundary
+    3. Count tree pixels (ESA value=10) within boundary
+    4. Calculate tree coverage ratio = tree_pixels / total_pixels
+    5. Effective area = boundary_area × ratio
+
+    Args:
+        db: Database session
+        blocks: List of block dictionaries with 'geometry' (WKT) and 'block_name'
+
+    Returns:
+        List of dictionaries with tree cover statistics for each block:
+        {
+            'block_name': str,
+            'total_area_ha': float,  # From geometry (authoritative)
+            'tree_pixels': int,
+            'total_pixels': int,
+            'tree_cover_ratio': float,  # 0.0 to 1.0
+            'effective_area_ha': float,  # total_area × ratio
+            'tree_cover_percentage': float  # For display
+        }
+    """
+    results = []
+
+    for block in blocks:
+        try:
+            block_name = block.get('block_name', 'Unknown')
+            geometry_wkt = block.get('geometry')
+
+            if not geometry_wkt:
+                logger.warning(f"Block {block_name} has no geometry, skipping")
+                results.append({
+                    'block_name': block_name,
+                    'total_area_ha': 0.0,
+                    'tree_pixels': 0,
+                    'total_pixels': 0,
+                    'tree_cover_ratio': 0.0,
+                    'effective_area_ha': 0.0,
+                    'tree_cover_percentage': 0.0,
+                    'error': 'No geometry'
+                })
+                continue
+
+            logger.info(f"Calculating tree cover for block: {block_name}")
+
+            # Execute SQL query to calculate all values
+            query = text("""
+                WITH boundary AS (
+                    SELECT ST_GeomFromText(:wkt, 4326) as geom
+                ),
+                -- Get authoritative boundary area from geometry
+                boundary_area AS (
+                    SELECT
+                        ST_Area(ST_Transform(
+                            geom,
+                            CASE
+                                WHEN ST_X(ST_Centroid(geom)) < 84.0 THEN 32644
+                                ELSE 32645
+                            END
+                        )) / 10000.0 as area_ha
+                    FROM boundary
+                ),
+                -- Clip ESA WorldCover raster to boundary
+                clipped_rasters AS (
+                    SELECT ST_Clip(rast, b.geom, 0.0, true) as clipped_rast
+                    FROM rasters.esa_world_cover, boundary b
+                    WHERE ST_Intersects(rast, b.geom)
+                ),
+                -- Count all pixels by value
+                pixel_counts AS (
+                    SELECT (ST_ValueCount(clipped_rast, 1, true)).*
+                    FROM clipped_rasters
+                    WHERE clipped_rast IS NOT NULL
+                )
+                SELECT
+                    -- Authoritative area from geometry
+                    (SELECT area_ha FROM boundary_area) as total_area_ha,
+                    -- Pixel counts
+                    SUM(count) FILTER (WHERE value = 10) as tree_pixels,
+                    SUM(count) FILTER (WHERE value > 0) as total_pixels,
+                    -- Tree cover ratio
+                    CASE
+                        WHEN SUM(count) FILTER (WHERE value > 0) > 0 THEN
+                            CAST(SUM(count) FILTER (WHERE value = 10) AS FLOAT) /
+                            CAST(SUM(count) FILTER (WHERE value > 0) AS FLOAT)
+                        ELSE 0.0
+                    END as tree_cover_ratio
+                FROM pixel_counts
+            """)
+
+            result = db.execute(query, {"wkt": geometry_wkt}).first()
+
+            if not result:
+                logger.warning(f"No raster data found for block {block_name}")
+                results.append({
+                    'block_name': block_name,
+                    'total_area_ha': 0.0,
+                    'tree_pixels': 0,
+                    'total_pixels': 0,
+                    'tree_cover_ratio': 0.0,
+                    'effective_area_ha': 0.0,
+                    'tree_cover_percentage': 0.0,
+                    'error': 'No raster data'
+                })
+                continue
+
+            # Extract values
+            total_area_ha = float(result.total_area_ha or 0)
+            tree_pixels = int(result.tree_pixels or 0)
+            total_pixels = int(result.total_pixels or 0)
+            tree_cover_ratio = float(result.tree_cover_ratio or 0)
+
+            # Calculate effective area using ratio
+            effective_area_ha = total_area_ha * tree_cover_ratio
+            tree_cover_percentage = tree_cover_ratio * 100.0
+
+            block_result = {
+                'block_name': block_name,
+                'total_area_ha': round(total_area_ha, 4),
+                'tree_pixels': tree_pixels,
+                'total_pixels': total_pixels,
+                'tree_cover_ratio': round(tree_cover_ratio, 4),
+                'effective_area_ha': round(effective_area_ha, 4),
+                'tree_cover_percentage': round(tree_cover_percentage, 2)
+            }
+
+            results.append(block_result)
+
+            logger.info(
+                f"Block {block_name}: "
+                f"Total={total_area_ha:.2f}ha, "
+                f"Effective={effective_area_ha:.2f}ha "
+                f"({tree_cover_percentage:.1f}% tree cover)"
+            )
+
+        except Exception as e:
+            logger.error(f"Error calculating tree cover for block {block_name}: {e}")
+            results.append({
+                'block_name': block.get('block_name', 'Unknown'),
+                'total_area_ha': 0.0,
+                'tree_pixels': 0,
+                'total_pixels': 0,
+                'tree_cover_ratio': 0.0,
+                'effective_area_ha': 0.0,
+                'tree_cover_percentage': 0.0,
+                'error': str(e)
+            })
+
+    return results

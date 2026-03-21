@@ -101,6 +101,8 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
         'Type',
         'Block No',
         'Block Name',
+        'Sub-area Name',
+        'Is Excluded Zone',
         'Longitude',
         'Latitude',
         'Easting UTM',
@@ -132,7 +134,7 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
                     longitude=float(point.longitude),
                     latitude=float(point.latitude),
                     clipped_features=clipped_features,
-                    search_radius_meters=300.0,
+                    search_radius_meters=100.0,
                     prefer_rivers=True,
                     min_distance_threshold=20.0
                 )
@@ -151,6 +153,8 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
             point.point_type,
             point.block_number if point.block_number else '',
             point.block_name if point.block_name else '',
+            point.sub_area_name if point.sub_area_name else '',
+            'Yes' if point.is_excluded else 'No' if point.sub_area_name else '',
             f'{point.longitude:.7f}' if point.longitude else '',
             f'{point.latitude:.7f}' if point.latitude else '',
             f'{point.easting_utm:.2f}' if point.easting_utm else '',
@@ -280,7 +284,8 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
 
     # Header row with topographic features
     headers = [
-        'Point No', 'Type', 'Block No', 'Block Name', 'Longitude', 'Latitude',
+        'Point No', 'Type', 'Block No', 'Block Name', 'Sub-area Name', 'Is Excluded Zone',
+        'Longitude', 'Latitude',
         'Easting UTM', 'Northing UTM', 'UTM Zone',
         'Azimuth (deg)', 'Distance (m)', 'Elevation (m)',
         'Nearest Feature', 'Feature Type', 'Distance to Feature (m)', 'Direction to Feature',
@@ -308,7 +313,7 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
                     longitude=float(point.longitude),
                     latitude=float(point.latitude),
                     clipped_features=clipped_features,
-                    search_radius_meters=300.0,
+                    search_radius_meters=100.0,
                     prefer_rivers=True,
                     min_distance_threshold=20.0
                 )
@@ -325,30 +330,32 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
         ws_points.cell(row=row, column=2, value=point.point_type)
         ws_points.cell(row=row, column=3, value=point.block_number if point.block_number else '')
         ws_points.cell(row=row, column=4, value=point.block_name if point.block_name else '')
-        ws_points.cell(row=row, column=5, value=round(point.longitude, 7) if point.longitude else '')
-        ws_points.cell(row=row, column=6, value=round(point.latitude, 7) if point.latitude else '')
-        ws_points.cell(row=row, column=7, value=round(point.easting_utm, 2) if point.easting_utm else '')
-        ws_points.cell(row=row, column=8, value=round(point.northing_utm, 2) if point.northing_utm else '')
-        ws_points.cell(row=row, column=9, value=point.utm_zone if point.utm_zone else '')
-        ws_points.cell(row=row, column=10, value=round(point.azimuth_to_next, 2) if point.azimuth_to_next else '')
-        ws_points.cell(row=row, column=11, value=round(point.distance_to_next, 2) if point.distance_to_next else '')
-        ws_points.cell(row=row, column=12, value=round(point.elevation, 2) if point.elevation else '')
-        ws_points.cell(row=row, column=13, value=feature_name)
-        ws_points.cell(row=row, column=14, value=feature_type)
-        ws_points.cell(row=row, column=15, value=feature_distance)
-        ws_points.cell(row=row, column=16, value=feature_direction)
-        ws_points.cell(row=row, column=17, value='Yes' if point.is_verified else 'No')
-        ws_points.cell(row=row, column=18, value=point.remarks if point.remarks else '')
+        ws_points.cell(row=row, column=5, value=point.sub_area_name if point.sub_area_name else '')
+        ws_points.cell(row=row, column=6, value='Yes' if point.is_excluded else 'No' if point.sub_area_name else '')
+        ws_points.cell(row=row, column=7, value=round(point.longitude, 7) if point.longitude else '')
+        ws_points.cell(row=row, column=8, value=round(point.latitude, 7) if point.latitude else '')
+        ws_points.cell(row=row, column=9, value=round(point.easting_utm, 2) if point.easting_utm else '')
+        ws_points.cell(row=row, column=10, value=round(point.northing_utm, 2) if point.northing_utm else '')
+        ws_points.cell(row=row, column=11, value=point.utm_zone if point.utm_zone else '')
+        ws_points.cell(row=row, column=12, value=round(point.azimuth_to_next, 2) if point.azimuth_to_next else '')
+        ws_points.cell(row=row, column=13, value=round(point.distance_to_next, 2) if point.distance_to_next else '')
+        ws_points.cell(row=row, column=14, value=round(point.elevation, 2) if point.elevation else '')
+        ws_points.cell(row=row, column=15, value=feature_name)
+        ws_points.cell(row=row, column=16, value=feature_type)
+        ws_points.cell(row=row, column=17, value=feature_distance)
+        ws_points.cell(row=row, column=18, value=feature_direction)
+        ws_points.cell(row=row, column=19, value='Yes' if point.is_verified else 'No')
+        ws_points.cell(row=row, column=20, value=point.remarks if point.remarks else '')
 
         # Highlight verified points
         if point.is_verified:
-            for col in range(1, 19):
+            for col in range(1, 21):
                 ws_points.cell(row=row, column=col).fill = PatternFill(
                     start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"
                 )
 
     # Adjust column widths
-    for col in range(1, 19):
+    for col in range(1, 21):
         ws_points.column_dimensions[chr(64 + col)].width = 15
 
     # Save to bytes
@@ -396,6 +403,12 @@ def export_fieldbook_gpx(db: Session, calculation_id: UUID) -> bytes:
                 ET.SubElement(wpt, 'ele').text = f'{point.elevation:.2f}'
 
             desc_parts = []
+            if point.block_name:
+                desc_parts.append(f'Block: {point.block_name}')
+            if point.sub_area_name:
+                desc_parts.append(f'Sub-area: {point.sub_area_name}')
+                if point.is_excluded:
+                    desc_parts.append('Type: Excluded Zone (Private Land)')
             if point.azimuth_to_next:
                 desc_parts.append(f'Azimuth: {point.azimuth_to_next:.2f}°')
             if point.distance_to_next:
@@ -623,7 +636,7 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
                     longitude=lon,
                     latitude=lat,
                     clipped_features=clipped_features,
-                    search_radius_meters=300.0,
+                    search_radius_meters=100.0,
                     prefer_rivers=True,
                     min_distance_threshold=20.0
                 )

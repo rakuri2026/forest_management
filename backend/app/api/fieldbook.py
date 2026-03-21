@@ -95,6 +95,7 @@ async def generate_fieldbook(
 async def list_fieldbook_points(
     calculation_id: UUID,
     format: Optional[str] = Query(None, description="Export format: csv, excel, gpx, geojson"),
+    include_topographic: bool = Query(True, description="Include topographic features (ridge/river data)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -102,6 +103,7 @@ async def list_fieldbook_points(
     List all fieldbook points for a calculation.
 
     Optionally export in CSV, Excel, GPX, or GeoJSON format.
+    Can include topographic features (nearest ridge/river) in JSON response.
     """
     # Verify calculation exists and belongs to user
     calculation = db.query(Calculation).filter(
@@ -154,10 +156,99 @@ async def list_fieldbook_points(
     if not points:
         return FieldbookListResponse(points=[], total_count=0)
 
-    return FieldbookListResponse(
-        points=[FieldbookPoint.model_validate(p) for p in points],
-        total_count=len(points)
-    )
+    # Enrich points with topographic features if requested
+    point_list = []
+    if include_topographic and points:
+        try:
+            from sqlalchemy import text
+            import logging
+            logger = logging.getLogger(__name__)
+
+            # Get boundary for pre-clipping
+            boundary_query = text("""
+                SELECT ST_AsText(boundary_geom) as wkt
+                FROM public.calculations
+                WHERE id = :calc_id
+            """)
+            boundary_result = db.execute(boundary_query, {"calc_id": str(calculation_id)}).first()
+
+            clipped_features = None
+            if boundary_result and boundary_result.wkt:
+                # Pre-clip topographic features
+                from app.utils.geospatial_vector_optimized import (
+                    preclip_topographic_features,
+                    find_nearest_topographic_feature_optimized
+                )
+
+                try:
+                    db.rollback()  # Clear any stale transactions
+                except:
+                    pass
+
+                clipped_features = preclip_topographic_features(
+                    db=db,
+                    boundary_wkt=boundary_result.wkt,
+                    buffer_meters=100.0
+                )
+
+                if clipped_features:
+                    logger.info(f"Pre-clipped topographic features for {len(points)} fieldbook points")
+
+            # Process each point
+            for point in points:
+                point_dict = FieldbookPoint.model_validate(point).model_dump()
+
+                # Add topographic features
+                if clipped_features and point.longitude and point.latitude:
+                    try:
+                        topo_feature = find_nearest_topographic_feature_optimized(
+                            db=db,
+                            longitude=float(point.longitude),
+                            latitude=float(point.latitude),
+                            clipped_features=clipped_features,
+                            search_radius_meters=100.0,
+                            prefer_rivers=True,
+                            min_distance_threshold=20.0
+                        )
+
+                        if topo_feature:
+                            point_dict['nearest_feature'] = topo_feature.get("feature_name", None)
+                            point_dict['feature_type'] = topo_feature.get("feature_type", None)
+                            point_dict['distance_to_feature'] = topo_feature.get("distance_meters", None)
+                            point_dict['direction_to_feature'] = topo_feature.get("direction", None)
+                        else:
+                            point_dict['nearest_feature'] = None
+                            point_dict['feature_type'] = None
+                            point_dict['distance_to_feature'] = None
+                            point_dict['direction_to_feature'] = None
+                    except Exception as e:
+                        logger.warning(f"Failed to find topographic feature for point {point.point_number}: {e}")
+                        point_dict['nearest_feature'] = None
+                        point_dict['feature_type'] = None
+                        point_dict['distance_to_feature'] = None
+                        point_dict['direction_to_feature'] = None
+                else:
+                    point_dict['nearest_feature'] = None
+                    point_dict['feature_type'] = None
+                    point_dict['distance_to_feature'] = None
+                    point_dict['direction_to_feature'] = None
+
+                point_list.append(point_dict)
+
+        except Exception as e:
+            # If topographic calculation fails, return basic points
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to calculate topographic features: {e}")
+            point_list = [FieldbookPoint.model_validate(p).model_dump() for p in points]
+    else:
+        # No topographic features requested
+        point_list = [FieldbookPoint.model_validate(p).model_dump() for p in points]
+
+    return {
+        "points": point_list,
+        "total_count": len(points)
+    }
 
 
 @router.get("/{calculation_id}/fieldbook/{point_number}", response_model=FieldbookPoint)

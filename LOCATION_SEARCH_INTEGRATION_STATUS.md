@@ -317,6 +317,7 @@ curl http://localhost:8001/api/location/ward/1/geometry
 3. ✅ Results clickable
 4. ✅ Boundary toggle works
 
+
 5. ✅ Clear button resets state
 6. ✅ Satellite toggle works (layer control)
 

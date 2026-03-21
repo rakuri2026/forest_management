@@ -89,9 +89,21 @@ def background_tree_generation(
         model.progress_percent = 100
         model.current_step = "Complete"
 
-        # Add block-wise DBH class distribution to algorithm_config for frontend display
+        # Add statistics to algorithm_config for frontend display
         config_with_stats = dict(model.algorithm_config or {})
-        config_with_stats['block_dbh_distribution'] = result['statistics']['block_dbh_distribution']
+        stats = result['statistics']
+        
+        # Block-wise distribution
+        config_with_stats['block_dbh_distribution'] = stats.get('block_dbh_distribution', {})
+        
+        # Overall volume breakdown (matching field inventory method)
+        config_with_stats['pole_timber_m3_per_ha'] = stats.get('pole_timber_m3_per_ha', 0)
+        config_with_stats['pole_firewood_m3_per_ha'] = stats.get('pole_firewood_m3_per_ha', 0)
+        config_with_stats['tree_timber_m3_per_ha'] = stats.get('tree_timber_m3_per_ha', 0)
+        config_with_stats['tree_firewood_m3_per_ha'] = stats.get('tree_firewood_m3_per_ha', 0)
+        config_with_stats['total_growing_stock_m3_per_ha'] = stats.get('total_growing_stock_m3_per_ha', 0)
+        config_with_stats['volume_per_ha'] = stats.get('volume_per_ha', 0)
+        
         model.algorithm_config = config_with_stats
 
         db.commit()

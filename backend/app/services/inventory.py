@@ -273,8 +273,9 @@ class InventoryService:
                 # Estimate height using default H/D ratio
                 height_m = dbh_cm * 0.8  # Default ratio for missing heights
 
-            # 1. Calculate stem volume
+            # 1. Calculate stem volume (काण्डको आयतन)
             # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
+            # Source: Forest Regulation 2079, Table 1
             if coef['a'] is not None and coef['b'] is not None and coef['c'] is not None:
                 stem_volume = math.exp(
                     coef['a'] +
@@ -285,24 +286,62 @@ class InventoryService:
                 # Use generic formula for species without coefficients
                 stem_volume = 0.0
 
-            # 2. Calculate branch volume (20% of stem for trees >= 10 cm)
-            branch_volume = stem_volume * 0.2
+            # 2. Calculate branch volume (हाँगाको आयतन)
+            # Formula: Branch Volume = Stem Volume × Branch Ratio
+            # Source: Forest Regulation 2079, Table 2
+            # Based on Sharma and Pukala, 1990
+            # s = small (sano), m = medium (machilo), bg = big (bara)
+            s = coef.get('s')
+            m = coef.get('m')
+            bg = coef.get('bg')
+            
+            if s is not None and m is not None and bg is not None:
+                # Use interpolation formula based on DBH class
+                if dbh_cm < 10:
+                    branch_ratio = float(s)
+                elif dbh_cm <= 40:
+                    branch_ratio = ((dbh_cm - 10) * float(m) + (40 - dbh_cm) * float(s)) / 30.0
+                elif dbh_cm <= 70:
+                    branch_ratio = ((dbh_cm - 40) * float(bg) + (70 - dbh_cm) * float(m)) / 30.0
+                else:
+                    branch_ratio = float(bg)
+                branch_volume = stem_volume * branch_ratio
+            elif s is not None and m is not None:
+                branch_ratio = (float(s) + float(m)) / 2.0
+                branch_volume = stem_volume * branch_ratio
+            elif coef.get('b') is not None:
+                branch_ratio = abs(float(coef['b'])) * 0.1
+                branch_volume = stem_volume * branch_ratio
+            else:
+                branch_volume = stem_volume * 0.2
 
-            # 3. Total tree volume
+            # 3. Total tree volume (रुखको आयतन)
+            # Formula: Tree Volume = Stem Volume + Branch Volume
+            # Source: Forest Regulation 2079, Section 3(ii)
             tree_volume = stem_volume + branch_volume
 
-            # 4. Calculate gross volume (merchantable)
-            # Remove top portion (diameter < 10 cm)
+            # 4. Calculate gross timber volume (काठको मूल आयतन)
+            # Formula: Gross Timber = Stem Volume - 10cm Top Diameter Stem Volume
+            # Source: Forest Regulation 2079, Section 4 (काठको मूल आयतन)
+            # NOTE: Gross timber comes ONLY from stem (trunk), not branches
+            # Branches go directly to firewood category
+            # Remove top portion of stem where diameter < 10 cm (non-merchantable)
             if coef['a1'] is not None and coef['b1'] is not None:
+                # Calculate 10cm top diameter ratio
                 cm10_dia_ratio = math.exp(
                     coef['a1'] + coef['b1'] * math.log(dbh_cm)
                 )
+                # Apply ratio to STEM volume (regulation uses stem, not tree)
                 cm10_top_volume = stem_volume * cm10_dia_ratio
                 gross_volume = stem_volume - cm10_top_volume
             else:
-                gross_volume = stem_volume * 0.85  # Default 85% is merchantable
+                # Fallback: Assume 85% of stem volume is merchantable
+                gross_volume = stem_volume * 0.85
 
-            # 5. Calculate net volume (after defects)
+            # 5. Calculate net timber volume (काठको नेट आयतन)
+            # Apply waste factors based on tree class (दर्जा)
+            # Source: Forest Regulation 2079, Section 5 (दर्जा अनुसार नेट आयतन)
+
             # Get class value safely (avoid Series ambiguity)
             class_val = None
             if class_col is not None and class_col in df.columns:
@@ -314,17 +353,28 @@ class InventoryService:
                 except (KeyError, TypeError):
                     class_val = None
 
-            # Use class for defect calculation (default to 'B' if not provided)
+            # Use class for waste calculation (default to Class 2 if not provided)
             if class_val is not None:
-                tree_class = str(class_val)
+                tree_class = str(class_val).strip()
             else:
-                tree_class = 'B'
+                tree_class = '2'  # Default to Class 2 (moderate quality)
 
-            # Apply defect factor based on class
+            # Apply waste factor based on class (Forest Regulation 2079)
+            # Class 1 (पहिलो दर्जा): 80% net, 20% waste
+            # Class 2 (दोस्रो दर्जा): 60% net, 40% waste
+            # Class 3 (तेस्रो दर्जा): 30% net, 70% waste
+            # Class 4 (चौथो दर्जा): 0% timber (all firewood)
             if tree_class == '1' or tree_class.upper() == 'A':
-                net_volume = gross_volume * 0.9  # 10% defect (Class A/1)
+                net_volume = gross_volume * 0.80  # 20% waste
+            elif tree_class == '2' or tree_class.upper() == 'B':
+                net_volume = gross_volume * 0.60  # 40% waste
+            elif tree_class == '3' or tree_class.upper() == 'C':
+                net_volume = gross_volume * 0.30  # 70% waste
+            elif tree_class == '4' or tree_class.upper() == 'D':
+                net_volume = 0.0  # All firewood (100% waste)
             else:
-                net_volume = gross_volume * 0.8  # 20% defect (Class B/2/3/4)
+                # Unknown class: default to Class 2 (moderate)
+                net_volume = gross_volume * 0.60
 
             # 6. Convert net volume to cubic feet
             net_volume_cft = net_volume * 35.3147

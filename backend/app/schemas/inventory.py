@@ -16,6 +16,11 @@ class TreeSpeciesCoefficientResponse(BaseModel):
     max_height_m: Optional[float]
     is_active: bool
 
+    # New fields (added 2026-03-03)
+    wood_density_gm_cm3: Optional[float] = Field(None, description="Wood density in g/cm³")
+    wood_density_source: Optional[str] = Field(None, description="Source reference for wood density data")
+    genus: Optional[str] = Field(None, description="Genus name")
+
     class Config:
         from_attributes = True
 

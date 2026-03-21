@@ -76,8 +76,10 @@ function generateDynamicCanopyLegend(minHeight: number, maxHeight: number): Lege
 
   // If no classes match (edge case), return a single generic class
   if (relevantClasses.length === 0) {
+    const minVal = minHeight != null ? minHeight.toFixed(1) : 'N/A';
+    const maxVal = maxHeight != null ? maxHeight.toFixed(1) : 'N/A';
     return [
-      { color: '#228B22', label: 'Forest Canopy', range: `${minHeight.toFixed(1)}-${maxHeight.toFixed(1)}m` }
+      { color: '#228B22', label: 'Forest Canopy', range: `${minVal}-${maxVal}m` }
     ];
   }
 
@@ -107,8 +109,10 @@ function generateDynamicTemperatureLegend(minTemp: number, maxTemp: number): Leg
 
   // If no classes match (edge case), return a single generic class
   if (relevantClasses.length === 0) {
+    const minVal = minTemp != null ? minTemp.toFixed(1) : 'N/A';
+    const maxVal = maxTemp != null ? maxTemp.toFixed(1) : 'N/A';
     return [
-      { color: '#90EE90', label: 'Temperature', range: `${minTemp.toFixed(1)}-${maxTemp.toFixed(1)}°C` }
+      { color: '#90EE90', label: 'Temperature', range: `${minVal}-${maxVal}°C` }
     ];
   }
 
@@ -138,8 +142,10 @@ function generateDynamicPrecipitationLegend(minPrecip: number, maxPrecip: number
 
   // If no classes match (edge case), return a single generic class
   if (relevantClasses.length === 0) {
+    const minVal = minPrecip != null ? minPrecip.toFixed(0) : 'N/A';
+    const maxVal = maxPrecip != null ? maxPrecip.toFixed(0) : 'N/A';
     return [
-      { color: '#90EE90', label: 'Precipitation', range: `${minPrecip.toFixed(0)}-${maxPrecip.toFixed(0)}mm` }
+      { color: '#90EE90', label: 'Precipitation', range: `${minVal}-${maxVal}mm` }
     ];
   }
 
@@ -169,8 +175,10 @@ function generateDynamicBiomassLegend(minBiomass: number, maxBiomass: number): L
 
   // If no classes match (edge case), return a single generic class
   if (relevantClasses.length === 0) {
+    const minVal = minBiomass != null ? minBiomass.toFixed(0) : 'N/A';
+    const maxVal = maxBiomass != null ? maxBiomass.toFixed(0) : 'N/A';
     return [
-      { color: '#90EE90', label: 'Biomass', range: `${minBiomass.toFixed(0)}-${maxBiomass.toFixed(0)} Mg/ha` }
+      { color: '#90EE90', label: 'Biomass', range: `${minVal}-${maxVal} Mg/ha` }
     ];
   }
 

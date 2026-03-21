@@ -12,8 +12,10 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql://postgres:admin123@localhost:5432/cf_db"
-    DB_POOL_SIZE: int = 5
-    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_SIZE: int = 20  # Increased from 5
+    DB_MAX_OVERFLOW: int = 30  # Increased from 10
+    DB_POOL_RECYCLE: int = 3600  # Recycle connections after 1 hour
+    DB_POOL_TIMEOUT: int = 30  # Wait up to 30 seconds for connection
 
     # JWT Authentication
     SECRET_KEY: str = "cf-forest-management-secret-key-2026-change-in-production"

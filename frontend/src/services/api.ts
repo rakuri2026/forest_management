@@ -40,6 +40,12 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // If sending FormData, remove Content-Type header so browser sets it with boundary
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -130,6 +136,19 @@ export const forestApi = {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response.data;
+  },
+
+  createFromMap: async (data: {
+    forest_name: string;
+    outer_boundary: any;
+    gps_points?: any[];
+    blocks: any[];
+    sub_areas?: any[];
+    analysis_options?: Record<string, boolean>;
+    map_options?: Record<string, boolean>;
+  }): Promise<Calculation> => {
+    const response = await api.post<Calculation>('/api/forests/create-from-map', data);
     return response.data;
   },
 
@@ -232,6 +251,14 @@ export const forestApi = {
     const response = await api.get(
       `/api/forests/calculations/${calculationId}/accessible-area`,
       { params }
+    );
+    return response.data;
+  },
+
+  // Tree cover areas endpoint - calculate effective forest areas for all blocks
+  calculateTreeCoverAreas: async (calculationId: string): Promise<any> => {
+    const response = await api.post(
+      `/api/forests/calculations/${calculationId}/tree-cover-areas`
     );
     return response.data;
   },
@@ -431,6 +458,134 @@ export const inventoryApi = {
         "Content-Type": "multipart/form-data",
       },
     });
+    return response.data;
+  },
+};
+
+// Field Inventory endpoints
+export const fieldInventoryApi = {
+  previewMapping: async (file: File): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post("/api/field-inventory/preview-mapping", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  upload: async (
+    file: File,
+    calculationId: string,
+    mapping: Record<string, string>,
+    sampleSizes: {
+      regeneration_area_sqm: number;
+      sapling_area_sqm: number;
+      pole_area_sqm: number;
+      tree_area_sqm: number;
+    }
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("calculation_id", calculationId);
+    formData.append("mapping", JSON.stringify(mapping));
+    formData.append("regeneration_area_sqm", sampleSizes.regeneration_area_sqm.toString());
+    formData.append("sapling_area_sqm", sampleSizes.sapling_area_sqm.toString());
+    formData.append("pole_area_sqm", sampleSizes.pole_area_sqm.toString());
+    formData.append("tree_area_sqm", sampleSizes.tree_area_sqm.toString());
+
+    const response = await api.post("/api/field-inventory/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  process: async (fieldInventoryId: string, file: File): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post(`/api/field-inventory/${fieldInventoryId}/process`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  getStatus: async (fieldInventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/status`);
+    return response.data;
+  },
+
+  getSummary: async (fieldInventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/summary`);
+    return response.data;
+  },
+
+  listBlocks: async (fieldInventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/blocks`);
+    return response.data;
+  },
+
+  getSpeciesBreakdown: async (fieldInventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/species-breakdown`);
+    return response.data;
+  },
+
+  getMaiAah: async (
+    fieldInventoryId: string,
+    aahGood: number = 75,
+    aahModerate: number = 60,
+    aahWeak: number = 40,
+    customMultipliers?: Record<string, number>
+  ): Promise<any> => {
+    const params: any = {
+      aah_good: aahGood,
+      aah_moderate: aahModerate,
+      aah_weak: aahWeak
+    };
+
+    if (customMultipliers && Object.keys(customMultipliers).length > 0) {
+      params.custom_multipliers = JSON.stringify(customMultipliers);
+    }
+
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/mai-aah`, { params });
+    return response.data;
+  },
+
+  getByCalculation: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/by-calculation/${calculationId}`);
+    return response.data;
+  },
+
+  delete: async (fieldInventoryId: string): Promise<void> => {
+    await api.delete(`/api/field-inventory/${fieldInventoryId}`);
+  },
+
+  getTotalInventory: async (
+    fieldInventoryId: string,
+    blockAreas: Record<string, number>,
+    customMultipliers?: Record<string, number>,
+    aahGood: number = 75,
+    aahModerate: number = 60,
+    aahWeak: number = 40
+  ): Promise<any> => {
+    const params: any = {
+      block_areas: JSON.stringify(blockAreas),
+      aah_good: aahGood,
+      aah_moderate: aahModerate,
+      aah_weak: aahWeak
+    };
+
+    if (customMultipliers && Object.keys(customMultipliers).length > 0) {
+      params.custom_multipliers = JSON.stringify(customMultipliers);
+    }
+
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/total-inventory`, { params });
     return response.data;
   },
 };

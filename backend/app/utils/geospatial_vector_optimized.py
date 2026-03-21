@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def preclip_topographic_features(
     db: Session,
     boundary_wkt: str,
-    buffer_meters: float = 1000.0
+    buffer_meters: float = 200.0
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Pre-clip ridge and river features to boundary + buffer.
@@ -32,7 +32,7 @@ def preclip_topographic_features(
     Args:
         db: Database session
         boundary_wkt: WKT of boundary polygon
-        buffer_meters: Buffer distance in meters (default 1000m)
+        buffer_meters: Buffer distance in meters (default 200m)
 
     Returns:
         Dictionary with 'ridges' and 'rivers' lists containing clipped features
@@ -125,7 +125,7 @@ def find_nearest_ridge_from_clipped(
     longitude: float,
     latitude: float,
     clipped_ridges: List[Dict[str, Any]],
-    search_radius_meters: float = 1000.0
+    search_radius_meters: float = 300.0
 ) -> Optional[dict]:
     """
     Find nearest ridge from pre-clipped ridge list.
@@ -223,7 +223,7 @@ def find_nearest_river_from_clipped(
     longitude: float,
     latitude: float,
     clipped_rivers: List[Dict[str, Any]],
-    search_radius_meters: float = 1000.0
+    search_radius_meters: float = 300.0
 ) -> Optional[dict]:
     """
     Find nearest river from pre-clipped river list.
@@ -334,7 +334,7 @@ def find_nearest_topographic_feature_optimized(
     longitude: float,
     latitude: float,
     clipped_features: Dict[str, List[Dict[str, Any]]],
-    search_radius_meters: float = 1000.0,
+    search_radius_meters: float = 300.0,
     prefer_rivers: bool = True,
     min_distance_threshold: float = 20.0
 ) -> Optional[dict]:

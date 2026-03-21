@@ -7,42 +7,29 @@ interface LocationSearchProps {
   onBoundaryToggle?: (show: boolean, geometry?: any) => void;
 }
 
-interface Province {
-  code: string;
-  name: string;
-  name_nepali?: string;
-}
-
 interface District {
-  code: string;
   name: string;
-  province_code: string;
 }
 
 interface Municipality {
-  code: string;
   name: string;
-  district_code: string;
-  type?: string;
+  district: string;
 }
 
 interface Ward {
   id: number;
-  ward_no: number;
-  municipality_code: string;
-  province: string;
-  district: string;
+  ward: number;
   municipality: string;
+  district: string;
   bounds?: [number, number, number, number];
 }
 
 interface SearchResult {
   id: number;
   display_name: string;
-  province: string;
   district: string;
   municipality: string;
-  ward_no: number;
+  ward: number;
   bounds: [number, number, number, number];
 }
 
@@ -51,13 +38,11 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
   onBoundaryToggle
 }) => {
   // State for cascading dropdowns
-  const [provinces, setProvinces] = useState<Province[]>([]);
   const [districts, setDistricts] = useState<District[]>([]);
   const [municipalities, setMunicipalities] = useState<Municipality[]>([]);
   const [wards, setWards] = useState<Ward[]>([]);
 
   // Selected values
-  const [selectedProvince, setSelectedProvince] = useState<string>('');
   const [selectedDistrict, setSelectedDistrict] = useState<string>('');
   const [selectedMunicipality, setSelectedMunicipality] = useState<string>('');
   const [selectedWard, setSelectedWard] = useState<number | null>(null);
@@ -75,34 +60,23 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
   // UI state
   const [searchMode, setSearchMode] = useState<'dropdown' | 'text'>('dropdown');
 
-  // Load provinces on mount
+  // Load districts on mount
   useEffect(() => {
-    loadProvinces();
+    loadDistricts();
   }, []);
 
-  const loadProvinces = async () => {
+  const loadDistricts = async () => {
     try {
-      const response = await axios.get<Province[]>('/api/location/provinces');
-      setProvinces(response.data);
-    } catch (error) {
-      console.error('Error loading provinces:', error);
-    }
-  };
-
-  const loadDistricts = async (provinceCode: string) => {
-    try {
-      const response = await axios.get<District[]>(`/api/location/districts?province_code=${provinceCode}`);
+      const response = await axios.get<District[]>('/api/location/districts');
       setDistricts(response.data);
-      setMunicipalities([]);
-      setWards([]);
     } catch (error) {
       console.error('Error loading districts:', error);
     }
   };
 
-  const loadMunicipalities = async (districtCode: string) => {
+  const loadMunicipalities = async (district: string) => {
     try {
-      const response = await axios.get<Municipality[]>(`/api/location/municipalities?district_code=${districtCode}`);
+      const response = await axios.get<Municipality[]>(`/api/location/municipalities?district=${encodeURIComponent(district)}`);
       setMunicipalities(response.data);
       setWards([]);
     } catch (error) {
@@ -110,46 +84,32 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
     }
   };
 
-  const loadWards = async (municipalityCode: string) => {
+  const loadWards = async (municipality: string) => {
     try {
-      const response = await axios.get<Ward[]>(`/api/location/wards?municipality_code=${municipalityCode}&include_geometry=true`);
+      const response = await axios.get<Ward[]>(`/api/location/wards?municipality=${encodeURIComponent(municipality)}&include_geometry=true`);
       setWards(response.data);
     } catch (error) {
       console.error('Error loading wards:', error);
     }
   };
 
-  const handleProvinceChange = (code: string) => {
-    setSelectedProvince(code);
-    setSelectedDistrict('');
+  const handleDistrictChange = (district: string) => {
+    setSelectedDistrict(district);
     setSelectedMunicipality('');
     setSelectedWard(null);
-    if (code) {
-      loadDistricts(code);
-    } else {
-      setDistricts([]);
-      setMunicipalities([]);
-      setWards([]);
-    }
-  };
-
-  const handleDistrictChange = (code: string) => {
-    setSelectedDistrict(code);
-    setSelectedMunicipality('');
-    setSelectedWard(null);
-    if (code) {
-      loadMunicipalities(code);
+    if (district) {
+      loadMunicipalities(district);
     } else {
       setMunicipalities([]);
       setWards([]);
     }
   };
 
-  const handleMunicipalityChange = (code: string) => {
-    setSelectedMunicipality(code);
+  const handleMunicipalityChange = (municipality: string) => {
+    setSelectedMunicipality(municipality);
     setSelectedWard(null);
-    if (code) {
-      loadWards(code);
+    if (municipality) {
+      loadWards(municipality);
     } else {
       setWards([]);
     }
@@ -229,7 +189,6 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
   };
 
   const clearSelection = () => {
-    setSelectedProvince('');
     setSelectedDistrict('');
     setSelectedMunicipality('');
     setSelectedWard(null);
@@ -279,46 +238,24 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
       {/* Cascading Dropdowns */}
       {searchMode === 'dropdown' && (
         <div className="space-y-3">
-          {/* Province */}
+          {/* District */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Province
+              District
             </label>
             <select
-              value={selectedProvince}
-              onChange={(e) => handleProvinceChange(e.target.value)}
+              value={selectedDistrict}
+              onChange={(e) => handleDistrictChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Select Province</option>
-              {provinces.map((province) => (
-                <option key={province.code} value={province.code}>
-                  {province.name}
+              <option value="">Select District</option>
+              {districts.map((district) => (
+                <option key={district.name} value={district.name}>
+                  {district.name}
                 </option>
               ))}
             </select>
           </div>
-
-          {/* District */}
-          {selectedProvince && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                District
-              </label>
-              <select
-                value={selectedDistrict}
-                onChange={(e) => handleDistrictChange(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={districts.length === 0}
-              >
-                <option value="">Select District</option>
-                {districts.map((district) => (
-                  <option key={district.code} value={district.code}>
-                    {district.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Municipality */}
           {selectedDistrict && (
@@ -334,8 +271,8 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
               >
                 <option value="">Select Municipality</option>
                 {municipalities.map((municipality) => (
-                  <option key={municipality.code} value={municipality.code}>
-                    {municipality.name} {municipality.type && `(${municipality.type})`}
+                  <option key={municipality.name} value={municipality.name}>
+                    {municipality.name}
                   </option>
                 ))}
               </select>
@@ -357,7 +294,7 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
                 <option value="">Select Ward</option>
                 {wards.map((ward) => (
                   <option key={ward.id} value={ward.id}>
-                    Ward {ward.ward_no}
+                    Ward {ward.ward}
                   </option>
                 ))}
               </select>
@@ -374,7 +311,7 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by province, district, municipality..."
+              placeholder="Search by district or municipality..."
               className="w-full px-4 py-2 pl-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
@@ -440,9 +377,9 @@ const LocationSearch: React.FC<LocationSearchProps> = ({
       {/* Info Text */}
       <div className="mt-4 text-xs text-gray-500">
         {searchMode === 'dropdown' ? (
-          <p>Select province, district, municipality, and ward to find your area</p>
+          <p>Select district, municipality, and ward to find your area</p>
         ) : (
-          <p>Search by typing province, district, or municipality name</p>
+          <p>Search by typing district or municipality name</p>
         )}
       </div>
     </div>

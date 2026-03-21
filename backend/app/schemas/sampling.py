@@ -118,6 +118,23 @@ class SamplingDesignBase(BaseModel):
         le=200.0,
         description="Minimum distance from boundary to avoid edge effects (default: 50m)"
     )
+
+    # Accessible forest filtering parameters (NEW - Phase 2)
+    filter_tree_cover: Optional[bool] = Field(
+        default=True,
+        description="Filter to ESA WorldCover tree pixels (value=10) - Recommended (default: True)"
+    )
+    filter_slope: Optional[bool] = Field(
+        default=False,
+        description="Filter by slope accessibility - Optional (default: False)"
+    )
+    max_slope_degrees: Optional[float] = Field(
+        default=45.0,
+        ge=0.0,
+        le=90.0,
+        description="Maximum slope threshold in degrees (default: 45.0)"
+    )
+
     notes: Optional[str] = Field(None, max_length=1000, description="Design notes")
     block_overrides: Optional[Dict[str, BlockOverride]] = Field(
         None,
@@ -201,6 +218,24 @@ class BlockSamplingInfo(BaseModel):
     actual_intensity_percent: Decimal = Field(
         ...,
         description="Actual sampling intensity achieved for this block"
+    )
+
+    # Accessible forest area breakdown
+    accessible_forest_area_ha: Optional[Decimal] = Field(
+        None,
+        description="Accessible forest area in hectares (tree cover + slope OK)"
+    )
+    inaccessible_steep_forest_ha: Optional[Decimal] = Field(
+        None,
+        description="Tree cover but too steep for sampling"
+    )
+    non_forest_area_ha: Optional[Decimal] = Field(
+        None,
+        description="Non-tree cover area (grassland, cropland, water, etc.)"
+    )
+    accessible_forest_percentage: Optional[Decimal] = Field(
+        None,
+        description="Percentage of block that is accessible forest"
     )
 
     model_config = ConfigDict(from_attributes=True)

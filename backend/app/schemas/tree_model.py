@@ -65,6 +65,8 @@ class TreeModelResponse(BaseModel):
     # File info
     gpkg_filename: Optional[str] = None
     file_size_mb: Optional[float] = None
+    excel_filename: Optional[str] = None
+    excel_size_mb: Optional[float] = None
 
     # Status
     status: str
@@ -94,3 +96,4 @@ class TreeModelProgressUpdate(BaseModel):
     progress_percent: int
     current_step: str
     estimated_time_remaining_seconds: Optional[int] = None
+

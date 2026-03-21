@@ -9,6 +9,7 @@ Author: Community Forest Management System
 Date: February 18, 2026
 """
 
+import logging
 import random
 import math
 import os
@@ -28,6 +29,14 @@ import pandas as pd
 from ..models.calculation import Calculation
 from ..models.synthetic_tree_model import SyntheticTreeModel
 from ..models.sampling import SamplingDesign
+
+# Debug logging for volume calculation comparison
+DEBUG_VOLUME_CALC = os.environ.get('DEBUG_VOLUME_CALC', 'false').lower() == 'true'
+
+def _debug_log(msg: str):
+    """Print debug message if DEBUG_VOLUME_CALC is enabled"""
+    if DEBUG_VOLUME_CALC:
+        print(f"[TREE_MODEL_VOLUME] {msg}")
 from ..core.config import settings
 
 
@@ -288,6 +297,11 @@ def calculate_tree_volumes(
         - net_volume: Net timber volume in m³ (after waste)
         - firewood_m3: Firewood volume in m³
     """
+    # Debug logging
+    _debug_log(f"INPUT: dbh={dbh}, height={height}, tree_class={tree_class}")
+    _debug_log(f"SPECIES_COEFFS: {species_coefficients.get('scientific_name', 'unknown')}")
+    _debug_log(f"COEFFS: a={species_coefficients.get('a')}, b={species_coefficients.get('b')}, c={species_coefficients.get('c')}, a1={species_coefficients.get('a1')}, b1={species_coefficients.get('b1')}, s={species_coefficients.get('s')}, m={species_coefficients.get('m')}, bg={species_coefficients.get('bg')}")
+    
     # Skip if regeneration (DBH < 10 cm)
     if dbh < 10:
         return {
@@ -304,19 +318,42 @@ def calculate_tree_volumes(
     # 1. Calculate stem volume (Forest Regulation 2079, Table 1)
     # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
     if coef.get('a') is not None and coef.get('b') is not None and coef.get('c') is not None:
-        stem_volume = math.exp(
-            coef['a'] +
-            coef['b'] * math.log(dbh) +
-            coef['c'] * math.log(height)
-        ) / 1000.0  # Convert to m³
+        log_dbh = math.log(dbh)
+        log_height = math.log(height)
+        exp_value = coef['a'] + coef['b'] * log_dbh + coef['c'] * log_height
+        stem_volume = math.exp(exp_value) / 1000.0  # Convert to m³
+        
+        _debug_log(f"STEM: log(dbh)={log_dbh}, log(height)={log_height}, exp={exp_value}, stem_vol={stem_volume}")
     else:
         stem_volume = 0.0
+        _debug_log("STEM: Using default 0.0 (missing coefficients)")
 
     # 2. Calculate branch volume (Forest Regulation 2079, Table 2)
     # Formula: Branch Volume = Stem Volume × Branch Ratio
-    if coef.get('s') is not None and coef.get('m') is not None:
-        # Use s (sano) and m (machilo) coefficients
-        branch_ratio = (float(coef['s']) + float(coef['m'])) / 2.0
+    # Based on Sharma and Pukala, 1990
+    # s = small (sano), m = medium (machilo), bg = big (bara)
+    s = coef.get('s')
+    m = coef.get('m')
+    bg = coef.get('bg')
+    
+    if s is not None and m is not None and bg is not None:
+        # Use interpolation formula based on DBH class
+        if dbh < 10:
+            # Small trees: use s coefficient
+            branch_ratio = float(s)
+        elif dbh <= 40:
+            # 10-40 cm: linear interpolation between s and m
+            branch_ratio = ((dbh - 10) * float(m) + (40 - dbh) * float(s)) / 30.0
+        elif dbh <= 70:
+            # 40-70 cm: linear interpolation between m and bg
+            branch_ratio = ((dbh - 40) * float(bg) + (70 - dbh) * float(m)) / 30.0
+        else:
+            # >70 cm: use bg coefficient
+            branch_ratio = float(bg)
+        branch_volume = stem_volume * branch_ratio
+    elif s is not None and m is not None:
+        # Fallback: use average of s and m
+        branch_ratio = (float(s) + float(m)) / 2.0
         branch_volume = stem_volume * branch_ratio
     elif coef.get('b') is not None:
         # Fallback: approximate from b coefficient
@@ -324,7 +361,11 @@ def calculate_tree_volumes(
         branch_volume = stem_volume * branch_ratio
     else:
         # Final fallback: 20% default
+        branch_ratio = 0.2
         branch_volume = stem_volume * 0.2
+
+    if DEBUG_VOLUME_CALC:
+        _debug_log(f"BRANCH: s={s}, m={m}, bg={bg}, ratio={branch_ratio}, branch_vol={branch_volume}")
 
     # 3. Total tree volume
     tree_volume = stem_volume + branch_volume
@@ -336,8 +377,11 @@ def calculate_tree_volumes(
         cm10_dia_ratio = math.exp(coef['a1'] + coef['b1'] * math.log(dbh))
         cm10_top_volume = stem_volume * cm10_dia_ratio  # From stem only
         gross_volume = stem_volume - cm10_top_volume
+        
+        _debug_log(f"GROSS: a1={coef.get('a1')}, b1={coef.get('b1')}, cm10_ratio={cm10_dia_ratio}, cm10_vol={cm10_top_volume}, gross_vol={gross_volume}")
     else:
         gross_volume = stem_volume * 0.85  # Fallback: 85% merchantable
+        _debug_log(f"GROSS: Using fallback 0.85, gross_vol={gross_volume}")
 
     # 5. Calculate net timber volume (Forest Regulation 2079, Section 5)
     # Apply waste factors based on tree class
@@ -347,18 +391,30 @@ def calculate_tree_volumes(
     # Class 4: 0% net (100% firewood)
     if tree_class == 1:
         net_volume = gross_volume * 0.80
+        waste_factor = 0.80
     elif tree_class == 2:
         net_volume = gross_volume * 0.60
+        waste_factor = 0.60
     elif tree_class == 3:
         net_volume = gross_volume * 0.30
+        waste_factor = 0.30
     elif tree_class == 4:
         net_volume = 0.0
+        waste_factor = 0.0
     else:
         net_volume = gross_volume * 0.60  # Default to class 2
+        waste_factor = 0.60
+
+    if DEBUG_VOLUME_CALC:
+        _debug_log(f"[TREE_MODEL_VOLUME] NET: class={tree_class}, waste_factor={waste_factor}, gross_vol={gross_volume}, net_vol={net_volume}")
 
     # 6. Calculate firewood volume
     # Firewood = All branches + Stem waste
     firewood_m3 = tree_volume - net_volume
+
+    if DEBUG_VOLUME_CALC:
+        _debug_log(f"[TREE_MODEL_VOLUME] FIREWOOD: tree_vol={tree_volume}, net_vol={net_volume}, firewood={firewood_m3}")
+        _debug_log(f"[TREE_MODEL_VOLUME] FINAL: stem={stem_volume}, branch={branch_volume}, tree={tree_volume}, gross={gross_volume}, net={net_volume}, firewood={firewood_m3}")
 
     return {
         'stem_volume': round(stem_volume, 6),
@@ -1079,7 +1135,9 @@ def export_to_excel(
         record = {
             'fid': fid,
             'block_name': tree.get('block_name', ''),
+            'block_number': tree.get('block_number', 0),
             'sample_plot_number': tree.get('sample_plot_number', ''),
+            'total_sample_plots': tree.get('total_sample_plots', 0),
             # Hidden sorting column (removed before export)
             'species_role': species_role,
             # Regeneration columns
@@ -1246,6 +1304,8 @@ def export_to_excel(
         'fid': 'first',  # Will reassign later
         'block_name': 'first',
         'sample_plot_number': 'first',
+        'block_number': 'first',
+        'total_sample_plots': 'first',
         'longitude': 'first',
         'latitude': 'first',
         # Regeneration columns
@@ -1264,12 +1324,26 @@ def export_to_excel(
         'pole_dbh_cm': 'first',
         'pole_height_m': 'first',
         'pole_class': 'first',
+        # Pole volumes
+        'pole_stem_volume_m3': 'first',
+        'pole_branch_volume_m3': 'first',
+        'pole_tree_volume_m3': 'first',
+        'pole_gross_volume_m3': 'first',
+        'pole_net_volume_m3': 'first',
+        'pole_firewood_m3': 'first',
         # Tree columns
         'tree_sn': 'first',
         'tree_species_scientific': 'first',
         'tree_dbh_cm': 'first',
         'tree_height_m': 'first',
         'tree_class': 'first',
+        # Tree volumes
+        'tree_stem_volume_m3': 'first',
+        'tree_branch_volume_m3': 'first',
+        'tree_tree_volume_m3': 'first',
+        'tree_gross_volume_m3': 'first',
+        'tree_net_volume_m3': 'first',
+        'tree_firewood_m3': 'first',
     }
     
     # Group by merge_key and aggregate
@@ -1291,8 +1365,8 @@ def export_to_excel(
     df = df.reset_index(drop=True)
     df['fid'] = range(1, len(df) + 1)
 
-    # Column order (with volume columns - Forest Regulation 2079 compliant)
-    column_order = [
+    # Column order for Tree Model sheet (original format - NO volume columns)
+    tree_model_column_order = [
         'fid',
         'block_name',
         'sample_plot_number',
@@ -1311,28 +1385,13 @@ def export_to_excel(
         'pole_dbh_cm',
         'pole_height_m',
         'pole_class',
-        # Volume columns removed - calculated in field inventory tab
-        # 'pole_stem_volume_m3',
-        # 'pole_branch_volume_m3',
-        # 'pole_tree_volume_m3',
-        # 'pole_gross_volume_m3',
-        # 'pole_net_volume_m3',
-        # 'pole_firewood_m3',
         'tree_sn',
         'tree_species_scientific',
         'tree_dbh_cm',
         'tree_height_m',
         'tree_class',
-        # Volume columns removed - calculated in field inventory tab
-        # 'tree_stem_volume_m3',
-        # 'tree_branch_volume_m3',
-        # 'tree_tree_volume_m3',
-        # 'tree_gross_volume_m3',
-        # 'tree_net_volume_m3',
-        # 'tree_firewood_m3'
     ]
-    df = df[column_order]
-
+    
     # REMOVE EMPTY ROWS (rows with no species data in any category)
     # A row is empty if all species columns are None/NaN
     has_species_data = (
@@ -1346,45 +1405,69 @@ def export_to_excel(
     # Reassign FID after removing empty rows
     df['fid'] = range(1, len(df) + 1)
 
-    # ROUND DBH AND HEIGHT COLUMNS TO 0 DECIMAL PLACES (integers)
-    # Handle None values properly before rounding to avoid "NoneType has no __round__ method" error
-    # Use pd.Series.apply() with conditional rounding for nullable columns
+    # DBH columns - keep full precision for Field Inventory recalculation
+    # Round DBH and Height to 6 decimal places (preserves precision for volume calculation)
+    # DBH and Height columns - keep original precision from tree generation
+    # Tree Model calculates these with full precision (DBH rounded to 1 decimal, height to 1 decimal)
+    # Field Inventory will use pre-calculated volume columns from Excel instead of recalculating
+    
+    # Filter to only include columns that exist in df
+    tree_model_column_order = [col for col in tree_model_column_order if col in df.columns]
+    df_tree_model = df[tree_model_column_order]
 
-    # DBH columns
-    if 'regen_dbh' in df.columns:
-        df['regen_dbh'] = df['regen_dbh'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
-    if 'sapling_dbh_cm' in df.columns:
-        df['sapling_dbh_cm'] = df['sapling_dbh_cm'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
-    if 'pole_dbh_cm' in df.columns:
-        df['pole_dbh_cm'] = df['pole_dbh_cm'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
-    if 'tree_dbh_cm' in df.columns:
-        df['tree_dbh_cm'] = df['tree_dbh_cm'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
-
-    # Height columns
-    if 'pole_height_m' in df.columns:
-        df['pole_height_m'] = df['pole_height_m'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
-    if 'tree_height_m' in df.columns:
-        df['tree_height_m'] = df['tree_height_m'].apply(lambda x: round(x, 0) if pd.notna(x) else None).astype('Int64')
-
-    # Write to Excel with formatting
+    # Column order for Volumes sheet (includes block_number and total_sample_plots)
+    volumes_column_order = [
+        'fid',
+        'block_name',
+        'block_number',
+        'sample_plot_number',
+        'total_sample_plots',
+        'pole_species_scientific',
+        'pole_dbh_cm',
+        'pole_height_m',
+        'pole_class',
+        'pole_stem_volume_m3',
+        'pole_branch_volume_m3',
+        'pole_tree_volume_m3',
+        'pole_gross_volume_m3',
+        'pole_net_volume_m3',
+        'pole_firewood_m3',
+        'tree_species_scientific',
+        'tree_dbh_cm',
+        'tree_height_m',
+        'tree_class',
+        'tree_stem_volume_m3',
+        'tree_branch_volume_m3',
+        'tree_tree_volume_m3',
+        'tree_gross_volume_m3',
+        'tree_net_volume_m3',
+        'tree_firewood_m3',
+    ]
+    
+    volumes_column_order = [col for col in volumes_column_order if col in df.columns]
+    df_volumes = df[volumes_column_order]
+    
+    # Write to Excel - optimized for speed
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Tree Model', index=False)
-
-        # Get workbook and worksheet for formatting
-        worksheet = writer.sheets['Tree Model']
-
-        # Auto-adjust column widths
-        for column in worksheet.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            worksheet.column_dimensions[column_letter].width = adjusted_width
+        # Sheet 1: Tree Model (original format)
+        df_tree_model.to_excel(writer, sheet_name='Tree Model', index=False)
+        
+        # Sheet 2: Volumes (for verification) - includes block_number and total_sample_plots
+        df_volumes.to_excel(writer, sheet_name='Volumes', index=False)
+    
+    # Set fixed column widths for faster processing
+    from openpyxl import load_workbook
+    wb = load_workbook(filepath)
+    
+    # Set fixed column widths (faster than calculating)
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        for col in ws.columns:
+            col_letter = col[0].column_letter
+            # Use reasonable fixed widths
+            ws.column_dimensions[col_letter].width = 15
+    
+    wb.save(filepath)
 
     # Calculate file size
     file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
@@ -1668,6 +1751,28 @@ def generate_synthetic_trees(
     report(90, "Exporting to GPKG file")
     gpkg_filepath, gpkg_size_mb = export_to_gpkg(trees, calculation_id)
 
+    # Add block number and total sample plots to each tree for Excel export
+    # Get unique blocks and assign block numbers
+    unique_blocks = list(dict.fromkeys(t.get('block_name', '') for t in trees if t.get('block_name')))
+    block_to_number = {block: idx + 1 for idx, block in enumerate(unique_blocks)}
+    
+    # Count plots per block
+    plots_per_block = {}
+    for tree in trees:
+        block_name = tree.get('block_name', 'Unknown')
+        plot_num = tree.get('sample_plot_number')
+        if plot_num and block_name:
+            if block_name not in plots_per_block:
+                plots_per_block[block_name] = set()
+            for pn in str(plot_num).split(','):
+                plots_per_block[block_name].add(pn.strip())
+    
+    # Add block_number and total_sample_plots to each tree
+    for tree in trees:
+        block_name = tree.get('block_name', '')
+        tree['block_number'] = block_to_number.get(block_name, 0)
+        tree['total_sample_plots'] = len(plots_per_block.get(block_name, set()))
+
     report(93, "Exporting to Excel file")
     excel_filepath, excel_size_mb = export_to_excel(trees, calculation_id, db=db)
 
@@ -1744,6 +1849,19 @@ def generate_synthetic_trees(
         }
 
         # Calculate volumes per block (Forest Regulation 2079)
+        # Separate pole (DBH 10-30cm) and tree (DBH >30cm) volumes
+        pole_trees = [t for t in block_trees if 10 <= t.get('dbh_cm', 0) < 30]
+        tree_trees = [t for t in block_trees if t.get('dbh_cm', 0) >= 30]
+
+        # Pole volumes
+        pole_net_volume = sum(t.get('net_volume', 0.0) for t in pole_trees)
+        pole_firewood = sum(t.get('firewood_m3', 0.0) for t in pole_trees)
+        
+        # Tree volumes
+        tree_net_volume = sum(t.get('net_volume', 0.0) for t in tree_trees)
+        tree_firewood = sum(t.get('firewood_m3', 0.0) for t in tree_trees)
+
+        # Total volumes
         total_stem_volume = sum(t.get('stem_volume', 0.0) for t in block_trees)
         total_branch_volume = sum(t.get('branch_volume', 0.0) for t in block_trees)
         total_tree_volume = sum(t.get('tree_volume', 0.0) for t in block_trees)
@@ -1751,19 +1869,32 @@ def generate_synthetic_trees(
         total_net_volume = sum(t.get('net_volume', 0.0) for t in block_trees)
         total_firewood = sum(t.get('firewood_m3', 0.0) for t in block_trees)
 
-        # Convert to per-hectare (plot area in hectares)
-        plot_buffer_m = config.get('plot_buffer_meters', 10)
-        plot_area_ha = (3.14159 * (plot_buffer_m ** 2)) / 10000.0  # hectares per plot
-        total_sampled_area_ha = plot_area_ha * num_plots_in_block
-
-        if total_sampled_area_ha > 0:
-            stem_volume_per_ha = total_stem_volume / total_sampled_area_ha
-            branch_volume_per_ha = total_branch_volume / total_sampled_area_ha
-            tree_volume_per_ha = total_tree_volume / total_sampled_area_ha
-            gross_volume_per_ha = total_gross_volume / total_sampled_area_ha
-            net_volume_per_ha = total_net_volume / total_sampled_area_ha
-            firewood_per_ha = total_firewood / total_sampled_area_ha
+        # Calculate per-hectare using plot factors (matching field inventory method)
+        # Pole: plot factor 100, Tree: plot factor 20
+        # Formula: volume_per_ha = (total_volume / num_plots) * plot_factor
+        if num_plots_in_block > 0:
+            # Calculate average per plot first, then multiply by factor
+            pole_timber_per_ha = (pole_net_volume / num_plots_in_block) * 100
+            pole_firewood_per_ha = (pole_firewood / num_plots_in_block) * 100
+            tree_timber_per_ha = (tree_net_volume / num_plots_in_block) * 20
+            tree_firewood_per_ha = (tree_firewood / num_plots_in_block) * 20
+            
+            # Legacy calculation for comparison
+            plot_buffer_m = config.get('plot_buffer_meters', 10)
+            plot_area_ha = (3.14159 * (plot_buffer_m ** 2)) / 10000.0
+            total_sampled_area_ha = plot_area_ha * num_plots_in_block
+            
+            stem_volume_per_ha = total_stem_volume / total_sampled_area_ha if total_sampled_area_ha > 0 else 0
+            branch_volume_per_ha = total_branch_volume / total_sampled_area_ha if total_sampled_area_ha > 0 else 0
+            tree_volume_per_ha = total_tree_volume / total_sampled_area_ha if total_sampled_area_ha > 0 else 0
+            gross_volume_per_ha = total_gross_volume / total_sampled_area_ha if total_sampled_area_ha > 0 else 0
+            net_volume_per_ha = total_net_volume / total_sampled_area_ha if total_sampled_area_ha > 0 else 0
+            firewood_per_ha = total_firewood / total_sampled_area_ha if total_sampled_area_ha > 0 else 0
         else:
+            pole_timber_per_ha = 0.0
+            pole_firewood_per_ha = 0.0
+            tree_timber_per_ha = 0.0
+            tree_firewood_per_ha = 0.0
             stem_volume_per_ha = 0.0
             branch_volume_per_ha = 0.0
             tree_volume_per_ha = 0.0
@@ -1771,8 +1902,11 @@ def generate_synthetic_trees(
             net_volume_per_ha = 0.0
             firewood_per_ha = 0.0
 
-        # Calculate total volume (net timber + firewood) - matches field inventory calculation
-        total_volume_per_ha = net_volume_per_ha + firewood_per_ha
+        # Total growing stock (timber only) = pole timber + tree timber
+        total_growing_stock = pole_timber_per_ha + tree_timber_per_ha
+        
+        # Total volume (timber + firewood)
+        total_volume_per_ha = pole_timber_per_ha + pole_firewood_per_ha + tree_timber_per_ha + tree_firewood_per_ha
 
         block_dbh_distribution[block_name] = {
             'total_trees': len(block_trees),
@@ -1785,24 +1919,61 @@ def generate_synthetic_trees(
             'gross_volume_m3': round(total_gross_volume, 2),
             'net_volume_m3': round(total_net_volume, 2),
             'firewood_m3': round(total_firewood, 2),
-            # Per-hectare values
+            # Per-hectare values (legacy method - total volume / sampled area)
             'stem_volume_per_ha': round(stem_volume_per_ha, 2),
             'branch_volume_per_ha': round(branch_volume_per_ha, 2),
             'tree_volume_per_ha': round(tree_volume_per_ha, 2),
             'gross_volume_per_ha': round(gross_volume_per_ha, 2),
             'net_volume_per_ha': round(net_volume_per_ha, 2),
             'firewood_per_ha': round(firewood_per_ha, 2),
+            # Per-hectare values (matching field inventory method - plot factor)
+            'pole_timber_m3_per_ha': round(pole_timber_per_ha, 2),
+            'pole_firewood_m3_per_ha': round(pole_firewood_per_ha, 2),
+            'tree_timber_m3_per_ha': round(tree_timber_per_ha, 2),
+            'tree_firewood_m3_per_ha': round(tree_firewood_per_ha, 2),
+            # Total growing stock (pole timber + tree timber)
+            'total_growing_stock_m3_per_ha': round(total_growing_stock, 2),
             # Total volume (timber + firewood) - for UI display
             'volume_per_ha': round(total_volume_per_ha, 2),
         }
 
     # Calculate overall volume totals (Forest Regulation 2079)
+    # Calculate overall volume totals with pole/tree breakdown
+    pole_trees_all = [t for t in trees if 10 <= t.get('dbh_cm', 0) < 30]
+    tree_trees_all = [t for t in trees if t.get('dbh_cm', 0) >= 30]
+    
     total_stem_volume_all = sum(t.get('stem_volume', 0.0) for t in trees)
     total_branch_volume_all = sum(t.get('branch_volume', 0.0) for t in trees)
     total_tree_volume_all = sum(t.get('tree_volume', 0.0) for t in trees)
     total_gross_volume_all = sum(t.get('gross_volume', 0.0) for t in trees)
     total_net_volume_all = sum(t.get('net_volume', 0.0) for t in trees)
     total_firewood_all = sum(t.get('firewood_m3', 0.0) for t in trees)
+    
+    # Pole/tree breakdown using plot factor method
+    total_pole_net = sum(t.get('net_volume', 0.0) for t in pole_trees_all)
+    total_pole_firewood = sum(t.get('firewood_m3', 0.0) for t in pole_trees_all)
+    total_tree_net = sum(t.get('net_volume', 0.0) for t in tree_trees_all)
+    total_tree_firewood = sum(t.get('firewood_m3', 0.0) for t in tree_trees_all)
+    
+    # Calculate per hectare using plot factors
+    if sampling_design.total_points > 0:
+        avg_pole_net_per_plot = total_pole_net / sampling_design.total_points
+        avg_pole_firewood_per_plot = total_pole_firewood / sampling_design.total_points
+        avg_tree_net_per_plot = total_tree_net / sampling_design.total_points
+        avg_tree_firewood_per_plot = total_tree_firewood / sampling_design.total_points
+        
+        pole_timber_per_ha_all = avg_pole_net_per_plot * 100
+        pole_firewood_per_ha_all = avg_pole_firewood_per_plot * 100
+        tree_timber_per_ha_all = avg_tree_net_per_plot * 20
+        tree_firewood_per_ha_all = avg_tree_firewood_per_plot * 20
+    else:
+        pole_timber_per_ha_all = 0
+        pole_firewood_per_ha_all = 0
+        tree_timber_per_ha_all = 0
+        tree_firewood_per_ha_all = 0
+    
+    total_growing_stock_all = pole_timber_per_ha_all + tree_timber_per_ha_all
+    total_volume_per_ha_all = pole_timber_per_ha_all + pole_firewood_per_ha_all + tree_timber_per_ha_all + tree_firewood_per_ha_all
 
     statistics = {
         'total_trees': len(trees),
@@ -1832,13 +2003,22 @@ def generate_synthetic_trees(
         'total_gross_volume_m3': round(total_gross_volume_all, 2),
         'total_net_volume_m3': round(total_net_volume_all, 2),
         'total_firewood_m3': round(total_firewood_all, 2),
-        # Per-hectare values
+        # Per-hectare values (legacy method - total volume / sampled area)
         'stem_volume_per_ha': round(total_stem_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
         'branch_volume_per_ha': round(total_branch_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
         'tree_volume_per_ha': round(total_tree_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
         'gross_volume_per_ha': round(total_gross_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
         'net_volume_per_ha': round(total_net_volume_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
         'firewood_per_ha': round(total_firewood_all / total_plot_area_ha, 2) if total_plot_area_ha > 0 else 0,
+        # Per-hectare values (matching field inventory method - plot factor)
+        'pole_timber_m3_per_ha': round(pole_timber_per_ha_all, 2),
+        'pole_firewood_m3_per_ha': round(pole_firewood_per_ha_all, 2),
+        'tree_timber_m3_per_ha': round(tree_timber_per_ha_all, 2),
+        'tree_firewood_m3_per_ha': round(tree_firewood_per_ha_all, 2),
+        # Total growing stock (pole timber + tree timber)
+        'total_growing_stock_m3_per_ha': round(total_growing_stock_all, 2),
+        # Total volume (timber + firewood)
+        'volume_per_ha': round(total_volume_per_ha_all, 2),
         'block_dbh_distribution': block_dbh_distribution,  # Block-wise DBH class distribution
     }
 

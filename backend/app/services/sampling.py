@@ -32,6 +32,63 @@ from app.services.tree_cover_analysis_optimized import (
 logger = logging.getLogger(__name__)
 
 
+def get_excluded_areas_for_calculation(db: Session, calculation_id: UUID) -> List[Polygon]:
+    """
+    Get excluded areas (private land) from calculation's sub-areas.
+
+    Args:
+        db: Database session
+        calculation_id: Calculation ID
+
+    Returns:
+        List of Shapely Polygon geometries representing excluded areas
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation or not calculation.result_data:
+        return []
+
+    excluded_polygons = []
+    sub_areas = calculation.result_data.get("sub_areas", [])
+
+    for sub_area in sub_areas:
+        if sub_area.get("is_excluded", False):
+            try:
+                from shapely.geometry import shape
+                geom = shape(sub_area["geometry"])
+                if isinstance(geom, Polygon):
+                    excluded_polygons.append(geom)
+                elif isinstance(geom, MultiPolygon):
+                    excluded_polygons.extend(list(geom.geoms))
+            except Exception as e:
+                logger.warning(f"Failed to parse excluded area geometry: {e}")
+                continue
+
+    logger.info(f"Found {len(excluded_polygons)} excluded areas for calculation {calculation_id}")
+    return excluded_polygons
+
+
+def point_in_excluded_area(lon: float, lat: float, excluded_areas: List[Polygon]) -> bool:
+    """
+    Check if a point falls within any excluded area (private land).
+
+    Args:
+        lon: Longitude
+        lat: Latitude
+        excluded_areas: List of excluded area polygons
+
+    Returns:
+        True if point is in excluded area, False otherwise
+    """
+    if not excluded_areas:
+        return False
+
+    point = Point(lon, lat)
+    for excluded_poly in excluded_areas:
+        if excluded_poly.contains(point):
+            return True
+    return False
+
+
 def get_polygon_bounds(geom_wkt: str) -> Tuple[float, float, float, float]:
     """
     Get bounding box of polygon.
@@ -553,6 +610,11 @@ def create_sampling_design(
     # Extract blocks from calculation
     blocks = extract_blocks_from_calculation(db, calculation_id)
 
+    # Get excluded areas (private land) - these areas should NOT have any sample plots
+    excluded_areas = get_excluded_areas_for_calculation(db, calculation_id)
+    if excluded_areas:
+        logger.info(f"Found {len(excluded_areas)} excluded areas (private land) - no plots will be placed here")
+
     # Generate sampling points PER BLOCK
     all_points = []
     block_assignments = []
@@ -673,6 +735,20 @@ def create_sampling_design(
             # Convert pixel centers to (lon, lat) tuples for compatibility
             pixel_points = [(lon, lat) for lon, lat, slope in candidate_pixels]
 
+            # Filter out points in excluded areas (private land)
+            if excluded_areas:
+                original_count = len(pixel_points)
+                pixel_points = [
+                    (lon, lat) for lon, lat in pixel_points
+                    if not point_in_excluded_area(lon, lat, excluded_areas)
+                ]
+                filtered_count = original_count - len(pixel_points)
+                if filtered_count > 0:
+                    logger.info(
+                        f"    - Filtered out {filtered_count} pixels in excluded areas (private land). "
+                        f"{len(pixel_points)} candidate pixels remaining"
+                    )
+
             if block_sampling_type == "systematic":
                 # Systematic sampling from pixel grid
                 # Calculate spacing to get approximately the desired number of samples
@@ -716,7 +792,9 @@ def create_sampling_design(
         else:
             # POLYGON-BASED SAMPLING: Fall back to original approach (no filtering)
             logger.info(f"    - Using full boundary for sampling (no tree cover filter)")
-            sampling_polygon_wkt = block_wkt
+
+            # Apply boundary buffer ONCE here (not in the generation functions)
+            sampling_polygon_wkt = apply_boundary_buffer(block_wkt, block_boundary_buffer)
 
             if block_sampling_type == "systematic":
                 block_area_sqm = float(effective_block_area) * 10000.0
@@ -727,7 +805,7 @@ def create_sampling_design(
                     bounds[0], bounds[1], bounds[2], bounds[3],
                     int(spacing_meters),
                     sampling_polygon_wkt,
-                    block_boundary_buffer
+                    0.0  # Buffer already applied above - don't apply again!
                 )
 
             elif block_sampling_type == "random":
@@ -735,7 +813,7 @@ def create_sampling_design(
                     sampling_polygon_wkt,
                     samples_for_block,
                     block_min_distance,
-                    block_boundary_buffer
+                    0.0  # Buffer already applied above - don't apply again!
                 )
 
             elif block_sampling_type == "stratified":
@@ -743,11 +821,25 @@ def create_sampling_design(
                     sampling_polygon_wkt,
                     samples_for_block,
                     num_strata=max(4, samples_for_block // 2),
-                    boundary_buffer_meters=block_boundary_buffer
+                    boundary_buffer_meters=0.0  # Buffer already applied above - don't apply again!
                 )
 
             else:
                 raise ValueError(f"Invalid sampling_type: {block_sampling_type}")
+
+            # Filter out points in excluded areas (private land)
+            if excluded_areas and block_points:
+                original_count = len(block_points)
+                block_points = [
+                    (lon, lat) for lon, lat in block_points
+                    if not point_in_excluded_area(lon, lat, excluded_areas)
+                ]
+                filtered_count = original_count - len(block_points)
+                if filtered_count > 0:
+                    logger.info(
+                        f"    - Filtered out {filtered_count} points in excluded areas (private land). "
+                        f"{len(block_points)} points remaining"
+                    )
 
         # Store points with block assignment
         for point in block_points:
@@ -792,6 +884,19 @@ def create_sampling_design(
 
     points = all_points
     logger.info(f"Generated total {len(points)} sampling points across {len(blocks)} blocks")
+
+    # DIAGNOSTIC: Log detailed information if no points were generated
+    if not points:
+        logger.error(
+            f"❌ NO POINTS GENERATED - Diagnostics:\n"
+            f"  - Total blocks: {len(blocks)}\n"
+            f"  - Sampling intensity: {float(sampling_intensity_percent)}%\n"
+            f"  - Min samples per block: {min_samples_per_block}\n"
+            f"  - Filter tree cover: {filter_tree_cover}\n"
+            f"  - Filter slope: {filter_slope}\n"
+            f"  - Boundary buffer: {boundary_buffer_meters}m\n"
+            f"  - Block details: {[(name, f'{area:.2f} ha') for _, _, name, area in blocks]}"
+        )
 
     if not points:
         if filter_slope or filter_tree_cover:

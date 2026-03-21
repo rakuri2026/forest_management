@@ -130,16 +130,25 @@ export default function CalculationDetail() {
   // Calculate optimal map orientation based on geometry extent
   useEffect(() => {
     if (calculation?.geometry) {
-      const geoJsonLayer = L.geoJSON(calculation.geometry);
-      const bounds = geoJsonLayer.getBounds();
+      try {
+        const geoJsonLayer = L.geoJSON(calculation.geometry);
+        const bounds = geoJsonLayer.getBounds();
 
-      if (bounds.isValid()) {
-        const width = bounds.getEast() - bounds.getWest();
-        const height = bounds.getNorth() - bounds.getSouth();
+        if (bounds.isValid()) {
+          const width = bounds.getEast() - bounds.getWest();
+          const height = bounds.getNorth() - bounds.getSouth();
 
-        // If width > height, use landscape; otherwise portrait
-        const orientation = width > height ? 'landscape' : 'portrait';
-        setMapOrientation(orientation);
+          // If width > height, use landscape; otherwise portrait
+          const orientation = width > height ? 'landscape' : 'portrait';
+          setMapOrientation(orientation);
+          console.log('Geometry loaded successfully, orientation:', orientation);
+        } else {
+          console.warn('Invalid geometry bounds for calculation');
+          setMapOrientation('portrait');
+        }
+      } catch (error) {
+        console.error('Error processing geometry:', error);
+        setMapOrientation('portrait');
       }
     }
   }, [calculation]);
@@ -152,6 +161,17 @@ export default function CalculationDetail() {
       console.log('Calculation data loaded:', data);
       console.log('Result data keys:', data.result_data ? Object.keys(data.result_data) : 'null');
       console.log('Blocks:', data.result_data?.blocks);
+      
+      // Log geometry info for debugging
+      if (data.geometry) {
+        console.log('Geometry type:', data.geometry.type);
+        console.log('Geometry coordinates:', data.geometry.type === 'Polygon' ? 
+          `Polygon with ${data.geometry.coordinates?.length} rings` : 
+          data.geometry.type === 'MultiPolygon' ? 
+          `MultiPolygon with ${data.geometry.coordinates?.length} polygons` : 'unknown');
+      } else {
+        console.warn('No geometry found in calculation data!');
+      }
       setCalculation(data);
     } catch (err: any) {
       console.error('Error loading calculation:', err);
@@ -2023,7 +2043,7 @@ export default function CalculationDetail() {
                     maxZoom={17}
                   />
                 )}
-                {boundaryVisible && (
+                {boundaryVisible && calculation.geometry && (
                   <GeoJSON
                     data={calculation.geometry}
                     style={{

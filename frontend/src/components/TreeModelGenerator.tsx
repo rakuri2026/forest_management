@@ -480,6 +480,42 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                           </div>
                         </div>
 
+                        {/* Overall Volume Summary */}
+                        {model.algorithm_config && (
+                          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                            <div>
+                              <p className="text-xs text-gray-600">Pole Timber</p>
+                              <p className="text-sm font-bold text-amber-800">
+                                {model.algorithm_config.pole_timber_m3_per_ha?.toFixed(1) || '0'} m³/ha
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Pole Firewood</p>
+                              <p className="text-sm font-bold text-orange-700">
+                                {model.algorithm_config.pole_firewood_m3_per_ha?.toFixed(1) || '0'} m³/ha
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Tree Timber</p>
+                              <p className="text-sm font-bold text-amber-900">
+                                {model.algorithm_config.tree_timber_m3_per_ha?.toFixed(1) || '0'} m³/ha
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Tree Firewood</p>
+                              <p className="text-sm font-bold text-orange-800">
+                                {model.algorithm_config.tree_firewood_m3_per_ha?.toFixed(1) || '0'} m³/ha
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Total Volume</p>
+                              <p className="text-sm font-bold text-red-800">
+                                {model.algorithm_config.volume_per_ha?.toFixed(1) || '0'} m³/ha
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Block-wise DBH Class Distribution (Per Hectare) */}
                         {model.algorithm_config?.block_dbh_distribution && (
                           <div className="mb-3">
@@ -489,10 +525,31 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                                 <div key={blockName} className="bg-gray-50 p-2 rounded">
                                   <p className="text-xs font-medium text-gray-700 mb-1">{blockName} ({blockData.num_plots} plots):</p>
                                   <div className="flex flex-wrap gap-1.5">
-                                    {/* Volume per hectare - prominent display */}
+                                    {/* Volume breakdown per hectare */}
+                                    {blockData.pole_timber_m3_per_ha > 0 && (
+                                      <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs rounded-full">
+                                        Pole Timber: {blockData.pole_timber_m3_per_ha.toFixed(1)} m³/ha
+                                      </span>
+                                    )}
+                                    {blockData.pole_firewood_m3_per_ha > 0 && (
+                                      <span className="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs rounded-full">
+                                        Pole Firewood: {blockData.pole_firewood_m3_per_ha.toFixed(1)} m³/ha
+                                      </span>
+                                    )}
+                                    {blockData.tree_timber_m3_per_ha > 0 && (
+                                      <span className="px-2 py-0.5 bg-amber-200 text-amber-900 text-xs rounded-full">
+                                        Tree Timber: {blockData.tree_timber_m3_per_ha.toFixed(1)} m³/ha
+                                      </span>
+                                    )}
+                                    {blockData.tree_firewood_m3_per_ha > 0 && (
+                                      <span className="px-2 py-0.5 bg-orange-200 text-orange-900 text-xs rounded-full">
+                                        Tree Firewood: {blockData.tree_firewood_m3_per_ha.toFixed(1)} m³/ha
+                                      </span>
+                                    )}
+                                    {/* Total volume per hectare - prominent display */}
                                     {blockData.volume_per_ha !== undefined && blockData.volume_per_ha > 0 && (
-                                      <span className="px-2 py-0.5 bg-orange-100 text-orange-900 text-xs rounded-full font-semibold">
-                                        Volume: {blockData.volume_per_ha.toFixed(1)} m³/ha
+                                      <span className="px-2 py-0.5 bg-red-100 text-red-900 text-xs rounded-full font-semibold">
+                                        Total: {blockData.volume_per_ha.toFixed(1)} m³/ha
                                       </span>
                                     )}
                                     {blockData.dbh_per_ha?.regeneration_1_4cm > 0 && (

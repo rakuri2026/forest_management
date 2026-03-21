@@ -163,26 +163,23 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- Query buildings (Building)
+    -- Query buildings (use generic 'Building' label since table has no name column)
     FOR v_feature_name, v_azimuth IN
         SELECT DISTINCT
-            "Building" as name,
-            degrees(ST_Azimuth(v_centroid, ST_ClosestPoint(geom, v_centroid))) as azimuth
+            'Building' as name,
+            degrees(ST_Azimuth(v_centroid, ST_ClosestPoint(shape, v_centroid))) as azimuth
         FROM buildings.building
-        WHERE ST_DWithin(ST_Transform(v_geom, 32645), ST_Transform(geom, 32645), 100)
-            AND "Building" IS NOT NULL
+        WHERE ST_DWithin(ST_Transform(v_geom, 32645), ST_Transform(shape, 32645), 100)
         LIMIT 10  -- Limit buildings to avoid too many results
     LOOP
-        IF v_feature_name IS NOT NULL AND v_feature_name != '' THEN
-            IF v_azimuth >= 315 OR v_azimuth < 45 THEN
-                v_north_features := array_append(v_north_features, v_feature_name);
-            ELSIF v_azimuth >= 45 AND v_azimuth < 135 THEN
-                v_east_features := array_append(v_east_features, v_feature_name);
-            ELSIF v_azimuth >= 135 AND v_azimuth < 225 THEN
-                v_south_features := array_append(v_south_features, v_feature_name);
-            ELSIF v_azimuth >= 225 AND v_azimuth < 315 THEN
-                v_west_features := array_append(v_west_features, v_feature_name);
-            END IF;
+        IF v_azimuth >= 315 OR v_azimuth < 45 THEN
+            v_north_features := array_append(v_north_features, v_feature_name);
+        ELSIF v_azimuth >= 45 AND v_azimuth < 135 THEN
+            v_east_features := array_append(v_east_features, v_feature_name);
+        ELSIF v_azimuth >= 135 AND v_azimuth < 225 THEN
+            v_south_features := array_append(v_south_features, v_feature_name);
+        ELSIF v_azimuth >= 225 AND v_azimuth < 315 THEN
+            v_west_features := array_append(v_west_features, v_feature_name);
         END IF;
     END LOOP;
 

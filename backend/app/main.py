@@ -28,7 +28,7 @@ from .core.config import settings
 from .core.database import check_db_connection, Base, engine
 from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router
 from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
-from .api import location_search
+from .api import location_search, tiles, user_group
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
     # Startup
     print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     print(f"Debug mode: {settings.DEBUG}")
+    
+    # Check volume debug logging
+    import os
+    if os.environ.get('DEBUG_VOLUME_CALC', '').lower() == 'true':
+        print(">>> DEBUG_VOLUME_CALC enabled - volume calculation logs will be printed <<<")
 
     # Check database connection
     if check_db_connection():
@@ -198,6 +203,19 @@ app.include_router(
     location_search.router,
     prefix="/api/location",
     tags=["Location Search"]
+)
+
+# Include tiles router for raster visualization
+app.include_router(
+    tiles.router,
+    tags=["Raster Tiles"]
+)
+
+# Include user group router
+app.include_router(
+    user_group.router,
+    prefix="/api",
+    tags=["User Group Map"]
 )
 
 

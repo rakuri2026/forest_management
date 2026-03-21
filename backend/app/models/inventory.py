@@ -47,6 +47,11 @@ class TreeSpeciesCoefficient(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # Wood density and taxonomy (added 2026-03-03)
+    wood_density_gm_cm3 = Column(Float, nullable=True)
+    wood_density_source = Column(Text, nullable=True)
+    genus = Column(String(100), nullable=True)
+
     def __repr__(self):
         return f"<TreeSpeciesCoefficient(id={self.id}, name='{self.scientific_name}')>"
 
@@ -145,6 +150,10 @@ class InventoryTree(Base):
     # Mother tree designation
     remark = Column(String(50), nullable=True)  # 'Mother Tree' or 'Felling Tree'
     grid_cell_id = Column(Integer, nullable=True)
+
+    # Diameter classification
+    stand_type = Column(String(20), nullable=True)  # 'Regeneration', 'Pole', 'Tree'
+    dbh_class = Column(String(50), nullable=True)   # 'Small pole (10-20)', etc.
 
     # Metadata
     local_name = Column(String(100), nullable=True)

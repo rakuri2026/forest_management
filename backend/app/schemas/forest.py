@@ -179,3 +179,10 @@ class GenerateMapsRequest(BaseModel):
     generate_landcover_change_map: bool = False
     generate_soil_map: bool = False
     generate_forest_health_map: bool = False
+
+
+class AddSpeciesRequest(BaseModel):
+    """Schema for adding a species to a calculation"""
+    species_id: int = Field(..., description="ID of species from tree_species_coefficients table")
+    role: str = Field("Associate", description="Role of the species (Dominant, Co-dominant, Associate, Occasional, Rare)")
+    availability_rank: int = Field(3, ge=1, le=4, description="Availability rank (1=Dominant, 2=Co-dominant, 3=Associate, 4=Occasional/Rare)")

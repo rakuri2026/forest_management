@@ -25,6 +25,7 @@ from ..schemas.forest import (
     GenerateMapsRequest,
     AddSpeciesRequest,
 )
+from ..schemas.map_creation import MapCreationRequest
 from ..schemas.tree_model import (
     GenerateTreeModelRequest,
     TreeModelResponse,
@@ -42,8 +43,14 @@ from ..services.analysis import analyze_forest_boundary
 from ..services.fieldbook import generate_fieldbook_points
 from ..services.sampling import create_sampling_design
 from ..services.map_generator import get_map_generator
-from ..services.tree_cover_analysis import calculate_accessible_forest_area
-from shapely.geometry import mapping
+from ..services.tree_cover_analysis import calculate_accessible_forest_area, calculate_block_tree_cover_areas
+from ..services.map_creation_service import (
+    geojson_to_wkt,
+    process_map_creation_data,
+    validate_map_creation_data,
+    prepare_block_analysis_data,
+)
+from shapely.geometry import mapping, shape
 from shapely import wkb
 from fastapi.responses import StreamingResponse
 import io
@@ -463,7 +470,7 @@ async def upload_forest_boundary(
                 fieldbook_result = generate_fieldbook_points(
                     db=db,
                     calculation_id=calc_id,
-                    interpolation_distance=50.0,
+                    interpolation_distance=100.0,
                     extract_elevation=True,
                     calculate_reference=False  # Never auto-calculate references (too slow)
                 )
@@ -526,11 +533,27 @@ async def upload_forest_boundary(
         )
 
     # Get geometry as GeoJSON
-    geojson_query = db.query(
-        func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
-    ).filter(Calculation.id == calc_id).first()
+    geometry_json = None
+    try:
+        # First check if geometry is valid
+        validity_check = db.query(
+            func.ST_IsValid(Calculation.boundary_geom).label("is_valid")
+        ).filter(Calculation.id == calculation_id).first()
+        
+        if validity_check and not validity_check.is_valid:
+            print(f"WARNING: Geometry for calculation {calculation_id} is invalid in database")
+        
+        geojson_query = db.query(
+            func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
+        ).filter(Calculation.id == calculation_id).first()
 
-    geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+        if geojson_query and geojson_query.geojson:
+            geometry_json = json.loads(geojson_query.geojson)
+            print(f"Successfully converted geometry to GeoJSON for calculation {calculation_id}")
+        else:
+            print(f"WARNING: No geometry found for calculation {calculation_id}")
+    except Exception as e:
+        print(f"ERROR: Failed to convert geometry to GeoJSON for calculation {calculation_id}: {e}")
 
     # Filter out removed species from potential_species
     result_data = calculation.result_data or {}
@@ -549,6 +572,238 @@ async def upload_forest_boundary(
             ]
             # Update count
             result_data["species_count"] = len(result_data["potential_species"])
+
+    return CalculationResponse(
+        id=calculation.id,
+        user_id=calculation.user_id,
+        uploaded_filename=calculation.uploaded_filename,
+        forest_name=calculation.forest_name,
+        block_name=calculation.block_name,
+        status=calculation.status,
+        processing_time_seconds=calculation.processing_time_seconds,
+        error_message=calculation.error_message,
+        created_at=calculation.created_at,
+        completed_at=calculation.completed_at,
+        geometry=geometry_json,
+        result_data=result_data
+    )
+
+
+@router.post("/create-from-map", response_model=CalculationResponse, status_code=status.HTTP_201_CREATED)
+async def create_forest_from_map(
+    request: MapCreationRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create forest boundary through interactive map creation
+
+    Allows users to create forest boundaries by:
+    - Drawing on map directly
+    - Auto-creating from GPS points
+    - Splitting into blocks
+    - Defining sub-areas
+
+    The created boundary will be analyzed the same way as uploaded files.
+    """
+    import datetime
+
+    # Validate map creation data
+    validation_result = validate_map_creation_data(
+        request.outer_boundary,
+        [block.model_dump() for block in request.blocks]
+    )
+
+    if not validation_result["valid"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Validation failed: {'; '.join(validation_result['errors'])}"
+        )
+
+    # Process map creation data
+    try:
+        boundary_wkt, metadata = process_map_creation_data(
+            request.outer_boundary,
+            [block.model_dump() for block in request.blocks],
+            gps_points=[point.model_dump() for point in request.gps_points] if request.gps_points else None,
+            sub_areas=[area.model_dump() for area in request.sub_areas] if request.sub_areas else None,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    # Prepare blocks for analysis
+    blocks_for_analysis = prepare_block_analysis_data(
+        [block.model_dump() for block in request.blocks]
+    )
+
+    # Create initial result_data with blocks
+    initial_result_data = {
+        "total_blocks": len(blocks_for_analysis),
+        "blocks": blocks_for_analysis,
+        "creation_method": "map_creation",
+    }
+
+    # Add GPS points and sub-areas to metadata
+    if metadata.get("gps_points"):
+        initial_result_data["gps_points"] = metadata["gps_points"]
+        initial_result_data["gps_points_count"] = metadata["gps_points_count"]
+
+    if metadata.get("sub_areas"):
+        initial_result_data["sub_areas"] = metadata["sub_areas"]
+        initial_result_data["sub_areas_count"] = metadata["sub_areas_count"]
+
+        # DEBUG LOGGING: Track sub-area geometries
+        print(f"\n{'='*60}")
+        print(f"📍 SUB-AREAS RECEIVED: {metadata['sub_areas_count']} sub-areas")
+        for idx, sub_area in enumerate(metadata["sub_areas"]):
+            geom = sub_area.get("geometry", {})
+            coords = geom.get("coordinates", [])
+            area_ha = sub_area.get("area_hectares", 0)
+            category = sub_area.get("category", "unknown")
+            name = sub_area.get("name", f"SubArea {idx+1}")
+
+            print(f"  Sub-area #{idx+1}: {name}")
+            print(f"    Category: {category}")
+            print(f"    Area: {area_ha:.4f} ha")
+            print(f"    Geometry type: {geom.get('type', 'unknown')}")
+            if coords:
+                # Show first coordinate to verify it's not block coordinates
+                first_ring = coords[0] if coords else []
+                if first_ring and len(first_ring) > 0:
+                    first_point = first_ring[0]
+                    print(f"    First coordinate: [{first_point[0]:.6f}, {first_point[1]:.6f}]")
+                    print(f"    Total points: {len(first_ring)}")
+        print(f"{'='*60}\n")
+
+        # Track excluded area (private land)
+        if metadata.get("excluded_area_hectares"):
+            initial_result_data["excluded_area_hectares"] = metadata["excluded_area_hectares"]
+            print(f"  Excluded area total: {metadata['excluded_area_hectares']:.4f} ha")
+
+    # Create Calculation record
+    calculation = Calculation(
+        user_id=current_user.id,
+        uploaded_filename="map_created_boundary.geojson",
+        forest_name=request.forest_name,
+        boundary_geom=boundary_wkt,
+        status=CalculationStatus.PROCESSING,
+        result_data=initial_result_data,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+    )
+
+    db.add(calculation)
+    db.commit()
+    db.refresh(calculation)
+
+    # Prepare analysis options
+    analysis_options = request.analysis_options or {}
+    map_options = request.map_options or {}
+
+    # Run analysis
+    try:
+        result_data, processing_time_seconds = await analyze_forest_boundary(
+            calculation.id,
+            db,
+            options=analysis_options
+        )
+
+        # Update calculation with results
+        calculation.result_data = result_data
+        calculation.status = CalculationStatus.COMPLETED
+        calculation.completed_at = datetime.datetime.now(datetime.timezone.utc)
+        calculation.processing_time_seconds = processing_time_seconds
+
+        # DEBUG LOGGING: Verify sub-areas survived analysis
+        if result_data.get("sub_areas"):
+            print(f"\n✓ SUB-AREAS AFTER ANALYSIS: {result_data.get('sub_areas_count', len(result_data['sub_areas']))} sub-areas preserved")
+            for idx, sub_area in enumerate(result_data["sub_areas"]):
+                print(f"  ✓ {sub_area.get('name', f'SubArea {idx+1}')}: {sub_area.get('area_hectares', 0):.4f} ha")
+        else:
+            print(f"\n⚠️  WARNING: No sub-areas in result_data after analysis!")
+            print(f"   Initial sub-areas count: {initial_result_data.get('sub_areas_count', 0)}")
+
+        flag_modified(calculation, "result_data")
+        db.commit()
+        db.refresh(calculation)
+
+        # Auto-generate fieldbook if requested
+        if analysis_options.get('auto_generate_fieldbook', True):
+            try:
+                print(f"🔄 Auto-generating fieldbook for calculation {calculation.id}...")
+                result = generate_fieldbook_points(  # No await - this is a sync function
+                    db=db,                              # db FIRST (correct order)
+                    calculation_id=calculation.id,       # calculation_id SECOND
+                    interpolation_distance=100.0,
+                    extract_elevation=True,
+                    calculate_reference=False
+                )
+                print(f"✓ Fieldbook auto-generated: {result.total_points} points created")
+
+                # Verify data is in database immediately after generation
+                from app.models.fieldbook import Fieldbook
+                verify_count = db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation.id).count()
+                print(f"✓ Verification in endpoint: {verify_count} fieldbook points in database")
+            except Exception as e:
+                print(f"⚠️  Warning: Fieldbook generation failed: {e}")
+                import traceback
+                traceback.print_exc()  # Show full error for debugging
+
+        # Auto-generate sampling if requested
+        if analysis_options.get('auto_generate_sampling', True):
+            try:
+                print(f"🔄 Auto-generating sampling design for calculation {calculation.id}...")
+                result = create_sampling_design(  # No await - this is a sync function
+                    db=db,                              # db FIRST
+                    calculation_id=calculation.id,      # calculation_id SECOND
+                    sampling_type="systematic",         # Correct parameter name
+                    sampling_intensity_percent=Decimal("0.5"),  # 0.5% intensity
+                    min_samples_per_block=5,
+                    plot_shape="circular",
+                    plot_radius_meters=Decimal("12.6156")  # 500 sqm circular plot
+                )
+                print(f"✓ Sampling auto-generated: {result.total_plots} plots created")
+
+                # Verify data is in database immediately after generation
+                from app.models.sampling import SamplingDesign
+                verify_count = db.query(SamplingDesign).filter(SamplingDesign.calculation_id == calculation.id).count()
+                print(f"✓ Verification in endpoint: {verify_count} sampling designs in database")
+            except Exception as e:
+                print(f"⚠️  Warning: Sampling generation failed: {e}")
+                import traceback
+                traceback.print_exc()  # Show full error for debugging
+
+    except Exception as e:
+        calculation.status = CalculationStatus.FAILED
+        calculation.error_message = str(e)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis failed: {str(e)}"
+        )
+
+    # Prepare response
+    geometry_json = None
+    if calculation.boundary_geom:
+        try:
+            geom_wkb = db.execute(
+                text("SELECT ST_AsEWKB(:geom) as geom"),
+                {"geom": calculation.boundary_geom}
+            ).scalar()
+            if geom_wkb:
+                geom = wkb.loads(bytes(geom_wkb))
+                geometry_json = mapping(geom)
+        except Exception as e:
+            print(f"Error converting geometry: {e}")
+
+    result_data = calculation.result_data or {}
+
+    # Final verification before returning response
+    from app.models.fieldbook import Fieldbook
+    final_count = db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation.id).count()
+    print(f"✓ Final verification before response: {final_count} fieldbook points in database")
 
     return CalculationResponse(
         id=calculation.id,
@@ -910,6 +1165,119 @@ async def generate_maps(
         'not_implemented': not_implemented,
         'message': f"Generated {len(generated_maps)} maps successfully. {len(failed_maps)} failed. {len(not_implemented)} not yet implemented."
     }
+
+
+@router.post("/calculations/{calculation_id}/tree-cover-areas")
+async def calculate_and_store_tree_cover_areas(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate tree cover areas for all blocks and store in calculation result_data.
+
+    Uses ratio-based approach to ensure consistency:
+    1. Get authoritative boundary area from PostGIS geometry
+    2. Count total pixels and tree pixels within boundary
+    3. Calculate tree coverage ratio = tree_pixels / total_pixels
+    4. Effective area = boundary_area × ratio
+
+    This ensures pixel-based tree cover calculations align with geometry-based areas.
+
+    **Returns:**
+    - Block-wise tree cover statistics
+    - Stores results in calculation.result_data['tree_cover_areas']
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    from ..models.user import UserRole
+    if calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this calculation"
+        )
+
+    # Get blocks from result_data
+    result_data = calculation.result_data or {}
+    blocks = result_data.get("blocks", [])
+
+    if not blocks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no blocks. Analysis may not be complete."
+        )
+
+    # Prepare blocks for tree cover calculation
+    # Need to convert GeoJSON to WKT for the service function
+    blocks_for_calc = []
+    for block in blocks:
+        # Try to get geometry in various formats
+        block_geom = block.get("geometry_wkt") or block.get("geometry")
+
+        if not block_geom:
+            continue
+
+        # Convert to WKT if it's GeoJSON
+        try:
+            if isinstance(block_geom, dict):
+                # It's GeoJSON - convert to WKT
+                geom_shape = shape(block_geom)
+                block_geom_wkt = geom_shape.wkt
+            elif isinstance(block_geom, str):
+                # It's already WKT string
+                block_geom_wkt = block_geom
+            else:
+                continue
+
+            blocks_for_calc.append({
+                "block_name": block.get("block_name", f"Block {block.get('block_number', '?')}"),
+                "geometry": block_geom_wkt
+            })
+        except Exception as e:
+            print(f"Error converting geometry for block {block.get('block_name')}: {e}")
+            continue
+
+    if not blocks_for_calc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No blocks with valid geometry found. Total blocks: {len(blocks)}"
+        )
+
+    # Calculate tree cover areas
+    try:
+        tree_cover_results = calculate_block_tree_cover_areas(db, blocks_for_calc)
+
+        # Store in calculation result_data
+        if result_data is None:
+            result_data = {}
+
+        result_data['tree_cover_areas'] = tree_cover_results
+        calculation.result_data = result_data
+        flag_modified(calculation, "result_data")
+        db.commit()
+
+        return {
+            "calculation_id": str(calculation_id),
+            "forest_name": calculation.forest_name,
+            "total_blocks": len(tree_cover_results),
+            "tree_cover_areas": tree_cover_results,
+            "message": "Tree cover areas calculated and stored successfully"
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating tree cover areas: {str(e)}"
+        )
 
 
 @router.get("/calculations/{calculation_id}/accessible-area")

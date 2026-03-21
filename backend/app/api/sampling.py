@@ -298,7 +298,7 @@ async def get_sampling_points(
         clipped_features = preclip_topographic_features(
             db=db,
             boundary_wkt=boundary_wkt,
-            buffer_meters=1000.0
+            buffer_meters=100.0
         )
 
     # Build points array
@@ -339,7 +339,7 @@ async def get_sampling_points(
                 longitude=lon,
                 latitude=lat,
                 clipped_features=clipped_features,
-                search_radius_meters=1000.0,
+                search_radius_meters=100.0,
                 prefer_rivers=prefer_rivers,
                 min_distance_threshold=min_feature_distance
             )

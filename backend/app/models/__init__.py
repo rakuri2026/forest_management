@@ -14,6 +14,14 @@ from .inventory import (
 from .fieldbook import Fieldbook
 from .sampling import SamplingDesign
 from .biodiversity import BiodiversitySpecies, CalculationBiodiversity
+from .synthetic_tree_model import SyntheticTreeModel
+from .field_inventory import (
+    FieldInventoryCalculation,
+    FieldInventorySamplePlot,
+    FieldInventoryMeasurement,
+    FieldInventoryBlockSummary
+)
+from .user_group import UserGroupExtent, UserGroupBuilding
 
 __all__ = [
     "User",
@@ -34,4 +42,11 @@ __all__ = [
     "SamplingDesign",
     "BiodiversitySpecies",
     "CalculationBiodiversity",
+    "SyntheticTreeModel",
+    "FieldInventoryCalculation",
+    "FieldInventorySamplePlot",
+    "FieldInventoryMeasurement",
+    "FieldInventoryBlockSummary",
+    "UserGroupExtent",
+    "UserGroupBuilding",
 ]

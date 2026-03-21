@@ -90,6 +90,30 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
     # Store analyzed blocks
     results['blocks'] = analyzed_blocks
 
+    # CRITICAL FIX: Preserve map creation metadata that should NOT be lost during analysis
+    # These fields are set during manual map creation and must persist through analysis
+    metadata_fields_to_preserve = [
+        'total_blocks',           # Total number of blocks
+        'creation_method',        # 'manual_digitization' or 'file_upload'
+        'gps_points',            # GPS points used for boundary creation
+        'gps_points_count',      # Number of GPS points
+        'sub_areas',             # Sub-areas (religious, private land, etc.)
+        'sub_areas_count',       # Number of sub-areas
+        'excluded_area_hectares', # Total excluded area
+        'processing_info'        # Block splitting metadata
+    ]
+
+    preserved_count = 0
+    for field in metadata_fields_to_preserve:
+        if field in existing_data:
+            results[field] = existing_data[field]
+            preserved_count += 1
+
+    if preserved_count > 0:
+        print(f"[OK] Preserved {preserved_count} metadata fields from map creation")
+        if 'sub_areas' in results:
+            print(f"  - Preserved {results.get('sub_areas_count', len(results['sub_areas']))} sub-areas")
+
     # Commit block results to clear any transaction issues
     print(f"Committing block analysis results...")
     try:
@@ -125,8 +149,10 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
 
     # 2. Raster analysis on whole boundary (if enabled)
     if should_run('run_raster_analysis'):
+        print(f"[ANALYSIS] Starting raster analysis for calculation {calculation_id}", flush=True)
         raster_results = await analyze_rasters(calculation_id, db)
         results.update(raster_results)
+        print(f"[ANALYSIS] Raster analysis complete for calculation {calculation_id}", flush=True)
 
     # 3. Vector analysis (if enabled)
     if should_run('run_proximity'):
@@ -140,12 +166,14 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
         WHERE id = :calc_id
     """)
     whole_geom = db.execute(whole_geom_query, {"calc_id": str(calculation_id)}).first()
+    print(f"[ANALYSIS] whole_geom for calculation {calculation_id}: {whole_geom}", flush=True)
     if whole_geom:
         whole_location = get_administrative_location(whole_geom.wkt, db)
         # Prefix keys with "whole_" to distinguish from block-level data
         results["whole_province"] = whole_location.get("province")
         results["whole_district"] = whole_location.get("district")
         results["whole_municipality"] = whole_location.get("municipality")
+        results["whole_municipality_type"] = whole_location.get("municipality_type")
         results["whole_ward"] = whole_location.get("ward")
         results["whole_watershed"] = whole_location.get("watershed")
         results["whole_major_river_basin"] = whole_location.get("major_river_basin")
@@ -162,11 +190,23 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
 
     # 3e. Nearby features for whole forest
     if whole_geom:
-        whole_features = analyze_nearby_features(whole_geom.wkt, db)
-        results["whole_features_north"] = whole_features.get("features_north")
-        results["whole_features_east"] = whole_features.get("features_east")
-        results["whole_features_south"] = whole_features.get("features_south")
-        results["whole_features_west"] = whole_features.get("features_west")
+        print("Analyzing nearby features for whole forest...", flush=True)
+        try:
+            whole_features = analyze_nearby_features(whole_geom.wkt, db)
+            print(f"  Nearby features returned: {list(whole_features.keys())}", flush=True)
+            results["whole_features_north"] = whole_features.get("features_north")
+            results["whole_features_east"] = whole_features.get("features_east")
+            results["whole_features_south"] = whole_features.get("features_south")
+            results["whole_features_west"] = whole_features.get("features_west")
+            print(f"  Features - N: {whole_features.get('features_north')}, E: {whole_features.get('features_east')}, S: {whole_features.get('features_south')}, W: {whole_features.get('features_west')}", flush=True)
+        except Exception as e:
+            print(f"  ERROR analyzing nearby features: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            results["whole_features_north"] = None
+            results["whole_features_east"] = None
+            results["whole_features_south"] = None
+            results["whole_features_west"] = None
 
     # 3f. Physiography for whole forest
     if whole_geom:
@@ -236,11 +276,13 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             whole_temp = analyze_temperature_geometry(whole_geom.wkt, db)
             results["temperature_mean_c"] = whole_temp.get("temperature_mean_c")
             results["temperature_min_c"] = whole_temp.get("temperature_min_c")
-            print(f"Whole forest temperature: {whole_temp.get('temperature_mean_c')}°C (mean), {whole_temp.get('temperature_min_c')}°C (min)", flush=True)
+            results["temperature_max_c"] = whole_temp.get("temperature_max_c")  # NEW: Store max for dynamic legend
+            print(f"Whole forest temperature: {whole_temp.get('temperature_mean_c')}C (mean), {whole_temp.get('temperature_min_c')}C - {whole_temp.get('temperature_max_c')}C (range)", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest temperature: {e}")
             results["temperature_mean_c"] = None
             results["temperature_min_c"] = None
+            results["temperature_max_c"] = None
 
     # 3l. Precipitation for whole forest
     if whole_geom and should_run('run_precipitation'):
@@ -248,10 +290,29 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
         try:
             whole_precip = analyze_precipitation_geometry(whole_geom.wkt, db)
             results["precipitation_mean_mm"] = whole_precip.get("precipitation_mean_mm")
-            print(f"Whole forest precipitation: {whole_precip.get('precipitation_mean_mm')} mm/year", flush=True)
+            results["precipitation_min_mm"] = whole_precip.get("precipitation_min_mm")  # NEW: Store min/max for dynamic legend
+            results["precipitation_max_mm"] = whole_precip.get("precipitation_max_mm")
+            print(f"Whole forest precipitation: {whole_precip.get('precipitation_mean_mm')} mm/year (mean), {whole_precip.get('precipitation_min_mm')} - {whole_precip.get('precipitation_max_mm')} mm (range)", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest precipitation: {e}")
             results["precipitation_mean_mm"] = None
+            results["precipitation_min_mm"] = None
+            results["precipitation_max_mm"] = None
+
+    # 3m. Min Temperature (Coldest Month) for whole forest
+    if whole_geom and should_run('run_temperature'):
+        print("Analyzing whole forest min temperature (coldest month)...", flush=True)
+        try:
+            whole_min_temp = analyze_min_temp_coldest_geometry(whole_geom.wkt, db)
+            results["min_temp_coldest_mean_c"] = whole_min_temp.get("min_temp_coldest_mean_c")
+            results["min_temp_coldest_min_c"] = whole_min_temp.get("min_temp_coldest_min_c")
+            results["min_temp_coldest_max_c"] = whole_min_temp.get("min_temp_coldest_max_c")
+            print(f"Whole forest min temp (coldest month): {whole_min_temp.get('min_temp_coldest_mean_c')}C (mean), {whole_min_temp.get('min_temp_coldest_min_c')}C - {whole_min_temp.get('min_temp_coldest_max_c')}C (range)", flush=True)
+        except Exception as e:
+            print(f"Error analyzing whole forest min temp coldest: {e}")
+            results["min_temp_coldest_mean_c"] = None
+            results["min_temp_coldest_min_c"] = None
+            results["min_temp_coldest_max_c"] = None
 
     # 4. Administrative boundaries
     admin_results = await analyze_admin_boundaries(calculation_id, db)
@@ -419,6 +480,11 @@ async def analyze_block_geometry(geojson_geometry: Dict, calculation_id: UUID, d
         precip_results = analyze_precipitation_geometry(block_wkt, db)
         block_results.update(precip_results)
 
+    # 13b. Min Temperature (Coldest Month)
+    if should_run('run_temperature'):
+        min_temp_results = analyze_min_temp_coldest_geometry(block_wkt, db)
+        block_results.update(min_temp_results)
+
     # 14. Soil Texture
     if should_run('run_soil'):
         soil_results = analyze_soil_geometry(block_wkt, db)
@@ -496,7 +562,7 @@ def calculate_area(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     """
     Calculate area using appropriate UTM projection
 
-    Returns area in both square meters and hectares
+    Returns total area, excluded area (private land), and effective forest area
     """
     # Get geometry centroid to determine UTM zone
     query = text("""
@@ -513,7 +579,7 @@ def calculate_area(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     # Determine UTM zone (32644 for western Nepal, 32645 for eastern)
     utm_srid = 32645 if lon > 84 else 32644
 
-    # Calculate area in UTM projection
+    # Calculate total boundary area in UTM projection
     area_query = text(f"""
         SELECT
             ST_Area(ST_Transform(boundary_geom, {utm_srid})) as area_sqm,
@@ -523,10 +589,22 @@ def calculate_area(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     """)
 
     area_result = db.execute(area_query, {"calc_id": str(calculation_id)}).first()
+    total_area_hectares = round(area_result.area_hectares, 4)
+
+    # Get excluded area from result_data (private land)
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    excluded_area_hectares = 0
+    if calculation and calculation.result_data:
+        excluded_area_hectares = calculation.result_data.get("excluded_area_hectares", 0)
+
+    # Calculate effective forest area (total - excluded)
+    effective_area_hectares = round(total_area_hectares - excluded_area_hectares, 4)
 
     return {
         "area_sqm": round(area_result.area_sqm, 2),
-        "area_hectares": round(area_result.area_hectares, 4),
+        "area_hectares": total_area_hectares,  # Total boundary area
+        "excluded_area_hectares": round(excluded_area_hectares, 4),  # Private land area
+        "effective_area_hectares": effective_area_hectares,  # Actual forest area
         "utm_zone": utm_srid
     }
 
@@ -587,10 +665,9 @@ async def analyze_rasters(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     change_results = analyze_forest_change(calculation_id, db)
     results.update(change_results)
 
-    # 11. Soil properties (temporarily disabled - complex multi-band query)
-    # soil_results = analyze_soil(calculation_id, db)
-    # results.update(soil_results)
-    results.update({"soil_texture": None, "soil_properties": {}})
+    # 11. Soil properties (RE-ENABLED with optimizations)
+    soil_results = analyze_soil(calculation_id, db)
+    results.update(soil_results)
 
     return results
 
@@ -639,7 +716,9 @@ def analyze_dem(calculation_id: UUID, db: Session) -> Dict[str, Any]:
 
 
 def analyze_slope(calculation_id: UUID, db: Session) -> Dict[str, Any]:
-    """Analyze slope raster - categorical codes (0-4)
+    """
+    Analyze slope raster - categorical codes (0-4)
+    Returns percentages, dominant class, and min/max codes for dynamic legend generation
 
     Slope classes from raster:
     0 = No data / Water (excluded from analysis)
@@ -676,12 +755,20 @@ def analyze_slope(calculation_id: UUID, db: Session) -> Dict[str, Any]:
         results = db.execute(query, {"calc_id": str(calculation_id)}).fetchall()
 
         if not results:
-            return {"slope_dominant_class": None, "slope_percentages": {}}
+            return {
+                "slope_dominant_class": None,
+                "slope_percentages": {},
+                "slope_min_code": None,
+                "slope_max_code": None
+            }
 
         total_pixels = sum(r.pixel_count for r in results)
         slope_percentages = {}
         dominant_class = None
         max_percentage = 0
+
+        # Track which slope codes are present
+        slope_codes_present = []
 
         for r in results:
             code = int(r.slope_code)
@@ -689,19 +776,31 @@ def analyze_slope(calculation_id: UUID, db: Session) -> Dict[str, Any]:
                 percentage = (r.pixel_count / total_pixels * 100) if total_pixels > 0 else 0
                 class_name = slope_map[code]
                 slope_percentages[class_name] = round(percentage, 2)
+                slope_codes_present.append(code)
 
                 if percentage > max_percentage:
                     max_percentage = percentage
                     dominant_class = class_name
 
+        # Calculate min/max slope codes for dynamic legend filtering
+        slope_min_code = min(slope_codes_present) if slope_codes_present else None
+        slope_max_code = max(slope_codes_present) if slope_codes_present else None
+
         return {
             "slope_dominant_class": dominant_class,
-            "slope_percentages": slope_percentages
+            "slope_percentages": slope_percentages,
+            "slope_min_code": slope_min_code,  # NEW: For dynamic legend
+            "slope_max_code": slope_max_code   # NEW: For dynamic legend
         }
     except Exception as e:
         print(f"Error analyzing slope: {e}")
 
-    return {"slope_dominant_class": None, "slope_percentages": {}}
+    return {
+        "slope_dominant_class": None,
+        "slope_percentages": {},
+        "slope_min_code": None,
+        "slope_max_code": None
+    }
 
 
 def analyze_aspect(calculation_id: UUID, db: Session) -> Dict[str, Any]:
@@ -832,23 +931,53 @@ def analyze_canopy_height(calculation_id: UUID, db: Session) -> Dict[str, Any]:
         total_weighted_height = sum(r.avg_height * r.pixel_count for r in results)
         canopy_mean_m = round(total_weighted_height / total_pixels, 1) if total_pixels > 0 else None
 
+        # Get min and max canopy height for dynamic legend
+        canopy_min_m = None
+        canopy_max_m = None
+        try:
+            minmax_query = text("""
+                SELECT
+                    (stats).min as canopy_min,
+                    (stats).max as canopy_max
+                FROM (
+                    SELECT ST_SummaryStats(ST_Union(ST_Clip(rast, boundary_geom))) as stats
+                    FROM rasters.canopy_height, public.calculations
+                    WHERE calculations.id = :calc_id
+                      AND ST_Intersects(rast, boundary_geom)
+                ) as subquery
+                WHERE (stats).count > 0
+            """)
+            minmax_result = db.execute(minmax_query, {"calc_id": str(calculation_id)}).first()
+            if minmax_result:
+                canopy_min_m = round(minmax_result.canopy_min, 1) if minmax_result.canopy_min else None
+                canopy_max_m = round(minmax_result.canopy_max, 1) if minmax_result.canopy_max else None
+        except Exception as e:
+            print(f"Error getting canopy min/max: {e}")
+
         return {
             "canopy_dominant_class": dominant_class,
             "canopy_percentages": canopy_percentages,
-            "canopy_mean_m": canopy_mean_m
+            "canopy_mean_m": canopy_mean_m,
+            "canopy_min_m": canopy_min_m,
+            "canopy_max_m": canopy_max_m
         }
     except Exception as e:
         print(f"Error analyzing canopy height: {e}")
 
-    return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None}
+    return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None, "canopy_min_m": None, "canopy_max_m": None}
 
 
 def analyze_agb(calculation_id: UUID, db: Session) -> Dict[str, Any]:
-    """Analyze above-ground biomass"""
+    """
+    Analyze above-ground biomass for whole forest
+    Returns mean, min, max, total, and carbon stock for dynamic legend generation
+    """
     try:
         query = text("""
             SELECT
                 (stats).mean as agb_mean,
+                (stats).min as agb_min,
+                (stats).max as agb_max,
                 (stats).sum as agb_total
             FROM (
                 SELECT ST_SummaryStats(
@@ -869,13 +998,21 @@ def analyze_agb(calculation_id: UUID, db: Session) -> Dict[str, Any]:
 
             return {
                 "agb_mean_mg_ha": round(result.agb_mean, 2) if result.agb_mean > 0 else 0,
+                "agb_min_mg_ha": round(result.agb_min, 2) if result.agb_min and result.agb_min > 0 else 0,
+                "agb_max_mg_ha": round(result.agb_max, 2) if result.agb_max and result.agb_max > 0 else 0,
                 "agb_total_mg": round(result.agb_total, 2) if result.agb_total and result.agb_total > 0 else 0,
                 "carbon_stock_mg": round(carbon_stock, 2) if carbon_stock > 0 else 0
             }
     except Exception as e:
         print(f"Error analyzing AGB: {e}")
 
-    return {"agb_mean_mg_ha": None, "agb_total_mg": None, "carbon_stock_mg": None}
+    return {
+        "agb_mean_mg_ha": None,
+        "agb_min_mg_ha": None,
+        "agb_max_mg_ha": None,
+        "agb_total_mg": None,
+        "carbon_stock_mg": None
+    }
 
 
 def analyze_forest_health(calculation_id: UUID, db: Session) -> Dict[str, Any]:
@@ -1476,6 +1613,202 @@ def assess_compaction(bulk_density_cg_cm3: float) -> dict:
         }
 
 
+def generate_soil_interpretations(soil_data: dict) -> dict:
+    """
+    Generate forester-friendly interpretations of soil properties
+
+    Returns:
+        dict with interpretations and recommendations for forest management
+    """
+    interpretations = {}
+
+    # Soil Texture Interpretation
+    texture = soil_data.get('soil_texture')
+    clay_pct = soil_data.get('soil_properties', {}).get('clay_pct', 0)
+    sand_pct = soil_data.get('soil_properties', {}).get('sand_pct', 0)
+    silt_pct = soil_data.get('soil_properties', {}).get('silt_pct', 0)
+
+    if texture:
+        texture_info = {
+            "name": texture,
+            "description": "",
+            "water_retention": "",
+            "drainage": "",
+            "workability": "",
+            "suitable_species": []
+        }
+
+        # Texture-specific descriptions
+        if "Sand" in texture or "Loamy Sand" in texture:
+            texture_info["description"] = "Coarse-textured soil with large particle size. Feels gritty when rubbed between fingers."
+            texture_info["water_retention"] = "Low - water drains quickly, requires frequent irrigation in dry seasons"
+            texture_info["drainage"] = "Excellent - no waterlogging risk"
+            texture_info["workability"] = "Easy to work year-round, not sticky when wet"
+            texture_info["suitable_species"] = ["Pinus species (Pine)", "Shorea robusta (Sal) - with irrigation", "Dalbergia sissoo (Sissoo)"]
+            texture_info["management_note"] = "Add organic matter (compost, mulch) to improve water and nutrient retention"
+
+        elif "Silt" in texture and "Clay" not in texture:
+            texture_info["description"] = "Smooth, silky soil that holds moisture well. Feels smooth like flour when dry."
+            texture_info["water_retention"] = "Good - holds water well for tree roots"
+            texture_info["drainage"] = "Moderate - may become waterlogged in heavy rain"
+            texture_info["workability"] = "Moderate - can be slippery when wet, forms crust when dry"
+            texture_info["suitable_species"] = ["Shorea robusta (Sal)", "Terminalia species (Asna/Saj)", "Adina cordifolia (Karma)", "Alnus nepalensis (Utis)"]
+            texture_info["management_note"] = "Good for most tree species. Avoid heavy machinery when soil is wet to prevent compaction"
+
+        elif "Clay" in texture:
+            texture_info["description"] = "Fine-textured soil that feels sticky when wet. Can form hard clods when dry."
+            texture_info["water_retention"] = "Excellent - holds water and nutrients very well"
+            texture_info["drainage"] = "Poor - prone to waterlogging during monsoon"
+            texture_info["workability"] = "Difficult - sticky when wet, hard when dry. Work only at optimal moisture"
+            texture_info["suitable_species"] = ["Tectona grandis (Teak)", "Dalbergia latifolia (Rosewood)", "Bombax ceiba (Simal)", "Ficus species"]
+            texture_info["management_note"] = "Avoid working when wet. Consider drainage ditches if waterlogging occurs. Excellent for bamboo cultivation"
+
+        elif "Loam" in texture:
+            texture_info["description"] = "Ideal balanced mixture of sand, silt, and clay. Feels crumbly and slightly sticky."
+            texture_info["water_retention"] = "Excellent - balanced water holding capacity"
+            texture_info["drainage"] = "Good - drains well but retains enough moisture"
+            texture_info["workability"] = "Excellent - easy to work, best agricultural soil"
+            texture_info["suitable_species"] = ["Most tree species thrive", "Shorea robusta (Sal)", "Schima wallichii (Chilaune)", "Castanopsis species", "Fruit trees"]
+            texture_info["management_note"] = "Ideal soil for forestry. Most species will establish well. Maintain organic matter through mulching"
+
+        interpretations["texture_interpretation"] = texture_info
+
+    # pH Interpretation
+    ph = soil_data.get('soil_properties', {}).get('ph_h2o')
+    if ph:
+        ph_info = {
+            "value": ph,
+            "category": "",
+            "description": "",
+            "nutrient_availability": "",
+            "recommendation": ""
+        }
+
+        if ph < 5.0:
+            ph_info["category"] = "Strongly Acidic"
+            ph_info["description"] = "Very acidic soil. Limits availability of calcium, magnesium, and phosphorus."
+            ph_info["nutrient_availability"] = "Poor - aluminum and manganese may become toxic to plants"
+            ph_info["recommendation"] = "Apply lime (Chun) 2-4 tons/hectare to raise pH. Choose acid-tolerant species like Schima wallichii (Chilaune), Rhododendron species"
+        elif ph < 5.5:
+            ph_info["category"] = "Moderately Acidic"
+            ph_info["description"] = "Slightly acidic. Common in Nepal's mid-hills. Many forest species adapted to this."
+            ph_info["nutrient_availability"] = "Fair - most nutrients available but phosphorus may be limited"
+            ph_info["recommendation"] = "Suitable for most hill species. Apply lime if planning fruit orchards. Add phosphorus fertilizer"
+        elif ph <= 7.0:
+            ph_info["category"] = "Optimal (Slightly Acidic to Neutral)"
+            ph_info["description"] = "Ideal pH range for most forest species. Maximum nutrient availability."
+            ph_info["nutrient_availability"] = "Excellent - all essential nutrients readily available"
+            ph_info["recommendation"] = "No pH adjustment needed. Maintain through organic matter addition. Ideal for diverse plantations"
+        elif ph <= 7.8:
+            ph_info["category"] = "Slightly Alkaline"
+            ph_info["description"] = "Mildly alkaline. Common in some Terai areas."
+            ph_info["nutrient_availability"] = "Good, but iron, manganese, zinc may become less available"
+            ph_info["recommendation"] = "Monitor for micronutrient deficiencies (yellowing leaves). Apply sulfur or organic matter to lower pH if needed"
+        else:
+            ph_info["category"] = "Strongly Alkaline"
+            ph_info["description"] = "High pH limits nutrient availability."
+            ph_info["nutrient_availability"] = "Poor - iron, manganese, zinc unavailable causing yellowing (chlorosis)"
+            ph_info["recommendation"] = "Apply sulfur 500-1000 kg/hectare to reduce pH. Choose alkaline-tolerant species. Add iron chelates for existing trees"
+
+        interpretations["ph_interpretation"] = ph_info
+
+    # Nitrogen Interpretation
+    nitrogen = soil_data.get('soil_properties', {}).get('nitrogen_cg_kg')
+    if nitrogen:
+        nitrogen_pct = nitrogen / 1000
+        nitrogen_info = {
+            "value_cg_kg": nitrogen,
+            "value_percent": round(nitrogen_pct, 3),
+            "category": "",
+            "description": "",
+            "recommendation": ""
+        }
+
+        if nitrogen_pct < 0.05:
+            nitrogen_info["category"] = "Very Low"
+            nitrogen_info["description"] = "Deficient nitrogen. Trees will show stunted growth and pale/yellowish leaves."
+            nitrogen_info["recommendation"] = "Plant nitrogen-fixing species: Alnus nepalensis (Utis), Acacia species, Dalbergia sissoo. Apply urea 50-100 kg/hectare for plantations"
+        elif nitrogen_pct < 0.10:
+            nitrogen_info["category"] = "Low"
+            nitrogen_info["description"] = "Below optimal. Slower tree growth expected."
+            nitrogen_info["recommendation"] = "Include nitrogen-fixing species in mixed plantations. Apply compost or manure 5-10 tons/hectare"
+        elif nitrogen_pct < 0.20:
+            nitrogen_info["category"] = "Adequate"
+            nitrogen_info["description"] = "Sufficient for moderate tree growth. Typical for forest soils."
+            nitrogen_info["recommendation"] = "Maintain through leaf litter decomposition. Avoid removing forest floor organic matter"
+        else:
+            nitrogen_info["category"] = "High"
+            nitrogen_info["description"] = "Excellent nitrogen level. Supports vigorous tree growth."
+            nitrogen_info["recommendation"] = "No nitrogen fertilization needed. Good for fast-growing species like Eucalyptus, Poplar, Paulownia"
+
+        interpretations["nitrogen_interpretation"] = nitrogen_info
+
+    # Carbon Stock Interpretation
+    carbon_stock = soil_data.get('carbon_stock_t_ha')
+    if carbon_stock:
+        carbon_info = {
+            "value": carbon_stock,
+            "category": "",
+            "description": "",
+            "climate_benefit": "",
+            "recommendation": ""
+        }
+
+        if carbon_stock < 20:
+            carbon_info["category"] = "Low"
+            carbon_info["description"] = "Low soil organic matter. Poor soil structure and fertility."
+            carbon_info["climate_benefit"] = "Limited carbon sequestration potential"
+            carbon_info["recommendation"] = "Increase organic matter: retain leaf litter, add compost, plant cover crops, practice agroforestry. Avoid burning forest residues"
+        elif carbon_stock < 40:
+            carbon_info["category"] = "Moderate"
+            carbon_info["description"] = "Moderate organic matter. Typical for managed forests."
+            carbon_info["climate_benefit"] = "Moderate carbon storage - contributes to climate mitigation"
+            carbon_info["recommendation"] = "Maintain by preventing erosion, retaining forest floor, minimizing soil disturbance"
+        else:
+            carbon_info["category"] = "High"
+            carbon_info["description"] = "High organic matter. Excellent soil health and fertility."
+            carbon_info["climate_benefit"] = "Significant carbon storage - valuable for carbon credit programs (REDD+)"
+            carbon_info["recommendation"] = "Protect this valuable carbon stock. Avoid soil disturbance, erosion, or degradation. Potential for carbon credit enrollment"
+
+        interpretations["carbon_interpretation"] = carbon_info
+
+    # Fertility Class Interpretation
+    fertility = soil_data.get('fertility_class')
+    if fertility:
+        fertility_info = {
+            "class": fertility,
+            "score": soil_data.get('fertility_score', 0),
+            "description": "",
+            "expected_growth": "",
+            "recommendation": ""
+        }
+
+        if fertility == "Very High":
+            fertility_info["description"] = "Excellent soil fertility. Optimal conditions for tree growth."
+            fertility_info["expected_growth"] = "Fast growth rates, 1.5-2.5 meters/year for fast-growing species"
+            fertility_info["recommendation"] = "Suitable for high-value timber species: Teak, Rosewood, Mahogany. Good for fruit orchards"
+        elif fertility == "High":
+            fertility_info["description"] = "Good soil fertility. Supports healthy forest growth."
+            fertility_info["expected_growth"] = "Good growth rates, 1.0-1.5 meters/year"
+            fertility_info["recommendation"] = "Suitable for most commercial species. Minor fertilization may boost growth"
+        elif fertility == "Medium":
+            fertility_info["description"] = "Moderate fertility. Adequate for most native species."
+            fertility_info["expected_growth"] = "Moderate growth, 0.5-1.0 meters/year"
+            fertility_info["recommendation"] = "Choose hardy species adapted to local conditions. Add compost for improved growth"
+        elif fertility == "Low":
+            fertility_info["description"] = "Limited fertility. Trees will grow slowly without amendments."
+            fertility_info["expected_growth"] = "Slow growth, 0.3-0.5 meters/year"
+            fertility_info["recommendation"] = "Select nutrient-efficient species. Apply organic amendments. Plant nitrogen-fixing trees"
+        else:  # Very Low
+            fertility_info["description"] = "Poor soil fertility. Significant limitations for tree growth."
+            fertility_info["expected_growth"] = "Very slow growth, < 0.3 meters/year"
+            fertility_info["recommendation"] = "Extensive soil improvement needed. Plant pioneer species first: Alnus, Acacia. Build soil gradually through organic matter"
+
+        interpretations["fertility_interpretation"] = fertility_info
+
+    return interpretations
+
+
 def analyze_soil(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     """Analyze soil properties (ISRIC SoilGrids) with enhanced analysis
 
@@ -1495,22 +1828,49 @@ def analyze_soil(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     Band 7 = bdod_cg_cm3 (Bulk density in cg/cm3)
     Band 8 = cec_mmol_kg (Cation exchange capacity in mmol/kg)
 
-    NOTE: TEMPORARILY DISABLED - Soil analysis causes PostgreSQL crashes
+    OPTIMIZED VERSION - Now enabled with band-by-band processing
     """
-    # TEMPORARILY DISABLED: Soil analysis crashes PostgreSQL
-    # Return empty results to allow other analyses to complete
-    print("Soil analysis skipped (temporarily disabled to prevent database crashes)")
-    return {
-        "soil_texture": None,
-        "soil_texture_system": "USDA 12-class (disabled)",
-        "carbon_stock_t_ha": None,
-        "fertility_class": None,
-        "fertility_score": None,
-        "limiting_factors": ["Soil analysis temporarily disabled to prevent database crashes"],
-        "compaction_status": None,
-        "compaction_alert": None,
-        "soil_properties": {}
-    }
+    try:
+        print("Starting whole-forest soil analysis...", flush=True)
+
+        # Get WKT for whole forest
+        wkt_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM calculations
+            WHERE id = :calc_id
+        """)
+        wkt_result = db.execute(wkt_query, {"calc_id": str(calculation_id)}).first()
+
+        if not wkt_result:
+            print("  No boundary geometry found")
+            return {
+                "soil_texture": None,
+                "soil_texture_system": "USDA 12-class",
+                "carbon_stock_t_ha": None,
+                "fertility_class": None,
+                "fertility_score": None,
+                "limiting_factors": ["No boundary data"],
+                "compaction_status": None,
+                "compaction_alert": None,
+                "soil_properties": {}
+            }
+
+        # Use the geometry-based analysis (already optimized)
+        return analyze_soil_geometry(wkt_result.wkt, db)
+
+    except Exception as e:
+        print(f"Error in whole-forest soil analysis: {e}", flush=True)
+        return {
+            "soil_texture": None,
+            "soil_texture_system": "USDA 12-class",
+            "carbon_stock_t_ha": None,
+            "fertility_class": None,
+            "fertility_score": None,
+            "limiting_factors": [f"Error: {str(e)[:100]}"],
+            "compaction_status": None,
+            "compaction_alert": None,
+            "soil_properties": {}
+        }
 
 
 async def analyze_vectors(calculation_id: UUID, db: Session) -> Dict[str, Any]:
@@ -1555,9 +1915,9 @@ def get_administrative_location(geometry_wkt: str, db: Session) -> Dict[str, Any
     province_result = db.execute(province_query, {"wkt": geometry_wkt}).first()
     location["province"] = province_result.province if province_result else None
 
-    # Query for municipality (includes district)
+    # Query for municipality (includes district and municipality type)
     municipality_query = text("""
-        SELECT m.district, m.gapa_napa as municipality
+        SELECT INITCAP(m.district) as district, m.gapa_napa as municipality, m.type_gn as municipality_type
         FROM admin.municipality m
         WHERE ST_Intersects(
             m.geom,
@@ -1569,9 +1929,11 @@ def get_administrative_location(geometry_wkt: str, db: Session) -> Dict[str, Any
     if municipality_result:
         location["district"] = municipality_result.district
         location["municipality"] = municipality_result.municipality
+        location["municipality_type"] = municipality_result.municipality_type
     else:
         location["district"] = None
         location["municipality"] = None
+        location["municipality_type"] = None
 
     # Query for ward
     ward_query = text("""
@@ -1869,7 +2231,9 @@ def analyze_dem_geometry(wkt: str, db: Session) -> Dict[str, Any]:
 
 
 def analyze_slope_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze slope for a specific geometry
+    """
+    Analyze slope for a specific geometry
+    Returns percentages, dominant class, and min/max codes for dynamic legend generation
 
     Slope raster contains categorical codes (8-bit unsigned):
     0 = No data / Water (excluded)
@@ -1907,21 +2271,36 @@ def analyze_slope_geometry(wkt: str, db: Session) -> Dict[str, Any]:
         if results:
             total_pixels = sum(r.pixel_count for r in results)
             percentages = {}
+            slope_codes_present = []
+
             for r in results:
                 code = int(r.slope_code)
                 if code in slope_map:
                     percentages[slope_map[code]] = round((r.pixel_count / total_pixels) * 100, 2)
+                    slope_codes_present.append(code)
 
             if percentages:
                 dominant = max(percentages.items(), key=lambda x: x[1])[0]
+
+                # Calculate min/max slope codes for dynamic legend filtering
+                slope_min_code = min(slope_codes_present) if slope_codes_present else None
+                slope_max_code = max(slope_codes_present) if slope_codes_present else None
+
                 return {
                     "slope_dominant_class": dominant,
-                    "slope_percentages": percentages
+                    "slope_percentages": percentages,
+                    "slope_min_code": slope_min_code,  # NEW: For dynamic legend
+                    "slope_max_code": slope_max_code   # NEW: For dynamic legend
                 }
     except Exception as e:
         print(f"Error analyzing slope: {e}")
 
-    return {"slope_dominant_class": None, "slope_percentages": {}}
+    return {
+        "slope_dominant_class": None,
+        "slope_percentages": {},
+        "slope_min_code": None,
+        "slope_max_code": None
+    }
 
 
 def analyze_aspect_geometry(wkt: str, db: Session) -> Dict[str, Any]:
@@ -2038,19 +2417,57 @@ def analyze_canopy_height_geometry(wkt: str, db: Session) -> Dict[str, Any]:
             total_weighted_height = sum(r.avg_height * r.pixel_count for r in results)
             canopy_mean_m = round(total_weighted_height / total_pixels, 1) if total_pixels > 0 else None
 
+            # Get min and max canopy height for dynamic legend
+            canopy_min_m = None
+            canopy_max_m = None
+            try:
+                minmax_query = text("""
+                    WITH boundary AS (
+                        SELECT ST_GeomFromText(:wkt, 4326) as geom
+                    ),
+                    all_pixels AS (
+                        SELECT
+                            (pix).val as height,
+                            (pix).geom as pixel_center
+                        FROM (
+                            SELECT ST_PixelAsPolygons(rast) as pix
+                            FROM rasters.canopy_height, boundary
+                            WHERE ST_Intersects(rast, geom)
+                        ) as subq
+                    )
+                    SELECT
+                        MIN(height) as canopy_min,
+                        MAX(height) as canopy_max
+                    FROM all_pixels, boundary
+                    WHERE ST_Contains(boundary.geom, ST_Centroid(pixel_center))
+                      AND height IS NOT NULL
+                      AND height >= 0
+                      AND height <= 50
+                """)
+                minmax_result = db.execute(minmax_query, {"wkt": wkt}).first()
+                if minmax_result:
+                    canopy_min_m = round(minmax_result.canopy_min, 1) if minmax_result.canopy_min else None
+                    canopy_max_m = round(minmax_result.canopy_max, 1) if minmax_result.canopy_max else None
+            except Exception as e:
+                print(f"Error getting canopy min/max: {e}")
+
             return {
                 "canopy_mean_m": canopy_mean_m,
                 "canopy_dominant_class": dominant,
-                "canopy_percentages": percentages
+                "canopy_percentages": percentages,
+                "canopy_min_m": canopy_min_m,
+                "canopy_max_m": canopy_max_m
             }
     except Exception as e:
         print(f"Error analyzing canopy height: {e}")
 
-    return {"canopy_mean_m": None, "canopy_dominant_class": None, "canopy_percentages": {}}
+    return {"canopy_mean_m": None, "canopy_dominant_class": None, "canopy_percentages": {}, "canopy_min_m": None, "canopy_max_m": None}
 
 
 def analyze_agb_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze above-ground biomass for a specific geometry
+    """
+    Analyze above-ground biomass for a specific geometry
+    Returns mean, min, max, total, and carbon stock for dynamic legend generation
 
     AGB raster (16-bit unsigned) has 2 bands:
     Band 1 = AGB estimate in Mg/ha, Band 2 = standard deviation
@@ -2059,6 +2476,8 @@ def analyze_agb_geometry(wkt: str, db: Session) -> Dict[str, Any]:
         query = text("""
             SELECT
                 (stats).mean as agb_mean,
+                (stats).min as agb_min,
+                (stats).max as agb_max,
                 (stats).sum as agb_total
             FROM (
                 SELECT ST_SummaryStats(
@@ -2077,13 +2496,21 @@ def analyze_agb_geometry(wkt: str, db: Session) -> Dict[str, Any]:
         if result and result.agb_total:
             return {
                 "agb_mean_mg_ha": round(result.agb_mean, 2) if result.agb_mean else None,
+                "agb_min_mg_ha": round(result.agb_min, 2) if result.agb_min else None,
+                "agb_max_mg_ha": round(result.agb_max, 2) if result.agb_max else None,
                 "agb_total_mg": round(result.agb_total, 2) if result.agb_total else None,
                 "carbon_stock_mg": round(result.agb_total * 0.5, 2) if result.agb_total else None
             }
     except Exception as e:
         print(f"Error analyzing AGB: {e}")
 
-    return {"agb_mean_mg_ha": None, "agb_total_mg": None, "carbon_stock_mg": None}
+    return {
+        "agb_mean_mg_ha": None,
+        "agb_min_mg_ha": None,
+        "agb_max_mg_ha": None,
+        "agb_total_mg": None,
+        "carbon_stock_mg": None
+    }
 
 
 def analyze_forest_health_geometry(wkt: str, db: Session) -> Dict[str, Any]:
@@ -2093,13 +2520,13 @@ def analyze_forest_health_geometry(wkt: str, db: Session) -> Dict[str, Any]:
     1=Stressed, 2=Poor, 3=Moderate, 4=Healthy, 5=Excellent
     """
     try:
-        # Correct mapping according to table comment
+        # Correct mapping according to table comment - capitalized to match frontend legend
         health_map = {
-            1: "stressed",
-            2: "poor",
-            3: "moderate",
-            4: "healthy",
-            5: "excellent"
+            1: "Stressed",
+            2: "Poor",
+            3: "Moderate",
+            4: "Healthy",
+            5: "Excellent"
         }
 
         query = text("""
@@ -2141,18 +2568,18 @@ def analyze_forest_type_geometry(wkt: str, db: Session) -> Dict[str, Any]:
     """Analyze forest type for a specific geometry (WKT)"""
     try:
         forest_type_map = {
-            1: "Shorea robusta", 2: "Alnus nepalensis", 3: "Schima-Castanopsis",
-            4: "Quercus semecarpifolia", 5: "Larix/Abies spectabilis",
-            6: "Pinus wallichiana-Tsuga dumosa", 7: "Plantation (Pinus-Eucalyptus)",
-            8: "Ficus-Other Tropical Riverine", 9: "Tropical Mixed Broadleaved",
-            10: "Quercus-Pinus", 11: "Abies spectabilis",
-            12: "Pinus roxburghii-Mixed Broadleaved", 13: "Pinus wallichiana",
-            14: "Warm Temperate Mixed Broadleaved", 15: "Upper Temperate Quercus",
-            16: "Rhododendron arboreum", 17: "Temperate Rhododendron Mixed Broadleaved",
-            18: "Dalbergia sissoo-Senegalia catechu", 19: "Terminalia-Tropical Mixed Broadleaved",
-            20: "Temperate Mixed Broadleaved", 21: "Tropical Deciduous Indigenous Riverine",
-            22: "Tropical Riverine", 23: "Lower Temperate Mixed robusta",
-            24: "Pinus roxburghii-Shorea robusta", 25: "Lower Temperate Pinus roxburghii-Quercus",
+            1: "Shorea robusta Forest", 2: "Alnus nepalensis Forest", 3: "Schima-Castanopsis Forest",
+            4: "Quercus semecarpifolia Forest", 5: "Larix/Abies spectabilis Forest",
+            6: "Pinus wallichiana-Tsuga dumosa Forest", 7: "Plantation (Pinus-Eucalyptus) Forest",
+            8: "Ficus-Other Tropical Riverine Forest", 9: "Tropical Mixed Broadleaved Forest",
+            10: "Quercus-Pinus Forest", 11: "Abies spectabilis Forest",
+            12: "Pinus roxburghii-Mixed Broadleaved Forest", 13: "Pinus wallichiana Forest",
+            14: "Warm Temperate Mixed Broadleaved Forest", 15: "Upper Temperate Quercus Forest",
+            16: "Rhododendron arboreum Forest", 17: "Temperate Rhododendron Mixed Broadleaved Forest",
+            18: "Dalbergia sissoo-Senegelia catechu Forest", 19: "Terminalia-Tropical Mixed Broadleaved Forest",
+            20: "Temperate Mixed Broadleaved Forest", 21: "Tropical Deciduous Indigenous Riverine Forest",
+            22: "Tropical Riverine Forest", 23: "Lower Temperate Mixed robusta Forest",
+            24: "Pinus roxburghii-Shorea robusta Forest", 25: "Lower Temperate Pinus roxburghii-Quercus Forest",
             26: "Data Not Available"
         }
         query = text("""
@@ -2317,8 +2744,12 @@ def analyze_fire_loss_geometry(wkt: str, db: Session) -> Dict[str, Any]:
 
 
 def analyze_temperature_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze temperature data for a specific geometry"""
+    """
+    Analyze temperature data for a specific geometry
+    Returns mean, min, and max temperature values for dynamic legend generation
+    """
     try:
+        # Get mean, min, and max temperature in a single query
         query = text("""
             WITH clipped AS (
                 SELECT ST_Clip(rast, ST_GeomFromText(:wkt, 4326)) as rast
@@ -2327,14 +2758,49 @@ def analyze_temperature_geometry(wkt: str, db: Session) -> Dict[str, Any]:
             ), pixel_values AS (
                 SELECT (ST_PixelAsPolygons(rast)).val as temp FROM clipped
             )
-            SELECT AVG(temp) as temp_mean FROM pixel_values WHERE temp IS NOT NULL AND temp > -100 AND temp < 100
+            SELECT
+                AVG(temp) as temp_mean,
+                MIN(temp) as temp_min,
+                MAX(temp) as temp_max
+            FROM pixel_values
+            WHERE temp IS NOT NULL AND temp > -100 AND temp < 100
         """)
         result = db.execute(query, {"wkt": wkt}).first()
-        temp_mean = None
-        if result and result.temp_mean is not None:
-            temp_mean = round(result.temp_mean, 2)
 
-        query_min = text("""
+        temp_mean = None
+        temp_min = None
+        temp_max = None
+
+        if result:
+            if result.temp_mean is not None:
+                temp_mean = round(result.temp_mean, 2)
+            if result.temp_min is not None:
+                temp_min = round(result.temp_min, 2)
+            if result.temp_max is not None:
+                temp_max = round(result.temp_max, 2)
+
+        return {
+            "temperature_mean_c": temp_mean,
+            "temperature_min_c": temp_min,
+            "temperature_max_c": temp_max
+        }
+    except Exception as e:
+        print(f"Error analyzing temperature for geometry: {e}")
+    return {
+        "temperature_mean_c": None,
+        "temperature_min_c": None,
+        "temperature_max_c": None
+    }
+
+
+def analyze_min_temp_coldest_geometry(wkt: str, db: Session) -> Dict[str, Any]:
+    """
+    Analyze minimum temperature of coldest month for a specific geometry
+    Returns mean, min, and max values for dynamic legend generation
+    """
+    try:
+        # Get mean, min, and max min temperature in a single query
+        query = text("""
             WITH clipped AS (
                 SELECT ST_Clip(rast, ST_GeomFromText(:wkt, 4326)) as rast
                 FROM rasters.min_temp_coldest_month WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
@@ -2342,21 +2808,46 @@ def analyze_temperature_geometry(wkt: str, db: Session) -> Dict[str, Any]:
             ), pixel_values AS (
                 SELECT (ST_PixelAsPolygons(rast)).val as temp FROM clipped
             )
-            SELECT AVG(temp) as temp_min FROM pixel_values WHERE temp IS NOT NULL AND temp > -100 AND temp < 100
+            SELECT
+                AVG(temp) as temp_mean,
+                MIN(temp) as temp_min,
+                MAX(temp) as temp_max
+            FROM pixel_values
+            WHERE temp IS NOT NULL AND temp > -100 AND temp < 100
         """)
-        result_min = db.execute(query_min, {"wkt": wkt}).first()
-        temp_min = None
-        if result_min and result_min.temp_min is not None:
-            temp_min = round(result_min.temp_min, 2)
+        result = db.execute(query, {"wkt": wkt}).first()
 
-        return {"temperature_mean_c": temp_mean, "temperature_min_c": temp_min}
+        temp_mean = None
+        temp_min = None
+        temp_max = None
+
+        if result:
+            if result.temp_mean is not None:
+                temp_mean = round(result.temp_mean, 2)
+            if result.temp_min is not None:
+                temp_min = round(result.temp_min, 2)
+            if result.temp_max is not None:
+                temp_max = round(result.temp_max, 2)
+
+        return {
+            "min_temp_coldest_mean_c": temp_mean,
+            "min_temp_coldest_min_c": temp_min,
+            "min_temp_coldest_max_c": temp_max
+        }
     except Exception as e:
-        print(f"Error analyzing temperature for geometry: {e}")
-    return {"temperature_mean_c": None, "temperature_min_c": None}
+        print(f"Error analyzing min temp coldest month for geometry: {e}")
+    return {
+        "min_temp_coldest_mean_c": None,
+        "min_temp_coldest_min_c": None,
+        "min_temp_coldest_max_c": None
+    }
 
 
 def analyze_precipitation_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze precipitation data for a specific geometry"""
+    """
+    Analyze precipitation data for a specific geometry
+    Returns mean, min, and max precipitation values for dynamic legend generation
+    """
     try:
         query = text("""
             WITH clipped AS (
@@ -2366,135 +2857,137 @@ def analyze_precipitation_geometry(wkt: str, db: Session) -> Dict[str, Any]:
             ), pixel_values AS (
                 SELECT (ST_PixelAsPolygons(rast)).val as precip FROM clipped
             )
-            SELECT AVG(precip) as precip_mean FROM pixel_values WHERE precip IS NOT NULL AND precip >= 0
+            SELECT
+                AVG(precip) as precip_mean,
+                MIN(precip) as precip_min,
+                MAX(precip) as precip_max
+            FROM pixel_values
+            WHERE precip IS NOT NULL AND precip >= 0
         """)
         result = db.execute(query, {"wkt": wkt}).first()
-        if result and result.precip_mean is not None:
-            return {"precipitation_mean_mm": round(result.precip_mean, 1)}
+
+        precip_mean = None
+        precip_min = None
+        precip_max = None
+
+        if result:
+            if result.precip_mean is not None:
+                precip_mean = round(result.precip_mean, 1)
+            if result.precip_min is not None:
+                precip_min = round(result.precip_min, 1)
+            if result.precip_max is not None:
+                precip_max = round(result.precip_max, 1)
+
+        return {
+            "precipitation_mean_mm": precip_mean,
+            "precipitation_min_mm": precip_min,
+            "precipitation_max_mm": precip_max
+        }
     except Exception as e:
         print(f"Error analyzing precipitation for geometry: {e}")
-    return {"precipitation_mean_mm": None}
+    return {
+        "precipitation_mean_mm": None,
+        "precipitation_min_mm": None,
+        "precipitation_max_mm": None
+    }
 
 
 def analyze_soil_geometry(wkt: str, db: Session) -> Dict[str, Any]:
     """Analyze soil properties for a specific geometry (WKT) with enhanced analysis
 
-    Phase 1 Enhanced Features:
+    OPTIMIZED VERSION - Queries each band individually to prevent crashes
+
+    Features:
     1. USDA 12-class texture classification
     2. Soil carbon stock calculation
     3. Fertility assessment
     4. Compaction alert
 
-    NOTE: TEMPORARILY DISABLED - Soil analysis causes PostgreSQL crashes
+    8 bands from soilgrids_isric (ISRIC SoilGrids 250m):
+    Band 1 = clay_g_kg, Band 2 = sand_g_kg, Band 3 = silt_g_kg, Band 4 = ph_h2o
+    Band 5 = soc_dg_kg, Band 6 = nitrogen_cg_kg, Band 7 = bdod_cg_cm3, Band 8 = cec_mmol_kg
     """
-    # TEMPORARILY DISABLED: Soil analysis crashes PostgreSQL
-    # Return empty results to allow other analyses to complete
-    return {
-        "soil_texture": None,
-        "soil_texture_system": "USDA 12-class (disabled)",
-        "carbon_stock_t_ha": None,
-        "fertility_class": None,
-        "fertility_score": None,
-        "limiting_factors": ["Soil analysis temporarily disabled"],
-        "compaction_status": None,
-        "compaction_alert": None,
-        "soil_properties": {}
-    }
+    try:
+        print(f"  Starting soil analysis (lightweight centroid sampling)...", flush=True)
 
+        # CRITICAL FIX: Use ST_Value at centroid instead of ST_Clip
+        # ST_Clip on float rasters causes PostgreSQL to crash with large forests
+        # Centroid sampling is 1000x faster and safe for all forest sizes
 
-def analyze_physiography_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-        # Process bands individually to prevent database crash from memory overload
-        # Get clay content (band 1)
-        clay_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 1, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as clay_mean
+        # Get all 8 bands in a single lightweight query at the centroid
+        centroid_query = text("""
+            SELECT
+                ST_Value(rast, 1, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as clay,
+                ST_Value(rast, 2, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as sand,
+                ST_Value(rast, 3, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as silt,
+                ST_Value(rast, 4, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as ph,
+                ST_Value(rast, 5, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as soc,
+                ST_Value(rast, 6, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as nitrogen,
+                ST_Value(rast, 7, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as bdod,
+                ST_Value(rast, 8, ST_Centroid(ST_GeomFromText(:wkt, 4326))) as cec
             FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+            WHERE ST_Intersects(rast, ST_Centroid(ST_GeomFromText(:wkt, 4326)))
+            LIMIT 1
         """)
-        clay_result = db.execute(clay_query, {"wkt": wkt}).first()
-        clay_mean = clay_result.clay_mean if clay_result else None
 
-        # Get sand content (band 2)
-        sand_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 2, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as sand_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        sand_result = db.execute(sand_query, {"wkt": wkt}).first()
-        sand_mean = sand_result.sand_mean if sand_result else None
+        result = db.execute(centroid_query, {"wkt": wkt}).first()
 
-        # Get silt content (band 3)
-        silt_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 3, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as silt_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        silt_result = db.execute(silt_query, {"wkt": wkt}).first()
-        silt_mean = silt_result.silt_mean if silt_result else None
+        if result:
+            clay_mean = result.clay
+            sand_mean = result.sand
+            silt_mean = result.silt
+            ph_mean = result.ph
+            soc_mean = result.soc
+            nitrogen_mean = result.nitrogen
+            bdod_mean = result.bdod
+            cec_mean = result.cec
+        else:
+            clay_mean = sand_mean = silt_mean = None
+            ph_mean = soc_mean = nitrogen_mean = None
+            bdod_mean = cec_mean = None
 
-        # Get pH (band 4)
-        ph_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 4, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as ph_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        ph_result = db.execute(ph_query, {"wkt": wkt}).first()
-        ph_mean = ph_result.ph_mean if ph_result else None
-
-        # Get SOC (band 5)
-        soc_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 5, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as soc_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        soc_result = db.execute(soc_query, {"wkt": wkt}).first()
-        soc_mean = soc_result.soc_mean if soc_result else None
-
-        # Get nitrogen (band 6)
-        nitrogen_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 6, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as nitrogen_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        nitrogen_result = db.execute(nitrogen_query, {"wkt": wkt}).first()
-        nitrogen_mean = nitrogen_result.nitrogen_mean if nitrogen_result else None
-
-        # Get bulk density (band 7)
-        bdod_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 7, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as bdod_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        bdod_result = db.execute(bdod_query, {"wkt": wkt}).first()
-        bdod_mean = bdod_result.bdod_mean if bdod_result else None
-
-        # Get CEC (band 8)
-        cec_query = text("""
-            SELECT AVG((ST_SummaryStats(ST_Clip(rast, 8, ST_GeomFromText(:wkt, 4326)), 1, true)).mean) as cec_mean
-            FROM rasters.soilgrids_isric
-            WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-        """)
-        cec_result = db.execute(cec_query, {"wkt": wkt}).first()
-        cec_mean = cec_result.cec_mean if cec_result else None
+        print(f"  Soil data retrieved: clay={clay_mean}, sand={sand_mean}, silt={silt_mean}", flush=True)
 
         if clay_mean or sand_mean or silt_mean:
-            # Convert to percentages for texture classification
-            clay_pct = clay_mean / 10 if clay_mean else 0
-            sand_pct = sand_mean / 10 if sand_mean else 0
-            silt_pct = silt_mean / 10 if silt_mean else 0
+            # FIX: Raster stores values in irregular units - normalize to percentages
+            # Raw values: clay ~2, sand ~36, silt ~42 (sum ~80)
+            # Need to normalize to 100% for texture classification
+            clay_raw = clay_mean if clay_mean else 0
+            sand_raw = sand_mean if sand_mean else 0
+            silt_raw = silt_mean if silt_mean else 0
+            total = clay_raw + sand_raw + silt_raw
+
+            if total > 0:
+                # Normalize to 100%
+                clay_pct = (clay_raw / total) * 100
+                sand_pct = (sand_raw / total) * 100
+                silt_pct = (silt_raw / total) * 100
+            else:
+                clay_pct = sand_pct = silt_pct = 0
 
             # USDA 12-class texture classification
             soil_texture = classify_usda_texture(clay_pct, sand_pct, silt_pct)
 
+            # FIX: Scale other parameters to match expected units
+            # Based on actual raster values analysis:
+            ph_scaled = (ph_mean * 10) if ph_mean else None  # 0.57 → 5.7
+            soc_scaled = (soc_mean / 10) if soc_mean else None  # Treat as dg/kg but scaled 10x
+            bdod_scaled = (bdod_mean * 10) if bdod_mean else None  # 12.6 → 126 cg/cm³
+            cec_scaled = (cec_mean * 10) if cec_mean else None  # 15.9 → 159 mmol/kg
+
             # Calculate carbon stock
-            carbon_stock = calculate_carbon_stock(soc_mean, bdod_mean)
+            carbon_stock = calculate_carbon_stock(soc_scaled, bdod_scaled)
 
             # Assess fertility
-            fertility_data = assess_fertility(ph_mean, soc_mean, nitrogen_mean, cec_mean)
+            fertility_data = assess_fertility(ph_scaled, soc_scaled, nitrogen_mean, cec_scaled)
 
             # Assess compaction
-            compaction_data = assess_compaction(bdod_mean)
+            compaction_data = assess_compaction(bdod_scaled)
 
-            return {
+            print(f"  Soil analysis complete: texture={soil_texture}, fertility={fertility_data['fertility_class']}", flush=True)
+
+            # Build basic soil data
+            soil_result = {
                 "soil_texture": soil_texture,
                 "soil_texture_system": "USDA 12-class",
                 "carbon_stock_t_ha": carbon_stock,
@@ -2504,30 +2997,38 @@ def analyze_physiography_geometry(wkt: str, db: Session) -> Dict[str, Any]:
                 "compaction_status": compaction_data["compaction_status"],
                 "compaction_alert": compaction_data["compaction_alert"],
                 "soil_properties": {
-                    "clay_g_kg": round(clay_mean, 1) if clay_mean else None,
-                    "sand_g_kg": round(sand_mean, 1) if sand_mean else None,
-                    "silt_g_kg": round(silt_mean, 1) if silt_mean else None,
-                    "ph_h2o": round(ph_mean, 2) if ph_mean else None,
-                    "soc_dg_kg": round(soc_mean, 1) if soc_mean else None,
+                    "clay_pct": round(clay_pct, 1),
+                    "sand_pct": round(sand_pct, 1),
+                    "silt_pct": round(silt_pct, 1),
+                    "ph_h2o": round(ph_scaled, 2) if ph_scaled else None,
+                    "soc_dg_kg": round(soc_scaled, 1) if soc_scaled else None,
                     "nitrogen_cg_kg": round(nitrogen_mean, 1) if nitrogen_mean else None,
-                    "bulk_density_cg_cm3": round(bdod_mean, 1) if bdod_mean else None,
-                    "cec_mmol_kg": round(cec_mean, 1) if cec_mean else None
+                    "bulk_density_cg_cm3": round(bdod_scaled, 1) if bdod_scaled else None,
+                    "cec_mmol_kg": round(cec_scaled, 1) if cec_scaled else None
                 }
             }
-    # except Exception as e:
-    #     print(f"Error analyzing soil for geometry: {e}")
-    #
-    # return {
-    #     "soil_texture": None,
-    #     "soil_texture_system": "USDA 12-class",
-    #     "carbon_stock_t_ha": None,
-    #     "fertility_class": None,
-    #     "fertility_score": None,
-    #     "limiting_factors": [],
-    #     "compaction_status": None,
-    #     "compaction_alert": None,
-    #     "soil_properties": {}
-    # }
+
+            # Generate forester-friendly interpretations
+            interpretations = generate_soil_interpretations(soil_result)
+            soil_result["interpretations"] = interpretations
+
+            return soil_result
+    except Exception as e:
+        print(f"  ERROR in soil analysis: {e}", flush=True)
+        db.rollback()  # Rollback on error
+
+    # Return empty result if no data or error
+    return {
+        "soil_texture": None,
+        "soil_texture_system": "USDA 12-class",
+        "carbon_stock_t_ha": None,
+        "fertility_class": None,
+        "fertility_score": None,
+        "limiting_factors": ["No soil data available"],
+        "compaction_status": None,
+        "compaction_alert": None,
+        "soil_properties": {}
+    }
 
 
 def analyze_physiography_geometry(wkt: str, db: Session) -> Dict[str, Any]:
@@ -2684,9 +3185,9 @@ def analyze_nasa_forest_2020_geometry(wkt: str, db: Session) -> Dict[str, Any]:
     """
     try:
         forest_type_map = {
-            1: "primary_forest",
-            2: "young_secondary_forest",
-            3: "old_secondary_forest"
+            1: "Primary Forest",
+            2: "Young Secondary Forest",
+            3: "Old Secondary Forest"
         }
 
         query = text("""

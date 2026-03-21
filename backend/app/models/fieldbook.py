@@ -34,6 +34,10 @@ class Fieldbook(Base):
     block_number = Column(Integer, nullable=True)  # Which block this point belongs to (1, 2, 3...)
     block_name = Column(String(100), nullable=True)  # Optional block name (e.g., "Ward 5", "North Block")
 
+    # Sub-area information (for excluded zones, special areas)
+    sub_area_name = Column(String(100), nullable=True)  # Name if point is on sub-area boundary
+    is_excluded = Column(Boolean, nullable=True)         # True if on excluded zone boundary (private land)
+
     # Coordinates
     longitude = Column(Numeric(10, 7), nullable=False)  # WGS84 longitude
     latitude = Column(Numeric(10, 7), nullable=False)   # WGS84 latitude

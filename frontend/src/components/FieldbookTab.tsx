@@ -14,18 +14,44 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   // Generation settings
   const [interpolationDistance, setInterpolationDistance] = useState(50);
   const [extractElevation, setExtractElevation] = useState(true);
-  const [calculateReference, setCalculateReference] = useState(false);
 
   useEffect(() => {
     loadFieldbook();
   }, [calculationId]);
 
-  const loadFieldbook = async () => {
+  const loadFieldbook = async (skipCache: boolean = false) => {
+    const cacheKey = `fieldbook_${calculationId}`;
+
+    // Try to load from cache first (unless explicitly skipped)
+    if (!skipCache) {
+      try {
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+          const cachedData = JSON.parse(cached);
+          setFieldbook(cachedData);
+          console.log('✅ Loaded fieldbook from cache (instant)');
+          return; // Return early with cached data
+        }
+      } catch (e) {
+        console.warn('Cache read failed, fetching fresh data');
+      }
+    }
+
+    // Fetch from server
     setLoading(true);
     setError(null);
     try {
+      console.log('🔄 Fetching fieldbook from server...');
       const data = await fieldbookApi.list(calculationId);
       setFieldbook(data);
+
+      // Cache the result
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(data));
+        console.log('💾 Cached fieldbook data for next load');
+      } catch (e) {
+        console.warn('Failed to cache fieldbook (storage full?)');
+      }
     } catch (err: any) {
       if (err.response?.status !== 404) {
         setError(err.response?.data?.detail || 'Failed to load fieldbook');
@@ -46,12 +72,15 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       const result = await fieldbookApi.generate(calculationId, {
         interpolation_distance_meters: interpolationDistance,
         extract_elevation: extractElevation,
-        calculate_reference: calculateReference,
+        calculate_reference: false,  // Deprecated - features calculated during export
       });
 
       alert(`Fieldbook generated successfully!\n\nTotal points: ${result.total_points}\nVertices: ${result.total_vertices}\nInterpolated: ${result.interpolated_points}\nPerimeter: ${parseFloat(result.total_perimeter_meters).toFixed(2)}m`);
 
-      await loadFieldbook();
+      // Clear cache and reload fresh data
+      const cacheKey = `fieldbook_${calculationId}`;
+      sessionStorage.removeItem(cacheKey);
+      await loadFieldbook(true); // Skip cache, fetch fresh
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to generate fieldbook');
     } finally {
@@ -66,6 +95,11 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
 
     try {
       await fieldbookApi.delete(calculationId);
+
+      // Clear cache
+      const cacheKey = `fieldbook_${calculationId}`;
+      sessionStorage.removeItem(cacheKey);
+
       setFieldbook(null);
       alert('Fieldbook deleted successfully');
     } catch (err: any) {
@@ -79,7 +113,13 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `fieldbook_${calculationId}.${format === 'geojson' ? 'geojson' : format}`;
+
+      // Set appropriate file extension
+      let extension = format;
+      if (format === 'excel') extension = 'xlsx';
+      else if (format === 'geojson') extension = 'geojson';
+
+      a.download = `fieldbook_${calculationId}.${extension}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -137,21 +177,21 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               </label>
             </div>
 
-            <div className="flex items-start">
-              <input
-                type="checkbox"
-                id="calculateReference"
-                checked={calculateReference}
-                onChange={(e) => setCalculateReference(e.target.checked)}
-                className="h-4 w-4 text-blue-600 mt-0.5"
-              />
-              <div className="ml-2">
-                <label htmlFor="calculateReference" className="text-sm text-gray-700">
-                  Calculate reference (nearest landmark)
-                </label>
-                <p className="text-xs text-amber-600 mt-0.5">
-                  ⚠️ WARNING: Very slow! Takes 10-20 seconds per point. Only enable if needed for field navigation.
-                </p>
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm text-blue-800 font-medium">
+                    Topographic Features (Ridges/Rivers) Calculated Automatically During Export
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    The CSV and Excel exports now include nearest ridge/river information automatically using an optimized algorithm (20-100x faster than before). No need to enable any checkboxes.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -174,30 +214,36 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => handleExport('csv')}
-                className="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
+                className="flex-1 min-w-[120px] bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
               >
-                Export CSV
+                📄 CSV
+              </button>
+              <button
+                onClick={() => handleExport('excel')}
+                className="flex-1 min-w-[120px] bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
+              >
+                📊 Excel
               </button>
               <button
                 onClick={() => handleExport('geojson')}
-                className="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
+                className="flex-1 min-w-[120px] bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
               >
-                Export GeoJSON
+                🗺️ GeoJSON
               </button>
               <button
                 onClick={() => handleExport('gpx')}
-                className="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
+                className="flex-1 min-w-[120px] bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
               >
-                Export GPX
+                📍 GPX
               </button>
               <button
                 onClick={handleDelete}
                 className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 text-sm"
               >
-                Delete
+                🗑️ Delete
               </button>
             </div>
           </div>
@@ -210,66 +256,169 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
         )}
       </div>
 
-      {/* Points Table */}
+      {/* Enhanced Points Table with Elevation Arrows */}
       {fieldbook && fieldbook.points && fieldbook.points.length > 0 && (
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
             <h3 className="text-lg font-semibold">Fieldbook Points ({fieldbook.total_count})</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Elevation arrows: ↑ rise, ↓ fall, → flat. Topographic features (nearest ridge/river) shown with distance and direction.
+            </p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Point</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Longitude</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latitude</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference (Nearest Landmark)</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Elevation (m)</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM Zone</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Point</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Coordinates</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">UTM</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Elevation (m)</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Change</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nearest Feature</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Azimuth (°)</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Distance (m)</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {fieldbook.points.slice(0, 50).map((point: any) => (
-                  <tr key={point.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-sm font-mono">P{point.point_number}</td>
-                    <td className="px-4 py-2 text-sm">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        point.point_type === 'vertex'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {point.point_type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-sm">
-                      {point.block_number ? (
-                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
-                          {point.block_name || `Block ${point.block_number}`}
+                {fieldbook.points.slice(0, 50).map((point: any, idx: number) => {
+                  // Calculate elevation change from previous point
+                  let elevationChange = null;
+                  let elevationDiff = 0;
+                  let arrow = '→';
+                  let changeColor = 'text-gray-400';
+
+                  if (idx > 0 && point.elevation && fieldbook.points[idx - 1].elevation) {
+                    const prevElevation = parseFloat(fieldbook.points[idx - 1].elevation);
+                    const currElevation = parseFloat(point.elevation);
+                    elevationDiff = currElevation - prevElevation;
+
+                    if (Math.abs(elevationDiff) > 1) {
+                      if (elevationDiff > 0) {
+                        arrow = '↑';
+                        changeColor = Math.abs(elevationDiff) > 20 ? 'text-green-700 font-bold' : 'text-green-600';
+                      } else {
+                        arrow = '↓';
+                        changeColor = Math.abs(elevationDiff) > 20 ? 'text-red-700 font-bold' : 'text-red-600';
+                      }
+                      elevationChange = `${elevationDiff > 0 ? '+' : ''}${elevationDiff.toFixed(1)}m`;
+                    }
+                  }
+
+                  return (
+                    <tr key={point.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-sm font-mono font-medium">P{point.point_number}</td>
+                      <td className="px-3 py-2 text-sm">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          point.point_type === 'vertex'
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {point.point_type === 'vertex' ? 'V' : 'I'}
                         </span>
-                      ) : '-'}
-                    </td>
-                    <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.longitude).toFixed(7)}</td>
-                    <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.latitude).toFixed(7)}</td>
-                    <td className="px-4 py-2 text-sm text-gray-700">
-                      {point.reference ? (
-                        <span className="font-medium text-blue-700">{point.reference}</span>
-                      ) : (
-                        <span className="text-gray-400 text-xs">↑ same</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-sm">{point.elevation ? parseFloat(point.elevation).toFixed(2) : 'N/A'}</td>
-                    <td className="px-4 py-2 text-sm">{point.utm_zone}</td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-3 py-2 text-sm">
+                        {point.block_number ? (
+                          <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded text-xs font-medium">
+                            {point.block_name || `B${point.block_number}`}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs font-mono text-gray-700">
+                        <div>{parseFloat(point.longitude).toFixed(6)}</div>
+                        <div className="text-gray-500">{parseFloat(point.latitude).toFixed(6)}</div>
+                      </td>
+                      <td className="px-3 py-2 text-xs font-mono text-gray-600">
+                        {point.easting_utm && point.northing_utm ? (
+                          <>
+                            <div>E {parseFloat(point.easting_utm).toFixed(0)}</div>
+                            <div className="text-gray-500">N {parseFloat(point.northing_utm).toFixed(0)}</div>
+                            <div className="text-gray-400 text-[10px]">{point.utm_zone}N</div>
+                          </>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono text-right font-medium">
+                        {point.elevation ? (
+                          <span className="text-blue-900">{parseFloat(point.elevation).toFixed(1)}</span>
+                        ) : (
+                          <span className="text-gray-400">N/A</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {elevationChange ? (
+                          <div className="flex flex-col items-center">
+                            <span className={`text-xl ${changeColor}`}>{arrow}</span>
+                            <span className={`text-xs ${changeColor}`}>{elevationChange}</span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-300 text-sm">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {point.nearest_feature ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1">
+                              <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                point.feature_type?.toLowerCase() === 'river'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {point.feature_type?.toLowerCase() === 'river' ? '🌊' : '⛰️'}
+                              </span>
+                              <span className="font-medium text-gray-800 truncate max-w-[120px]" title={point.nearest_feature}>
+                                {point.nearest_feature}
+                              </span>
+                            </div>
+                            <div className="text-gray-600 flex items-center gap-2">
+                              <span className="font-mono">{point.distance_to_feature ? Math.round(point.distance_to_feature) : '-'}m</span>
+                              {point.direction_to_feature && (
+                                <span className="px-1 py-0.5 bg-gray-200 text-gray-700 rounded font-semibold text-[10px]">
+                                  {point.direction_to_feature}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono text-right text-gray-700">
+                        {point.azimuth_to_next ? parseFloat(point.azimuth_to_next).toFixed(1) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono text-right text-gray-700">
+                        {point.distance_to_next ? parseFloat(point.distance_to_next).toFixed(1) : '-'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {fieldbook.total_count > 50 && (
               <div className="px-6 py-4 bg-gray-50 text-sm text-gray-600 text-center">
-                Showing first 50 of {fieldbook.total_count} points. Export to see all.
+                Showing first 50 of {fieldbook.total_count} points. Export CSV/Excel to see all data.
               </div>
             )}
+          </div>
+
+          {/* Legend */}
+          <div className="px-6 py-3 bg-blue-50 border-t border-blue-100">
+            <div className="text-xs text-gray-700 flex flex-wrap gap-x-6 gap-y-2">
+              <div><span className="font-semibold">V</span> = Vertex (original boundary point)</div>
+              <div><span className="font-semibold">I</span> = Interpolated point</div>
+              <div><span className="text-green-600 font-bold text-lg">↑</span> = Elevation rise</div>
+              <div><span className="text-red-600 font-bold text-lg">↓</span> = Elevation fall</div>
+              <div><span className="text-gray-400 text-lg">→</span> = Flat (±1m)</div>
+              <div>🌊 = River</div>
+              <div>⛰️ = Ridge</div>
+              <div className="w-full text-blue-700 font-medium">
+                💡 Showing topographic features (nearest ridge/river) with distance and direction. Export CSV/Excel for full dataset.
+              </div>
+            </div>
           </div>
         </div>
       )}

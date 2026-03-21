@@ -12,6 +12,13 @@ import {
   splitPolygonWithLine,
   isPointInPolygon,
 } from '../../utils/geometryValidation';
+import {
+  snapPointToLine,
+  ensurePolygon,
+  roundCoordinates,
+  applyInwardBuffer,
+  GEOMETRY_CONFIG,
+} from '../../utils/geometryHelpers';
 import { GPSPoint } from '../../utils/gpsUtils';
 import BaseMapSelector from './BaseMapSelector';
 
@@ -604,7 +611,21 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
             }
 
             if (isValid) {
-              validPolygons.push(feature.geometry);
+              // Apply safety measures before accepting the polygon
+              let safeGeometry = feature.geometry;
+
+              // 1. Round coordinates to avoid floating-point drift
+              safeGeometry = roundCoordinates(safeGeometry, GEOMETRY_CONFIG.COORDINATE_PRECISION);
+              console.log(`[BlockSplitter]   Applied coordinate rounding`);
+
+              // 2. Apply micro-inward buffer to ensure strict containment
+              const bufferedGeometry = applyInwardBuffer(safeGeometry, GEOMETRY_CONFIG.BUFFER_INWARD);
+              if (bufferedGeometry) {
+                safeGeometry = bufferedGeometry;
+                console.log(`[BlockSplitter]   Applied inward buffer (${GEOMETRY_CONFIG.BUFFER_INWARD} degrees)`);
+              }
+
+              validPolygons.push(safeGeometry);
               console.log(`[BlockSplitter]   ✓ Valid block (inside boundary)`);
             } else {
               console.log(`[BlockSplitter]   ✗ Outside boundary, skipping`);
@@ -623,7 +644,7 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
         throw new Error('No valid blocks created. Split lines must form enclosed areas within the outer boundary.');
       }
 
-      // Step 6: Create blocks from resulting polygons
+      // Step 6: Create blocks from resulting polygons (geometries are already safe)
       const blocks: Block[] = validPolygons.map((geometry, index) => ({
         id: `preview-${index}`,
         name: `Unnamed ${index + 1}`,
