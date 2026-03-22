@@ -221,6 +221,11 @@ export function MapExportPanel({
       // Draw map to fill the entire map area
       ctx.drawImage(mapImg, 0, headerHeight, exportWidth, mapHeight);
       
+      // Draw neat border/frame around the map
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(0.5, headerHeight + 0.5, exportWidth - 1, mapHeight - 1);
+      
       // Add grid overlay if enabled
       if (showGrid) {
         // Get map bounds for coordinate labels
@@ -280,15 +285,6 @@ export function MapExportPanel({
           ctx.fillText(latText, 60, y + 4);
         }
         
-        // Add coordinate system label
-        ctx.font = 'bold 12px Arial';
-        ctx.textAlign = 'right';
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 2;
-        ctx.strokeText('WGS 84', exportWidth - 10, headerHeight + 20);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('WGS 84', exportWidth - 10, headerHeight + 20);
-        
         // Add axis labels
         ctx.font = 'bold 11px Arial';
         ctx.fillStyle = '#ffffff';
@@ -310,6 +306,21 @@ export function MapExportPanel({
         ctx.restore();
       }
       
+      // Draw North Arrow in upper right corner (inside map area)
+      const arrowX = exportWidth - 40;
+      const arrowY = headerHeight + 35;
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.moveTo(arrowX, arrowY);
+      ctx.lineTo(arrowX - 10, arrowY + 30);
+      ctx.lineTo(arrowX, arrowY + 22);
+      ctx.lineTo(arrowX + 10, arrowY + 30);
+      ctx.closePath();
+      ctx.fill();
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('N', arrowX, arrowY + 42);
+      
       // Draw footer border
       const footerY = headerHeight + mapHeight;
       ctx.strokeStyle = '#ccc';
@@ -317,28 +328,16 @@ export function MapExportPanel({
       ctx.beginPath();
       ctx.moveTo(0, footerY);
       ctx.lineTo(exportWidth, footerY);
+      ctx.lineTo(exportWidth, footerY + footerHeight);
+      ctx.lineTo(0, footerY + footerHeight);
+      ctx.closePath();
       ctx.stroke();
       
       // Draw footer background
       ctx.fillStyle = '#fafafa';
       ctx.fillRect(0, footerY, exportWidth, footerHeight);
       
-      // Draw North Arrow (left side)
-      const arrowX = 50;
-      const arrowY = footerY + 15;
-      ctx.fillStyle = '#333';
-      ctx.beginPath();
-      ctx.moveTo(arrowX, arrowY);
-      ctx.lineTo(arrowX - 8, arrowY + 25);
-      ctx.lineTo(arrowX, arrowY + 20);
-      ctx.lineTo(arrowX + 8, arrowY + 25);
-      ctx.closePath();
-      ctx.fill();
-      ctx.font = 'bold 12px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('N', arrowX, arrowY + 35);
-      
-      // Draw Scale Bar
+      // Draw Scale Bar (left side)
       const scaleX = 20;
       const scaleY = footerY + 50;
       ctx.fillStyle = '#333';
@@ -421,11 +420,20 @@ export function MapExportPanel({
         currentX += itemWidth;
       });
       
-      // Draw grid status (right side)
+      // Draw WGS 84 and Data Source (right side)
       ctx.font = '10px Arial';
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#333';
+      ctx.fillText('Coordinate System: WGS 84', exportWidth - 15, footerY + 20);
+      
+      ctx.font = '9px Arial';
+      ctx.fillStyle = '#555';
+      ctx.fillText('Data Sources:', exportWidth - 15, footerY + 38);
+      ctx.font = '8px Arial';
       ctx.fillStyle = '#666';
-      ctx.fillText(showGrid ? 'Grid: ON' : 'Grid: OFF', exportWidth - 40, footerY + footerHeight / 2);
+      ctx.fillText('Forest Boundary: Community Forest Field Data', exportWidth - 15, footerY + 50);
+      ctx.fillText('Buildings: OpenStreetMap', exportWidth - 15, footerY + 62);
+      ctx.fillText('Points of Interest: OpenStreetMap', exportWidth - 15, footerY + 74);
       
       // Restore original map state
       map.setView(currentCenter, currentZoom);
