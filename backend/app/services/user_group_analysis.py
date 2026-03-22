@@ -563,7 +563,7 @@ class UserGroupAnalysisService:
                 SELECT
                     b.objectid,
                     ST_AsGeoJSON(b.shape) as geometry,
-                    ST_Area(b.shape) as area_m2,
+                    ST_Area(b.shape::geography) as area_m2,
                     ST_X(ST_Centroid(b.shape)) as centroid_lon,
                     ST_Y(ST_Centroid(b.shape)) as centroid_lat
                 FROM buildings.building b

@@ -121,7 +121,8 @@ export function MapExportPanel({
       
       // Fit map to show all features FIRST
       if (featureBounds && featureBounds.isValid()) {
-        map.fitBounds(featureBounds, { padding: [20, 20] });
+        map.fitBounds(featureBounds, { padding: [0, 0] });
+        map.zoomIn();
       }
       
       // Force Leaflet to update its internal container size
@@ -202,21 +203,90 @@ export function MapExportPanel({
       
       // Add grid overlay if enabled
       if (showGrid) {
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = 1;
-        const gridSpacing = 50;
-        for (let x = 0; x <= exportWidth; x += gridSpacing) {
+        // Get map bounds for coordinate labels
+        const bounds = map.getBounds();
+        const north = bounds.getNorth();
+        const south = bounds.getSouth();
+        const east = bounds.getEast();
+        const west = bounds.getWest();
+        
+        // Calculate grid intervals (5 lines in each direction)
+        const numLines = 5;
+        const latStep = (north - south) / numLines;
+        const lonStep = (east - west) / numLines;
+        
+        // Draw vertical grid lines
+        for (let i = 0; i <= numLines; i++) {
+          const x = (exportWidth / numLines) * i;
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 0.3;
           ctx.beginPath();
           ctx.moveTo(x, headerHeight);
           ctx.lineTo(x, headerHeight + mapHeight);
           ctx.stroke();
+          
+          // Add longitude label at top (white with black outline)
+          const lon = west + (lonStep * i);
+          const lonText = lon.toFixed(5) + '°E';
+          ctx.font = 'bold 11px Arial';
+          ctx.textAlign = 'center';
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 2;
+          ctx.strokeText(lonText, x, headerHeight - 8);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(lonText, x, headerHeight - 8);
         }
-        for (let y = headerHeight; y <= headerHeight + mapHeight; y += gridSpacing) {
+        
+        // Draw horizontal grid lines and latitude labels
+        for (let i = 0; i <= numLines; i++) {
+          const y = headerHeight + (mapHeight / numLines) * i;
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 0.3;
           ctx.beginPath();
           ctx.moveTo(0, y);
           ctx.lineTo(exportWidth, y);
           ctx.stroke();
+          
+          // Add latitude label at left edge (white with black outline)
+          const lat = north - (latStep * i);
+          const latText = lat.toFixed(5) + '°N';
+          ctx.font = 'bold 11px Arial';
+          ctx.textAlign = 'right';
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 3;
+          ctx.strokeText(latText, 60, y + 4);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(latText, 60, y + 4);
         }
+        
+        // Add coordinate system label
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'right';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeText('WGS 84', exportWidth - 10, headerHeight + 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('WGS 84', exportWidth - 10, headerHeight + 20);
+        
+        // Add axis labels
+        ctx.font = 'bold 11px Arial';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        
+        // Longitude label (bottom center)
+        ctx.textAlign = 'center';
+        ctx.strokeText('Longitude (°E)', exportWidth / 2, headerHeight + mapHeight + 20);
+        ctx.fillText('Longitude (°E)', exportWidth / 2, headerHeight + mapHeight + 20);
+        
+        // Latitude label (rotated on left side)
+        ctx.save();
+        ctx.translate(15, headerHeight + mapHeight / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.strokeText('Latitude (°N)', 0, 0);
+        ctx.fillText('Latitude (°N)', 0, 0);
+        ctx.restore();
       }
       
       // Draw footer border

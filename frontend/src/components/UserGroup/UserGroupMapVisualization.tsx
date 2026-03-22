@@ -10,37 +10,42 @@ function AutoZoom({ forestBoundary, extentBoundary }: { forestBoundary: any; ext
   const map = useMap();
 
   useEffect(() => {
-    if (forestBoundary || extentBoundary) {
+    if (!forestBoundary && !extentBoundary) return;
+
+    const timer = setTimeout(() => {
       try {
+        map.invalidateSize();
+        
         const bounds = L.latLngBounds([]);
 
-        // Add forest boundary coordinates to bounds
-        if (forestBoundary && forestBoundary.coordinates) {
-          const coords = forestBoundary.type === 'Polygon'
-            ? forestBoundary.coordinates[0]
-            : forestBoundary.coordinates[0][0];
-          coords.forEach((coord: number[]) => {
-            bounds.extend([coord[1], coord[0]]);
-          });
+        if (forestBoundary) {
+          const geoBounds = L.geoJSON(forestBoundary).getBounds();
+          console.log('Forest bounds:', geoBounds);
+          bounds.extend(geoBounds);
+        }
+        
+        if (extentBoundary) {
+          const geoBounds = L.geoJSON(extentBoundary).getBounds();
+          console.log('Extent bounds:', geoBounds);
+          bounds.extend(geoBounds);
         }
 
-        // Add extent boundary coordinates to bounds
-        if (extentBoundary && extentBoundary.coordinates) {
-          const coords = extentBoundary.type === 'Polygon'
-            ? extentBoundary.coordinates[0]
-            : extentBoundary.coordinates[0][0];
-          coords.forEach((coord: number[]) => {
-            bounds.extend([coord[1], coord[0]]);
-          });
-        }
+        console.log('Final bounds:', bounds);
+        console.log('Map size:', map.getSize());
+        console.log('Container size:', map.getContainer().getBoundingClientRect());
 
         if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [50, 50] });
+          map.fitBounds(bounds, { 
+            padding: [100, 100], 
+            maxZoom: 18 
+          });
         }
       } catch (e) {
-        console.error('Error calculating bounds:', e);
+        console.error('Error calculating boundaries:', e);
       }
-    }
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [map, forestBoundary, extentBoundary]);
 
   return null;
@@ -128,7 +133,7 @@ export const UserGroupMapVisualization = forwardRef(function UserGroupMapVisuali
   };
 
   return (
-    <div className="user-group-map-container" style={{ height: '600px', width: '100%', marginTop: '20px' }}>
+    <div className="user-group-map-container" style={{ height: '700px', width: '700px', marginTop: '20px' }}>
       <MapContainer
         center={getMapCenter()}
         zoom={12}
