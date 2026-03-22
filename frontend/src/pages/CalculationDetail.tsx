@@ -678,6 +678,7 @@ export default function CalculationDetail() {
             <UserGroupMapTab
               calculationId={calculation.id}
               forestBoundary={calculation.geometry}
+              forestName={calculation.forest_name}
             />
           </div>
         )}

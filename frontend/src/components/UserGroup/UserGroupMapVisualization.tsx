@@ -1,9 +1,50 @@
-import React from 'react';
-import { MapContainer, TileLayer, GeoJSON, CircleMarker, Marker, LayersControl, Popup, Tooltip, FeatureGroup } from 'react-leaflet';
+import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import { MapContainer, TileLayer, GeoJSON, CircleMarker, Marker, LayersControl, Popup, Tooltip, FeatureGroup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const { BaseLayer, Overlay } = LayersControl;
+
+// Component to handle auto-zoom to boundaries
+function AutoZoom({ forestBoundary, extentBoundary }: { forestBoundary: any; extentBoundary?: any }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (forestBoundary || extentBoundary) {
+      try {
+        const bounds = L.latLngBounds([]);
+
+        // Add forest boundary coordinates to bounds
+        if (forestBoundary && forestBoundary.coordinates) {
+          const coords = forestBoundary.type === 'Polygon'
+            ? forestBoundary.coordinates[0]
+            : forestBoundary.coordinates[0][0];
+          coords.forEach((coord: number[]) => {
+            bounds.extend([coord[1], coord[0]]);
+          });
+        }
+
+        // Add extent boundary coordinates to bounds
+        if (extentBoundary && extentBoundary.coordinates) {
+          const coords = extentBoundary.type === 'Polygon'
+            ? extentBoundary.coordinates[0]
+            : extentBoundary.coordinates[0][0];
+          coords.forEach((coord: number[]) => {
+            bounds.extend([coord[1], coord[0]]);
+          });
+        }
+
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [50, 50] });
+        }
+      } catch (e) {
+        console.error('Error calculating bounds:', e);
+      }
+    }
+  }, [map, forestBoundary, extentBoundary]);
+
+  return null;
+}
 
 interface UserGroupMapVisualizationProps {
   calculationId: string;
@@ -14,14 +55,24 @@ interface UserGroupMapVisualizationProps {
   poiData?: any;
 }
 
-export function UserGroupMapVisualization({
+export const UserGroupMapVisualization = forwardRef(function UserGroupMapVisualization({
   calculationId,
   forestBoundary,
   extentBoundary,
   settlements = [],
   buildings = [],
   poiData = null
-}: UserGroupMapVisualizationProps) {
+}: UserGroupMapVisualizationProps, ref) {
+  const mapInstanceRef = useRef<L.Map | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    getMap: () => mapInstanceRef.current,
+    invalidateSize: () => mapInstanceRef.current?.invalidateSize(),
+    fitBounds: (bounds: L.LatLngBoundsExpression, options?: L.FitBoundsOptions) => {
+      mapInstanceRef.current?.fitBounds(bounds, options);
+    },
+    getBounds: () => mapInstanceRef.current?.getBounds() || null
+  }));
   // Custom house icon for settlements
   const houseIcon = L.divIcon({
     html: `<div style="font-size: 24px; text-align: center;">🏠</div>`,
@@ -31,9 +82,9 @@ export function UserGroupMapVisualization({
     popupAnchor: [0, -30]
   });
 
-  // POI icons
+  // POI icons (blue pin instead of red)
   const poiIcon = L.divIcon({
-    html: `<div style="font-size: 16px;">📍</div>`,
+    html: `<div style="font-size: 16px; filter: hue-rotate(200deg);">📍</div>`,
     className: 'poi-marker',
     iconSize: [20, 20],
     iconAnchor: [10, 20]
@@ -81,8 +132,13 @@ export function UserGroupMapVisualization({
       <MapContainer
         center={getMapCenter()}
         zoom={12}
+        preferCanvas={true}
         style={{ height: '100%', width: '100%' }}
+        ref={(map) => { if (map) mapInstanceRef.current = map; }}
       >
+        {/* Auto-zoom to fit boundaries */}
+        <AutoZoom forestBoundary={forestBoundary} extentBoundary={extentBoundary} />
+
         <LayersControl position="topright">
           {/* TERRAIN BASE MAP - DEFAULT (OpenTopoMap) */}
           <BaseLayer checked name="Terrain">
@@ -150,7 +206,7 @@ export function UserGroupMapVisualization({
             </Overlay>
           )}
 
-          {/* Buildings - Red circles */}
+          {/* Buildings - Small red circles */}
           {buildings.length > 0 && (
             <Overlay checked name="Buildings">
               <FeatureGroup>
@@ -158,12 +214,12 @@ export function UserGroupMapVisualization({
                   <CircleMarker
                     key={`building-${idx}`}
                     center={[building.lat, building.lon]}
-                    radius={4}
+                    radius={2}
                     pathOptions={{
                       fillColor: '#ff0000',
                       fillOpacity: 0.7,
                       color: '#cc0000',
-                      weight: 1
+                      weight: 0.5
                     }}
                   >
                     {building.area && (
@@ -180,7 +236,7 @@ export function UserGroupMapVisualization({
             </Overlay>
           )}
 
-          {/* Settlements - House icons with labels */}
+          {/* Settlements - House icons with permanent plain text labels */}
           {settlements.length > 0 && (
             <Overlay checked name="Settlements">
               <FeatureGroup>
@@ -193,19 +249,17 @@ export function UserGroupMapVisualization({
                     <Tooltip
                       permanent
                       direction="bottom"
-                      className="settlement-label"
+                      className="settlement-label-plain"
+                      opacity={1}
                     >
-                      <div style={{
+                      <span style={{
                         fontSize: '11px',
                         fontWeight: 'bold',
-                        textAlign: 'center',
-                        backgroundColor: 'white',
-                        padding: '2px 5px',
-                        border: '1px solid #333',
-                        borderRadius: '3px'
+                        color: '#000',
+                        textShadow: '1px 1px 2px white, -1px -1px 2px white, 1px -1px 2px white, -1px 1px 2px white'
                       }}>
                         {settlement.settlement_name}
-                      </div>
+                      </span>
                     </Tooltip>
                     <Popup>
                       <div>
@@ -231,6 +285,11 @@ export function UserGroupMapVisualization({
                     position={[poi.lat, poi.lon]}
                     icon={poiIcon}
                   >
+                    <Tooltip direction="top">
+                      <div style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                        {poi.name}
+                      </div>
+                    </Tooltip>
                     <Popup>
                       <div>
                         <strong>{poi.name}</strong><br />
@@ -253,6 +312,11 @@ export function UserGroupMapVisualization({
                     position={[edu.lat, edu.lon]}
                     icon={educationIcon}
                   >
+                    <Tooltip direction="top">
+                      <div style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                        {edu.name}
+                      </div>
+                    </Tooltip>
                     <Popup>
                       <div>
                         <strong>{edu.name}</strong>
@@ -274,6 +338,11 @@ export function UserGroupMapVisualization({
                     position={[health.lat, health.lon]}
                     icon={healthIcon}
                   >
+                    <Tooltip direction="top">
+                      <div style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                        {health.name}
+                      </div>
+                    </Tooltip>
                     <Popup>
                       <div>
                         <strong>{health.name}</strong>
@@ -285,9 +354,9 @@ export function UserGroupMapVisualization({
             </Overlay>
           )}
 
-          {/* Rivers */}
+          {/* Rivers - Checked by default */}
           {poiData && poiData.rivers && poiData.rivers.length > 0 && (
-            <Overlay name="Rivers">
+            <Overlay checked name="Rivers">
               <FeatureGroup>
                 {poiData.rivers.map((river: any, idx: number) => (
                   <GeoJSON
@@ -299,6 +368,11 @@ export function UserGroupMapVisualization({
                       opacity: 0.8
                     }}
                   >
+                    <Tooltip direction="top">
+                      <div style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                        {river.name}
+                      </div>
+                    </Tooltip>
                     <Popup>
                       <div>
                         <strong>{river.name}</strong>
@@ -313,4 +387,4 @@ export function UserGroupMapVisualization({
       </MapContainer>
     </div>
   );
-}
+});
