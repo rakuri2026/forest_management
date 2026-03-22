@@ -337,8 +337,8 @@ export function MapExportPanel({
       ctx.fillStyle = '#fafafa';
       ctx.fillRect(0, footerY, exportWidth, footerHeight);
       
-      // Draw Scale Bar (left side)
-      const scaleX = 20;
+      // Draw Scale Bar (bottom center)
+      const scaleX = (exportWidth - 180) / 2;
       const scaleY = footerY + 50;
       ctx.fillStyle = '#333';
       ctx.fillRect(scaleX, scaleY, 60, 3);
@@ -355,8 +355,8 @@ export function MapExportPanel({
       ctx.fillText('100m', scaleX + 60, scaleY + 12);
       ctx.fillText('200m', scaleX + 120, scaleY + 12);
       
-      // Draw Legend (middle section)
-      const legendX = Math.min(200, exportWidth / 4);
+      // Draw Legend (left aligned)
+      const legendX = 15;
       const legendY = footerY + 10;
       const legendItems = [
         { key: 'forestBoundary', label: 'Forest Boundary', color: '#00aa00' },
@@ -377,7 +377,7 @@ export function MapExportPanel({
         const itemWidth = 90;
         
         // Check if we need to wrap to next line
-        if (currentX + itemWidth > exportWidth - 60 && idx > 0) {
+        if (currentX + itemWidth > exportWidth - 220 && idx > 0) {
           currentX = legendX;
           currentY += 22;
         }
