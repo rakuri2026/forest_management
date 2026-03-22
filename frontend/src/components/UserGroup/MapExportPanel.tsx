@@ -225,16 +225,17 @@ export function MapExportPanel({
           ctx.lineTo(x, headerHeight + mapHeight);
           ctx.stroke();
           
-          // Add longitude label at top (white with black outline)
+          // Add longitude label at top (inside map area, white with black outline)
           const lon = west + (lonStep * i);
           const lonText = lon.toFixed(5) + '°E';
-          ctx.font = 'bold 11px Arial';
+          ctx.font = 'bold 10px Arial';
           ctx.textAlign = 'center';
           ctx.strokeStyle = '#000000';
           ctx.lineWidth = 2;
-          ctx.strokeText(lonText, x, headerHeight - 8);
+          const lonLabelY = headerHeight + 12;
+          ctx.strokeText(lonText, x, lonLabelY);
           ctx.fillStyle = '#ffffff';
-          ctx.fillText(lonText, x, headerHeight - 8);
+          ctx.fillText(lonText, x, lonLabelY);
         }
         
         // Draw horizontal grid lines and latitude labels
