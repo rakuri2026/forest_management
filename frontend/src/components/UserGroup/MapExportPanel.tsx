@@ -144,6 +144,21 @@ export function MapExportPanel({
       const mapHeight = Math.round(mapRect.height);
       const exportHeight = headerHeight + mapHeight + footerHeight;
 
+      // Hide Leaflet controls before capture
+      const controlSelectors = [
+        '.leaflet-control-zoom',      // Zoom +/- buttons
+        '.leaflet-control-layers',    // Layer panel button
+        '.leaflet-control-attribution', // Attribution (optional, can keep)
+      ];
+      const hiddenControls: HTMLElement[] = [];
+      controlSelectors.forEach(selector => {
+        const controls = mapContainer.querySelectorAll(selector);
+        controls.forEach((ctrl: any) => {
+          hiddenControls.push(ctrl);
+          ctrl.style.display = 'none';
+        });
+      });
+      
       // Capture the map container
       const mapCanvas = await html2canvas(mapContainer, {
         scale: 1,
@@ -158,6 +173,11 @@ export function MapExportPanel({
             }
           });
         }
+      });
+      
+      // Restore controls after capture
+      hiddenControls.forEach(ctrl => {
+        ctrl.style.display = '';
       });
 
       // Create final canvas
