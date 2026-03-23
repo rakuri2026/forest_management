@@ -11,7 +11,9 @@
   "dependencies": {
     "@geoman-io/leaflet-geoman-free": "^2.19.2",
     "@turf/turf": "^7.3.4",
+    "@types/html2canvas": "^0.5.35",
     "axios": "^1.6.2",
+    "html2canvas": "^1.4.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.574.0",
     "papaparse": "^5.5.3",

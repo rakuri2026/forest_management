@@ -1,7 +1,10 @@
-import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import { MapContainer, TileLayer, GeoJSON, CircleMarker, Marker, LayersControl, Popup, Tooltip, FeatureGroup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { MapLegend } from './MapLegend';
+import { RasterClickHandler } from './RasterClickHandler';
+import { RasterLayerControls } from './RasterLayerControls';
 
 const { BaseLayer, Overlay } = LayersControl;
 
@@ -70,6 +73,14 @@ export const UserGroupMapVisualization = forwardRef(function UserGroupMapVisuali
 }: UserGroupMapVisualizationProps, ref) {
   const mapInstanceRef = useRef<L.Map | null>(null);
 
+  // Raster layer state management
+  const [landCoverEnabled, setLandCoverEnabled] = useState(false);
+  const [landCoverOpacity, setLandCoverOpacity] = useState(0.7);
+  const [biomassEnabled, setBiomassEnabled] = useState(false);
+  const [biomassOpacity, setBiomassOpacity] = useState(0.7);
+  const [legendType, setLegendType] = useState<'landcover' | 'biomass' | null>(null);
+  const [clickQueryEnabled, setClickQueryEnabled] = useState(false);
+
   useImperativeHandle(ref, () => ({
     getMap: () => mapInstanceRef.current,
     invalidateSize: () => mapInstanceRef.current?.invalidateSize(),
@@ -133,10 +144,28 @@ export const UserGroupMapVisualization = forwardRef(function UserGroupMapVisuali
   };
 
   return (
-    <div className="user-group-map-container" style={{ height: '700px', width: '700px', marginTop: '20px' }}>
+    <div className="user-group-map-wrapper" style={{ display: 'flex', gap: '20px', marginTop: '20px', alignItems: 'flex-start' }}>
+      {/* Raster Layer Controls - Outside map */}
+      <RasterLayerControls
+        landCoverEnabled={landCoverEnabled}
+        landCoverOpacity={landCoverOpacity}
+        biomassEnabled={biomassEnabled}
+        biomassOpacity={biomassOpacity}
+        legendType={legendType}
+        clickQueryEnabled={clickQueryEnabled}
+        onLandCoverToggle={setLandCoverEnabled}
+        onLandCoverOpacityChange={setLandCoverOpacity}
+        onBiomassToggle={setBiomassEnabled}
+        onBiomassOpacityChange={setBiomassOpacity}
+        onLegendToggle={setLegendType}
+        onClickQueryToggle={setClickQueryEnabled}
+      />
+
+      {/* Map Container */}
+      <div className="user-group-map-container" style={{ height: '700px', minWidth: '600px', position: 'relative', flex: '1' }}>
       <MapContainer
         center={getMapCenter()}
-        zoom={12}
+        zoom={14}
         preferCanvas={true}
         style={{ height: '100%', width: '100%' }}
         ref={(map) => { if (map) mapInstanceRef.current = map; }}
@@ -388,8 +417,40 @@ export const UserGroupMapVisualization = forwardRef(function UserGroupMapVisuali
               </FeatureGroup>
             </Overlay>
           )}
+
         </LayersControl>
+
+        {/* Raster Layers (controlled separately) */}
+        {landCoverEnabled && (
+          <TileLayer
+            url={`http://localhost:8001/api/calculations/${calculationId}/user-group-tiles/landcover/{z}/{x}/{y}.png?exclude_forest=true&alpha=160`}
+            attribution='Land cover: ESA WorldCover 2020'
+            minZoom={10}
+            maxZoom={18}
+            opacity={landCoverOpacity}
+          />
+        )}
+
+        {biomassEnabled && (
+          <TileLayer
+            url={`http://localhost:8001/api/calculations/${calculationId}/user-group-tiles/biomass/{z}/{x}/{y}.png?exclude_forest=true&alpha=160`}
+            attribution='Biomass: ESA CCI AGB 2022 Nepal'
+            minZoom={10}
+            maxZoom={18}
+            opacity={biomassOpacity}
+          />
+        )}
+
+        {/* Click-to-query handler */}
+        <RasterClickHandler
+          calculationId={calculationId}
+          enabled={clickQueryEnabled}
+        />
       </MapContainer>
+
+        {/* Map Legend - Inside map container */}
+        <MapLegend type={legendType} onClose={() => setLegendType(null)} />
+      </div>
     </div>
   );
 });

@@ -1162,3 +1162,148 @@ class UserGroupAnalysisService:
         except Exception as e:
             logger.error(f"Error exporting to CSV: {e}")
             raise
+
+    # ============================================================================
+    # Land Cover Analysis
+    # ============================================================================
+
+    async def analyze_land_cover(self, calculation_id: str) -> Dict[str, Any]:
+        """
+        Perform comprehensive land cover and biomass analysis for user group map
+
+        This analysis:
+        1. Gets user group extent geometry
+        2. Gets community forest boundary geometry
+        3. Calculates overlap and net analysis area
+        4. Performs land cover classification (ESA World Cover)
+        5. Calculates biomass and timber volume (AGB 2022 Nepal)
+
+        Args:
+            calculation_id: The calculation (community forest) ID
+
+        Returns:
+            Dictionary with land cover classes, biomass, and area statistics
+
+        Raises:
+            ValueError: If community forest boundary or user group extent not found
+        """
+        from datetime import datetime
+
+        try:
+            logger.info(f"Starting land cover analysis for calculation {calculation_id}")
+
+            # Step 1: Get community forest boundary
+            calc = self.db.query(Calculation).filter(
+                Calculation.id == UUID(calculation_id)
+            ).first()
+
+            if not calc:
+                raise ValueError(
+                    "Community Forest boundary not found. "
+                    "Please upload a forest boundary in the Analysis tab first."
+                )
+
+            # Step 2: Get user group extent
+            extent = self.db.query(UserGroupExtent).filter(
+                UserGroupExtent.calculation_id == UUID(calculation_id)
+            ).order_by(UserGroupExtent.created_at.desc()).first()
+
+            if not extent:
+                raise ValueError(
+                    "User Group extent not found. "
+                    "Please upload or create a user group boundary in the Forest User Map tab first."
+                )
+
+            logger.info(f"Found extent ID: {extent.id}, calculation ID: {calc.id}")
+
+            # Step 3: Call PostgreSQL function to perform per-class biomass analysis
+            # This ensures biomass is only counted for tree cover (and partially for shrubland/grassland)
+            query = text("""
+                SELECT
+                    user_group_area_ha,
+                    forest_overlap_area_ha,
+                    net_analysis_area_ha,
+                    land_cover_class,
+                    land_cover_name,
+                    land_cover_area_ha,
+                    land_cover_percentage,
+                    avg_biomass_mg_per_ha,
+                    min_biomass_mg_per_ha,
+                    max_biomass_mg_per_ha,
+                    total_biomass_mg,
+                    avg_volume_m3_per_ha,
+                    total_volume_m3,
+                    pixel_count
+                FROM analyze_land_cover_and_biomass_per_class(
+                    (SELECT extent_geometry FROM public.user_group_extents WHERE id = :extent_id),
+                    (SELECT boundary_geom FROM public.calculations WHERE id = :calc_id)
+                )
+            """)
+
+            results = self.db.execute(
+                query,
+                {'extent_id': extent.id, 'calc_id': str(calc.id)}
+            ).fetchall()
+
+            if not results:
+                raise ValueError("No land cover data found. Please ensure raster datasets are available.")
+
+            # Step 4: Process results
+            land_cover_classes = []
+            total_biomass = 0
+            total_volume = 0
+            user_group_area = 0
+            forest_overlap_area = 0
+            net_area = 0
+
+            for row in results:
+                # Extract area summary (same for all rows)
+                if not land_cover_classes:
+                    user_group_area = float(row[0])
+                    forest_overlap_area = float(row[1])
+                    net_area = float(row[2])
+
+                # Extract land cover class data
+                land_cover_classes.append({
+                    'class_code': int(row[3]),
+                    'class_name': row[4],
+                    'area_ha': float(row[5]),
+                    'percentage': float(row[6]),
+                    'avg_biomass_mg_per_ha': float(row[7]),
+                    'min_biomass_mg_per_ha': float(row[8]),
+                    'max_biomass_mg_per_ha': float(row[9]),
+                    'total_biomass_mg': float(row[10]),
+                    'avg_volume_m3_per_ha': float(row[11]),
+                    'total_volume_m3': float(row[12]),
+                    'pixel_count': int(row[13])
+                })
+
+                total_biomass += float(row[10])
+                total_volume += float(row[12])
+
+            # Calculate overall averages
+            avg_biomass = total_biomass / net_area if net_area > 0 else 0
+            avg_volume = total_volume / net_area if net_area > 0 else 0
+
+            logger.info(f"Land cover analysis completed: {len(land_cover_classes)} classes found")
+            logger.info(f"Total biomass: {total_biomass:.2f} Mg, Total volume: {total_volume:.2f} m³")
+
+            return {
+                'user_group_area_ha': round(user_group_area, 4),
+                'forest_overlap_area_ha': round(forest_overlap_area, 4),
+                'net_analysis_area_ha': round(net_area, 4),
+                'land_cover_classes': land_cover_classes,
+                'total_biomass_mg': round(total_biomass, 2),
+                'total_volume_m3': round(total_volume, 2),
+                'avg_biomass_mg_per_ha': round(avg_biomass, 2),
+                'avg_volume_m3_per_ha': round(avg_volume, 2),
+                'analysis_date': datetime.utcnow(),
+                'has_forest_overlap': forest_overlap_area > 0
+            }
+
+        except ValueError:
+            # Re-raise ValueError with original message
+            raise
+        except Exception as e:
+            logger.error(f"Error performing land cover analysis: {e}")
+            raise ValueError(f"Land cover analysis failed: {str(e)}")

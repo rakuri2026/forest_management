@@ -74,3 +74,46 @@ class POIResponse(BaseModel):
     education: Optional[List[POILayer]] = []
     health: Optional[List[POILayer]] = []
     rivers: Optional[List[Dict[str, Any]]] = []
+
+
+# ============================================================================
+# Land Cover Analysis Schemas
+# ============================================================================
+
+class LandCoverClass(BaseModel):
+    """Individual land cover class statistics"""
+    class_code: int
+    class_name: str
+    area_ha: float
+    percentage: float
+    avg_biomass_mg_per_ha: float
+    min_biomass_mg_per_ha: float
+    max_biomass_mg_per_ha: float
+    total_biomass_mg: float
+    avg_volume_m3_per_ha: float
+    total_volume_m3: float
+    pixel_count: int
+
+
+class LandCoverAnalysisResponse(BaseModel):
+    """Complete land cover analysis results"""
+    # Area summary
+    user_group_area_ha: float
+    forest_overlap_area_ha: float
+    net_analysis_area_ha: float
+
+    # Land cover breakdown
+    land_cover_classes: List[LandCoverClass]
+
+    # Overall biomass summary
+    total_biomass_mg: float
+    total_volume_m3: float
+    avg_biomass_mg_per_ha: float
+    avg_volume_m3_per_ha: float
+
+    # Metadata
+    analysis_date: datetime
+    has_forest_overlap: bool
+
+    class Config:
+        from_attributes = True

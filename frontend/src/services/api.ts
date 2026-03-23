@@ -731,3 +731,178 @@ export const samplingApi = {
     return response.data;
   },
 };
+
+// ============================================================================
+// User Group Map API
+// ============================================================================
+
+export const userGroupApi = {
+  /**
+   * Upload user group extent boundary file
+   */
+  uploadExtent: async (
+    calculationId: string,
+    file: File
+  ): Promise<{ extent_id: number; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post(
+      `/api/calculations/${calculationId}/user-group/upload`,
+      formData
+    );
+    return response.data;
+  },
+
+  /**
+   * Create manual extent from digitized polygon
+   */
+  createManualExtent: async (
+    calculationId: string,
+    geometry: any
+  ): Promise<{ extent_id: number; message: string }> => {
+    const response = await api.post(
+      `/api/calculations/${calculationId}/user-group/manual`,
+      { geometry }
+    );
+    return response.data;
+  },
+
+  /**
+   * Create auto-buffer extent
+   */
+  createAutoBuffer: async (
+    calculationId: string,
+    bufferDistance: number = 1000
+  ): Promise<{ extent_id: number; message: string }> => {
+    const response = await api.post(
+      `/api/calculations/${calculationId}/user-group/auto-buffer`,
+      null,
+      { params: { buffer_distance: bufferDistance } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Run building and settlement analysis
+   */
+  analyzeUserGroup: async (
+    calculationId: string,
+    extentId: number
+  ): Promise<{ message: string; settlements_analyzed: number; total_buildings: number }> => {
+    const response = await api.post(
+      `/api/calculations/${calculationId}/user-group/analyze`,
+      null,
+      { params: { extent_id: extentId } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Get analysis results for visualization
+   */
+  getResults: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/calculations/${calculationId}/user-group/results`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get POI layers (points of interest, education, health, rivers)
+   */
+  getPOILayers: async (
+    calculationId: string,
+    layerType: 'all' | 'poi' | 'education' | 'health' | 'rivers' = 'all'
+  ): Promise<any> => {
+    const response = await api.get(
+      `/api/calculations/${calculationId}/user-group/poi`,
+      { params: { layer_type: layerType } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete user group extent and all related data
+   */
+  deleteExtent: async (calculationId: string): Promise<void> => {
+    await api.delete(`/api/calculations/${calculationId}/user-group`);
+  },
+
+  /**
+   * Export user group map (PDF, GPKG, GeoJSON, CSV)
+   */
+  exportMap: async (
+    extentId: number,
+    format: 'pdf' | 'gpkg' | 'geojson' | 'csv'
+  ): Promise<Blob> => {
+    const response = await api.get(`/api/user-group/${extentId}/export`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
+  /**
+   * Query land cover and biomass at a specific point
+   */
+  queryPoint: async (
+    calculationId: string,
+    lat: number,
+    lon: number
+  ): Promise<{
+    location: { lat: number; lon: number };
+    land_cover: { class_code: number; class_name: string } | null;
+    biomass: { value_mg_ha: number; volume_m3_ha: number } | null;
+  }> => {
+    const response = await api.get(
+      `/api/calculations/${calculationId}/user-group/query`,
+      {
+        params: { lat, lon },
+      }
+    );
+    return response.data;
+  },
+
+  /**
+   * Analyze land cover and biomass for user group extent
+   *
+   * Performs comprehensive spatial analysis including:
+   * - Land use classification (ESA World Cover)
+   * - Biomass estimation (AGB 2022 Nepal)
+   * - Community forest overlap exclusion
+   * - Timber volume calculation
+   *
+   * Prerequisites:
+   * 1. Community forest boundary must be uploaded (Analysis tab)
+   * 2. User group extent must be created (Forest User Map tab)
+   */
+  analyzeLandCover: async (calculationId: string): Promise<{
+    user_group_area_ha: number;
+    forest_overlap_area_ha: number;
+    net_analysis_area_ha: number;
+    land_cover_classes: Array<{
+      class_code: number;
+      class_name: string;
+      area_ha: number;
+      percentage: number;
+      avg_biomass_mg_per_ha: number;
+      min_biomass_mg_per_ha: number;
+      max_biomass_mg_per_ha: number;
+      total_biomass_mg: number;
+      avg_volume_m3_per_ha: number;
+      total_volume_m3: number;
+      pixel_count: number;
+    }>;
+    total_biomass_mg: number;
+    total_volume_m3: number;
+    avg_biomass_mg_per_ha: number;
+    avg_volume_m3_per_ha: number;
+    analysis_date: string;
+    has_forest_overlap: boolean;
+  }> => {
+    const response = await api.get(
+      `/api/calculations/${calculationId}/user-group/land-cover`
+    );
+    return response.data;
+  },
+};

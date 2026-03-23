@@ -19,6 +19,7 @@ env/
 # Environment variables
 .env
 .env.local
+token.txt
 
 # Database
 *.db
@@ -29,6 +30,75 @@ uploads/*
 !uploads/.gitkeep
 exports/*
 !exports/.gitkeep
+backups/
+outputs/
+
+# Test Data (large files)
+testData/
+dumping_files/
+migrations/
+
+# Development documentation (progress notes)
+*_COMPLETE.md
+*_FIX.md
+*_IMPLEMENTATION.md
+*_PROGRESS.md
+*_STATUS.md
+*_PLAN.md
+*_SUMMARY.md
+*_REPORT.md
+*_GUIDE.md
+*_TESTING.md
+*_VERIFICATION.md
+*_CONFIRMATION.md
+*_ANALYSIS.md
+*_METHODOLOGY.md
+QUICK_*.md
+DEBUGGING_*.md
+HOW_TO_*.md
+TEST_*.md
+IMPLEMENTATION_*.md
+TOMORROW_*.md
+current_context.md
+session*.txt
+
+# Temporary scripts
+add_*.py
+check_*.py
+create_*.py
+diagnose_*.py
+fix_*.py
+implement_*.py
+install_*.py
+optimize_*.py
+quick_*.py
+reanalyze_*.py
+run_*.py
+test_*.py
+update_*.py
+verify_*.py
+apply_*.py
+assign_*.py
+compare_*.py
+complete_*.py
+export_*.py
+extract_*.py
+generate_*.py
+get_*.py
+insert_*.py
+wait_*.py
+SAFETY_*.py
+
+# Batch files (environment-specific)
+*.bat
+!start_all.bat
+!stop_all.bat
+!restart_all.bat
+
+# CSV/Excel data files
+*.csv
+*.xlsx
+!testData/spp_database/tree_species_coefficients*.csv
 
 # Logs
 *.log
@@ -50,3 +120,14 @@ alembic/versions/*.pyc
 dist/
 build/
 *.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+
+# Claude Code
+.claude/settings.local.json

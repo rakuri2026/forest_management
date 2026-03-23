@@ -4,6 +4,7 @@ import { ExtentUploadSection } from './UserGroup/ExtentUploadSection';
 import { AutoBufferSection } from './UserGroup/AutoBufferSection';
 import { UserGroupMapVisualization } from './UserGroup/UserGroupMapVisualization';
 import { SettlementStatistics } from './UserGroup/SettlementStatistics';
+import { LandCoverAnalysis } from './UserGroup/LandCoverAnalysis';
 import { MapExportPanel } from './UserGroup/MapExportPanel';
 import api from '../services/api';
 
@@ -250,6 +251,14 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
 
           {/* Statistics Dashboard */}
           <SettlementStatistics settlements={results.settlements} />
+
+          {/* Land Cover & Biomass Analysis */}
+          <div className="mt-6">
+            <LandCoverAnalysis
+              calculationId={calculationId}
+              forestName={forestName}
+            />
+          </div>
 
           {/* Export Options */}
           <div className="export-section mt-6">
