@@ -876,7 +876,7 @@ export const userGroupApi = {
    * 1. Community forest boundary must be uploaded (Analysis tab)
    * 2. User group extent must be created (Forest User Map tab)
    */
-  analyzeLandCover: async (calculationId: string): Promise<{
+  analyzeLandCover: async (calculationId: string, forceRefresh: boolean = false): Promise<{
     user_group_area_ha: number;
     forest_overlap_area_ha: number;
     net_analysis_area_ha: number;
@@ -899,10 +899,162 @@ export const userGroupApi = {
     avg_volume_m3_per_ha: number;
     analysis_date: string;
     has_forest_overlap: boolean;
+    from_cache?: boolean;
   }> => {
     const response = await api.get(
-      `/api/calculations/${calculationId}/user-group/land-cover`
+      `/api/calculations/${calculationId}/user-group/land-cover`,
+      {
+        params: { force_refresh: forceRefresh }
+      }
     );
+    return response.data;
+  },
+
+  // ============================================================================
+  // Household Information API
+  // ============================================================================
+
+  /**
+   * Download Excel template for household information entry
+   */
+  downloadHouseholdTemplate: async (
+    calculationId: string,
+    options: { land_unit: 'ropani' | 'kaththa'; include_coordinates: boolean }
+  ): Promise<Blob> => {
+    const response = await api.post(
+      `/api/household/calculations/${calculationId}/template`,
+      options,
+      {
+        responseType: 'blob',
+      }
+    );
+    return response.data;
+  },
+
+  /**
+   * Upload filled Excel file with household data
+   */
+  uploadHouseholdData: async (
+    calculationId: string,
+    file: File
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post(
+      `/api/household/calculations/${calculationId}/upload`,
+      formData
+    );
+    return response.data;
+  },
+
+  /**
+   * Get all household records for a calculation
+   */
+  getHouseholds: async (
+    calculationId: string,
+    skip = 0,
+    limit = 100
+  ): Promise<any[]> => {
+    const response = await api.get(
+      `/api/household/calculations/${calculationId}/households`,
+      {
+        params: { skip, limit },
+      }
+    );
+    return response.data;
+  },
+
+  /**
+   * Get a single household by ID
+   */
+  getHousehold: async (householdId: string): Promise<any> => {
+    const response = await api.get(`/api/household/households/${householdId}`);
+    return response.data;
+  },
+
+  /**
+   * Create a new household record
+   */
+  createHousehold: async (calculationId: string, data: any): Promise<any> => {
+    const response = await api.post(
+      `/api/household/calculations/${calculationId}/households`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Update a household record
+   */
+  updateHousehold: async (householdId: string, data: any): Promise<any> => {
+    console.log('API: updateHousehold called', householdId, data);
+    const response = await api.put(
+      `/api/household/households/${householdId}`,
+      data
+    );
+    console.log('API: updateHousehold response', response.data);
+    return response.data;
+  },
+
+  /**
+   * Delete a household record
+   */
+  deleteHousehold: async (householdId: string): Promise<void> => {
+    await api.delete(`/api/household/households/${householdId}`);
+  },
+
+  /**
+   * Delete all household records for a calculation
+   */
+  deleteAllHouseholds: async (calculationId: string): Promise<any> => {
+    const response = await api.delete(
+      `/api/household/calculations/${calculationId}/households`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get summary statistics for household data
+   */
+  getHouseholdSummary: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/household/calculations/${calculationId}/summary`
+    );
+    return response.data;
+  },
+
+  /**
+   * Export household analysis to Excel
+   */
+  exportHouseholdAnalysis: async (calculationId: string): Promise<Blob> => {
+    const response = await api.get(
+      `/api/household/calculations/${calculationId}/export`,
+      {
+        responseType: 'blob',
+      }
+    );
+    return response.data;
+  },
+
+  /**
+   * Get surname suggestions for autocomplete
+   */
+  getSurnameSuggestions: async (
+    query: string,
+    limit = 10
+  ): Promise<any[]> => {
+    const response = await api.get(`/api/household/surnames`, {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+
+  /**
+   * Lookup caste classification by surname
+   */
+  lookupCasteBySurname: async (surname: string): Promise<any[]> => {
+    const response = await api.get(`/api/household/caste-lookup/${surname}`);
     return response.data;
   },
 };
