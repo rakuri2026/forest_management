@@ -3,8 +3,8 @@
  * Displays household records with inline editing
  */
 import React, { useState } from 'react';
-import { Table, Button, Tag, Popconfirm, message, Space, Tooltip, Form, InputNumber, Input, Select } from 'antd';
-import { DeleteOutlined, EditOutlined, ReloadOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { Table, Button, Tag, Popconfirm, message, Space, Tooltip, Form, InputNumber, Input, Select, Modal } from 'antd';
+import { DeleteOutlined, EditOutlined, ReloadOutlined, SaveOutlined, CloseOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as api from '../../services/api';
 import type { HouseholdInfo } from '../../types/household';
@@ -75,6 +75,7 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
   calculationId,
 }) => {
   const [form] = Form.useForm();
+  const [addForm] = Form.useForm();
   const [editingKey, setEditingKey] = useState<string>('');
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
@@ -82,6 +83,10 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [originalData, setOriginalData] = useState<Record<string, HouseholdInfo>>({});
   const autoSaveTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Add household modal state
+  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
 
   const isEditing = (record: HouseholdInfo) => record.id === editingKey;
 
@@ -309,6 +314,60 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
         newSet.delete(id);
         return newSet;
       });
+    }
+  };
+
+  const handleShowAddModal = () => {
+    addForm.resetFields();
+    // Set default values
+    addForm.setFieldsValue({
+      land_unit: 'ropani',
+      cow_ox_count: 0,
+      buffalo_count: 0,
+      goat_sheep_count: 0,
+      timber_demand_cft: 0,
+      pole_demand: 0,
+      forest_based_occupation: false,
+    });
+    setIsAddModalVisible(true);
+  };
+
+  const handleAddCancel = () => {
+    setIsAddModalVisible(false);
+    addForm.resetFields();
+  };
+
+  const handleAdd = async (values: any) => {
+    setIsAdding(true);
+    try {
+      // Prepare the data
+      const addData = {
+        ...values,
+        // Convert numeric values
+        house_no: Number(values.house_no),
+        female_count: Number(values.female_count),
+        male_count: Number(values.male_count),
+        land_area: values.land_area ? Number(values.land_area) : 0,
+        cow_ox_count: values.cow_ox_count || 0,
+        buffalo_count: values.buffalo_count || 0,
+        goat_sheep_count: values.goat_sheep_count || 0,
+        timber_demand_cft: values.timber_demand_cft || 0,
+        pole_demand: values.pole_demand || 0,
+        firewood_demand_bhari: values.firewood_demand_bhari || undefined,
+        grass_demand_bhari: values.grass_demand_bhari || undefined,
+        bedding_demand_bhari: values.bedding_demand_bhari || undefined,
+      };
+
+      await api.userGroupApi.createHousehold(calculationId, addData);
+      message.success('Household added successfully');
+      setIsAddModalVisible(false);
+      addForm.resetFields();
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error adding household:', error);
+      message.error(error.response?.data?.detail || 'Failed to add household');
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -662,6 +721,14 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
           <Tag color="orange" icon={<EditOutlined />}>Manually entered</Tag>
         </Space>
         <Space>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleShowAddModal}
+            disabled={editingKey !== ''}
+          >
+            Add Household
+          </Button>
           {editingKey && (
             <Tag color="purple" icon={autoSaving ? <ReloadOutlined spin /> : <ReloadOutlined />}>
               {autoSaving ? 'Auto-saving...' : 'Auto-save: Every 2 min'}
@@ -696,6 +763,227 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
           bordered
         />
       </Form>
+
+      {/* Add Household Modal */}
+      <Modal
+        title="Add New Household"
+        open={isAddModalVisible}
+        onCancel={handleAddCancel}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        <Form
+          form={addForm}
+          layout="vertical"
+          onFinish={handleAdd}
+        >
+          <div style={{ maxHeight: '60vh', overflowY: 'auto', padding: '0 8px' }}>
+            {/* Basic Information */}
+            <h3 style={{ borderBottom: '1px solid #d9d9d9', paddingBottom: 8 }}>Basic Information</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <Form.Item
+                label="House No (घर नं.)"
+                name="house_no"
+                rules={[{ required: true, message: 'House number is required' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={1} />
+              </Form.Item>
+
+              <Form.Item
+                label="Surname (थर)"
+                name="surname"
+                rules={[{ required: true, message: 'Surname is required' }]}
+              >
+                <Input />
+              </Form.Item>
+
+              <Form.Item
+                label="Male Head (घरमुली पुरुष)"
+                name="household_head_male"
+              >
+                <Input />
+              </Form.Item>
+
+              <Form.Item
+                label="Female Head (घरमुली महिला)"
+                name="household_head_female"
+              >
+                <Input />
+              </Form.Item>
+
+              <Form.Item
+                label="Address (ठेगाना)"
+                name="address_tole"
+              >
+                <Input />
+              </Form.Item>
+            </div>
+
+            {/* Family Members */}
+            <h3 style={{ borderBottom: '1px solid #d9d9d9', paddingBottom: 8, marginTop: 16 }}>Family Members</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <Form.Item
+                label="Female Count (महिला संख्या)"
+                name="female_count"
+                rules={[{ required: true, message: 'Female count is required' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} />
+              </Form.Item>
+
+              <Form.Item
+                label="Male Count (पुरुष संख्या)"
+                name="male_count"
+                rules={[{ required: true, message: 'Male count is required' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} />
+              </Form.Item>
+            </div>
+
+            {/* Land & Livestock */}
+            <h3 style={{ borderBottom: '1px solid #d9d9d9', paddingBottom: 8, marginTop: 16 }}>Land & Livestock</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <Form.Item
+                label="Land Area (जग्गा क्षेत्रफल)"
+                name="land_area"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} />
+              </Form.Item>
+
+              <Form.Item
+                label="Land Unit (एकाई)"
+                name="land_unit"
+              >
+                <Select>
+                  <Select.Option value="ropani">Ropani</Select.Option>
+                  <Select.Option value="kaththa">Kaththa</Select.Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                label="Cow/Ox (गाई/गोरु)"
+                name="cow_ox_count"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} />
+              </Form.Item>
+
+              <Form.Item
+                label="Buffalo (भैंसी)"
+                name="buffalo_count"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} />
+              </Form.Item>
+
+              <Form.Item
+                label="Goat/Sheep (बाख्रा/भेडा)"
+                name="goat_sheep_count"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} />
+              </Form.Item>
+            </div>
+
+            {/* Forest Product Demand */}
+            <h3 style={{ borderBottom: '1px solid #d9d9d9', paddingBottom: 8, marginTop: 16 }}>Forest Product Demand</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <Form.Item
+                label="Timber Demand (काठ माग cft)"
+                name="timber_demand_cft"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} />
+              </Form.Item>
+
+              <Form.Item
+                label="Pole Demand (डल्लो माग)"
+                name="pole_demand"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} />
+              </Form.Item>
+
+              <Form.Item
+                label="Firewood Demand (दाउरा भारी)"
+                name="firewood_demand_bhari"
+                extra="Leave blank for auto-calculation"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} />
+              </Form.Item>
+
+              <Form.Item
+                label="Grass Demand (घाँस भारी)"
+                name="grass_demand_bhari"
+                extra="Leave blank for auto-calculation"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} />
+              </Form.Item>
+
+              <Form.Item
+                label="Bedding Demand (ओछ्यान भारी)"
+                name="bedding_demand_bhari"
+                extra="Leave blank for auto-calculation"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} step={0.1} />
+              </Form.Item>
+            </div>
+
+            {/* Classification */}
+            <h3 style={{ borderBottom: '1px solid #d9d9d9', paddingBottom: 8, marginTop: 16 }}>Classification</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <Form.Item
+                label="Caste Classification (जातीय वर्गीकरण)"
+                name="caste_classification_ne"
+              >
+                <Select>
+                  <Select.Option value="जनजाती">जनजाती</Select.Option>
+                  <Select.Option value="दलित">दलित</Select.Option>
+                  <Select.Option value="सीमान्तकृत">सीमान्तकृत</Select.Option>
+                  <Select.Option value="अति सीमान्तकृत">अति सीमान्तकृत</Select.Option>
+                  <Select.Option value="लोपोन्मुख र सीमान्तकृत">लोपोन्मुख र सीमान्तकृत</Select.Option>
+                  <Select.Option value="अन्य">अन्य</Select.Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                label="Prosperity Level (समृद्धि स्तर)"
+                name="prosperity_level"
+              >
+                <Select>
+                  <Select.Option value="अति विपन्न">अति विपन्न</Select.Option>
+                  <Select.Option value="विपन्न">विपन्न</Select.Option>
+                  <Select.Option value="मध्यम">मध्यम</Select.Option>
+                  <Select.Option value="सम्पन्न">सम्पन्न</Select.Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                label="Forest Based Occupation (वन आधारित पेशा)"
+                name="forest_based_occupation"
+              >
+                <Select>
+                  <Select.Option value={true}>Yes</Select.Option>
+                  <Select.Option value={false}>No</Select.Option>
+                </Select>
+              </Form.Item>
+            </div>
+
+            {/* Remarks */}
+            <h3 style={{ borderBottom: '1px solid #d9d9d9', paddingBottom: 8, marginTop: 16 }}>Additional Information</h3>
+            <Form.Item
+              label="Remarks (कैफियत)"
+              name="remarks"
+            >
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          </div>
+
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid #d9d9d9', paddingTop: 16 }}>
+            <Button onClick={handleAddCancel}>
+              Cancel
+            </Button>
+            <Button type="primary" htmlType="submit" loading={isAdding}>
+              Add Household
+            </Button>
+          </div>
+        </Form>
+      </Modal>
     </div>
   );
 };

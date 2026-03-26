@@ -22,6 +22,9 @@ from .field_inventory import (
     FieldInventoryBlockSummary
 )
 from .user_group import UserGroupExtent, UserGroupBuilding
+from .household_information import HouseholdInformation
+from .caste_classification import CasteClassification
+from .forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialCommittee
 
 __all__ = [
     "User",
@@ -49,4 +52,9 @@ __all__ = [
     "FieldInventoryBlockSummary",
     "UserGroupExtent",
     "UserGroupBuilding",
+    "HouseholdInformation",
+    "CasteClassification",
+    "ForestUserCommittee",
+    "AdvisoryCommittee",
+    "FinancialCommittee",
 ]

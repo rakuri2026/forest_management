@@ -28,7 +28,7 @@ from .core.config import settings
 from .core.database import check_db_connection, Base, engine
 from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router
 from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
-from .api import location_search, tiles, user_group
+from .api import location_search, tiles, user_group, household_info, forest_committee
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -216,6 +216,18 @@ app.include_router(
     user_group.router,
     prefix="/api",
     tags=["User Group Map"]
+)
+
+# Include household information router
+app.include_router(
+    household_info.router,
+    tags=["Household Information"]
+)
+
+# Include forest committee router
+app.include_router(
+    forest_committee.router,
+    tags=["Forest Committee"]
 )
 
 

@@ -5,5 +5,7 @@ from .inventory import router as inventory_router
 from .species import router as species_router
 from .tree_models import router as tree_models_router
 from . import biodiversity
+from . import household_info
+from . import forest_committee
 
-__all__ = ["auth_router", "forests_router", "inventory_router", "species_router", "tree_models_router", "biodiversity"]
+__all__ = ["auth_router", "forests_router", "inventory_router", "species_router", "tree_models_router", "biodiversity", "household_info", "forest_committee"]

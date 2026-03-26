@@ -1057,4 +1057,101 @@ export const userGroupApi = {
     const response = await api.get(`/api/household/caste-lookup/${surname}`);
     return response.data;
   },
+
+  // ============================================================================
+  // Forest Committee API
+  // ============================================================================
+
+  /**
+   * Get all committee data for a user group
+   */
+  getAllCommittees: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/forest-committee/user-groups/${calculationId}`);
+    return response.data;
+  },
+
+  /**
+   * Create/replace all committees in bulk
+   */
+  createCommitteesBulk: async (calculationId: string, data: any): Promise<any> => {
+    const response = await api.post(`/api/forest-committee/user-groups/${calculationId}/bulk`, data);
+    return response.data;
+  },
+
+  /**
+   * Create a main committee member
+   */
+  createMainCommitteeMember: async (calculationId: string, member: any): Promise<any> => {
+    const response = await api.post(`/api/forest-committee/user-groups/${calculationId}/main`, member);
+    return response.data;
+  },
+
+  /**
+   * Update a main committee member
+   */
+  updateMainCommitteeMember: async (memberId: string, updates: any): Promise<any> => {
+    const response = await api.put(`/api/forest-committee/main/${memberId}`, updates);
+    return response.data;
+  },
+
+  /**
+   * Delete a main committee member
+   */
+  deleteMainCommitteeMember: async (memberId: string): Promise<void> => {
+    await api.delete(`/api/forest-committee/main/${memberId}`);
+  },
+
+  /**
+   * Create an advisory committee member
+   */
+  createAdvisoryMember: async (calculationId: string, member: any): Promise<any> => {
+    const response = await api.post(`/api/forest-committee/user-groups/${calculationId}/advisory`, member);
+    return response.data;
+  },
+
+  /**
+   * Update an advisory committee member
+   */
+  updateAdvisoryMember: async (memberId: string, updates: any): Promise<any> => {
+    const response = await api.put(`/api/forest-committee/advisory/${memberId}`, updates);
+    return response.data;
+  },
+
+  /**
+   * Delete an advisory committee member
+   */
+  deleteAdvisoryMember: async (memberId: string): Promise<void> => {
+    await api.delete(`/api/forest-committee/advisory/${memberId}`);
+  },
+
+  /**
+   * Create a financial committee member
+   */
+  createFinancialMember: async (calculationId: string, member: any): Promise<any> => {
+    const response = await api.post(`/api/forest-committee/user-groups/${calculationId}/financial`, member);
+    return response.data;
+  },
+
+  /**
+   * Update a financial committee member
+   */
+  updateFinancialMember: async (memberId: string, updates: any): Promise<any> => {
+    const response = await api.put(`/api/forest-committee/financial/${memberId}`, updates);
+    return response.data;
+  },
+
+  /**
+   * Delete a financial committee member
+   */
+  deleteFinancialMember: async (memberId: string): Promise<void> => {
+    await api.delete(`/api/forest-committee/financial/${memberId}`);
+  },
+
+  /**
+   * Delete all committee data for a user group
+   */
+  deleteAllCommittees: async (calculationId: string): Promise<any> => {
+    const response = await api.delete(`/api/forest-committee/user-groups/${calculationId}`);
+    return response.data;
+  },
 };

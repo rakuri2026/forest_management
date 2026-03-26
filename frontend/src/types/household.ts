@@ -142,6 +142,7 @@ export interface HouseholdUploadResponse {
   valid_rows: number;
   invalid_rows: number;
   records_imported: number;
+  records_updated: number;
   validations: HouseholdUploadValidation[];
 }
 

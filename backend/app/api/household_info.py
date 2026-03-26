@@ -21,6 +21,7 @@ from ..models.user import User
 from ..models.calculation import Calculation
 from ..models.household_information import HouseholdInformation
 from ..models.caste_classification import CasteClassification
+from ..models.forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialCommittee
 from ..schemas.household_info import (
     HouseholdInfoCreate,
     HouseholdInfoUpdate,
@@ -33,6 +34,7 @@ from ..schemas.household_info import (
     TemplateDownloadOptions
 )
 from ..services.household_calculations import HouseholdCalculations
+from ..services.forest_committee_service import ForestCommitteeValidation
 
 router = APIRouter(prefix="/api/household", tags=["household_information"])
 
@@ -673,6 +675,15 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
             "  • CasteDB: Hidden (lookup data)",
             "    CasteDB: लुकाइएको (लुकअप डाटा)",
             "",
+            "  • वन उपभोक्ता समिति: Forest User Committee (max 15 members)",
+            "    Main committee with position, gender, caste validation",
+            "",
+            "  • सल्लाहाकार समिति: Advisory Committee (max 10 members, optional)",
+            "    Advisory committee information",
+            "",
+            "  • आर्थिक समिति: Financial Committee (max 10 members, optional)",
+            "    Financial committee information",
+            "",
             "═══════════════════════════════════════════════════════════════════",
             "STEP-BY-STEP GUIDE",
             "═══════════════════════════════════════════════════════════════════",
@@ -774,6 +785,172 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
         # No sheet protection - cell locks still work
         # All cells in Instructions are locked, users can unprotect manually if needed
 
+        # ====================================================================
+        # CREATE FOREST USER COMMITTEE SHEETS
+        # ====================================================================
+
+        # Sheet 5: Main Forest User Committee (वन उपभोक्ता समिति)
+        ws_main_committee = wb.create_sheet("वन उपभोक्ता समिति")
+        ws_main_committee.column_dimensions['A'].width = 8   # सि.नं.
+        ws_main_committee.column_dimensions['B'].width = 12  # लिङ्ग
+        ws_main_committee.column_dimensions['C'].width = 18  # पद
+        ws_main_committee.column_dimensions['D'].width = 18  # जातिय वर्ग
+        ws_main_committee.column_dimensions['E'].width = 25  # नाम
+        ws_main_committee.column_dimensions['F'].width = 25  # ठेगाना
+        ws_main_committee.column_dimensions['G'].width = 15  # मोवाइल नंवर
+
+        # Header row 1 (Nepali)
+        main_headers_ne = ["सि.नं.", "लिङ्ग", "पद", "जातिय वर्ग", "नाम", "ठेगाना", "मोवाइल नंवर"]
+        main_headers_en = ["S.No.", "Gender", "Position", "Caste Category", "Name", "Address", "Mobile"]
+
+        for col_idx, header in enumerate(main_headers_ne, start=1):
+            cell = ws_main_committee.cell(row=1, column=col_idx, value=header)
+            cell.font = Font(bold=True, size=11)
+            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+            cell.font = Font(bold=True, color="FFFFFF")
+
+        # Header row 2 (English)
+        for col_idx, header in enumerate(main_headers_en, start=1):
+            cell = ws_main_committee.cell(row=2, column=col_idx, value=header)
+            cell.font = Font(italic=True, size=9, color="666666")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        # Add data validation for gender (column B)
+        gender_validation = DataValidation(type="list", formula1='"महिला,पुरूष"', allow_blank=False)
+        gender_validation.error = "कृपया सूचीबाट छान्नुहोस्: महिला, पुरूष"
+        gender_validation.errorTitle = "अवैध प्रविष्टि"
+        ws_main_committee.add_data_validation(gender_validation)
+        gender_validation.add(f"B3:B17")  # Rows 3-17 (max 15 members)
+
+        # Add data validation for position (column C)
+        position_validation = DataValidation(type="list",
+            formula1='"अध्यक्ष,उपाध्यक्ष,कोषाध्यक्ष,सह कोषाध्यक्ष,सचिव,सह सचिव,सदस्य"',
+            allow_blank=False)
+        position_validation.error = "कृपया सूचीबाट छान्नुहोस्"
+        position_validation.errorTitle = "अवैध पद"
+        ws_main_committee.add_data_validation(position_validation)
+        position_validation.add(f"C3:C17")
+
+        # Add data validation for caste category (column D)
+        caste_validation = DataValidation(type="list",
+            formula1='"जनजाती,आदिवासी,दलित,सिमान्तकृत,अन्य"',
+            allow_blank=False)
+        caste_validation.error = "कृपया सूचीबाट छान्नुहोस्"
+        caste_validation.errorTitle = "अवैध जातिय वर्ग"
+        ws_main_committee.add_data_validation(caste_validation)
+        caste_validation.add(f"D3:D17")
+
+        # Fill in starting rows with serial numbers (1-15)
+        green_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        green_border = Border(
+            left=Side(style='thin', color='70AD47'),
+            right=Side(style='thin', color='70AD47'),
+            top=Side(style='thin', color='70AD47'),
+            bottom=Side(style='thin', color='70AD47')
+        )
+
+        for row_num in range(3, 18):  # Rows 3-17 (15 members)
+            serial_no = row_num - 2
+            ws_main_committee.cell(row=row_num, column=1, value=serial_no)
+
+            # Apply green background and border to all editable cells
+            for col_idx in range(1, 8):
+                cell = ws_main_committee.cell(row=row_num, column=col_idx)
+                cell.fill = green_fill
+                cell.border = green_border
+                cell.protection = Protection(locked=False)
+                cell.alignment = Alignment(horizontal="center" if col_idx <= 4 else "left")
+
+        # Lock header rows
+        for row_num in [1, 2]:
+            for col_idx in range(1, 8):
+                ws_main_committee.cell(row=row_num, column=col_idx).protection = Protection(locked=True)
+
+        # Sheet 6: Advisory Committee (सल्लाहाकार समिति)
+        ws_advisory = wb.create_sheet("सल्लाहाकार समिति")
+        ws_advisory.column_dimensions['A'].width = 8   # सि.नं.
+        ws_advisory.column_dimensions['B'].width = 30  # नाम
+        ws_advisory.column_dimensions['C'].width = 30  # ठेगाना
+        ws_advisory.column_dimensions['D'].width = 15  # मोवाइल नंवर
+
+        # Header rows
+        advisory_headers_ne = ["सि.नं.", "नाम", "ठेगाना", "मोवाइल नंवर"]
+        advisory_headers_en = ["S.No.", "Name", "Address", "Mobile"]
+
+        for col_idx, header in enumerate(advisory_headers_ne, start=1):
+            cell = ws_advisory.cell(row=1, column=col_idx, value=header)
+            cell.font = Font(bold=True, size=11, color="FFFFFF")
+            cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        for col_idx, header in enumerate(advisory_headers_en, start=1):
+            cell = ws_advisory.cell(row=2, column=col_idx, value=header)
+            cell.font = Font(italic=True, size=9, color="666666")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        # Fill rows 3-12 (max 10 members)
+        for row_num in range(3, 13):
+            serial_no = row_num - 2
+            ws_advisory.cell(row=row_num, column=1, value=serial_no)
+
+            for col_idx in range(1, 5):
+                cell = ws_advisory.cell(row=row_num, column=col_idx)
+                cell.fill = green_fill
+                cell.border = green_border
+                cell.protection = Protection(locked=False)
+                cell.alignment = Alignment(horizontal="center" if col_idx == 1 else "left")
+
+        # Lock header rows
+        for row_num in [1, 2]:
+            for col_idx in range(1, 5):
+                ws_advisory.cell(row=row_num, column=col_idx).protection = Protection(locked=True)
+
+        # Sheet 7: Financial Committee (आर्थिक समिति)
+        ws_financial = wb.create_sheet("आर्थिक समिति")
+        ws_financial.column_dimensions['A'].width = 8   # सि.नं.
+        ws_financial.column_dimensions['B'].width = 30  # नाम
+        ws_financial.column_dimensions['C'].width = 30  # ठेगाना
+        ws_financial.column_dimensions['D'].width = 15  # मोवाइल नंवर
+
+        # Header rows
+        financial_headers_ne = ["सि.नं.", "नाम", "ठेगाना", "मोवाइल नंवर"]
+        financial_headers_en = ["S.No.", "Name", "Address", "Mobile"]
+
+        for col_idx, header in enumerate(financial_headers_ne, start=1):
+            cell = ws_financial.cell(row=1, column=col_idx, value=header)
+            cell.font = Font(bold=True, size=11, color="FFFFFF")
+            cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        for col_idx, header in enumerate(financial_headers_en, start=1):
+            cell = ws_financial.cell(row=2, column=col_idx, value=header)
+            cell.font = Font(italic=True, size=9, color="666666")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        # Fill rows 3-12 (max 10 members)
+        for row_num in range(3, 13):
+            serial_no = row_num - 2
+            ws_financial.cell(row=row_num, column=1, value=serial_no)
+
+            for col_idx in range(1, 5):
+                cell = ws_financial.cell(row=row_num, column=col_idx)
+                cell.fill = green_fill
+                cell.border = green_border
+                cell.protection = Protection(locked=False)
+                cell.alignment = Alignment(horizontal="center" if col_idx == 1 else "left")
+
+        # Lock header rows
+        for row_num in [1, 2]:
+            for col_idx in range(1, 5):
+                ws_financial.cell(row=row_num, column=col_idx).protection = Protection(locked=True)
+
         # Save to temporary file
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False) as tmp:
             wb.save(tmp.name)
@@ -836,16 +1013,8 @@ async def upload_household_data(
     if not calculation:
         raise HTTPException(status_code=404, detail="Calculation not found")
 
-    # Check if data already exists (one upload per calculation rule)
-    existing_count = db.query(HouseholdInformation).filter(
-        HouseholdInformation.calculation_id == calculation_id
-    ).count()
-
-    if existing_count > 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Household data already exists for this calculation ({existing_count} records). Delete existing data first."
-        )
+    # Note: Upsert mode enabled - uploads will update existing records (by house_no)
+    # or insert new records. No need to delete existing data first.
 
     # Validate file type
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
@@ -1056,26 +1225,176 @@ async def upload_household_data(
             if validation.is_valid:
                 records_to_import.append(row_data)
 
-        # Import valid records
+        # Import valid records with upsert logic (update if house_no exists, insert if new)
         imported_count = 0
+        updated_count = 0
+
         if records_to_import:
-            for record_data in records_to_import:
-                household = HouseholdInformation(
-                    calculation_id=calculation_id,
-                    created_by=current_user.id,
-                    **record_data
-                )
-                db.add(household)
-                imported_count += 1
+            # Get all existing house numbers for this calculation
+            existing_households = db.query(HouseholdInformation).filter(
+                HouseholdInformation.calculation_id == calculation_id
+            ).all()
+
+            # Create a map of house_no -> household object for quick lookup
+            existing_by_house_no = {h.house_no: h for h in existing_households}
+
+            # Process each record
+            for idx, record_data in enumerate(records_to_import):
+                house_no = record_data.get('house_no')
+
+                # Check if this house_no already exists
+                if house_no in existing_by_house_no:
+                    # UPDATE existing record
+                    existing_household = existing_by_house_no[house_no]
+
+                    # Update all fields
+                    for key, value in record_data.items():
+                        setattr(existing_household, key, value)
+
+                    updated_count += 1
+
+                    # Add warning to validation for this row
+                    for validation in validations:
+                        if validation.data and validation.data.get('house_no') == house_no:
+                            validation.warnings.append(
+                                f"⚠️ House #{house_no} already exists - record will be UPDATED"
+                            )
+                            break
+                else:
+                    # INSERT new record
+                    household = HouseholdInformation(
+                        calculation_id=calculation_id,
+                        created_by=current_user.id,
+                        **record_data
+                    )
+                    db.add(household)
+                    imported_count += 1
 
             db.commit()
 
+        # ====================================================================
+        # Parse and Import Committee Data (Optional)
+        # ====================================================================
+        committee_imported_count = 0
+        committee_validations = []
+
+        # Only parse committee data from Excel files (not CSV)
+        if not is_csv:
+            # Header mappings for committee sheets
+            main_committee_headers = {
+                "सि.नं.": "serial_no",
+                "लिङ्ग": "gender",
+                "पद": "position",
+                "जातिय वर्ग": "caste_category",
+                "नाम": "name",
+                "ठेगाना": "address",
+                "मोवाइल नंवर": "mobile"
+            }
+
+            advisory_financial_headers = {
+                "सि.नं.": "serial_no",
+                "नाम": "name",
+                "ठेगाना": "address",
+                "मोवाइल नंवर": "mobile"
+            }
+
+            # Parse Main Committee (वन उपभोक्ता समिति)
+            if "वन उपभोक्ता समिति" in wb.sheetnames:
+                try:
+                    ws_main = wb["वन उपभोक्ता समिति"]
+                    main_records, main_validations = ForestCommitteeValidation.parse_committee_sheet(
+                        ws_main, main_committee_headers, 'main'
+                    )
+
+                    # Validate composition (50% women rule, position uniqueness)
+                    if main_records:
+                        _, composition_warnings = ForestCommitteeValidation.validate_committee_composition(main_records)
+                        if composition_warnings:
+                            # Add composition warnings to the first validation result
+                            if main_validations:
+                                main_validations[0]['warnings'].extend(composition_warnings)
+
+                    # Import main committee records
+                    for record in main_records:
+                        member = ForestUserCommittee(
+                            calculation_id=calculation_id,
+                            created_by=current_user.id,
+                            **record
+                        )
+                        db.add(member)
+                        committee_imported_count += 1
+
+                    committee_validations.extend(main_validations)
+                except Exception as e:
+                    print(f"Error parsing main committee: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Parse Advisory Committee (सल्लाहाकार समिति)
+            if "सल्लाहाकार समिति" in wb.sheetnames:
+                try:
+                    ws_advisory = wb["सल्लाहाकार समिति"]
+                    advisory_records, advisory_validations = ForestCommitteeValidation.parse_committee_sheet(
+                        ws_advisory, advisory_financial_headers, 'advisory'
+                    )
+
+                    # Import advisory committee records
+                    for record in advisory_records:
+                        member = AdvisoryCommittee(
+                            calculation_id=calculation_id,
+                            created_by=current_user.id,
+                            **record
+                        )
+                        db.add(member)
+                        committee_imported_count += 1
+
+                    committee_validations.extend(advisory_validations)
+                except Exception as e:
+                    print(f"Error parsing advisory committee: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Parse Financial Committee (आर्थिक समिति)
+            if "आर्थिक समिति" in wb.sheetnames:
+                try:
+                    ws_financial = wb["आर्थिक समिति"]
+                    financial_records, financial_validations = ForestCommitteeValidation.parse_committee_sheet(
+                        ws_financial, advisory_financial_headers, 'financial'
+                    )
+
+                    # Import financial committee records
+                    for record in financial_records:
+                        member = FinancialCommittee(
+                            calculation_id=calculation_id,
+                            created_by=current_user.id,
+                            **record
+                        )
+                        db.add(member)
+                        committee_imported_count += 1
+
+                    committee_validations.extend(financial_validations)
+                except Exception as e:
+                    print(f"Error parsing financial committee: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Commit committee data
+            if committee_imported_count > 0:
+                try:
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print(f"Error committing committee data: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+
         return HouseholdUploadResponse(
-            success=imported_count > 0,
+            success=(imported_count + updated_count) > 0,
             total_rows=len(validations),
             valid_rows=len(records_to_import),
             invalid_rows=len(validations) - len(records_to_import),
             records_imported=imported_count,
+            records_updated=updated_count,
             validations=validations
         )
 
