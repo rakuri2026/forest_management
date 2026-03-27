@@ -741,7 +741,7 @@ export default function CalculationDetail() {
               {/* Left side: Comprehensive Table */}
               <div className="w-1/2 overflow-auto">
                 {blocks.length > 0 ? (
-                  <div className="space-y-6">
+                  <div className="space-y-4">
                     {/* Summary Card */}
                     <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg border border-green-200 p-4">
                       <h3 className="text-lg font-bold text-green-800">Forest Area Summary</h3>
@@ -761,101 +761,87 @@ export default function CalculationDetail() {
                       </div>
                     </div>
 
-                    {/* Block-wise Area Table */}
+                    {/* Combined Table: Blocks + Sub-Areas */}
                     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                        <h4 className="text-sm font-semibold text-gray-700">Block-wise Area Breakdown</h4>
-                      </div>
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total (ha)</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Excluded (ha)</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net (ha)</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Block / Sub-Area</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total (ha)</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Excluded (ha)</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net (ha)</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {blocks.map((block: any, idx: number) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 text-sm font-medium text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
-                              <td className="px-4 py-2 text-sm text-gray-900 text-right">{parseFloat(block.area_hectares || 0).toFixed(2)}</td>
-                              <td className="px-4 py-2 text-sm text-red-600 text-right">
-                                {block.excluded_area_hectares > 0 ? parseFloat(block.excluded_area_hectares).toFixed(2) : '-'}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-green-700 font-semibold text-right">
-                                {parseFloat(block.effective_area_hectares || block.area_hectares || 0).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))}
+                          {/* Block rows */}
+                          {blocks.map((block: any, idx: number) => {
+                            const subAreasInBlock = (calculation?.result_data?.sub_areas || []).filter((sa: any) => 
+                              sa.blockName === block.block_name || sa.block_name === block.block_name
+                            );
+                            const hasSubAreas = subAreasInBlock.length > 0;
+                            
+                            return (
+                              <>
+                                {/* Block main row */}
+                                <tr key={`block-${idx}`} className="bg-green-50 hover:bg-green-100">
+                                  <td className="px-3 py-2 text-sm font-bold text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
+                                  <td className="px-3 py-2 text-sm text-gray-500">Block</td>
+                                  <td className="px-3 py-2 text-sm text-gray-900 text-right font-semibold">{parseFloat(block.area_hectares || 0).toFixed(2)}</td>
+                                  <td className="px-3 py-2 text-sm text-red-600 text-right">
+                                    {block.excluded_area_hectares > 0 ? parseFloat(block.excluded_area_hectares).toFixed(2) : '-'}
+                                  </td>
+                                  <td className="px-3 py-2 text-sm text-green-700 font-bold text-right">
+                                    {parseFloat(block.effective_area_hectares || block.area_hectares || 0).toFixed(2)}
+                                  </td>
+                                </tr>
+                                {/* Sub-area rows under this block */}
+                                {subAreasInBlock.map((sa: any, saIdx: number) => (
+                                  <tr key={`sa-${idx}-${saIdx}`} className="hover:bg-gray-50">
+                                    <td className="px-3 py-2 text-sm text-gray-600 pl-8">↳ {sa.name}</td>
+                                    <td className="px-3 py-2 text-sm text-gray-500">
+                                      {sa.category === 'private_land' ? 'Private Land' :
+                                       sa.category === 'protected' ? 'Protected' :
+                                       sa.category === 'plantation' ? 'Plantation' :
+                                       sa.category === 'religious' ? 'Religious' :
+                                       sa.category === 'biodiversity' ? 'Biodiversity' :
+                                       sa.category === 'pro-poor' ? 'Pro-Poor' :
+                                       sa.category === 'tourist' ? 'Tourist' :
+                                       sa.category === 'office' ? 'Office' : sa.category}
+                                    </td>
+                                    <td className="px-3 py-2 text-sm text-gray-600 text-right">{parseFloat(sa.area_hectares || 0).toFixed(4)}</td>
+                                    <td className="px-3 py-2 text-sm text-red-600 text-right">
+                                      {(sa.isExcluded || sa.is_excluded) ? parseFloat(sa.area_hectares || 0).toFixed(2) : '-'}
+                                    </td>
+                                    <td className="px-3 py-2 text-sm text-right">
+                                      {(sa.isExcluded || sa.is_excluded) ? (
+                                        <span className="text-gray-400">-</span>
+                                      ) : (
+                                        <span className="text-green-600">{parseFloat(sa.area_hectares || 0).toFixed(4)}</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </>
+                            );
+                          })}
                           {/* Total Row */}
-                          <tr className="bg-gray-100 font-semibold">
-                            <td className="px-4 py-2 text-sm text-gray-900">TOTAL</td>
-                            <td className="px-4 py-2 text-sm text-gray-900 text-right">
+                          <tr className="bg-gray-200 font-bold">
+                            <td className="px-3 py-2 text-sm text-gray-900">TOTAL</td>
+                            <td className="px-3 py-2 text-sm text-gray-900"></td>
+                            <td className="px-3 py-2 text-sm text-gray-900 text-right">
                               {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.area_hectares || 0), 0).toFixed(2)}
                             </td>
-                            <td className="px-4 py-2 text-sm text-red-600 text-right">
+                            <td className="px-3 py-2 text-sm text-red-600 text-right">
                               {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.excluded_area_hectares || 0), 0).toFixed(2)}
                             </td>
-                            <td className="px-4 py-2 text-sm text-green-700 text-right">
+                            <td className="px-3 py-2 text-sm text-green-700 text-right">
                               {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.effective_area_hectares || b.area_hectares || 0), 0).toFixed(2)}
                             </td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
-
-                    {/* Sub-Areas Table */}
-                    {(calculation?.result_data?.sub_areas && calculation.result_data.sub_areas.length > 0) && (
-                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                          <h4 className="text-sm font-semibold text-gray-700">Sub-Areas Detail</h4>
-                        </div>
-                        <table className="min-w-full divide-y divide-gray-200">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sub-Area Name</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Area (ha)</th>
-                              <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {calculation.result_data.sub_areas.map((sa: any, idx: number) => (
-                              <tr key={sa.id || idx} className="hover:bg-gray-50">
-                                <td className="px-4 py-2 text-sm font-medium text-gray-900">{sa.name}</td>
-                                <td className="px-4 py-2 text-sm text-gray-500">
-                                  {sa.category === 'private_land' ? 'Private Land' :
-                                   sa.category === 'protected' ? 'Protected Zone' :
-                                   sa.category === 'plantation' ? 'Plantation' :
-                                   sa.category === 'religious' ? 'Religious' :
-                                   sa.category === 'biodiversity' ? 'Biodiversity' :
-                                   sa.category === 'pro-poor' ? 'Pro-Poor' :
-                                   sa.category === 'tourist' ? 'Tourist' :
-                                   sa.category === 'office' ? 'Office' : sa.category}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-gray-900 text-right">{sa.area_hectares?.toFixed(4) || 0}</td>
-                                <td className="px-4 py-2 text-center">
-                                  {sa.isExcluded || sa.is_excluded ? (
-                                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Excluded</span>
-                                  ) : (
-                                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Included</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                            {/* Sub-areas Total */}
-                            <tr className="bg-gray-100 font-semibold">
-                              <td className="px-4 py-2 text-sm text-gray-900" colSpan={2}>SUB-AREAS TOTAL</td>
-                              <td className="px-4 py-2 text-sm text-gray-900 text-right">
-                                {calculation.result_data.sub_areas.reduce((sum: number, sa: any) => sum + parseFloat(sa.area_hectares || 0), 0).toFixed(2)}
-                              </td>
-                              <td className="px-4 py-2"></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div className="text-center py-12 bg-gray-50 rounded-lg">
