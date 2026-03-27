@@ -108,14 +108,12 @@ export const forestApi = {
   uploadBoundary: async (
     file: File,
     forestName?: string,
-    blockName?: string,
     analysisOptions?: Record<string, boolean>,
     mapOptions?: Record<string, boolean>
   ): Promise<Calculation> => {
     const formData = new FormData();
     formData.append('file', file);
     if (forestName) formData.append('forest_name', forestName);
-    if (blockName) formData.append('block_name', blockName);
 
     // Append analysis options as form fields
     if (analysisOptions) {
@@ -147,6 +145,7 @@ export const forestApi = {
     sub_areas?: any[];
     analysis_options?: Record<string, boolean>;
     map_options?: Record<string, boolean>;
+    run_analysis?: boolean;
   }): Promise<Calculation> => {
     const response = await api.post<Calculation>('/api/forests/create-from-map', data);
     return response.data;
@@ -261,6 +260,146 @@ export const forestApi = {
       `/api/forests/calculations/${calculationId}/tree-cover-areas`
     );
     return response.data;
+  },
+
+  // Geometry editing endpoints
+  updateGeometry: async (
+    calculationId: string,
+    geometry: any,
+    reanalyze: boolean = false
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/forests/calculations/${calculationId}/geometry`,
+      { geometry, reanalyze }
+    );
+    return response.data;
+  },
+
+  // Sub-area management endpoints
+  addSubArea: async (
+    calculationId: string,
+    data: {
+      name: string;
+      category: string;
+      geometry: any;
+      block_id?: string;
+      block_name?: string;
+      is_excluded?: boolean;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/forests/calculations/${calculationId}/sub-areas`,
+      data
+    );
+    return response.data;
+  },
+
+  listSubAreas: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/forests/calculations/${calculationId}/sub-areas`
+    );
+    return response.data;
+  },
+
+  updateSubArea: async (
+    calculationId: string,
+    subAreaId: string,
+    data: {
+      name?: string;
+      category?: string;
+      block_id?: string;
+      block_name?: string;
+      is_excluded?: boolean;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/forests/calculations/${calculationId}/sub-areas/${subAreaId}`,
+      data
+    );
+    return response.data;
+  },
+
+  deleteSubArea: async (
+    calculationId: string,
+    subAreaId: string
+  ): Promise<any> => {
+    const response = await api.delete(
+      `/api/forests/calculations/${calculationId}/sub-areas/${subAreaId}`
+    );
+    return response.data;
+  },
+
+  // Interactive boundary editing
+  editBoundary: async (
+    calculationId: string,
+    data: {
+      operation: string;
+      features?: any[];
+      target_index?: number;
+      reanalyze?: boolean;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/forests/calculations/${calculationId}/edit-boundary`,
+      data
+    );
+    return response.data;
+  },
+
+  // Block naming endpoints
+  getPolygons: async (calculationId: string): Promise<{
+    polygons: Array<{
+      index: number;
+      geometry: any;
+      area_hectares: number;
+      current_name: string;
+    }>;
+    total_count: number;
+  }> => {
+    const response = await api.get(
+      `/api/forests/calculations/${calculationId}/polygons`
+    );
+    return response.data;
+  },
+
+  createBlocks: async (calculationId: string, blocks: Array<{
+    polygon_index: number;
+    name: string;
+  }>, runAnalysis: boolean = true): Promise<any> => {
+    const response = await api.post(
+      `/api/forests/calculations/${calculationId}/blocks`,
+      { blocks, run_analysis: runAnalysis }
+    );
+    return response.data;
+  },
+
+  getBlocks: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/forests/calculations/${calculationId}/blocks`
+    );
+    return response.data;
+  },
+
+  updateBlock: async (
+    calculationId: string,
+    blockId: string,
+    name: string
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/forests/calculations/${calculationId}/blocks/${blockId}`,
+      null,
+      { params: { name } }
+    );
+    return response.data;
+  },
+
+  deleteBlock: async (
+    calculationId: string,
+    blockId: string
+  ): Promise<void> => {
+    await api.delete(
+      `/api/forests/calculations/${calculationId}/blocks/${blockId}`
+    );
   },
 };
 

@@ -14,7 +14,6 @@ export default function Upload() {
   const [uploadMode, setUploadMode] = useState<UploadMode>('file');
   const [file, setFile] = useState<File | null>(null);
   const [forestName, setForestName] = useState('');
-  const [blockName, setBlockName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -73,11 +72,11 @@ export default function Upload() {
       const result = await forestApi.uploadBoundary(
         file,
         forestName,
-        blockName,
         analysisOptions,
         mapOptions
       );
-      navigate(`/calculations/${result.id}`);
+      // Redirect to block naming page for multi-polygon files
+      navigate(`/calculations/${result.id}/block-naming`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Upload failed. Please try again.');
     } finally {
@@ -91,6 +90,7 @@ export default function Upload() {
     gpsPoints: any[];
     blocks: any[];
     subAreas: any[];
+    runAnalysis?: boolean;
   }) => {
     console.log('[Upload] handleMapCreationComplete called with:', {
       forestName,
@@ -99,7 +99,8 @@ export default function Upload() {
       blocksCount: data.blocks?.length || 0,
       subAreasCount: data.subAreas?.length || 0,
       analysisOptions,
-      mapOptions
+      mapOptions,
+      runAnalysis: data.runAnalysis
     });
 
     setUploading(true);
@@ -117,11 +118,13 @@ export default function Upload() {
         sub_areas: data.subAreas,
         analysis_options: analysisOptions,
         map_options: mapOptions,
+        run_analysis: data.runAnalysis ?? false,
       });
 
       console.log('[Upload] API call successful, result:', result);
       console.log('[Upload] Navigating to /calculations/' + result.id);
 
+      // Navigate to calculation detail - blocks are already created with names from wizard
       navigate(`/calculations/${result.id}`);
     } catch (err: any) {
       console.error('[Upload] API call failed:', err);
@@ -274,20 +277,6 @@ export default function Upload() {
                 required
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-4 py-2 border"
                 placeholder="e.g., Shivapuri Community Forest"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="block-name" className="block text-sm font-medium text-gray-700">
-                Block Name (Optional)
-              </label>
-              <input
-                type="text"
-                id="block-name"
-                value={blockName}
-                onChange={(e) => setBlockName(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-4 py-2 border"
-                placeholder="e.g., Block 1"
               />
             </div>
           </div>

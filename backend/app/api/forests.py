@@ -8,12 +8,14 @@ from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional, List
 from uuid import UUID
 import json
+import datetime
 
 from ..core.database import get_db
 from ..models.user import User
 from ..models.community_forest import CommunityForest
 from ..models.forest_manager import ForestManager
 from ..models.calculation import Calculation, CalculationStatus
+from ..models.forest_block import ForestBlock
 from ..models.synthetic_tree_model import SyntheticTreeModel
 from ..schemas.forest import (
     CommunityForestResponse,
@@ -24,6 +26,17 @@ from ..schemas.forest import (
     ReanalysisRequest,
     GenerateMapsRequest,
     AddSpeciesRequest,
+    GeometryUpdateRequest,
+    SubAreaCreateRequest,
+    SubAreaUpdateRequest,
+    SubAreaResponse,
+    SubAreaListResponse,
+    BlockPolygonResponse,
+    BlockPolygonListResponse,
+    BlockCreateRequest,
+    BlockCreateListRequest,
+    BlockResponse,
+    BlockListResponse,
 )
 from ..schemas.map_creation import MapCreationRequest
 from ..schemas.tree_model import (
@@ -388,13 +401,17 @@ async def upload_forest_boundary(
     }
 
     # Create calculation record with WKT geometry and user options
+    # Always set to PENDING to let user review/finalize blocks and sub-areas before analysis
+    # User can skip block naming for single polygons, but still has the option to add sub-areas
+    initial_status = CalculationStatus.PENDING
+    
     calculation = Calculation(
         user_id=current_user.id,
         uploaded_filename=file.filename,
         boundary_geom=func.ST_GeomFromText(wkt, 4326),
         forest_name=forest_name,  # Now mandatory from form
         block_name=block_name or (blocks_data[0]['block_name'] if blocks_data else "Block 1"),
-        status=CalculationStatus.PROCESSING,
+        status=initial_status,
         result_data=result_data,
         analysis_options=analysis_options_dict,
         map_options=map_options_dict
@@ -407,122 +424,8 @@ async def upload_forest_boundary(
     # Get the calculation ID before analysis
     calc_id = calculation.id
 
-    # Start analysis in background
-    try:
-        # Run raster analysis on the uploaded boundary
-        print(f"Starting analysis for calculation {calc_id}")
-
-        # Get a fresh calculation reference with eager loading to avoid detached instance issues
-        db.expire_all()  # Expire cached objects
-
-        # Use the analysis_options_dict we already built (now stored in database)
-        # Only include analysis parameters (not auto-generation flags) for the analysis service
-        analysis_service_options = {
-            'run_raster_analysis': run_raster_analysis,
-            'run_elevation': run_elevation,
-            'run_slope': run_slope,
-            'run_aspect': run_aspect,
-            'run_canopy': run_canopy,
-            'run_biomass': run_biomass,
-            'run_forest_health': run_forest_health,
-            'run_forest_type': run_forest_type,
-            'run_landcover': run_landcover,
-            'run_forest_loss': run_forest_loss,
-            'run_forest_gain': run_forest_gain,
-            'run_fire_loss': run_fire_loss,
-            'run_temperature': run_temperature,
-            'run_precipitation': run_precipitation,
-            'run_soil': run_soil,
-            'run_proximity': run_proximity,
-        }
-
-        analysis_results, processing_time = await analyze_forest_boundary(calc_id, db, options=analysis_service_options)
-        print(f"Analysis completed with {len(analysis_results)} keys")
-
-        # Merge analysis results with existing block data using SQL JSONB operators
-        # Use CAST syntax instead of :: to avoid parameter binding conflict
-        update_query = text("""
-            UPDATE public.calculations
-            SET
-                result_data = result_data || CAST(:analysis_data AS jsonb),
-                processing_time_seconds = :processing_time,
-                status = :status,
-                completed_at = NOW()
-            WHERE id = :calc_id
-        """)
-
-        print(f"Executing UPDATE with {len(json.dumps(analysis_results))} bytes of data")
-        result = db.execute(update_query, {
-            "analysis_data": json.dumps(analysis_results),
-            "processing_time": processing_time,
-            "status": "COMPLETED",
-            "calc_id": str(calc_id)  # Use calc_id instead of calculation.id
-        })
-        print(f"UPDATE affected {result.rowcount} rows")
-
-        db.commit()
-        print("Commit successful")
-
-        # Auto-generate fieldbook and sampling (OPTIONAL - controlled by user)
-        if auto_generate_fieldbook:
-            try:
-                print(f"Auto-generating fieldbook with 50m interpolation for calculation {calc_id}")
-                fieldbook_result = generate_fieldbook_points(
-                    db=db,
-                    calculation_id=calc_id,
-                    interpolation_distance=100.0,
-                    extract_elevation=True,
-                    calculate_reference=False  # Never auto-calculate references (too slow)
-                )
-                print(f"Fieldbook auto-generated: {fieldbook_result.total_points} points")
-            except Exception as fb_error:
-                print(f"Warning: Fieldbook auto-generation failed: {fb_error}")
-                # Don't fail the entire upload if fieldbook generation fails
-        else:
-            print(f"Skipping fieldbook auto-generation (user disabled)")
-
-        if auto_generate_sampling:
-            try:
-                print(f"Auto-generating sampling design for calculation {calc_id}")
-                sampling_result = create_sampling_design(
-                    db=db,
-                    calculation_id=calc_id,
-                    sampling_type="systematic",
-                    grid_spacing_meters=250,
-                    plot_shape="circular",
-                    plot_radius_meters=12.62  # 500 sqm circular plot = radius ~12.62m
-                )
-                print(f"Sampling auto-generated: {sampling_result.total_plots} plots")
-            except Exception as sp_error:
-                print(f"Warning: Sampling auto-generation failed: {sp_error}")
-                # Don't fail the entire upload if sampling generation fails
-        else:
-            print(f"Skipping sampling auto-generation (user disabled)")
-
-        # Refresh calculation object after commit
-        calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()
-        if calculation and calculation.result_data:
-            print(f"Refreshed calculation, result_data has {len(calculation.result_data)} keys")
-        else:
-            print(f"Warning: Could not refresh calculation or result_data is empty")
-
-    except Exception as e:
-        db.rollback()  # Rollback failed transaction first
-        print(f"Analysis failed: {str(e)}")
-
-        # Update status in a new transaction
-        try:
-            calculation.status = CalculationStatus.FAILED
-            calculation.error_message = str(e)[:500]  # Limit error message length
-            db.commit()
-        except Exception as commit_error:
-            print(f"Failed to update error status: {commit_error}")
-            db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(e)}"
-        )
+    # Note: Analysis is NOT started here - it starts after block naming
+    # The PENDING status triggers analysis in the create_blocks_from_polygons endpoint
 
     # Re-query calculation to ensure we have fresh data
     calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()
@@ -538,22 +441,22 @@ async def upload_forest_boundary(
         # First check if geometry is valid
         validity_check = db.query(
             func.ST_IsValid(Calculation.boundary_geom).label("is_valid")
-        ).filter(Calculation.id == calculation_id).first()
+        ).filter(Calculation.id == calc_id).first()
         
         if validity_check and not validity_check.is_valid:
-            print(f"WARNING: Geometry for calculation {calculation_id} is invalid in database")
+            print(f"WARNING: Geometry for calculation {calc_id} is invalid in database")
         
         geojson_query = db.query(
             func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
-        ).filter(Calculation.id == calculation_id).first()
+        ).filter(Calculation.id == calc_id).first()
 
         if geojson_query and geojson_query.geojson:
             geometry_json = json.loads(geojson_query.geojson)
-            print(f"Successfully converted geometry to GeoJSON for calculation {calculation_id}")
+            print(f"Successfully converted geometry to GeoJSON for calculation {calc_id}")
         else:
-            print(f"WARNING: No geometry found for calculation {calculation_id}")
+            print(f"WARNING: No geometry found for calculation {calc_id}")
     except Exception as e:
-        print(f"ERROR: Failed to convert geometry to GeoJSON for calculation {calculation_id}: {e}")
+        print(f"ERROR: Failed to convert geometry to GeoJSON for calculation {calc_id}: {e}")
 
     # Filter out removed species from potential_species
     result_data = calculation.result_data or {}
@@ -701,88 +604,100 @@ async def create_forest_from_map(
     # Prepare analysis options
     analysis_options = request.analysis_options or {}
     map_options = request.map_options or {}
+    
+    # Check if we should run analysis (default to False for map creation)
+    run_analysis = getattr(request, 'run_analysis', False)
+    print(f"[create-forest-from-map] run_analysis value: {run_analysis}")
 
-    # Run analysis
-    try:
-        result_data, processing_time_seconds = await analyze_forest_boundary(
-            calculation.id,
-            db,
-            options=analysis_options
-        )
+    # Run analysis only if requested
+    if run_analysis:
+        try:
+            result_data, processing_time_seconds = await analyze_forest_boundary(
+                calculation.id,
+                db,
+                options=analysis_options
+            )
 
-        # Update calculation with results
-        calculation.result_data = result_data
-        calculation.status = CalculationStatus.COMPLETED
-        calculation.completed_at = datetime.datetime.now(datetime.timezone.utc)
-        calculation.processing_time_seconds = processing_time_seconds
+            # Update calculation with results
+            calculation.result_data = result_data
+            calculation.status = CalculationStatus.COMPLETED
+            calculation.completed_at = datetime.datetime.now(datetime.timezone.utc)
+            calculation.processing_time_seconds = processing_time_seconds
 
-        # DEBUG LOGGING: Verify sub-areas survived analysis
-        if result_data.get("sub_areas"):
-            print(f"\n✓ SUB-AREAS AFTER ANALYSIS: {result_data.get('sub_areas_count', len(result_data['sub_areas']))} sub-areas preserved")
-            for idx, sub_area in enumerate(result_data["sub_areas"]):
-                print(f"  ✓ {sub_area.get('name', f'SubArea {idx+1}')}: {sub_area.get('area_hectares', 0):.4f} ha")
-        else:
-            print(f"\n⚠️  WARNING: No sub-areas in result_data after analysis!")
-            print(f"   Initial sub-areas count: {initial_result_data.get('sub_areas_count', 0)}")
+            # DEBUG LOGGING: Verify sub-areas survived analysis
+            if result_data.get("sub_areas"):
+                print(f"\n✓ SUB-AREAS AFTER ANALYSIS: {result_data.get('sub_areas_count', len(result_data['sub_areas']))} sub-areas preserved")
+                for idx, sub_area in enumerate(result_data["sub_areas"]):
+                    print(f"  ✓ {sub_area.get('name', f'SubArea {idx+1}')}: {sub_area.get('area_hectares', 0):.4f} ha")
+            else:
+                print(f"\n⚠️  WARNING: No sub-areas in result_data after analysis!")
+                print(f"   Initial sub-areas count: {initial_result_data.get('sub_areas_count', 0)}")
 
+            flag_modified(calculation, "result_data")
+            db.commit()
+            db.refresh(calculation)
+
+            # Auto-generate fieldbook if requested
+            if analysis_options.get('auto_generate_fieldbook', True):
+                try:
+                    print(f"🔄 Auto-generating fieldbook for calculation {calculation.id}...")
+                    result = generate_fieldbook_points(
+                        db=db,
+                        calculation_id=calculation.id,
+                        interpolation_distance=100.0,
+                        extract_elevation=True,
+                        calculate_reference=False
+                    )
+                    print(f"✓ Fieldbook auto-generated: {result.total_points} points created")
+
+                    # Verify data is in database immediately after generation
+                    from app.models.fieldbook import Fieldbook
+                    verify_count = db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation.id).count()
+                    print(f"✓ Verification in endpoint: {verify_count} fieldbook points in database")
+                except Exception as e:
+                    print(f"⚠️  Warning: Fieldbook generation failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Auto-generate sampling if requested
+            if analysis_options.get('auto_generate_sampling', True):
+                try:
+                    print(f"🔄 Auto-generating sampling design for calculation {calculation.id}...")
+                    result = create_sampling_design(
+                        db=db,
+                        calculation_id=calculation.id,
+                        sampling_type="systematic",
+                        sampling_intensity_percent=Decimal("0.5"),
+                        min_samples_per_block=5,
+                        plot_shape="circular",
+                        plot_radius_meters=Decimal("12.6156")
+                    )
+                    print(f"✓ Sampling auto-generated: {result.total_plots} plots created")
+
+                    # Verify data is in database immediately after generation
+                    from app.models.sampling import SamplingDesign
+                    verify_count = db.query(SamplingDesign).filter(SamplingDesign.calculation_id == calculation.id).count()
+                    print(f"✓ Verification in endpoint: {verify_count} sampling designs in database")
+                except Exception as e:
+                    print(f"⚠️  Warning: Sampling generation failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+        except Exception as e:
+            calculation.status = CalculationStatus.FAILED
+            calculation.error_message = str(e)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Analysis failed: {str(e)}"
+            )
+    else:
+        # Not running analysis - keep status as PENDING
+        print(f"[create-forest-from-map] Analysis skipped, status set to PENDING")
+        # The calculation is already created with PENDING status
+        # Just commit any pending changes to result_data
         flag_modified(calculation, "result_data")
         db.commit()
         db.refresh(calculation)
-
-        # Auto-generate fieldbook if requested
-        if analysis_options.get('auto_generate_fieldbook', True):
-            try:
-                print(f"🔄 Auto-generating fieldbook for calculation {calculation.id}...")
-                result = generate_fieldbook_points(  # No await - this is a sync function
-                    db=db,                              # db FIRST (correct order)
-                    calculation_id=calculation.id,       # calculation_id SECOND
-                    interpolation_distance=100.0,
-                    extract_elevation=True,
-                    calculate_reference=False
-                )
-                print(f"✓ Fieldbook auto-generated: {result.total_points} points created")
-
-                # Verify data is in database immediately after generation
-                from app.models.fieldbook import Fieldbook
-                verify_count = db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation.id).count()
-                print(f"✓ Verification in endpoint: {verify_count} fieldbook points in database")
-            except Exception as e:
-                print(f"⚠️  Warning: Fieldbook generation failed: {e}")
-                import traceback
-                traceback.print_exc()  # Show full error for debugging
-
-        # Auto-generate sampling if requested
-        if analysis_options.get('auto_generate_sampling', True):
-            try:
-                print(f"🔄 Auto-generating sampling design for calculation {calculation.id}...")
-                result = create_sampling_design(  # No await - this is a sync function
-                    db=db,                              # db FIRST
-                    calculation_id=calculation.id,      # calculation_id SECOND
-                    sampling_type="systematic",         # Correct parameter name
-                    sampling_intensity_percent=Decimal("0.5"),  # 0.5% intensity
-                    min_samples_per_block=5,
-                    plot_shape="circular",
-                    plot_radius_meters=Decimal("12.6156")  # 500 sqm circular plot
-                )
-                print(f"✓ Sampling auto-generated: {result.total_plots} plots created")
-
-                # Verify data is in database immediately after generation
-                from app.models.sampling import SamplingDesign
-                verify_count = db.query(SamplingDesign).filter(SamplingDesign.calculation_id == calculation.id).count()
-                print(f"✓ Verification in endpoint: {verify_count} sampling designs in database")
-            except Exception as e:
-                print(f"⚠️  Warning: Sampling generation failed: {e}")
-                import traceback
-                traceback.print_exc()  # Show full error for debugging
-
-    except Exception as e:
-        calculation.status = CalculationStatus.FAILED
-        calculation.error_message = str(e)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(e)}"
-        )
 
     # Prepare response
     geometry_json = None
@@ -2672,3 +2587,1284 @@ async def get_species_summary(
             "percentage_confirmed": round((confirmed_species / total_species * 100) if total_species > 0 else 0, 1)
         }
     }
+
+
+# ============================================================================
+# GEOMETRY & SUB-AREA EDITING ENDPOINTS
+# ============================================================================
+
+@router.patch("/calculations/{calculation_id}/geometry")
+async def update_calculation_geometry(
+    calculation_id: UUID,
+    request: GeometryUpdateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the boundary geometry of a calculation.
+
+    This allows users to edit the forest boundary by:
+    - Drawing new polygons
+    - Modifying existing geometry
+    - Uploading corrected boundary files
+
+    Optionally triggers re-analysis after the geometry update.
+    """
+    from shapely.geometry import shape
+    from shapely.validation import make_valid
+
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    try:
+        # Convert GeoJSON to Shapely geometry
+        geom = shape(request.geometry)
+
+        # Make geometry valid (fix self-intersections, etc.)
+        if not geom.is_valid:
+            geom = make_valid(geom)
+
+        # Ensure it's a polygon/multipolygon
+        if geom.geom_type == "LineString":
+            geom = geom.buffer(0)
+        elif geom.geom_type == "Point":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Geometry must be a polygon or multipolygon"
+            )
+
+        # Convert back to GeoJSON and then to WKT for PostGIS
+        geom_geojson = mapping(geom)
+
+        # Calculate area
+        area_sqm = geom.area
+        area_hectares = area_sqm / 10000
+
+        # Update boundary geometry in database
+        update_query = text("""
+            UPDATE public.calculations
+            SET boundary_geom = ST_GeomFromText(:wkt, 4326)
+            WHERE id = :calc_id
+        """)
+
+        db.execute(update_query, {
+            "wkt": geom.wkt,
+            "calc_id": str(calculation_id)
+        })
+
+        # Update result_data with new geometry info
+        result_data = calculation.result_data or {}
+        result_data["geometry_updated"] = True
+        result_data["geometry_update_area_hectares"] = round(area_hectares, 4)
+        calculation.result_data = result_data
+        flag_modified(calculation, "result_data")
+
+        # Update status to indicate geometry was modified
+        calculation.status = CalculationStatus.COMPLETED  # Keep completed, but geometry is modified
+        db.commit()
+
+        # Optionally run re-analysis
+        if request.reanalyze:
+            # Set status to processing
+            calculation.status = CalculationStatus.PROCESSING
+            db.commit()
+
+            # Get existing analysis options
+            analysis_options = calculation.analysis_options or {}
+
+            try:
+                analysis_results, processing_time = await analyze_forest_boundary(
+                    calculation_id, db, options=analysis_options
+                )
+
+                # Preserve sub-areas and blocks from original data
+                blocks_data = result_data.get('blocks', [])
+                sub_areas = result_data.get('sub_areas', [])
+
+                # Merge analysis results
+                updated_result_data = {
+                    'blocks': blocks_data,
+                    'sub_areas': sub_areas,
+                    'geometry_updated': True,
+                    'geometry_update_area_hectares': round(area_hectares, 4),
+                    **analysis_results
+                }
+
+                # Update calculation
+                update_result_query = text("""
+                    UPDATE public.calculations
+                    SET
+                        result_data = CAST(:result_data AS jsonb),
+                        processing_time_seconds = :processing_time,
+                        status = :status,
+                        completed_at = NOW()
+                    WHERE id = :calc_id
+                """)
+
+                db.execute(update_result_query, {
+                    "result_data": json.dumps(updated_result_data),
+                    "processing_time": processing_time,
+                    "status": "COMPLETED",
+                    "calc_id": str(calculation_id)
+                })
+
+                db.commit()
+                print(f"Re-analysis completed after geometry update for calculation {calculation_id}")
+
+            except Exception as e:
+                print(f"Re-analysis failed after geometry update: {e}")
+                # Still return success, but include warning
+                calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+                calculation.status = CalculationStatus.COMPLETED
+                db.commit()
+
+        # Get updated geometry as GeoJSON
+        geojson_query = db.query(
+            func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
+        ).filter(Calculation.id == calculation_id).first()
+
+        geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+
+        return {
+            "success": True,
+            "message": "Geometry updated successfully" + (" and re-analysis completed" if request.reanalyze else ""),
+            "calculation_id": str(calculation_id),
+            "area_hectares": round(area_hectares, 4),
+            "geometry": geometry_json
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update geometry: {str(e)}"
+        )
+
+
+@router.post("/calculations/{calculation_id}/sub-areas", response_model=SubAreaResponse)
+async def add_sub_area(
+    calculation_id: UUID,
+    request: SubAreaCreateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Add a sub-area to an existing calculation.
+
+    Sub-areas are special zones within the forest boundary:
+    - Protected Zone (protected)
+    - Plantation Area (plantation)
+    - Pro-Poor Income Generation (pro-poor)
+    - Religious Area (religious)
+    - Bio-diversity Rich (biodiversity)
+    - Tourist Attraction (tourist)
+    - Office Area (office)
+    - Private Land (Excluded) (private_land)
+
+    Private land is excluded from forest area calculations.
+    """
+    from datetime import datetime
+    from shapely.geometry import shape
+    from shapely.validation import make_valid
+    import uuid
+
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    # Validate category
+    valid_categories = ["protected", "plantation", "pro-poor", "religious", "biodiversity", "tourist", "office", "private_land"]
+    if request.category not in valid_categories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+        )
+
+    try:
+        # Convert GeoJSON to Shapely geometry
+        geom = shape(request.geometry)
+        print(f"[add_sub_area] Input geometry type: {geom.geom_type}")
+        print(f"[add_sub_area] Input geometry area: {geom.area}")
+
+        # Make geometry valid
+        if not geom.is_valid:
+            geom = make_valid(geom)
+
+        # Ensure it's a polygon
+        if geom.geom_type == "MultiPolygon":
+            geom = geom.buffer(0)
+        elif geom.geom_type not in ["Polygon", "MultiPolygon"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Geometry must be a polygon or multipolygon"
+            )
+
+        # Get the boundary geometry and clip the sub-area to it
+        boundary_wkb = db.query(Calculation.boundary_geom).filter(Calculation.id == calculation_id).first()
+        if boundary_wkb and boundary_wkb[0]:
+            from shapely.wkb import loads as load_wkb
+            boundary_geom = load_wkb(bytes(boundary_wkb[0].data))
+            
+            # Calculate original area before clipping
+            original_area_sqm = geom.area
+            
+            # Clip sub-area to boundary (intersection)
+            clipped_geom = geom.intersection(boundary_geom)
+            
+            if clipped_geom.is_empty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Sub-area is outside the forest boundary"
+                )
+            
+            # Replace original with clipped geometry
+            geom = clipped_geom
+            print(f"Sub-area clipped: original area={original_area_sqm/10000:.2f}ha, clipped={geom.area/10000:.2f}ha")
+
+        # Calculate area (after clipping)
+        area_sqm = geom.area
+        area_hectares = area_sqm / 10000
+        
+        # Use provided area if available (from frontend calculation), otherwise use calculated
+        if request.area_hectares and request.area_hectares > 0:
+            area_hectares = request.area_hectares
+            area_sqm = area_hectares * 10000
+            print(f"[add_sub_area] Using PROVIDED area: {area_hectares} ha (from request)")
+        else:
+            area_hectares = area_sqm / 10000
+            print(f"[add_sub_area] Using CALCULATED area: {area_hectares} ha")
+
+        # Generate unique ID
+        sub_area_id = str(uuid.uuid4())
+
+        # Create sub-area object
+        new_sub_area = {
+            "id": sub_area_id,
+            "name": request.name,
+            "category": request.category,
+            "geometry": mapping(geom),
+            "area_sqm": round(area_sqm, 4),
+            "area_hectares": round(area_hectares, 4),
+            "blockId": request.block_id,
+            "blockName": request.block_name,
+            "isExcluded": request.is_excluded,
+            "created_at": datetime.now().isoformat()
+        }
+
+        # Get or initialize result_data
+        result_data = calculation.result_data or {}
+
+        # Initialize sub_areas array if needed
+        if "sub_areas" not in result_data:
+            result_data["sub_areas"] = []
+
+        # Add new sub-area
+        result_data["sub_areas"].append(new_sub_area)
+        result_data["sub_areas_count"] = len(result_data["sub_areas"])
+        
+        print(f"[add_sub_area] Added sub-area {sub_area_id}, total now: {len(result_data['sub_areas'])}")
+        
+        # Track excluded area if this is private land
+        if request.is_excluded:
+            current_excluded = result_data.get("excluded_area_hectares", 0)
+            result_data["excluded_area_hectares"] = round(current_excluded + area_hectares, 4)
+
+        # Update calculation
+        calculation.result_data = result_data
+        flag_modified(calculation, "result_data")
+        db.commit()
+        db.refresh(calculation)
+
+        return SubAreaResponse(
+            id=sub_area_id,
+            name=request.name,
+            category=request.category,
+            geometry=mapping(geom),
+            area_hectares=round(area_hectares, 4),
+            block_id=request.block_id,
+            block_name=request.block_name,
+            is_excluded=request.is_excluded
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to add sub-area: {str(e)}"
+        )
+
+
+@router.get("/calculations/{calculation_id}/sub-areas", response_model=SubAreaListResponse)
+async def list_sub_areas(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all sub-areas for a calculation.
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    # Get sub-areas from result_data
+    result_data = calculation.result_data or {}
+    sub_areas = result_data.get("sub_areas", [])
+    
+    print(f"[list_sub_areas] Calculation {calculation_id}: found {len(sub_areas)} sub-areas in result_data")
+    if sub_areas:
+        print(f"[list_sub_areas] First sub-area keys: {sub_areas[0].keys()}")
+        print(f"[list_sub_areas] First sub-area area_hectares: {sub_areas[0].get('area_hectares')}")
+        print(f"[list_sub_areas] First sub-area full: {sub_areas[0]}")
+
+    # Convert to response format
+    sub_area_responses = []
+    total_area = 0
+
+    for sa in sub_areas:
+        # Convert geometry to GeoJSON if it's stored as Shapely mapping
+        geom = sa.get("geometry")
+        geometry_json = {}
+        sa_area = sa.get("area_hectares", 0)
+        
+        if geom:
+            from shapely.geometry import mapping as shapely_mapping
+            from shapely.wkb import loads as load_wkb
+            
+            # Check if it's WKB (bytes) or already GeoJSON
+            if isinstance(geom, bytes):
+                try:
+                    shapely_geom = load_wkb(geom)
+                    geometry_json = shapely_mapping(shapely_geom)
+                except:
+                    geometry_json = {}
+            elif isinstance(geom, dict):
+                geometry_json = geom
+            else:
+                geometry_json = {}
+            
+            # If area is 0 or very small, recalculate from geometry
+            if sa_area < 0.001 and geometry_json:
+                try:
+                    from shapely.geometry import shape
+                    from shapely.ops import transform
+                    import pyproj
+                    
+                    # Get geometry and calculate centroid for UTM zone
+                    geom_obj = shape(geometry_json)
+                    if not geom_obj.is_empty:
+                        centroid = geom_obj.centroid
+                        utm_srid = 32644 if centroid.x < 84 else 32645
+                        
+                        # Project to UTM and calculate area
+                        project = pyproj.Transformer.from_crs(
+                            "EPSG:4326", 
+                            f"EPSG:{utm_srid}", 
+                            always_xy=True
+                        ).transform
+                        geom_utm = transform(project, geom_obj)
+                        sa_area = geom_utm.area / 10000
+                        print(f"[list_sub_areas] Recalculated area for {sa.get('name')}: {sa_area:.4f} ha")
+                except Exception as e:
+                    print(f"[list_sub_areas] Error recalculating area: {e}")
+        
+        sub_area_responses.append(SubAreaResponse(
+            id=sa.get("id", ""),
+            name=sa.get("name", ""),
+            category=sa.get("category", ""),
+            geometry=geometry_json,
+            area_hectares=round(sa_area, 4),
+            block_id=sa.get("blockId"),
+            block_name=sa.get("blockName"),
+            is_excluded=sa.get("isExcluded", False)
+        ))
+        total_area += sa_area
+
+    return SubAreaListResponse(
+        sub_areas=sub_area_responses,
+        total_count=len(sub_area_responses),
+        total_area_hectares=round(total_area, 4)
+    )
+
+
+@router.patch("/calculations/{calculation_id}/sub-areas/{sub_area_id}")
+async def update_sub_area(
+    calculation_id: UUID,
+    sub_area_id: str,
+    request: SubAreaUpdateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update a sub-area's properties (name, category, etc.)
+
+    Note: Geometry update is not supported via this endpoint.
+    Use geometry update endpoint to change the shape.
+    """
+    from datetime import datetime
+    
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    # Get sub-areas from result_data
+    result_data = calculation.result_data or {}
+    sub_areas = result_data.get("sub_areas", [])
+
+    # Find the sub-area
+    sub_area_found = False
+    for i, sa in enumerate(sub_areas):
+        if sa.get("id") == sub_area_id:
+            sub_area_found = True
+
+            # Update fields
+            if request.name is not None:
+                sub_areas[i]["name"] = request.name
+            if request.category is not None:
+                valid_categories = ["protected", "plantation", "pro-poor", "religious", "biodiversity", "tourist", "office", "private_land"]
+                if request.category not in valid_categories:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+                    )
+                sub_areas[i]["category"] = request.category
+            if request.block_id is not None:
+                sub_areas[i]["blockId"] = request.block_id
+            if request.block_name is not None:
+                sub_areas[i]["blockName"] = request.block_name
+            if request.is_excluded is not None:
+                # Recalculate excluded area if changing exclusion status
+                old_excluded = sub_areas[i].get("isExcluded", False)
+                area_ha = sub_areas[i].get("area_hectares", 0)
+
+                if request.is_excluded != old_excluded:
+                    current_excluded = result_data.get("excluded_area_hectares", 0)
+                    if request.is_excluded:
+                        result_data["excluded_area_hectares"] = round(current_excluded + area_ha, 4)
+                    else:
+                        result_data["excluded_area_hectares"] = round(current_excluded - area_ha, 4)
+
+                sub_areas[i]["isExcluded"] = request.is_excluded
+
+            sub_areas[i]["updated_at"] = datetime.now().isoformat()
+            break
+
+    if not sub_area_found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sub-area with ID {sub_area_id} not found"
+        )
+
+    # Save updated result_data
+    result_data["sub_areas"] = sub_areas
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+    db.refresh(calculation)
+
+    return {
+        "success": True,
+        "message": "Sub-area updated successfully",
+        "sub_area": sub_areas[[i for i, sa in enumerate(sub_areas) if sa.get("id") == sub_area_id][0]]
+    }
+
+
+@router.delete("/calculations/{calculation_id}/sub-areas/{sub_area_id}")
+async def delete_sub_area(
+    calculation_id: UUID,
+    sub_area_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a sub-area from a calculation.
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    # Get sub-areas from result_data
+    result_data = calculation.result_data or {}
+    sub_areas = result_data.get("sub_areas", [])
+
+    # Find and remove the sub-area
+    sub_area_found = False
+    deleted_area = 0
+    new_sub_areas = []
+
+    for sa in sub_areas:
+        if sa.get("id") == sub_area_id:
+            sub_area_found = True
+            deleted_area = sa.get("area_hectares", 0)
+            if sa.get("isExcluded", False):
+                # Reduce excluded area
+                current_excluded = result_data.get("excluded_area_hectares", 0)
+                result_data["excluded_area_hectares"] = round(max(0, current_excluded - deleted_area), 4)
+        else:
+            new_sub_areas.append(sa)
+
+    if not sub_area_found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sub-area with ID {sub_area_id} not found"
+        )
+
+    # Save updated result_data
+    result_data["sub_areas"] = new_sub_areas
+    result_data["sub_areas_count"] = len(new_sub_areas)
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+    db.refresh(calculation)
+
+    return {
+        "success": True,
+        "message": f"Sub-area deleted successfully. Removed {round(deleted_area, 4)} hectares."
+    }
+
+
+@router.post("/calculations/{calculation_id}/edit-boundary")
+async def edit_boundary_interactive(
+    calculation_id: UUID,
+    request: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Interactive boundary editing endpoint.
+
+    Accepts operations to modify the boundary geometry:
+    - add_polygon: Add a new polygon to the boundary
+    - remove_polygon: Remove a polygon from the boundary
+    - merge_polygons: Merge multiple polygons into one
+    - split_polygon: Split a polygon by a line
+
+    Request format:
+    {
+        "operation": "add_polygon|remove_polygon|merge|split",
+        "features": [...],  // GeoJSON features to add/modify
+        "target_index": 0,  // Index of polygon to modify (for remove/merge/split)
+        "reanalyze": true   // Whether to re-run analysis
+    }
+    """
+    from shapely.geometry import shape, mapping, MultiPolygon, Polygon
+    from shapely.ops import unary_union
+
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    operation = request.get("operation", "add_polygon")
+    features = request.get("features", [])
+    reanalyze = request.get("reanalyze", True)
+
+    try:
+        # Get current boundary geometry
+        if calculation.boundary_geom:
+            geom_wkb = db.execute(
+                text("SELECT ST_AsEWKB(:geom) as geom"),
+                {"geom": calculation.boundary_geom}
+            ).scalar()
+            if geom_wkb:
+                current_geom = wkb.loads(bytes(geom_wkb))
+            else:
+                current_geom = None
+        else:
+            current_geom = None
+
+        if current_geom is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No boundary geometry found for this calculation"
+            )
+
+        # Process based on operation
+        if operation == "add_polygon":
+            # Add new polygon(s) to the boundary
+            new_geoms = []
+            for feature in features:
+                if "geometry" in feature:
+                    geom = shape(feature["geometry"])
+                    new_geoms.append(geom)
+
+            if new_geoms:
+                if current_geom.geom_type == "MultiPolygon":
+                    new_polygons = list(current_geom.geoms) + new_geoms
+                    current_geom = MultiPolygon(new_polygons)
+                else:
+                    new_polygons = [current_geom] + new_geoms
+                    current_geom = MultiPolygon(new_polygons)
+
+        elif operation == "remove_polygon":
+            target_index = request.get("target_index", 0)
+            if current_geom.geom_type == "MultiPolygon":
+                polygons = list(current_geom.geoms)
+                if 0 <= target_index < len(polygons):
+                    polygons.pop(target_index)
+                    if len(polygons) == 1:
+                        current_geom = polygons[0]
+                    else:
+                        current_geom = MultiPolygon(polygons)
+            elif target_index == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot remove single polygon - use update_geometry instead"
+                )
+
+        elif operation == "merge":
+            # Merge all polygons into one
+            if current_geom.geom_type == "MultiPolygon":
+                current_geom = unary_union(current_geom)
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown operation: {operation}"
+            )
+
+        # Make geometry valid
+        if not current_geom.is_valid:
+            current_geom = current_geom.buffer(0)
+
+        # Calculate new area
+        area_sqm = current_geom.area
+        area_hectares = area_sqm / 10000
+
+        # Update boundary geometry in database
+        update_query = text("""
+            UPDATE public.calculations
+            SET boundary_geom = ST_GeomFromText(:wkt, 4326)
+            WHERE id = :calc_id
+        """)
+
+        db.execute(update_query, {
+            "wkt": current_geom.wkt,
+            "calc_id": str(calculation_id)
+        })
+
+        # Update result_data
+        result_data = calculation.result_data or {}
+        result_data["boundary_edited"] = True
+        result_data["boundary_edit_operation"] = operation
+        result_data["new_area_hectares"] = round(area_hectares, 4)
+        calculation.result_data = result_data
+        flag_modified(calculation, "result_data")
+
+        db.commit()
+
+        # Optionally run re-analysis
+        if reanalyze:
+            calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+            calculation.status = CalculationStatus.PROCESSING
+            db.commit()
+
+            analysis_options = calculation.analysis_options or {}
+
+            try:
+                analysis_results, processing_time = await analyze_forest_boundary(
+                    calculation_id, db, options=analysis_options
+                )
+
+                # Preserve blocks and sub-areas
+                blocks_data = result_data.get('blocks', [])
+                sub_areas = result_data.get('sub_areas', [])
+
+                updated_result_data = {
+                    'blocks': blocks_data,
+                    'sub_areas': sub_areas,
+                    'boundary_edited': True,
+                    'boundary_edit_operation': operation,
+                    'new_area_hectares': round(area_hectares, 4),
+                    **analysis_results
+                }
+
+                update_result_query = text("""
+                    UPDATE public.calculations
+                    SET
+                        result_data = CAST(:result_data AS jsonb),
+                        processing_time_seconds = :processing_time,
+                        status = :status,
+                        completed_at = NOW()
+                    WHERE id = :calc_id
+                """)
+
+                db.execute(update_result_query, {
+                    "result_data": json.dumps(updated_result_data),
+                    "processing_time": processing_time,
+                    "status": "COMPLETED",
+                    "calc_id": str(calculation_id)
+                })
+
+                db.commit()
+            except Exception as e:
+                print(f"Re-analysis failed after boundary edit: {e}")
+                calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+                calculation.status = CalculationStatus.COMPLETED
+                db.commit()
+
+        # Get updated geometry
+        geojson_query = db.query(
+            func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
+        ).filter(Calculation.id == calculation_id).first()
+
+        geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+
+        return {
+            "success": True,
+            "message": f"Boundary {operation} completed" + (" and re-analysis done" if reanalyze else ""),
+            "calculation_id": str(calculation_id),
+            "new_area_hectares": round(area_hectares, 4),
+            "geometry": geometry_json
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to edit boundary: {str(e)}"
+        )
+
+
+@router.get("/calculations/{calculation_id}/polygons", response_model=BlockPolygonListResponse)
+async def get_calculation_polygons(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of individual polygons from a calculation's boundary geometry.
+    
+    This extracts each polygon from the boundary (which could be MultiPolygon)
+    and returns them as individual polygons that the user can name as blocks.
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+    
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+    
+    # Check if boundary geometry exists
+    if not calculation.boundary_geom:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No boundary geometry found for this calculation"
+        )
+    
+    # Get existing blocks from result_data (if any) - database table may not have blocks yet
+    existing_blocks = {}
+    if calculation.result_data and 'blocks' in calculation.result_data:
+        for block in calculation.result_data.get('blocks', []):
+            existing_blocks[block.get('block_index', 0)] = block.get('block_name', '')
+    
+    # Extract individual polygons from the boundary geometry
+    # First check the geometry type
+    geom_type_query = db.execute(
+        text("SELECT ST_GeometryType(boundary_geom) as geom_type, ST_NumGeometries(boundary_geom) as num_geoms FROM calculations WHERE id = :calc_id"),
+        {"calc_id": str(calculation_id)}
+    ).first()
+    
+    print(f"Boundary geometry type: {geom_type_query.geom_type}, num_geometries: {geom_type_query.num_geoms}")
+    
+    # Debug: check if boundary_geom exists and is valid
+    boundary_check = db.execute(
+        text("SELECT boundary_geom IS NOT NULL as has_geom, ST_IsValid(boundary_geom) as is_valid FROM calculations WHERE id = :calc_id"),
+        {"calc_id": str(calculation_id)}
+    ).first()
+    print(f"Boundary check - has_geom: {boundary_check.has_geom}, is_valid: {boundary_check.is_valid}")
+    
+    # Try to get valid geometries - check result_data first
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    result_data = calculation.result_data or {}
+    
+    # If blocks exist in result_data with valid geometry, use those
+    blocks_in_result = result_data.get('blocks', [])
+    if blocks_in_result and len(blocks_in_result) > 0:
+        print(f"Found {len(blocks_in_result)} blocks in result_data")
+        
+        polygons = []
+        for i, block in enumerate(blocks_in_result):
+            block_geom = block.get('geometry')
+            block_area = block.get('area_hectares', 0)
+            block_name = block.get('block_name', f"Block {i+1}")
+            
+            print(f"Block {i+1} in result_data: area = {block_area}")
+            
+            if block_geom:
+                polygons.append(BlockPolygonResponse(
+                    index=i,
+                    geometry=block_geom,
+                    area_hectares=round(block_area, 4) if block_area else 0,
+                    current_name=block_name
+                ))
+        
+        if polygons:
+            print(f"Using {len(polygons)} blocks from result_data")
+            return BlockPolygonListResponse(
+                polygons=polygons,
+                total_count=len(polygons)
+            )
+    
+    # Otherwise try to extract from boundary_geom
+    num_geoms = geom_type_query.num_geoms or 1
+    
+    # Get centroid to determine UTM zone for Nepal
+    # Nepal uses UTM 44N (32644) for western (longitude < 84) and 45N (32645) for eastern
+    try:
+        centroid_query = db.execute(
+            text("""
+                SELECT ST_X(ST_Centroid(boundary_geom)) as centroid_lon
+                FROM calculations
+                WHERE id = :calc_id
+            """),
+            {"calc_id": str(calculation_id)}
+        ).first()
+        
+        centroid_lon = centroid_query.centroid_lon if centroid_query else 85.0
+        utm_srid = 32644 if centroid_lon < 84.0 else 32645
+        print(f"Using UTM zone {utm_srid} (lon: {centroid_lon})")
+    except Exception as e:
+        print(f"Error getting centroid: {e}")
+        utm_srid = 32645  # Default to eastern Nepal
+        centroid_lon = 85.0
+    
+    # For each geometry, get its area and geometry separately (using UTM for accurate area)
+    polygons = []
+    for i in range(1, num_geoms + 1):
+        try:
+            # Extract the i-th geometry from the collection and transform to UTM for accurate area
+            single_geom_query = db.execute(
+                text("""
+                    SELECT 
+                        ST_Area(ST_Transform(ST_GeometryN(boundary_geom, :idx), :utm_srid)) / 10000.0 as area_hectares,
+                        ST_AsGeoJSON(ST_GeometryN(boundary_geom, :idx)) as geometry
+                    FROM calculations
+                    WHERE id = :calc_id
+                """),
+                {"calc_id": str(calculation_id), "idx": i, "utm_srid": utm_srid}
+            ).first()
+            
+            if single_geom_query and single_geom_query.geometry:
+                geom_json = json.loads(single_geom_query.geometry)
+                print(f"Polygon {i}: area_hectares = {single_geom_query.area_hectares}")
+                polygons.append(BlockPolygonResponse(
+                    index=i - 1,
+                    geometry=geom_json,
+                    area_hectares=round(single_geom_query.area_hectares, 4) if single_geom_query.area_hectares else 0,
+                    current_name=existing_blocks.get(i - 1, f"Block {i}")
+                ))
+        except Exception as e:
+            print(f"Error extracting polygon {i}: {e}")
+            continue
+    
+    print(f"Extracted {len(polygons)} polygons from calculation {calculation_id}")
+    
+    return BlockPolygonListResponse(
+        polygons=polygons,
+        total_count=len(polygons)
+    )
+
+
+@router.post("/calculations/{calculation_id}/blocks", response_model=BlockListResponse)
+async def create_blocks_from_polygons(
+    calculation_id: UUID,
+    request: BlockCreateListRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create forest blocks from polygon mapping.
+    
+    User provides a list of polygon indices and their names. Each polygon
+    from the boundary geometry becomes a forest block.
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+    
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+    
+    # Delete existing blocks
+    db.query(ForestBlock).filter(ForestBlock.calculation_id == calculation_id).delete()
+    
+    # Create new blocks
+    created_blocks = []
+    total_area = 0.0
+    
+    for block_req in request.blocks:
+        # Get the polygon geometry for this index
+        polygon_query = db.execute(
+            text("""
+                SELECT 
+                    (ST_Dump(boundary_geom)).geom as polygon_geom,
+                    ST_Area((ST_Dump(boundary_geom)).geom) / 10000.0 as area_hectares
+                FROM calculations
+                WHERE id = :calc_id
+                OFFSET :offset LIMIT 1
+            """),
+            {"calc_id": str(calculation_id), "offset": block_req.polygon_index}
+        ).fetchone()
+        
+        if not polygon_query:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Polygon index {block_req.polygon_index} not found"
+            )
+        
+        # Create block record
+        block = ForestBlock(
+            calculation_id=calculation_id,
+            name=block_req.name,
+            geometry=polygon_query.polygon_geom,
+            area_hectares=polygon_query.area_hectares,
+            index=block_req.polygon_index
+        )
+        db.add(block)
+        created_blocks.append(block)
+        total_area += polygon_query.area_hectares
+    
+    db.commit()
+    
+    # Save block geometries to result_data so frontend can display them
+    blocks_for_result_data = []
+    for block in created_blocks:
+        geojson_result = db.query(
+            func.ST_AsGeoJSON(block.geometry).label('geojson')
+        ).first()
+        
+        block_data = {
+            'block_index': block.index,
+            'block_name': block.name,
+            'area_hectares': round(block.area_hectares, 4),
+            'geometry': json.loads(geojson_result.geojson) if geojson_result and geojson_result.geojson else None
+        }
+        blocks_for_result_data.append(block_data)
+    
+    # Update result_data with block geometries
+    if calculation.result_data:
+        calculation.result_data['blocks'] = blocks_for_result_data
+        flag_modified(calculation, 'result_data')
+        db.commit()
+    
+    # After saving blocks, trigger the analysis if status was PENDING and run_analysis is True
+    if request.run_analysis and calculation.status == CalculationStatus.PENDING:
+        calculation.status = CalculationStatus.PROCESSING
+        db.commit()
+        
+        # Get analysis options from the calculation
+        analysis_options = calculation.analysis_options or {}
+        
+        # Build analysis service options
+        analysis_service_options = {
+            'run_raster_analysis': analysis_options.get('run_raster_analysis', True),
+            'run_elevation': analysis_options.get('run_elevation', True),
+            'run_slope': analysis_options.get('run_slope', True),
+            'run_aspect': analysis_options.get('run_aspect', True),
+            'run_canopy': analysis_options.get('run_canopy', True),
+            'run_biomass': analysis_options.get('run_biomass', True),
+            'run_forest_health': analysis_options.get('run_forest_health', True),
+            'run_forest_type': analysis_options.get('run_forest_type', True),
+            'run_landcover': analysis_options.get('run_landcover', True),
+            'run_forest_loss': analysis_options.get('run_forest_loss', True),
+            'run_forest_gain': analysis_options.get('run_forest_gain', True),
+            'run_fire_loss': analysis_options.get('run_fire_loss', True),
+            'run_temperature': analysis_options.get('run_temperature', True),
+            'run_precipitation': analysis_options.get('run_precipitation', True),
+            'run_soil': analysis_options.get('run_soil', True),
+            'run_proximity': analysis_options.get('run_proximity', True),
+        }
+        
+        # Run the analysis
+        try:
+            analysis_results, processing_time = await analyze_forest_boundary(calculation_id, db, options=analysis_service_options)
+            
+            # Update with results
+            update_query = text("""
+                UPDATE public.calculations
+                SET
+                    result_data = result_data || CAST(:analysis_data AS jsonb),
+                    processing_time_seconds = :processing_time,
+                    status = :status,
+                    completed_at = NOW()
+                WHERE id = :calc_id
+            """)
+            
+            db.execute(update_query, {
+                "analysis_data": json.dumps(analysis_results),
+                "processing_time": processing_time,
+                "status": "COMPLETED",
+                "calc_id": str(calculation_id)
+            })
+            db.commit()
+            print(f"Analysis completed for calculation {calculation_id}")
+        except Exception as e:
+            print(f"Analysis failed for calculation {calculation_id}: {e}")
+            calculation.status = CalculationStatus.FAILED
+            calculation.error_message = str(e)[:500]
+            db.commit()
+    
+    # Refresh to get IDs
+    for block in created_blocks:
+        db.refresh(block)
+    
+    # Build response
+    block_responses = []
+    for block in created_blocks:
+        # Convert geometry to GeoJSON using proper SQLAlchemy
+        geojson_result = db.query(
+            func.ST_AsGeoJSON(block.geometry).label('geojson')
+        ).first()
+        
+        block_responses.append(BlockResponse(
+            id=str(block.id),
+            name=block.name,
+            geometry=json.loads(geojson_result.geojson) if geojson_result and geojson_result.geojson else {},
+            area_hectares=round(block.area_hectares, 4),
+            index=block.index,
+            created_at=block.created_at
+        ))
+    
+    return BlockListResponse(
+        blocks=block_responses,
+        total_count=len(block_responses),
+        total_area_hectares=round(total_area, 4)
+    )
+
+
+@router.get("/calculations/{calculation_id}/blocks", response_model=BlockListResponse)
+async def get_calculation_blocks(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all forest blocks for a calculation.
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+    
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+    
+    blocks = db.query(ForestBlock).filter(
+        ForestBlock.calculation_id == calculation_id
+    ).order_by(ForestBlock.index).all()
+    
+    block_responses = []
+    total_area = 0.0
+    
+    for block in blocks:
+        geojson_result = db.query(
+            func.ST_AsGeoJSON(block.geometry).label('geojson')
+        ).first()
+        
+        block_responses.append(BlockResponse(
+            id=str(block.id),
+            name=block.name,
+            geometry=json.loads(geojson_result.geojson) if geojson_result and geojson_result.geojson else {},
+            area_hectares=round(block.area_hectares, 4),
+            index=block.index,
+            created_at=block.created_at
+        ))
+        total_area += block.area_hectares
+    
+    return BlockListResponse(
+        blocks=block_responses,
+        total_count=len(block_responses),
+        total_area_hectares=round(total_area, 4)
+    )
+
+
+@router.patch("/calculations/{calculation_id}/blocks/{block_id}", response_model=BlockResponse)
+async def update_block(
+    calculation_id: UUID,
+    block_id: UUID,
+    name: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update a forest block's name.
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+    
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+    
+    block = db.query(ForestBlock).filter(
+        ForestBlock.id == block_id,
+        ForestBlock.calculation_id == calculation_id
+    ).first()
+    
+    if not block:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Block not found"
+        )
+    
+    block.name = name
+    db.commit()
+    db.refresh(block)
+    
+    geojson_result = db.query(
+        func.ST_AsGeoJSON(block.geometry).label('geojson')
+    ).first()
+    
+    return BlockResponse(
+        id=str(block.id),
+        name=block.name,
+        geometry=json.loads(geojson_result.geojson) if geojson_result and geojson_result.geojson else {},
+        area_hectares=round(block.area_hectares, 4),
+        index=block.index,
+        created_at=block.created_at
+    )
+
+
+@router.delete("/calculations/{calculation_id}/blocks/{block_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_block(
+    calculation_id: UUID,
+    block_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a forest block.
+    """
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+    
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+    
+    block = db.query(ForestBlock).filter(
+        ForestBlock.id == block_id,
+        ForestBlock.calculation_id == calculation_id
+    ).first()
+    
+    if not block:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Block not found"
+        )
+    
+    db.delete(block)
+    db.commit()

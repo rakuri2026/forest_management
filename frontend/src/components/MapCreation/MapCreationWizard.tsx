@@ -34,6 +34,7 @@ interface MapCreationWizardProps {
     gpsPoints: GPSPoint[];
     blocks: Block[];
     subAreas: SubArea[];
+    runAnalysis?: boolean;
   }) => void;
   onCancel: () => void;
   isProcessing?: boolean;
@@ -107,8 +108,8 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
     }
   };
 
-  const handleFinish = () => {
-    console.log('[MapCreationWizard] handleFinish called');
+  const handleFinish = (runAnalysis: boolean = true) => {
+    console.log('[MapCreationWizard] handleFinish called, runAnalysis:', runAnalysis);
     console.log('[MapCreationWizard] Data being sent:', {
       outerBoundary,
       gpsPoints,
@@ -126,6 +127,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
       gpsPoints,
       blocks: cleanedBlocks,
       subAreas,
+      runAnalysis,
     });
   };
 
@@ -545,11 +547,11 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
 
               {currentStep === steps.length && (
                 <button
-                  onClick={handleFinish}
+                  onClick={() => handleFinish(false)}
                   disabled={!canProceed() || isProcessing}
                   className="px-8 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-semibold"
                 >
-                  {isProcessing ? 'Processing...' : 'Finish & Analyze'}
+                  {isProcessing ? 'Processing...' : 'Save'}
                 </button>
               )}
             </div>

@@ -46,6 +46,9 @@ class MapCreationRequest(BaseModel):
     # Analysis options (same as file upload)
     analysis_options: Optional[Dict[str, bool]] = None
     map_options: Optional[Dict[str, bool]] = None
+    
+    # Whether to run analysis immediately or save only
+    run_analysis: Optional[bool] = Field(False, description="Whether to run analysis after saving")
 
     class Config:
         json_schema_extra = {

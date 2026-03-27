@@ -21,9 +21,13 @@ import { RasterClickInfo } from '../components/RasterClickInfo';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import MapEditor from '../components/MapEditor';
 
-// Import leaflet scale control (built-in)
-import 'leaflet/dist/leaflet.css';
+// Block colors for mapping
+const BLOCK_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#9b59b6', '#f39c12',
+  '#1abc9c', '#e67e22', '#34495e', '#16a085', '#c0392b'
+];
 
 // Validate GeoJSON geometry structure
 function isValidGeoJSON(geometry: any): boolean {
@@ -140,7 +144,7 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
   const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory'>('analysis');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas'>('analysis');
 
   // Re-analysis modal state
   const [showReanalysisModal, setShowReanalysisModal] = useState(false);
@@ -153,6 +157,10 @@ export default function CalculationDetail() {
 
   // NEW: Track which block species lists are expanded
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
+
+  // Map editor state
+  const [showMapEditor, setShowMapEditor] = useState(false);
+  const [subAreas, setSubAreas] = useState<any[]>([]);
 
   useEffect(() => {
     if (id) {
@@ -200,6 +208,21 @@ export default function CalculationDetail() {
       }
     }
   }, [calculation]);
+
+  // Get map center from geometry
+  const getMapCenter = (): [number, number] => {
+    if (!calculation?.geometry) return [27.7172, 85.3240];
+    try {
+      const layer = L.geoJSON(calculation.geometry);
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) {
+        return [(bounds.getNorth() + bounds.getSouth()) / 2, (bounds.getEast() + bounds.getWest()) / 2] as [number, number];
+      }
+    } catch (e) {
+      console.error('Error calculating center:', e);
+    }
+    return [27.7172, 85.3240];
+  };
 
   const loadCalculation = async () => {
     try {
@@ -537,15 +560,37 @@ export default function CalculationDetail() {
                 </div>
               )}
             </div>
-            <button
-              onClick={() => setShowReanalysisModal(true)}
-              className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Re-run Analysis
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  // Load sub-areas first
+                  if (id) {
+                    forestApi.listSubAreas(id).then(data => {
+                      setSubAreas(data.sub_areas || []);
+                      setShowMapEditor(true);
+                    }).catch(() => {
+                      setSubAreas([]);
+                      setShowMapEditor(true);
+                    });
+                  }
+                }}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
+                </svg>
+                Edit Map
+              </button>
+              <button
+                onClick={() => setShowReanalysisModal(true)}
+                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Re-run Analysis
+              </button>
+            </div>
           </div>
         </div>
 
@@ -561,6 +606,16 @@ export default function CalculationDetail() {
               }`}
             >
               Analysis
+            </button>
+            <button
+              onClick={() => setActiveTab('subareas')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'subareas'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Sub-Areas
             </button>
             <button
               onClick={() => setActiveTab('fieldbook')}
@@ -656,6 +711,139 @@ export default function CalculationDetail() {
         </div>
 
         {/* Tab Content */}
+        {activeTab === 'analysis' && (
+          <div className="p-6">
+            <AnalysisTabContent
+              calculation={calculation}
+              blocks={blocks}
+              subAreas={subAreas}
+            />
+          </div>
+        )}
+
+        {activeTab === 'subareas' && (
+          <div className="p-6">
+            <div className="mb-4 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold">Sub-Areas Management</h2>
+                <p className="text-sm text-gray-600">Draw and manage sub-areas within the forest boundary</p>
+              </div>
+              <button
+                onClick={() => setShowMapEditor(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                + Add Sub-Area (Draw on Map)
+              </button>
+            </div>
+            
+            {/* Split view: Table and Map */}
+            <div className="flex gap-6" style={{ height: '600px' }}>
+              {/* Left side: Table */}
+              <div className="w-1/2 overflow-auto">
+                {calculation?.result_data?.sub_areas && calculation.result_data.sub_areas.length > 0 ? (
+                  <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Area (ha)</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {calculation.result_data.sub_areas.map((sa: any, idx: number) => (
+                          <tr key={sa.id || idx}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sa.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sa.category}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sa.area_hectares?.toFixed(4) || 0}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {sa.isExcluded || sa.is_excluded ? (
+                                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Excluded</span>
+                              ) : (
+                                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Included</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg">
+                    <p className="text-gray-500">No sub-areas defined yet.</p>
+                    <p className="text-sm text-gray-400 mt-1">Click "Add Sub-Area (Draw on Map)" to create one.</p>
+                  </div>
+                )}
+              </div>
+              
+              {/* Right side: Map */}
+              <div className="w-1/2 rounded-lg overflow-hidden border-2 border-gray-400 shadow-lg">
+                <MapContainer
+                  center={[27.7, 85.3]}
+                  zoom={7}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={true}
+                  attributionControl={true}
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                  {/* Forest boundary */}
+                  {calculation.geometry && (
+                    <GeoJSON
+                      data={calculation.geometry}
+                      style={{
+                        color: '#16a085',
+                        weight: 3,
+                        fillColor: '#1abc9c',
+                        fillOpacity: 0.05
+                      }}
+                    />
+                  )}
+                  {/* Render blocks */}
+                  {blocks.length > 0 && blocks.map((block: any, index: number) => (
+                    block.geometry && (
+                      <GeoJSON
+                        key={`block-${index}-${block.block_name || index}`}
+                        data={block.geometry}
+                        style={{
+                          color: '#2563eb',
+                          weight: 2,
+                          fillColor: '#3b82f6',
+                          fillOpacity: 0.1
+                        }}
+                      />
+                    )
+                  ))}
+                  {/* Render sub-areas */}
+                  {calculation.result_data?.sub_areas && calculation.result_data.sub_areas.map((subArea: any, index: number) => (
+                    subArea.geometry && (
+                      <GeoJSON
+                        key={`subarea-${index}-${subArea.name || index}`}
+                        data={subArea.geometry}
+                        style={{
+                          color: subArea.isExcluded || subArea.is_excluded ? '#dc2626' : '#7c3aed',
+                          weight: 2,
+                          fillColor: subArea.isExcluded || subArea.is_excluded ? '#fca5a5' : '#c4b5fd',
+                          fillOpacity: 0.3
+                        }}
+                      />
+                    )
+                  ))}
+                  <ZoomToLayer
+                    geometry={calculation.geometry}
+                    setMapInstance={() => {}}
+                    orientation="landscape"
+                  />
+                </MapContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'fieldbook' && (
           <div className="p-6">
             <FieldbookTab calculationId={calculation.id} />
@@ -2162,6 +2350,36 @@ export default function CalculationDetail() {
                     }}
                   />
                 )}
+                {/* Render blocks from result_data */}
+                {blocks.length > 0 && blocks.map((block: any, index: number) => (
+                  block.geometry && (
+                    <GeoJSON
+                      key={`block-${index}-${block.block_name || index}`}
+                      data={block.geometry}
+                      style={{
+                        color: '#2563eb',
+                        weight: 2,
+                        fillColor: '#3b82f6',
+                        fillOpacity: 0.1
+                      }}
+                    />
+                  )
+                ))}
+                {/* Render sub-areas from result_data */}
+                {calculation.result_data?.sub_areas && calculation.result_data.sub_areas.map((subArea: any, index: number) => (
+                  subArea.geometry && (
+                    <GeoJSON
+                      key={`subarea-${index}-${subArea.name || index}`}
+                      data={subArea.geometry}
+                      style={{
+                        color: subArea.isExcluded ? '#dc2626' : '#7c3aed',
+                        weight: 2,
+                        fillColor: subArea.isExcluded ? '#fca5a5' : '#c4b5fd',
+                        fillOpacity: 0.3
+                      }}
+                    />
+                  )
+                ))}
                 <ZoomToLayer
                   geometry={calculation.geometry}
                   setMapInstance={setMapInstance}
@@ -2282,6 +2500,27 @@ export default function CalculationDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Map Editor Modal */}
+      {showMapEditor && calculation && (
+        <MapEditor
+          calculationId={id!}
+          initialGeometry={calculation.geometry}
+          initialSubAreas={subAreas}
+          initialBlocks={calculation.result_data?.blocks || []}
+          onSave={async (newGeometry, newSubAreas) => {
+            // Don't close - user will click "Done" button when ready
+            // Reload calculation to get updated data
+            await loadCalculation();
+            // Also reload sub-areas to ensure they are fresh
+            if (id) {
+              const subAreaData = await forestApi.listSubAreas(id);
+              setSubAreas(subAreaData.sub_areas || []);
+            }
+          }}
+          onCancel={() => setShowMapEditor(false)}
+        />
       )}
     </div>
   );
