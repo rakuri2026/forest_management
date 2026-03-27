@@ -3,13 +3,128 @@ Forest boundary analysis service
 Performs raster and vector analysis on uploaded forest boundaries
 """
 import time
-from typing import Dict, Any, Tuple, Optional
+import json
+from typing import Dict, Any, Tuple, Optional, List
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from datetime import datetime
+from shapely.geometry import shape, mapping
+from shapely.ops import unary_union
 
 from ..models.calculation import Calculation
+
+
+def get_excluded_sub_areas(existing_data: Dict) -> List[Dict]:
+    """
+    Get all sub-areas that are marked as excluded (private land)
+    """
+    sub_areas = existing_data.get('sub_areas', [])
+    excluded = []
+    for sa in sub_areas:
+        if sa.get('isExcluded') or sa.get('is_excluded'):
+            excluded.append(sa)
+    return excluded
+
+
+def create_block_working_geometry(block_geometry: Dict, excluded_sub_areas: List[Dict], utm_srid: int = 32644) -> Optional[Dict]:
+    """
+    Create a working geometry for a block by excluding private land areas
+    
+    Args:
+        block_geometry: Block geometry in GeoJSON format
+        excluded_sub_areas: List of excluded sub-areas
+        utm_srid: UTM projection zone
+        
+    Returns:
+        Working geometry in GeoJSON format (with exclusions), or None if no exclusions
+    """
+    if not excluded_sub_areas:
+        return block_geometry
+    
+    try:
+        # Convert block geometry to shapely
+        block_shapely = shape(block_geometry)
+        if block_shapely.is_empty:
+            return block_geometry
+        
+        # Collect excluded geometries that intersect with this block
+        excluded_geometries = []
+        for sa in excluded_sub_areas:
+            sa_geom = sa.get('geometry')
+            if sa_geom:
+                try:
+                    sa_shapely = shape(sa_geom)
+                    # Only include if it intersects with block
+                    if block_shapely.intersects(sa_shapely):
+                        excluded_geometries.append(sa_shapely.intersection(block_shapely))
+                except Exception as e:
+                    print(f"Warning: Could not process excluded area: {e}")
+                    continue
+        
+        if not excluded_geometries:
+            return block_geometry
+        
+        # Union all excluded geometries
+        excluded_union = unary_union(excluded_geometries)
+        
+        # Subtract from block geometry
+        working_geometry = block_shapely.difference(excluded_union)
+        
+        if working_geometry.is_empty:
+            return None
+            
+        # Return as GeoJSON
+        return mapping(working_geometry)
+        
+    except Exception as e:
+        print(f"Error creating block working geometry: {e}")
+        return block_geometry
+
+
+def calculate_excluded_area_in_block(block_geometry: Dict, excluded_sub_areas: List[Dict], utm_srid: int = 32644) -> float:
+    """
+    Calculate the total excluded area within a block
+    
+    Returns:
+        Area in hectares
+    """
+    if not excluded_sub_areas:
+        return 0.0
+    
+    try:
+        block_shapely = shape(block_geometry)
+        if block_shapely.is_empty:
+            return 0.0
+        
+        total_excluded = 0.0
+        for sa in excluded_sub_areas:
+            sa_geom = sa.get('geometry')
+            if sa_geom:
+                try:
+                    sa_shapely = shape(sa_geom)
+                    intersection = block_shapely.intersection(sa_shapely)
+                    if not intersection.is_empty:
+                        # Calculate area in hectares using UTM projection
+                        import pyproj
+                        from shapely.ops import transform
+                        
+                        project = pyproj.Transformer.from_crs(
+                            "EPSG:4326", 
+                            f"EPSG:{utm_srid}", 
+                            always_xy=True
+                        ).transform
+                        intersection_utm = transform(project, intersection)
+                        total_excluded += intersection_utm.area / 10000
+                except Exception as e:
+                    print(f"Warning: Could not calculate excluded area: {e}")
+                    continue
+        
+        return round(total_excluded, 4)
+        
+    except Exception as e:
+        print(f"Error calculating excluded area in block: {e}")
+        return 0.0
 
 
 async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Optional[Dict[str, bool]] = None) -> Tuple[Dict[str, Any], int]:
@@ -46,21 +161,70 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
     # Get existing result_data with blocks
     existing_data = calculation.result_data or {}
     blocks = existing_data.get('blocks', [])
+    
+    # Get excluded sub-areas (private land) for exclusion from analysis
+    excluded_sub_areas = get_excluded_sub_areas(existing_data)
+    total_excluded_area = 0
+    
+    if excluded_sub_areas:
+        print(f"[EXCLUSION] Found {len(excluded_sub_areas)} excluded sub-areas (private land)")
+        # Calculate total excluded area
+        for sa in excluded_sub_areas:
+            total_excluded_area += sa.get('area_hectares', 0)
+        print(f"[EXCLUSION] Total excluded area: {total_excluded_area:.4f} ha")
 
     # Analyze each block separately
     analyzed_blocks = []
     for i, block in enumerate(blocks):
-        print(f"Analyzing block {i+1}/{len(blocks)}: {block.get('block_name', f'Block {i+1}')}", flush=True)
+        block_name = block.get('block_name', f'Block {i+1}')
+        print(f"Analyzing block {i+1}/{len(blocks)}: {block_name}", flush=True)
+        
+        # Get block geometry
+        block_geometry = block.get('geometry')
+        
+        # Calculate excluded area within this block
+        block_excluded_area = 0
+        if excluded_sub_areas and block_geometry:
+            block_excluded_area = calculate_excluded_area_in_block(block_geometry, excluded_sub_areas)
+            print(f"[EXCLUSION] Block '{block_name}' has {block_excluded_area:.4f} ha of private land")
 
         try:
+            # Check if we have excluded areas to subtract
+            working_geometry = block_geometry
+            if excluded_sub_areas and block_geometry:
+                working_geometry = create_block_working_geometry(block_geometry, excluded_sub_areas)
+                if working_geometry is None:
+                    # Entire block is excluded (private land)
+                    print(f"[EXCLUSION] Block '{block_name}' is entirely private land - skipping analysis")
+                    analyzed_block = {
+                        **block,
+                        "area_hectares": 0,
+                        "excluded_area_hectares": block.get('area_hectares', 0),
+                        "effective_area_hectares": 0,
+                        "is_fully_excluded": True,
+                        "analysis_skipped": "Block is entirely private land"
+                    }
+                    analyzed_blocks.append(analyzed_block)
+                    continue
+                elif working_geometry != block_geometry:
+                    print(f"[EXCLUSION] Block '{block_name}' - running analysis on working geometry (excluded {block_excluded_area:.4f} ha)")
+            
             block_analysis = await analyze_block_geometry(
-                block['geometry'],
+                working_geometry,
                 calculation_id,
                 db,
                 options
             )
             # Merge analysis results into block data
             analyzed_block = {**block, **block_analysis}
+            
+            # Add excluded area tracking to block
+            analyzed_block['excluded_area_hectares'] = block_excluded_area
+            original_area = block.get('area_hectares', 0)
+            analyzed_block['original_area_hectares'] = original_area
+            # Effective area = original - excluded
+            analyzed_block['effective_area_hectares'] = round(original_area - block_excluded_area, 4)
+            
             print(f"Block {i+1} analysis completed successfully", flush=True)
 
         except Exception as block_error:

@@ -937,6 +937,11 @@ export default function CalculationDetail() {
               </h3>
               <p className="text-sm text-gray-600 mt-1">
                 Total Area: {calculation.result_data?.area_hectares?.toFixed(2)} hectares
+                {calculation.result_data?.excluded_area_hectares > 0 && (
+                  <span className="text-red-600">
+                    {' '}(Net: {calculation.result_data?.effective_area_hectares?.toFixed(2)} ha after {calculation.result_data?.excluded_area_hectares?.toFixed(2)} ha excluded)
+                  </span>
+                )}
                 {totalBlocks > 1 && ` (${totalBlocks} blocks)`}
               </p>
             </div>
@@ -962,6 +967,30 @@ export default function CalculationDetail() {
                       {(calculation.result_data?.area_sqm || 0).toLocaleString()} m²
                     </td>
                   </tr>
+
+                  {/* Excluded Area (Private Land) */}
+                  {calculation.result_data?.excluded_area_hectares > 0 && (
+                    <>
+                      <tr className="hover:bg-gray-50 bg-red-50">
+                        <td className="px-4 py-3 text-sm font-medium text-red-700">Private Land (Excluded)</td>
+                        <td className="px-4 py-3 text-sm text-red-700 font-mono">
+                          - {calculation.result_data?.excluded_area_hectares?.toFixed(2)} ha
+                        </td>
+                        <td className="px-4 py-3 text-sm text-red-600">
+                          Not part of forest area
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-gray-50 bg-green-50">
+                        <td className="px-4 py-3 text-sm font-bold text-green-700">Net Forest Area</td>
+                        <td className="px-4 py-3 text-sm font-bold text-green-700 font-mono">
+                          {calculation.result_data?.effective_area_hectares?.toFixed(2)} ha
+                        </td>
+                        <td className="px-4 py-3 text-sm text-green-600">
+                          Available for analysis
+                        </td>
+                      </tr>
+                    </>
+                  )}
 
                   {/* Extent */}
                   {calculation.result_data?.whole_forest_extent && (
@@ -1556,6 +1585,11 @@ export default function CalculationDetail() {
                     </h3>
                     <p className="text-sm text-gray-600 mt-1">
                       Area: {parseFloat(block.area_hectares || 0).toFixed(2)} hectares
+                      {block.excluded_area_hectares > 0 && (
+                        <span className="text-red-600">
+                          {' '}(Net: {parseFloat(block.effective_area_hectares || 0).toFixed(2)} ha, Excluded: {parseFloat(block.excluded_area_hectares || 0).toFixed(2)} ha)
+                        </span>
+                      )}
                     </p>
                   </div>
 
