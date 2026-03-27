@@ -745,20 +745,39 @@ export default function CalculationDetail() {
                     {/* Table 1: Summary Card */}
                     <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg border border-green-200 p-4">
                       <h3 className="text-lg font-bold text-green-800 mb-3">Table 1: Forest Area Summary</h3>
-                      <div className="grid grid-cols-3 gap-4 text-center">
-                        <div>
-                          <p className="text-sm text-green-600">Gross Area</p>
-                          <p className="text-xl font-bold text-green-800">{calculation.result_data?.area_hectares?.toFixed(2) || 0} ha</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-red-600">Excluded</p>
-                          <p className="text-xl font-bold text-red-600">- {calculation.result_data?.excluded_area_hectares?.toFixed(2) || 0} ha</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-green-600">Net Forest</p>
-                          <p className="text-xl font-bold text-green-800">{calculation.result_data?.effective_area_hectares?.toFixed(2) || 0} ha</p>
-                        </div>
-                      </div>
+                      {(() => {
+                        const gross = parseFloat(calculation.result_data?.area_hectares || 0);
+                        const excluded = parseFloat(calculation.result_data?.excluded_area_hectares || 0);
+                        const net = parseFloat(calculation.result_data?.effective_area_hectares || gross);
+                        
+                        if (excluded > 0) {
+                          return (
+                            <div className="grid grid-cols-3 gap-4 text-center">
+                              <div>
+                                <p className="text-sm text-green-600">Gross Area</p>
+                                <p className="text-xl font-bold text-green-800">{gross.toFixed(2)} ha</p>
+                              </div>
+                              <div>
+                                <p className="text-sm text-red-600">Excluded</p>
+                                <p className="text-xl font-bold text-red-600">- {excluded.toFixed(2)} ha</p>
+                              </div>
+                              <div>
+                                <p className="text-sm text-green-600">Net Forest</p>
+                                <p className="text-xl font-bold text-green-800">{net.toFixed(2)} ha</p>
+                              </div>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div className="grid grid-cols-1 gap-4 text-center">
+                              <div>
+                                <p className="text-sm text-green-600">Total Forest Area</p>
+                                <p className="text-xl font-bold text-green-800">{gross.toFixed(2)} ha</p>
+                              </div>
+                            </div>
+                          );
+                        }
+                      })()}
                     </div>
 
                     {/* Table 2: Block-wise Area Breakdown */}
@@ -776,18 +795,23 @@ export default function CalculationDetail() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {blocks.map((block: any, idx: number) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 text-sm font-medium text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
-                              <td className="px-4 py-2 text-sm text-gray-900 text-right">{parseFloat(block.area_hectares || 0).toFixed(2)}</td>
-                              <td className="px-4 py-2 text-sm text-red-600 text-right">
-                                {block.excluded_area_hectares > 0 ? parseFloat(block.excluded_area_hectares).toFixed(2) : '-'}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-green-700 font-semibold text-right">
-                                {parseFloat(block.effective_area_hectares || block.area_hectares || 0).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))}
+                          {blocks.map((block: any, idx: number) => {
+                            const excluded = parseFloat(block.excluded_area_hectares || 0);
+                            const total = parseFloat(block.area_hectares || 0);
+                            const net = parseFloat(block.effective_area_hectares || total);
+                            return (
+                              <tr key={idx} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 text-sm font-medium text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
+                                <td className="px-4 py-2 text-sm text-gray-900 text-right">{total.toFixed(2)}</td>
+                                <td className="px-4 py-2 text-sm text-red-600 text-right">
+                                  {excluded > 0 ? excluded.toFixed(2) : '-'}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-green-700 font-semibold text-right">
+                                  {net.toFixed(2)}
+                                </td>
+                              </tr>
+                            );
+                          })}
                           <tr className="bg-gray-100 font-semibold">
                             <td className="px-4 py-2 text-sm text-gray-900">TOTAL</td>
                             <td className="px-4 py-2 text-sm text-gray-900 text-right">
@@ -876,17 +900,21 @@ export default function CalculationDetail() {
                               sa.blockName === block.block_name || sa.block_name === block.block_name
                             );
                             
+                            const blockExcluded = parseFloat(block.excluded_area_hectares || 0);
+                            const blockTotal = parseFloat(block.area_hectares || 0);
+                            const blockNet = parseFloat(block.effective_area_hectares || blockTotal);
+                            
                             return (
                               <>
                                 <tr key={`block-${idx}`} className="bg-green-50 hover:bg-green-100">
                                   <td className="px-3 py-2 text-sm font-bold text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
                                   <td className="px-3 py-2 text-sm text-gray-500">Block</td>
-                                  <td className="px-3 py-2 text-sm text-gray-900 text-right font-semibold">{parseFloat(block.area_hectares || 0).toFixed(2)}</td>
+                                  <td className="px-3 py-2 text-sm text-gray-900 text-right font-semibold">{blockTotal.toFixed(2)}</td>
                                   <td className="px-3 py-2 text-sm text-red-600 text-right">
-                                    {block.excluded_area_hectares > 0 ? parseFloat(block.excluded_area_hectares).toFixed(2) : '-'}
+                                    {blockExcluded > 0 ? blockExcluded.toFixed(2) : '-'}
                                   </td>
                                   <td className="px-3 py-2 text-sm text-green-700 font-bold text-right">
-                                    {parseFloat(block.effective_area_hectares || block.area_hectares || 0).toFixed(2)}
+                                    {blockNet.toFixed(2)}
                                   </td>
                                 </tr>
                                 {subAreasInBlock.map((sa: any, saIdx: number) => (
