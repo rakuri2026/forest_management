@@ -284,7 +284,6 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
   const [selectedBlockFilter, setSelectedBlockFilter] = useState<string>('all');
   const [error, setError] = useState<string>('');
-  const [showTable, setShowTable] = useState<boolean>(false); // Collapsed by default
 
   // Validate sub-areas whenever they change
   useEffect(() => {
@@ -454,44 +453,61 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
   const mapCenter = getGeometryCenter(outerBoundary, [27.7172, 85.3240]);
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white p-4 rounded-lg shadow">
-        <h2 className="text-lg font-bold mb-3">Define Sub-areas (Optional)</h2>
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-lg shadow">
+        <h2 className="text-xl font-bold mb-4">Define Sub-areas (Optional)</h2>
 
-        {/* Compact Category Selection - Horizontal Chips */}
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <p className="text-sm text-blue-800">
+            <strong>Instructions:</strong>
+            <br />
+            • Select a category below
+            <br />
+            • Click the <strong>polygon icon</strong> to draw sub-areas within blocks
+            <br />
+            • Sub-areas must not overlap
+            <br />• Total sub-area in a block cannot exceed the block area
+          </p>
+        </div>
+
+        {/* Category Selection */}
         <div className="mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm font-medium text-gray-700">Category:</span>
+          <div className="flex items-center mb-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Sub-area Category
+            </label>
             <HelpTooltip helpText={helpTexts.subAreas.text} position="right" />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {SUB_AREA_CATEGORIES.map((category) => (
-              <button
-                key={category.value}
-                onClick={() => setSelectedCategory(category.value)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
-                  selectedCategory === category.value
-                    ? 'text-white shadow-sm'
-                    : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
-                }`}
-                style={{
-                  backgroundColor: selectedCategory === category.value ? category.color : 'white',
-                  borderColor: category.color,
-                  color: selectedCategory === category.value ? 'white' : category.color,
-                }}
-              >
-                {category.label}
-              </button>
+              <div key={category.value} className="relative">
+                <button
+                  onClick={() => setSelectedCategory(category.value)}
+                  className={`w-full px-4 py-3 rounded-lg border-2 transition-colors text-left ${
+                    selectedCategory === category.value
+                      ? 'border-gray-800 bg-gray-100'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                  style={{
+                    borderLeftWidth: '4px',
+                    borderLeftColor: category.color,
+                  }}
+                >
+                  <div className="font-semibold text-sm">{category.label}</div>
+                </button>
+                {category.value === 'protected' && (
+                  <HelpTooltip helpText={helpTexts.protectedZone.text} position="top" />
+                )}
+                {category.value === 'plantation' && (
+                  <HelpTooltip helpText={helpTexts.plantationArea.text} position="top" />
+                )}
+                {category.value === 'private_land' && (
+                  <HelpTooltip helpText={helpTexts.privateLand.text} position="top" />
+                )}
+              </div>
             ))}
           </div>
         </div>
-
-        {/* Drawing mode indicator */}
-        {subAreas.length === 0 && (
-          <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-            Click <strong>polygon icon</strong> on map to draw sub-areas
-          </div>
-        )}
 
         {/* Error Messages */}
         {error && (
@@ -563,23 +579,15 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
           </div>
         )}
 
-        {/* Sub-areas List - Collapsible */}
+        {/* Sub-areas List */}
         {subAreas.length > 0 && (
-          <div className="mb-4 bg-white rounded-lg shadow">
-            {/* Collapsible Header */}
-            <div 
-              className="flex justify-between items-center p-3 bg-gray-50 cursor-pointer rounded-t-lg"
-              onClick={() => setShowTable(!showTable)}
-            >
-              <h3 className="font-semibold flex items-center gap-2">
-                <span className="text-gray-400">{showTable ? '▼' : '▶'}</span>
-                Sub-areas ({subAreas.length})
-              </h3>
+          <div className="mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-semibold">Sub-areas ({subAreas.length})</h3>
               <div className="flex gap-2">
                 <select
                   value={selectedBlockFilter}
                   onChange={(e) => setSelectedBlockFilter(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
                   className="px-3 py-1 text-sm border border-gray-300 rounded"
                 >
                   <option value="all">All Blocks</option>
@@ -591,14 +599,14 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                 </select>
                 {selectedSubAreaId && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteSelected(); }}
+                    onClick={handleDeleteSelected}
                     className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
                   >
                     Delete Selected
                   </button>
                 )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleClearAll(); }}
+                  onClick={handleClearAll}
                   className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
                 >
                   Clear All
@@ -606,8 +614,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
               </div>
             </div>
 
-            {showTable && (
-              <div className="max-h-80 overflow-y-auto border-t border-gray-200 rounded-b-lg">
+            <div className="max-h-96 overflow-y-auto border border-gray-200 rounded">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50 sticky top-0">
                   <tr>
@@ -690,28 +697,27 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
         )}
       </div>
 
-      {/* Map - Compact Header */}
-      <div className="bg-white rounded-lg shadow">
-        {/* Compact Legend Bar */}
-        <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">
-          <div className="flex items-center gap-4">
-            <span className="text-xs font-medium text-gray-600">Legend:</span>
-            <div className="flex flex-wrap gap-3">
-              {SUB_AREA_CATEGORIES.map((category) => (
-                <div key={category.value} className="flex items-center">
-                  <div
-                    className="w-3 h-3 rounded mr-1"
-                    style={{ backgroundColor: category.color }}
-                  />
-                  <span className="text-xs">{category.label}</span>
-                </div>
-              ))}
-            </div>
+      {/* Map */}
+      <div className="bg-white p-6 rounded-lg shadow">
+        <h3 className="text-lg font-semibold mb-4">Map</h3>
+
+        {/* Legend */}
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded">
+          <div className="text-sm font-semibold mb-2">Legend:</div>
+          <div className="flex flex-wrap gap-3">
+            {SUB_AREA_CATEGORIES.map((category) => (
+              <div key={category.value} className="flex items-center">
+                <div
+                  className="w-4 h-4 rounded mr-2"
+                  style={{ backgroundColor: category.color }}
+                />
+                <span className="text-sm">{category.label}</span>
+              </div>
+            ))}
           </div>
-          <span className="text-xs text-gray-500">Click polygon icon to draw</span>
         </div>
 
-        <div className="h-[500px] rounded-b-lg overflow-hidden">
+        <div className="h-[600px] rounded overflow-hidden border border-gray-300">
           <MapContainer
             center={mapCenter as [number, number]}
             zoom={14}

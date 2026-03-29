@@ -8,7 +8,6 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Forests from './pages/Forests';
 import ForestDetail from './pages/ForestDetail';
-import Upload from './pages/Upload';
 import MyUploads from './pages/MyUploads';
 import CalculationDetail from './pages/CalculationDetail';
 import BlockNaming from './pages/BlockNaming';
@@ -42,7 +41,7 @@ const App: React.FC = () => {
 
             {/* Main routes */}
             <Route path="my-uploads" element={<MyUploads />} />
-            <Route path="upload" element={<Upload />} />
+            <Route path="upload" element={<Navigate to="/my-uploads" replace />} />
             <Route path="drafts/:draftId/resume" element={<DraftResume />} />
             <Route path="calculations/:id" element={<CalculationDetail />} />
             <Route path="calculations/:id/block-naming" element={<BlockNaming />} />
