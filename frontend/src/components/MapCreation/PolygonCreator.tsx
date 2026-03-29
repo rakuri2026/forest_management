@@ -666,6 +666,20 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
           </div>
         )}
 
+        {/* Drawing Mode Indicator */}
+        {activeIslandId && (
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md flex items-center gap-2">
+            <div className="animate-pulse w-3 h-3 bg-blue-500 rounded-full"></div>
+            <span className="text-blue-800 font-medium">Drawing mode active - click on the map to draw polygon</span>
+            <button
+              onClick={() => setActiveIslandId(null)}
+              className="ml-auto text-blue-600 hover:text-blue-800 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Error Messages */}
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-md">
