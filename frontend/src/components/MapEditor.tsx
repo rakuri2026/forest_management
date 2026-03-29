@@ -83,6 +83,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
     });
   }, [calculationId]);
   const [selectedCategory, setSelectedCategory] = useState<string>(SUB_AREA_CATEGORIES[0].value);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null); // Drawing mode - category that will trigger auto-draw
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit_boundary' | 'edit_subareas'>('edit_boundary');
   
@@ -292,6 +293,9 @@ const MapEditor: React.FC<MapEditorProps> = ({
       };
 
       setSubAreas(prev => [...prev, newSubArea]);
+      
+      // Clear active category after drawing is complete (polygon tool disabled until next activation)
+      setActiveCategory(null);
     };
 
     const handleEdit = (e: any) => {
@@ -338,6 +342,23 @@ const MapEditor: React.FC<MapEditorProps> = ({
       mapInstance.off('pm:remove', handleRemove);
     };
   }, [mapInstance, mode, selectedCategory]);
+
+  // Auto-activate polygon drawing when a category is activated
+  useEffect(() => {
+    if (!mapInstance || mode !== 'edit_subareas') return;
+    
+    if (activeCategory) {
+      console.log('[MapEditor] Activating polygon drawing for category:', activeCategory);
+      // Auto-start polygon drawing
+      mapInstance.pm.enableDraw('Polygon', {
+        snappable: true,
+        snapDistance: 20,
+      });
+    } else {
+      // Disable polygon drawing when no active category
+      mapInstance.pm.disableDraw('Polygon');
+    }
+  }, [mapInstance, activeCategory, mode]);
 
   // Render boundary geometry
   useEffect(() => {
@@ -709,21 +730,57 @@ const MapEditor: React.FC<MapEditorProps> = ({
             <div>
               <h3 className="font-semibold mb-3">Sub-area Categories</h3>
               <div className="grid grid-cols-2 gap-2 mb-4">
-                {SUB_AREA_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.value}
-                    onClick={() => setSelectedCategory(cat.value)}
-                    className={`px-3 py-2 rounded text-sm text-left border-2 transition-colors ${
-                      selectedCategory === cat.value
-                        ? 'border-gray-800 bg-gray-100'
-                        : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    style={{ borderLeftWidth: '4px', borderLeftColor: cat.color }}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
+                {SUB_AREA_CATEGORIES.map((cat) => {
+                  const isActive = activeCategory === cat.value;
+                  const isSelected = selectedCategory === cat.value;
+                  return (
+                    <button
+                      key={cat.value}
+                      onClick={() => {
+                        setSelectedCategory(cat.value);
+                        setActiveCategory(cat.value); // Start drawing immediately
+                      }}
+                      className={`px-3 py-2 rounded text-sm text-left border-2 transition-all relative ${
+                        isActive
+                          ? 'text-white shadow-md'
+                          : isSelected
+                          ? 'border-gray-800 bg-gray-100'
+                          : 'border-gray-300 hover:border-gray-400'
+                      }`}
+                      style={{
+                        borderLeftWidth: '4px',
+                        borderLeftColor: cat.color,
+                        backgroundColor: isActive ? cat.color : undefined,
+                      }}
+                    >
+                      {cat.label}
+                      {isActive && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-white bg-opacity-20 px-1 rounded">
+                          Drawing...
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Active Drawing Indicator */}
+              {activeCategory && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="animate-pulse w-3 h-3 bg-blue-500 rounded-full"></div>
+                    <span className="text-blue-800 font-medium">
+                      Drawing {SUB_AREA_CATEGORIES.find(c => c.value === activeCategory)?.label}...
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setActiveCategory(null)}
+                    className="text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
 
               {subAreas.length > 0 && (
                 <div className="mt-4">
