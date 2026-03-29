@@ -18,7 +18,7 @@ interface BlockPolygon {
 interface Calculation {
   id: string;
   forest_name: string;
-  boundary_geom: any;
+  geometry: any; // GeoJSON geometry from API
 }
 
 type BlockMode = 'single' | 'multiple';
@@ -320,9 +320,9 @@ const BlockNamingPage: React.FC = () => {
             />
 
             {/* Show boundary for single block mode */}
-            {calculation?.boundary_geom && blockMode === 'single' && (
+            {calculation?.geometry && blockMode === 'single' && (
               <GeoJSON
-                data={calculation.boundary_geom}
+                data={calculation.geometry}
                 style={{
                   color: '#3b82f6',
                   weight: 2,
