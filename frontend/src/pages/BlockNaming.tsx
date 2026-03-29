@@ -327,7 +327,9 @@ const BlockNamingPage: React.FC = () => {
                         key={idx}
                         onClick={() => handleRowClick(idx)}
                         className={`cursor-pointer transition-colors ${
-                          selectedIndex === idx ? 'bg-blue-50 border-l-4 border-blue-500' : 'hover:bg-gray-50'
+                          selectedIndex === idx 
+                            ? 'bg-blue-600 text-white' 
+                            : 'hover:bg-gray-100'
                         }`}
                       >
                         <td className="px-3 py-2.5 w-8">
@@ -355,12 +357,12 @@ const BlockNamingPage: React.FC = () => {
                             />
                           ) : (
                             <div className="flex items-center justify-between">
-                              <span className="text-gray-900">
+                              <span className={`font-medium ${selectedIndex === idx ? 'text-white' : 'text-gray-900'}`}>
                                 {namedPolygons.get(idx) || `Block ${idx + 1}`}
                               </span>
                               <button
                                 onClick={(e) => handleEditClick(idx, e)}
-                                className="text-gray-400 hover:text-blue-600"
+                                className={selectedIndex === idx ? 'text-white opacity-70 hover:opacity-100' : 'text-gray-400 hover:text-blue-600'}
                               >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -369,7 +371,7 @@ const BlockNamingPage: React.FC = () => {
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
+                        <td className={`px-3 py-2.5 whitespace-nowrap ${selectedIndex === idx ? 'text-white opacity-80' : 'text-gray-600'}`}>
                           {poly.area_hectares.toFixed(2)} ha
                         </td>
                       </tr>
@@ -463,7 +465,7 @@ const BlockNamingPage: React.FC = () => {
                       position={centroid}
                       icon={L.divIcon({
                         className: 'block-label',
-                        html: `<div style="background: white; padding: 4px 8px; border-radius: 4px; border: 2px solid ${getColorForIndex(idx)}; font-weight: bold; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">${blockName}</div>`,
+                        html: `<div style="background: rgba(255,255,255,0.95); padding: 4px 8px; border-radius: 4px; border: 2px solid ${getColorForIndex(idx)}; font-weight: bold; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.8); text-shadow: 0 0 4px white, 0 0 4px white, 0 0 8px white;">${blockName}</div>`,
                         iconSize: [0, 0],
                         iconAnchor: [0, 0]
                       })}
