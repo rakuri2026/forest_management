@@ -25,6 +25,40 @@ type BlockMode = 'single' | 'multiple';
 
 const COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
 
+// Component to fit map bounds to show boundary geometry
+const FitBoundaryBounds: React.FC<{ geometry: any }> = ({ geometry }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!geometry) return;
+    
+    try {
+      const allCoords: [number, number][] = [];
+      
+      if (geometry.type === 'Polygon') {
+        geometry.coordinates[0].forEach((coord: number[]) => {
+          allCoords.push([coord[1], coord[0]]);
+        });
+      } else if (geometry.type === 'MultiPolygon') {
+        geometry.coordinates.forEach((polygon: any) => {
+          polygon[0].forEach((coord: number[]) => {
+            allCoords.push([coord[1], coord[0]]);
+          });
+        });
+      }
+
+      if (allCoords.length > 0) {
+        const bounds = L.latLngBounds(allCoords);
+        map.fitBounds(bounds, { padding: [50, 50] });
+      }
+    } catch (e) {
+      console.error('Error fitting bounds:', e);
+    }
+  }, [geometry, map]);
+
+  return null;
+};
+
 // Component to fit map bounds to show all polygons
 const FitBounds: React.FC<{ polygons: BlockPolygon[] }> = ({ polygons }) => {
   const map = useMap();
@@ -313,26 +347,30 @@ const BlockNamingPage: React.FC = () => {
             center={[27.7, 85.3]}
             zoom={13}
             style={{ height: '100%', width: '100%' }}
+            className="z-0"
           >
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {/* Show boundary for single block mode */}
-            {calculation?.geometry && blockMode === 'single' && (
+            {/* Show boundary for both modes */}
+            {calculation?.geometry && (
               <GeoJSON
                 data={calculation.geometry}
                 style={{
-                  color: '#3b82f6',
-                  weight: 2,
-                  fillColor: '#3b82f6',
-                  fillOpacity: 0.2
+                  color: '#10b981',
+                  weight: 3,
+                  fillColor: '#10b981',
+                  fillOpacity: 0.15
                 }}
               />
             )}
 
-            {/* Show polygons for multi-block mode */}
+            {/* Auto-fit bounds to boundary */}
+            <FitBoundaryBounds geometry={calculation?.geometry} />
+
+            {/* Show polygons for multi-block mode (overlay on boundary) */}
             {blockMode === 'multiple' && polygons.map((poly, idx) => {
               const centroid = getPolygonCentroid(poly.geometry);
               const blockName = namedPolygons.get(idx) || `Block ${idx + 1}`;
