@@ -53,15 +53,17 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
   initialDraftId,
   isDraft = false,
 }) => {
-  const [currentStep, setCurrentStep] = useState<number>(isDraft ? 2 : 1);  // Skip GPS points for drafts
+  // Simplified 3-step workflow: 1=Boundary, 2=Divide&Label, 3=Review
+  const [currentStep, setCurrentStep] = useState<number>(initialPolygon ? 2 : 1);
+  const [divideTab, setDivideTab] = useState<'blocks' | 'subareas'>('blocks');
 
-  // Step 1: GPS Points (optional)
+  // GPS Points (optional, used within Boundary step)
   const [gpsPoints, setGpsPoints] = useState<GPSPoint[]>([]);
 
-  // Step 2: Outer Boundary - initialize from draft if available
+  // Boundary - initialize from draft if available
   const [outerBoundary, setOuterBoundary] = useState<any>(initialPolygon || null);
 
-  // Step 3: Blocks
+  // Blocks (Step 2 - Divide & Label)
   const [blocks, setBlocks] = useState<Block[]>([]);
 
   // Step 4: Sub-areas (optional)
@@ -81,11 +83,9 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
   const [showWardBoundary, setShowWardBoundary] = useState(false);
 
   const steps = [
-    { number: 1, name: 'GPS Points', optional: true },
-    { number: 2, name: 'Outer Boundary', optional: false },
-    { number: 3, name: 'Forest Blocks', optional: true }, // Now optional!
-    { number: 4, name: 'Sub-areas', optional: true },
-    { number: 5, name: 'Review', optional: false },
+    { number: 1, name: 'Boundary', optional: false },
+    { number: 2, name: 'Divide & Label', optional: true },
+    { number: 3, name: 'Review', optional: false },
   ];
 
   // Auto-create default blocks from islands if no blocks defined manually
@@ -129,14 +129,10 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
   const canProceed = () => {
     switch (currentStep) {
       case 1:
-        return true; // GPS points are optional
+        return outerBoundary !== null; // Boundary is required
       case 2:
-        return outerBoundary !== null;
+        return true; // Blocks and sub-areas are optional
       case 3:
-        return true; // Blocks now optional - auto-creates default
-      case 4:
-        return true; // Sub-areas are optional
-      case 5:
         return outerBoundary !== null;
       default:
         return false;
@@ -374,75 +370,108 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
 
         {/* Step Content */}
         <div className="mb-6">
+          {/* Step 1: Boundary (GPS optional + Polygon Creator) */}
           {currentStep === 1 && (
-            <GPSPointInput
-              onPointsChange={setGpsPoints}
-              initialPoints={gpsPoints}
-            />
-          )}
-
-          {currentStep === 2 && (
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-              {/* Left Sidebar - Location Search */}
-              <div className="lg:col-span-1 space-y-4">
-                <LocationSearch
-                  onLocationSelected={handleLocationSelected}
-                  onBoundaryToggle={handleBoundaryToggle}
-                />
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-start">
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-blue-900 text-sm mb-2">💡 सुझाव</h4>
-                      <p className="text-xs text-blue-800">
-                        तपाईंको क्षेत्र फेला पार्न location search प्रयोग गर्नुहोस्, त्यसपछि नक्शामा वन सीमाना कोर्नुहोस्।
-                        प्राकृतिक विशेषताहरू राम्रोसँग देख्न satellite view मा टगल गर्नुहोस्।
-                      </p>
+            <div className="space-y-4">
+              {/* Compact GPS Points input */}
+              <details className="bg-gray-50 rounded-lg border">
+                <summary className="px-4 py-2 cursor-pointer font-medium text-gray-700 hover:bg-gray-100">
+                  📍 GPS Points (Optional - for boundary auto-generation)
+                </summary>
+                <div className="p-4 border-t">
+                  <GPSPointInput
+                    onPointsChange={setGpsPoints}
+                    initialPoints={gpsPoints}
+                  />
+                </div>
+              </details>
+              
+              {/* Polygon Creator */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                <div className="lg:col-span-1 space-y-4">
+                  <LocationSearch
+                    onLocationSelected={handleLocationSelected}
+                    onBoundaryToggle={handleBoundaryToggle}
+                  />
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-blue-900 text-sm mb-2">💡 सुझाव</h4>
+                        <p className="text-xs text-blue-800">
+                          तपाईंको क्षेत्र फेला पार्न location search प्रयोग गर्नुहोस्, त्यसपछि नक्सामा वन सीमाना कोर्नुहोस्।
+                        </p>
+                      </div>
+                      <HelpTooltip helpText={helpTexts.drawPolygon.text} position="left" />
                     </div>
-                    <HelpTooltip helpText={helpTexts.drawPolygon.text} position="left" />
                   </div>
                 </div>
-              </div>
-
-              {/* Main Content - Polygon Creator */}
-              <div className="lg:col-span-3">
-                <PolygonCreator
-                  ref={polygonCreatorRef}
-                  gpsPoints={gpsPoints}
-                  onPolygonChange={setOuterBoundary}
-                  initialPolygon={outerBoundary}
-                />
+                <div className="lg:col-span-3">
+                  <PolygonCreator
+                    ref={polygonCreatorRef}
+                    gpsPoints={gpsPoints}
+                    onPolygonChange={setOuterBoundary}
+                    initialPolygon={outerBoundary}
+                  />
+                </div>
               </div>
             </div>
           )}
 
-          {currentStep === 3 && outerBoundary && (
-            <div>
-              {/* Info banner - blocks are now optional */}
-              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
-                <p className="text-sm text-blue-800">
-                  <strong>Optional:</strong> Blocks are optional. If you don't create blocks, the entire forest boundary will be treated as one block. 
-                  Use "Save Draft" to save your progress and resume later.
-                </p>
+          {/* Step 2: Divide & Label (Blocks + Sub-areas with tabs) */}
+          {currentStep === 2 && outerBoundary && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+                <strong>Optional:</strong> Blocks and sub-areas are optional. If not defined, the forest is treated as one block.
               </div>
-              <BlockSplitterPro
-                outerBoundary={outerBoundary}
-                gpsPoints={gpsPoints}
-                onBlocksChange={setBlocks}
-                initialBlocks={blocks}
-              />
+              
+              {/* Tab navigation */}
+              <div className="flex border-b">
+                <button
+                  onClick={() => setDivideTab('blocks')}
+                  className={`px-6 py-3 font-medium border-b-2 -mb-px ${
+                    divideTab === 'blocks'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  🗂️ Forest Blocks
+                </button>
+                <button
+                  onClick={() => setDivideTab('subareas')}
+                  className={`px-6 py-3 font-medium border-b-2 -mb-px ${
+                    divideTab === 'subareas'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  🏷️ Sub-areas
+                </button>
+              </div>
+              
+              {/* Tab content */}
+              <div className="min-h-[500px]">
+                {divideTab === 'blocks' && (
+                  <BlockSplitterPro
+                    outerBoundary={outerBoundary}
+                    gpsPoints={gpsPoints}
+                    onBlocksChange={setBlocks}
+                    initialBlocks={blocks}
+                  />
+                )}
+                {divideTab === 'subareas' && (
+                  <SubAreaManager
+                    blocks={getEffectiveBlocks()}
+                    outerBoundary={outerBoundary}
+                    onSubAreasChange={setSubAreas}
+                    initialSubAreas={subAreas}
+                  />
+                )}
+              </div>
             </div>
           )}
 
-          {currentStep === 4 && (
-            <SubAreaManager
-              blocks={getEffectiveBlocks()}
-              outerBoundary={outerBoundary}
-              onSubAreasChange={setSubAreas}
-              initialSubAreas={subAreas}
-            />
-          )}
-
-          {currentStep === 5 && (
+          {/* Step 3: Review */}
+          {currentStep === 3 && (
             <div className="space-y-6">
               {/* Visual Map Review */}
               <div className="bg-white p-6 rounded-lg shadow">
@@ -704,7 +733,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                 </button>
               )}
               
-              {/* Save Draft Button - available after step 2 */}
+              {/* Save Draft Button - available after boundary is drawn */}
               {currentStep >= 2 && outerBoundary && (
                 <div className="flex items-center">
                   <HelpTooltip helpText={helpTexts.saveDraft.text} position="top">
