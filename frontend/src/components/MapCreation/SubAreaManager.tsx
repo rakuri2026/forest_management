@@ -662,7 +662,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                               <div className="font-medium text-orange-600 mb-1">Spans {subArea.blockBreakdown.length} blocks:</div>
                               {subArea.blockBreakdown.map((bd, idx) => (
                                 <div key={idx} className="text-gray-700">
-                                  • {bd.blockName}: {formatArea(bd.area)} ({bd.percentage.toFixed(0)}%)
+                                  • {bd.blockName}: {formatArea(bd.area)} ({bd.percentage ? bd.percentage.toFixed(0) : 0}%)
                                 </div>
                               ))}
                             </div>

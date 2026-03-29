@@ -396,7 +396,10 @@ export const validateBlocksWithinBoundary = (
 /**
  * Format area for display
  */
-export const formatArea = (hectares: number): string => {
+export const formatArea = (hectares: number | undefined | null): string => {
+  if (hectares === undefined || hectares === null || isNaN(hectares)) {
+    return '0 ha';
+  }
   if (hectares < 0.01) {
     return `${(hectares * 10000).toFixed(0)} m²`;
   } else if (hectares < 1) {
