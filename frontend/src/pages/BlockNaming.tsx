@@ -459,18 +459,6 @@ const BlockNamingPage: React.FC = () => {
                       </div>
                     </Popup>
                   </GeoJSON>
-
-                  {centroid && (
-                    <Marker
-                      position={centroid}
-                      icon={L.divIcon({
-                        className: 'block-label',
-                        html: `<div style="background: rgba(255,255,255,0.95); padding: 4px 8px; border-radius: 4px; border: 2px solid ${getColorForIndex(idx)}; font-weight: bold; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.8); text-shadow: 0 0 4px white, 0 0 4px white, 0 0 8px white;">${blockName}</div>`,
-                        iconSize: [0, 0],
-                        iconAnchor: [0, 0]
-                      })}
-                    />
-                  )}
                 </React.Fragment>
               );
             })}
