@@ -466,6 +466,35 @@ const BlockNamingPage: React.FC = () => {
             {blockMode === 'multiple' && polygons.length > 0 && (
               <FitBounds polygons={polygons} />
             )}
+            
+            {/* Block Labels */}
+            {blockMode === 'multiple' && polygons.map((poly, idx) => {
+              const centroid = getPolygonCentroid(poly.geometry);
+              const blockName = namedPolygons.get(idx) || `Block ${idx + 1}`;
+              if (!centroid) return null;
+              return (
+                <Marker
+                  key={`label-${idx}`}
+                  position={centroid}
+                  zIndexOffset={1000}
+                  icon={L.divIcon({
+                    className: 'block-label',
+                    html: `<div style="
+                      background: ${getColorForIndex(idx)};
+                      color: white;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      font-size: 11px;
+                      font-weight: bold;
+                      white-space: nowrap;
+                      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                    ">${blockName}</div>`,
+                    iconSize: [0, 0],
+                    iconAnchor: [0, 0]
+                  })}
+                />
+              );
+            })}
           </MapContainer>
           
           {/* Base Map Toggle */}
