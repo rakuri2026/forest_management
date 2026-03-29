@@ -266,8 +266,8 @@ const MapEditor: React.FC<MapEditorProps> = ({
 
       // Transform blocks to match expected format (id, name, geometry)
       const transformedBlocks = blocks.map(b => ({
-        id: b.block_id || b.id,
-        name: b.block_name || b.name,
+        id: b.id || b.block_id || `block-${b.block_index}`,
+        name: b.block_name || b.name || b.block_index,
         geometry: b.geometry
       }));
 

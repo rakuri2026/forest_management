@@ -3726,6 +3726,7 @@ async def create_single_default_block(
 
     result_data = calculation.result_data or {}
     result_data['blocks'] = [{
+        'id': str(forest_block.id),  # Include UUID id for frontend compatibility
         'block_index': 0,
         'block_name': block_name,
         'area_hectares': float(area_hectares) if area_hectares else 0,
@@ -3829,6 +3830,7 @@ async def create_blocks_from_polygons(
         ).first()
         
         block_data = {
+            'id': str(block.id),  # Include UUID id for frontend compatibility
             'block_index': block.index,
             'block_name': block.name,
             'area_hectares': round(block.area_hectares, 4),
