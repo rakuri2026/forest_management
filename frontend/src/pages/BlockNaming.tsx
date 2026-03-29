@@ -244,6 +244,16 @@ const BlockNamingPage: React.FC = () => {
     );
   }
 
+  // Debug info
+  console.log('[BlockNaming] State:', {
+    hasCalculation: !!calculation,
+    hasGeometry: !!calculation?.geometry,
+    geometryType: calculation?.geometry?.type,
+    polygonsCount: polygons.length,
+    blockMode,
+    singleBlockName
+  });
+
   return (
     <div className="compact-page">
       {/* Header */}
@@ -418,7 +428,7 @@ const BlockNamingPage: React.FC = () => {
       </div>
 
       {/* Compact Controls Bar */}
-      <div className="compact-controls">
+      <div className="compact-controls" style={{ minHeight: '80px' }}>
         <div className="compact-controls-row">
           {/* Single Block Option */}
           <label className="compact-radio-label">
@@ -428,7 +438,7 @@ const BlockNamingPage: React.FC = () => {
               checked={blockMode === 'single'}
               onChange={() => setBlockMode('single')}
             />
-            <span>Single Block</span>
+            <span className="font-bold">Single Block</span>
           </label>
 
           {/* Block Name Input - Only shown for single mode */}
