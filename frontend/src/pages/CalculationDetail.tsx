@@ -21,6 +21,7 @@ import { RasterClickInfo } from '../components/RasterClickInfo';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import SubAreaManager from '../components/MapCreation/SubAreaManager';
 
 
 // Block colors for mapping
@@ -161,6 +162,7 @@ export default function CalculationDetail() {
   // Map editor state
 
   const [subAreas, setSubAreas] = useState<any[]>([]);
+  const [showSubAreasModal, setShowSubAreasModal] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -568,6 +570,35 @@ export default function CalculationDetail() {
               )}
             </div>
             <div className="flex gap-3">
+              <button
+                onClick={() => navigate(`/calculations/${id}/block-naming`)}
+                className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit Blocks
+              </button>
+              <button
+                onClick={() => {
+                  // Load sub-areas and blocks first
+                  if (id) {
+                    forestApi.listSubAreas(id).then(data => {
+                      setSubAreas(data.sub_areas || []);
+                      setShowSubAreasModal(true);
+                    }).catch(() => {
+                      setSubAreas([]);
+                      setShowSubAreasModal(true);
+                    });
+                  }
+                }}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
+                </svg>
+                Edit Sub-areas
+              </button>
               <button
                 onClick={() => setShowReanalysisModal(true)}
                 className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium"
@@ -2703,6 +2734,47 @@ export default function CalculationDetail() {
                     Re-run Analysis
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Areas Editor Modal */}
+      {showSubAreasModal && calculation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
+              <div>
+                <h2 className="text-xl font-bold">Edit Sub-areas</h2>
+                <p className="text-sm text-gray-500">{calculation.forest_name}</p>
+              </div>
+              <button
+                onClick={() => setShowSubAreasModal(false)}
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body - SubAreaManager */}
+            <div className="flex-1 overflow-auto p-4">
+              <SubAreaManager
+                blocks={calculation.result_data?.blocks || []}
+                outerBoundary={calculation.geometry}
+                onSubAreasChange={(newSubAreas) => setSubAreas(newSubAreas)}
+                initialSubAreas={subAreas}
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => setShowSubAreasModal(false)}
+                className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
+              >
+                Close
               </button>
             </div>
           </div>
