@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Map, Settings, Download, Play, Image } from 'lucide-react';
+import { Upload, Map, Settings, Download, Play, Image, Users } from 'lucide-react';
 import { ExtentUploadSection } from './UserGroup/ExtentUploadSection';
 import { AutoBufferSection } from './UserGroup/AutoBufferSection';
 import { UserGroupMapVisualization } from './UserGroup/UserGroupMapVisualization';
 import { SettlementStatistics } from './UserGroup/SettlementStatistics';
 import { LandCoverAnalysis } from './UserGroup/LandCoverAnalysis';
 import { MapExportPanel } from './UserGroup/MapExportPanel';
+import HouseholdInfoTab from './HouseholdInfo/HouseholdInfoTab';
 import api from '../services/api';
 
 interface UserGroupMapTabProps {
@@ -22,6 +23,7 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [showExportPanel, setShowExportPanel] = useState(false);
+  const [showHouseholdInfo, setShowHouseholdInfo] = useState(false);
   const [forestName, setForestName] = useState<string>(propForestName || '');
   const mapRef = useRef<any>(null);
 
@@ -258,6 +260,27 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
               calculationId={calculationId}
               forestName={forestName}
             />
+          </div>
+
+          {/* Household Information Section */}
+          <div className="mt-6">
+            <div className="flex gap-3 mb-4">
+              <button
+                className={`${
+                  showHouseholdInfo ? 'bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
+                } text-white px-6 py-3 rounded transition-colors flex items-center gap-2`}
+                onClick={() => setShowHouseholdInfo(!showHouseholdInfo)}
+              >
+                <Users size={16} />
+                {showHouseholdInfo ? 'Hide' : 'Show'} Household Information
+              </button>
+            </div>
+
+            {showHouseholdInfo && (
+              <div className="bg-white rounded-lg shadow-lg">
+                <HouseholdInfoTab calculationId={calculationId} />
+              </div>
+            )}
           </div>
 
           {/* Export Options */}

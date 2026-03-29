@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
+import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import {
   validateSubAreasNoOverlap,
   validateSubAreaSum,
@@ -11,6 +12,7 @@ import {
   formatArea,
   calculateSubAreaByBlock,
 } from '../../utils/geometryValidation';
+import { getGeometryCenter } from '../../utils/geometryHelpers';
 import BaseMapSelector from './BaseMapSelector';
 
 interface Block {
@@ -447,12 +449,8 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
     subAreasByBlock[blockId].push(subArea);
   });
 
-  const mapCenter = outerBoundary
-    ? [
-        (outerBoundary.coordinates[0][0][1] + outerBoundary.coordinates[0][2][1]) / 2,
-        (outerBoundary.coordinates[0][0][0] + outerBoundary.coordinates[0][2][0]) / 2,
-      ]
-    : [27.7172, 85.3240];
+  // Use helper function that works for both Polygon and MultiPolygon
+  const mapCenter = getGeometryCenter(outerBoundary, [27.7172, 85.3240]);
 
   return (
     <div className="space-y-6">
@@ -474,26 +472,39 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
 
         {/* Category Selection */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Sub-area Category
-          </label>
+          <div className="flex items-center mb-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Sub-area Category
+            </label>
+            <HelpTooltip helpText={helpTexts.subAreas.text} position="right" />
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {SUB_AREA_CATEGORIES.map((category) => (
-              <button
-                key={category.value}
-                onClick={() => setSelectedCategory(category.value)}
-                className={`px-4 py-3 rounded-lg border-2 transition-colors text-left ${
-                  selectedCategory === category.value
-                    ? 'border-gray-800 bg-gray-100'
-                    : 'border-gray-300 hover:border-gray-400'
-                }`}
-                style={{
-                  borderLeftWidth: '4px',
-                  borderLeftColor: category.color,
-                }}
-              >
-                <div className="font-semibold text-sm">{category.label}</div>
-              </button>
+              <div key={category.value} className="relative">
+                <button
+                  onClick={() => setSelectedCategory(category.value)}
+                  className={`w-full px-4 py-3 rounded-lg border-2 transition-colors text-left ${
+                    selectedCategory === category.value
+                      ? 'border-gray-800 bg-gray-100'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                  style={{
+                    borderLeftWidth: '4px',
+                    borderLeftColor: category.color,
+                  }}
+                >
+                  <div className="font-semibold text-sm">{category.label}</div>
+                </button>
+                {category.value === 'protected' && (
+                  <HelpTooltip helpText={helpTexts.protectedZone.text} position="top" />
+                )}
+                {category.value === 'plantation' && (
+                  <HelpTooltip helpText={helpTexts.plantationArea.text} position="top" />
+                )}
+                {category.value === 'private_land' && (
+                  <HelpTooltip helpText={helpTexts.privateLand.text} position="top" />
+                )}
+              </div>
             ))}
           </div>
         </div>

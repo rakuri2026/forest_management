@@ -381,3 +381,41 @@ export function calculateOverlapRatio(geom1: any, geom2: any): number | null {
     return null;
   }
 }
+
+/**
+ * Get map center coordinates for any geometry (Polygon or MultiPolygon)
+ * Safe alternative to directly accessing coordinates[0][0]
+ *
+ * @param geometry - GeoJSON geometry (Polygon or MultiPolygon)
+ * @param fallback - Fallback coordinates if calculation fails [lat, lon]
+ * @returns [latitude, longitude] for map center
+ */
+export function getGeometryCenter(
+  geometry: any,
+  fallback: [number, number] = [27.7172, 85.3240]
+): [number, number] {
+  try {
+    if (!geometry) {
+      return fallback;
+    }
+
+    const geom = getSafeGeometry(geometry);
+    if (!geom) {
+      return fallback;
+    }
+
+    // Use turf.js centroid which works for both Polygon and MultiPolygon
+    const feature = turf.feature(geom);
+    const center = turf.centroid(feature);
+
+    if (center && center.geometry && center.geometry.coordinates) {
+      const [lon, lat] = center.geometry.coordinates;
+      return [lat, lon]; // Return as [lat, lon] for Leaflet
+    }
+
+    return fallback;
+  } catch (error) {
+    console.error('[getGeometryCenter] Error calculating center:', error);
+    return fallback;
+  }
+}

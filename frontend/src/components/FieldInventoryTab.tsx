@@ -641,6 +641,7 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
                         <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-amber-50">Tree Volume (m³/ha)</th>
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-purple-50">Growing Stock (Timber m³/ha)</th>
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-indigo-50">Total Volume (All m³/ha)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-bold italic text-blue-800 uppercase border-r-2 border-blue-400 bg-blue-100 shadow-sm">Total Volume (All m³/ha) (from satellite)</th>
                         <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Regen Cond.</th>
                         <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Forest Cond.</th>
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300">MAI %</th>
@@ -723,6 +724,11 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
                             {/* Total volume (timber + firewood) */}
                             <td className="px-3 py-3 text-sm text-right text-indigo-700 font-bold border-r border-gray-200 bg-indigo-50">
                               {(poleTotal + treeTotal).toFixed(2)}
+                            </td>
+
+                            {/* Satellite-derived volume */}
+                            <td className="px-3 py-3 text-sm text-right text-blue-900 font-bold italic border-r-2 border-blue-400 bg-blue-100 shadow-sm">
+                              {block.satellite_volume_m3_per_ha ? Number(block.satellite_volume_m3_per_ha).toFixed(2) : '-'}
                             </td>
 
                             {/* Conditions */}

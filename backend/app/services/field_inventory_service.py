@@ -694,6 +694,14 @@ class FieldInventoryService:
                 total_growing_stock=total_growing_stock
             )
 
+            # Calculate satellite-derived volume from AGB raster
+            satellite_volume = None
+            if field_inventory.calculation_id:
+                satellite_volume = self._calculate_satellite_volume_for_block(
+                    calculation_id=field_inventory.calculation_id,
+                    block_name=block_name
+                )
+
             # Create block summary
             block_summary = FieldInventoryBlockSummary(
                 field_inventory_calculation_id=field_inventory_id,
@@ -708,6 +716,7 @@ class FieldInventoryService:
                 tree_timber_m3_per_ha=round(tree_timber_per_ha, 6),
                 tree_firewood_m3_per_ha=round(tree_firewood_per_ha, 6),
                 total_growing_stock_m3_per_ha=round(total_growing_stock, 6),
+                satellite_volume_m3_per_ha=satellite_volume,
                 # Carbon metrics
                 weighted_wood_density=carbon_metrics['weighted_density'],
                 agb_t_per_ha=carbon_metrics['agb_t_per_ha'],
@@ -854,6 +863,72 @@ class FieldInventoryService:
             'carbon_stock_tc_per_ha': round(carbon_stock_tc_per_ha, 6),
             'co2_equivalent_tco2_per_ha': round(co2_equivalent_tco2_per_ha, 6)
         }
+
+    def _calculate_satellite_volume_for_block(self, calculation_id: UUID, block_name: str) -> Optional[float]:
+        """
+        Calculate satellite-derived volume (m³/ha) for a block using AGB 2022 Nepal raster
+
+        Formula: Volume (m³/ha) = AGB (Mg/ha) × 0.67 (wood density conversion)
+
+        Args:
+            calculation_id: The calculation ID containing the block geometry
+            block_name: Name of the block to calculate volume for
+
+        Returns:
+            Volume in m³/ha, or None if calculation fails
+        """
+        try:
+            # Get the block geometry from the calculation's result_data
+            query = text("""
+                SELECT jsonb_array_elements(result_data->'blocks') AS block
+                FROM public.calculations
+                WHERE id = :calc_id
+            """)
+
+            result = self.db.execute(query, {"calc_id": str(calculation_id)}).fetchall()
+
+            # Find the block with matching name
+            block_wkt = None
+            for (block_json,) in result:
+                if block_json.get('block_name') == block_name or block_json.get('ward') == block_name:
+                    block_wkt = block_json.get('wkt')
+                    break
+
+            if not block_wkt:
+                logger.warning(f"[SATELLITE_VOLUME] No geometry found for block '{block_name}'")
+                return None
+
+            # Query AGB raster for this block geometry
+            agb_query = text("""
+                SELECT
+                    (stats).mean as agb_mean
+                FROM (
+                    SELECT ST_SummaryStats(
+                        ST_Clip(rast, 1, ST_GeomFromText(:wkt, 4326)),
+                        1,  -- band 1
+                        true  -- exclude nodata
+                    ) as stats
+                    FROM rasters.agb_2022_nepal
+                    WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
+                    LIMIT 1
+                ) as subquery
+            """)
+
+            agb_result = self.db.execute(agb_query, {"wkt": block_wkt}).first()
+
+            if agb_result and agb_result.agb_mean and agb_result.agb_mean > 0:
+                # Convert AGB (Mg/ha) to Volume (m³/ha) using 0.67 conversion factor
+                # This matches the conversion used in User Group Map analysis
+                volume_m3_per_ha = float(agb_result.agb_mean) * 0.67
+                logger.info(f"[SATELLITE_VOLUME] Block '{block_name}': AGB={agb_result.agb_mean:.2f} Mg/ha, Volume={volume_m3_per_ha:.2f} m³/ha")
+                return round(volume_m3_per_ha, 6)
+            else:
+                logger.warning(f"[SATELLITE_VOLUME] No AGB data found for block '{block_name}'")
+                return None
+
+        except Exception as e:
+            logger.error(f"[SATELLITE_VOLUME] Error calculating satellite volume for block '{block_name}': {e}")
+            return None
 
     async def _assess_forest_condition(self, block_summaries: List[FieldInventoryBlockSummary]):
         """Assess forest condition for each block"""

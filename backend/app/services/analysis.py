@@ -27,15 +27,15 @@ def get_excluded_sub_areas(existing_data: Dict) -> List[Dict]:
     return excluded
 
 
-def create_block_working_geometry(block_geometry: Dict, excluded_sub_areas: List[Dict], utm_srid: int = 32644) -> Optional[Dict]:
+def create_block_working_geometry(block_geometry: Dict, excluded_sub_areas: List[Dict], utm_srid: int = None) -> Optional[Dict]:
     """
-    Create a working geometry for a block by excluding private land areas
-    
+    Create a working geometry for a block by excluding private land areas.
+
     Args:
         block_geometry: Block geometry in GeoJSON format
         excluded_sub_areas: List of excluded sub-areas
-        utm_srid: UTM projection zone
-        
+        utm_srid: UTM projection zone (optional, not used in this function)
+
     Returns:
         Working geometry in GeoJSON format (with exclusions), or None if no exclusions
     """
@@ -82,21 +82,36 @@ def create_block_working_geometry(block_geometry: Dict, excluded_sub_areas: List
         return block_geometry
 
 
-def calculate_excluded_area_in_block(block_geometry: Dict, excluded_sub_areas: List[Dict], utm_srid: int = 32644) -> float:
+def calculate_excluded_area_in_block(block_geometry: Dict, excluded_sub_areas: List[Dict], utm_srid: int = None) -> float:
     """
-    Calculate the total excluded area within a block
-    
+    Calculate the total excluded area within a block.
+
+    Automatically calculates the appropriate UTM zone based on geometry location.
+
+    Args:
+        block_geometry: Block geometry in GeoJSON format
+        excluded_sub_areas: List of excluded sub-areas
+        utm_srid: UTM projection zone (optional, auto-calculated if not provided)
+
     Returns:
         Area in hectares
     """
     if not excluded_sub_areas:
         return 0.0
-    
+
     try:
         block_shapely = shape(block_geometry)
         if block_shapely.is_empty:
             return 0.0
-        
+
+        # Auto-calculate UTM zone if not provided
+        if utm_srid is None:
+            centroid = block_shapely.centroid
+            # Calculate UTM zone: zone = floor((longitude + 180) / 6) + 1
+            zone = int((centroid.x + 180) / 6) + 1
+            # Northern hemisphere: 32601-32660, Southern: 32701-32760
+            utm_srid = 32600 + zone if centroid.y >= 0 else 32700 + zone
+
         total_excluded = 0.0
         for sa in excluded_sub_areas:
             sa_geom = sa.get('geometry')
@@ -108,10 +123,10 @@ def calculate_excluded_area_in_block(block_geometry: Dict, excluded_sub_areas: L
                         # Calculate area in hectares using UTM projection
                         import pyproj
                         from shapely.ops import transform
-                        
+
                         project = pyproj.Transformer.from_crs(
-                            "EPSG:4326", 
-                            f"EPSG:{utm_srid}", 
+                            "EPSG:4326",
+                            f"EPSG:{utm_srid}",
                             always_xy=True
                         ).transform
                         intersection_utm = transform(project, intersection)
@@ -161,7 +176,55 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
     # Get existing result_data with blocks
     existing_data = calculation.result_data or {}
     blocks = existing_data.get('blocks', [])
-    
+
+    # FALLBACK: If no blocks exist, create default single block from boundary_geom
+    if not blocks:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"No blocks found for calculation {calculation_id}, creating default single block")
+        print(f"⚠️  No blocks found for calculation {calculation_id}, creating default single block")
+
+        # Get boundary geometry as GeoJSON
+        boundary_wkt = db.execute(
+            text("SELECT ST_AsText(boundary_geom) FROM calculations WHERE id = :calc_id"),
+            {"calc_id": str(calculation_id)}
+        ).scalar()
+
+        if not boundary_wkt:
+            raise ValueError(f"Calculation {calculation_id} has no boundary geometry")
+
+        # Calculate area in hectares (using UTM projection 32645 for Nepal)
+        area_hectares = db.execute(
+            text("SELECT ST_Area(ST_Transform(boundary_geom, 32645)) / 10000 FROM calculations WHERE id = :calc_id"),
+            {"calc_id": str(calculation_id)}
+        ).scalar()
+
+        # Get geometry as GeoJSON
+        block_geojson = db.execute(
+            text("SELECT ST_AsGeoJSON(boundary_geom) FROM calculations WHERE id = :calc_id"),
+            {"calc_id": str(calculation_id)}
+        ).scalar()
+
+        # Create default block
+        import json
+        default_block = {
+            'block_index': 0,
+            'block_name': calculation.forest_name or 'Block 1',
+            'area_hectares': float(area_hectares) if area_hectares else 0,
+            'geometry': json.loads(block_geojson) if block_geojson else None
+        }
+        blocks = [default_block]
+
+        # Save to result_data
+        existing_data['blocks'] = blocks
+        existing_data['total_blocks'] = 1
+        calculation.result_data = existing_data
+
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(calculation, 'result_data')
+        db.commit()
+        print(f"✓ Default block created for calculation {calculation_id}")
+
     # Get excluded sub-areas (private land) for exclusion from analysis
     excluded_sub_areas = get_excluded_sub_areas(existing_data)
     total_excluded_area = 0

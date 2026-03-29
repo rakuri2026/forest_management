@@ -1,7 +1,7 @@
 """Add wood_density and genus columns to tree_species_coefficients
 
 Revision ID: 009
-Revises: 008_add_field_inventory_system
+Revises: 008
 Create Date: 2026-03-03
 
 Adds three new columns:
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision = '009'
-down_revision = '008_add_field_inventory_system'
+down_revision = '008'
 branch_labels = None
 depends_on = None
 

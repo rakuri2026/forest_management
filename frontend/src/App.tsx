@@ -11,11 +11,13 @@ import ForestDetail from './pages/ForestDetail';
 import Upload from './pages/Upload';
 import MyUploads from './pages/MyUploads';
 import CalculationDetail from './pages/CalculationDetail';
+import BlockNaming from './pages/BlockNaming';
 import InventoryList from './pages/InventoryList';
 import InventoryUpload from './pages/InventoryUpload';
 import InventoryDetail from './pages/InventoryDetail';
 import FieldbookList from './pages/FieldbookList';
 import SamplingList from './pages/SamplingList';
+import DraftResume from './pages/DraftResume';
 
 const App: React.FC = () => {
   return (
@@ -41,7 +43,9 @@ const App: React.FC = () => {
             {/* Main routes */}
             <Route path="my-uploads" element={<MyUploads />} />
             <Route path="upload" element={<Upload />} />
+            <Route path="drafts/:draftId/resume" element={<DraftResume />} />
             <Route path="calculations/:id" element={<CalculationDetail />} />
+            <Route path="calculations/:id/block-naming" element={<BlockNaming />} />
             <Route path="forests" element={<Forests />} />
             <Route path="forests/:id" element={<ForestDetail />} />
 

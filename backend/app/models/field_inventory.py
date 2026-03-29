@@ -177,6 +177,9 @@ class FieldInventoryBlockSummary(Base):
     # Total growing stock (timber only)
     total_growing_stock_m3_per_ha = Column(Numeric(15, 6), nullable=True)
 
+    # Satellite-derived volume (from AGB raster - added 2026-03-23)
+    satellite_volume_m3_per_ha = Column(Numeric(15, 6), nullable=True)  # Volume from AGB 2022 Nepal raster
+
     # Forest condition assessment
     regeneration_condition = Column(String(20), nullable=True)  # 'Good', 'Moderate', 'Weak'
     forest_condition = Column(String(20), nullable=True)  # 'Good', 'Moderate', 'Weak'

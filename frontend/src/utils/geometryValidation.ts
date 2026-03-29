@@ -36,6 +36,23 @@ export const checkPolygonOverlap = (
   polygon2: any
 ): { overlaps: boolean; overlapArea?: number } => {
   try {
+    // Validate geometries exist and have coordinates
+    if (!polygon1 || !polygon2 || 
+        !polygon1.coordinates || !polygon2.coordinates ||
+        polygon1.coordinates.length === 0 || polygon2.coordinates.length === 0) {
+      return { overlaps: false };
+    }
+
+    // Only handle Polygon and MultiPolygon types
+    const type1 = polygon1.type || (polygon1.geometry ? polygon1.geometry.type : null);
+    const type2 = polygon2.type || (polygon2.geometry ? polygon2.geometry.type : null);
+    
+    if (!type1 || !type2 || 
+        !['Polygon', 'MultiPolygon'].includes(type1) ||
+        !['Polygon', 'MultiPolygon'].includes(type2)) {
+      return { overlaps: false };
+    }
+
     const feature1 = turf.feature(polygon1);
     const feature2 = turf.feature(polygon2);
 
@@ -48,7 +65,7 @@ export const checkPolygonOverlap = (
 
     return { overlaps: false };
   } catch (error) {
-    console.error('Error checking overlap:', error);
+    // Silently handle validation errors - not all geometries will overlap
     return { overlaps: false };
   }
 };

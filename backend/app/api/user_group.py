@@ -202,6 +202,7 @@ async def delete_user_group_extent(
 @router.get("/calculations/{calculation_id}/user-group/land-cover", response_model=LandCoverAnalysisResponse)
 async def analyze_land_cover(
     calculation_id: str,
+    force_refresh: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -214,6 +215,9 @@ async def analyze_land_cover(
     - Community forest overlap exclusion
     - Timber volume calculation
 
+    **Caching:** Results are automatically cached in database for fast retrieval.
+    Use `force_refresh=true` to re-run the analysis.
+
     **Prerequisites:**
     1. Community forest boundary must be uploaded (Analysis tab)
     2. User group extent must be created (Forest User Map tab)
@@ -225,7 +229,7 @@ async def analyze_land_cover(
     """
     try:
         service = UserGroupAnalysisService(db)
-        results = await service.analyze_land_cover(calculation_id)
+        results = await service.analyze_land_cover(calculation_id, force_refresh=force_refresh)
         return results
     except ValueError as e:
         # User-friendly error messages

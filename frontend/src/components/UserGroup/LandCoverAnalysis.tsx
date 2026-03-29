@@ -34,14 +34,120 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
   const [results, setResults] = useState<LandCoverResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [cacheInfo, setCacheInfo] = useState<{ size: number; age: string } | null>(null);
 
-  const handleAnalyze = async () => {
+  // Get cache info
+  const getCacheInfo = () => {
+    const localCacheKey = `land_cover_${calculationId}`;
+    const cached = localStorage.getItem(localCacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        const sizeKB = new Blob([cached]).size / 1024;
+        const ageMs = Date.now() - new Date(parsed.cached_at).getTime();
+        const ageHours = Math.floor(ageMs / (1000 * 60 * 60));
+        const ageMinutes = Math.floor((ageMs % (1000 * 60 * 60)) / (1000 * 60));
+        const ageStr = ageHours > 0 ? `${ageHours}h ${ageMinutes}m ago` : `${ageMinutes}m ago`;
+        setCacheInfo({ size: sizeKB, age: ageStr });
+      } catch (e) {
+        setCacheInfo(null);
+      }
+    } else {
+      setCacheInfo(null);
+    }
+  };
+
+  // Auto-load cached results on component mount
+  React.useEffect(() => {
+    const loadCachedResults = async () => {
+      try {
+        setLoading(true);
+
+        // LAYER 1: Try LocalStorage first (instant, <5ms)
+        const localCacheKey = `land_cover_${calculationId}`;
+        const localCached = localStorage.getItem(localCacheKey);
+
+        if (localCached) {
+          try {
+            const parsedData = JSON.parse(localCached);
+            // Check if cache is fresh (< 24 hours old)
+            const cacheAge = Date.now() - new Date(parsedData.cached_at).getTime();
+            const isStale = cacheAge > 24 * 60 * 60 * 1000; // 24 hours
+
+            if (!isStale) {
+              console.log('✅ Loaded from LocalStorage (instant!)', parsedData);
+              setResults(parsedData.data);
+              setFromCache(true);
+              setInitialLoadDone(true);
+              setLoading(false);
+              getCacheInfo();
+              return; // Exit early - no need to hit server
+            } else {
+              console.log('⚠️ LocalStorage cache is stale, refreshing from server...');
+              localStorage.removeItem(localCacheKey);
+            }
+          } catch (e) {
+            console.error('LocalStorage parse error:', e);
+            localStorage.removeItem(localCacheKey);
+          }
+        }
+
+        // LAYER 2: Load from database (slower, 50-200ms)
+        console.log('📡 Loading from database...');
+        const data = await userGroupApi.analyzeLandCover(calculationId, false);
+        setResults(data);
+        setFromCache(data.from_cache === true);
+
+        // Save to LocalStorage for next time
+        try {
+          localStorage.setItem(localCacheKey, JSON.stringify({
+            data: data,
+            cached_at: new Date().toISOString(),
+            calculation_id: calculationId
+          }));
+          console.log('💾 Saved to LocalStorage for instant future access');
+          getCacheInfo(); // Update cache info display
+        } catch (storageError) {
+          console.warn('LocalStorage save failed (quota exceeded?):', storageError);
+        }
+
+        setInitialLoadDone(true);
+      } catch (err: any) {
+        // If no cached results or error, just show the button
+        console.log('No cached results available');
+        setInitialLoadDone(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCachedResults();
+  }, [calculationId]);
+
+  const handleAnalyze = async (forceRefresh: boolean = false) => {
     setLoading(true);
     setError(null);
 
     try {
-      const data = await userGroupApi.analyzeLandCover(calculationId);
+      const data = await userGroupApi.analyzeLandCover(calculationId, forceRefresh);
       setResults(data);
+      setFromCache(data.from_cache === true);
+
+      // Save to LocalStorage for instant future access
+      const localCacheKey = `land_cover_${calculationId}`;
+      try {
+        localStorage.setItem(localCacheKey, JSON.stringify({
+          data: data,
+          cached_at: new Date().toISOString(),
+          calculation_id: calculationId
+        }));
+        console.log('💾 Saved fresh analysis to LocalStorage');
+        getCacheInfo(); // Update cache info display
+      } catch (storageError) {
+        console.warn('LocalStorage save failed:', storageError);
+      }
     } catch (err: any) {
       const errorMessage = err.response?.data?.detail || err.message || 'Analysis failed';
       setError(errorMessage);
@@ -85,25 +191,57 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
           </div>
         </div>
 
-        <button
-          onClick={handleAnalyze}
-          disabled={loading}
-          className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700
-                   disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors
-                   flex items-center gap-2 font-medium"
-        >
-          {loading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Analyzing...
-            </>
-          ) : (
-            <>
-              <BarChart3 className="w-4 h-4" />
-              Run Analysis
-            </>
+        <div className="flex items-center gap-3 flex-wrap">
+          {results && (
+            <div className="flex items-center gap-2">
+              {fromCache && (
+                <span className="text-xs px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" />
+                  ⚡ Instant load (LocalStorage)
+                </span>
+              )}
+              {cacheInfo && (
+                <span className="text-xs px-2 py-1 bg-gray-50 text-gray-600 border border-gray-200 rounded">
+                  {cacheInfo.size.toFixed(1)} KB · {cacheInfo.age}
+                </span>
+              )}
+              <button
+                onClick={() => {
+                  // Clear LocalStorage cache
+                  const localCacheKey = `land_cover_${calculationId}`;
+                  localStorage.removeItem(localCacheKey);
+                  setCacheInfo(null);
+                  setFromCache(false);
+                  console.log('🗑️ Cleared LocalStorage cache');
+                  alert('Local cache cleared! Next load will fetch from database.');
+                }}
+                className="text-xs px-2 py-1 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded border border-gray-200 hover:border-red-200 transition-colors"
+                title="Clear local cache and reload from database"
+              >
+                🗑️ Clear Local Cache
+              </button>
+            </div>
           )}
-        </button>
+          <button
+            onClick={() => handleAnalyze(results !== null)}
+            disabled={loading}
+            className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700
+                     disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors
+                     flex items-center gap-2 font-medium"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {results ? 'Re-analyzing...' : 'Analyzing...'}
+              </>
+            ) : (
+              <>
+                <BarChart3 className="w-4 h-4" />
+                {results ? 'Re-run Analysis' : 'Run Analysis'}
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Error Message */}

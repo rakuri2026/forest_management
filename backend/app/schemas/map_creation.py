@@ -46,9 +46,8 @@ class MapCreationRequest(BaseModel):
     # Analysis options (same as file upload)
     analysis_options: Optional[Dict[str, bool]] = None
     map_options: Optional[Dict[str, bool]] = None
-    
-    # Whether to run analysis immediately or save only
-    run_analysis: Optional[bool] = Field(False, description="Whether to run analysis after saving")
+
+    # REMOVED: run_analysis parameter - analysis is now triggered separately from Analysis page
 
     class Config:
         json_schema_extra = {

@@ -1,14 +1,14 @@
 """
 Forest management API endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import func, text, select
 from sqlalchemy.orm.attributes import flag_modified
-from typing import Optional, List
-from uuid import UUID
+from typing import Optional, List, Dict, Any
+from uuid import UUID, uuid4
+from datetime import datetime
 import json
-import datetime
 
 from ..core.database import get_db
 from ..models.user import User
@@ -37,6 +37,10 @@ from ..schemas.forest import (
     BlockCreateListRequest,
     BlockResponse,
     BlockListResponse,
+    DraftSaveRequest,
+    DraftResponse,
+    DraftDetailResponse,
+    ConvertDraftRequest,
 )
 from ..schemas.map_creation import MapCreationRequest
 from ..schemas.tree_model import (
@@ -70,6 +74,74 @@ import io
 
 
 router = APIRouter()
+
+
+def calculate_total_excluded_area(sub_areas: List[Dict]) -> float:
+    """
+    Calculate total excluded area from all sub-areas.
+
+    Args:
+        sub_areas: List of sub-area dictionaries
+
+    Returns:
+        Total excluded area in hectares
+    """
+    total_excluded = 0.0
+
+    for sa in sub_areas:
+        is_excluded = sa.get("is_excluded") or sa.get("isExcluded")
+        if is_excluded:
+            area = sa.get("area_hectares", 0)
+            total_excluded += area
+
+    return total_excluded
+
+
+def calculate_block_excluded_areas(blocks: List[Dict], sub_areas: List[Dict]) -> Dict[str, float]:
+    """
+    Calculate excluded area for each block, considering sub-areas that span multiple blocks.
+
+    Args:
+        blocks: List of block dictionaries with block_id/block_name
+        sub_areas: List of sub-area dictionaries with blockBreakdown (optional)
+
+    Returns:
+        Dictionary mapping block_id to excluded area in hectares
+    """
+    block_excluded = {}
+
+    # Initialize all blocks with 0
+    for block in blocks:
+        block_id = block.get("block_id")
+        if block_id:
+            block_excluded[block_id] = 0.0
+
+    # Calculate excluded areas
+    for sa in sub_areas:
+        is_excluded = sa.get("is_excluded") or sa.get("isExcluded")
+        if not is_excluded:
+            continue
+
+        # Check if sub-area has blockBreakdown (cross-block sub-area)
+        block_breakdown = sa.get("blockBreakdown")
+
+        if block_breakdown and len(block_breakdown) > 0:
+            # Use blockBreakdown to distribute area across blocks
+            for item in block_breakdown:
+                block_id = item.get("blockId")
+                area = item.get("area", 0)
+                if block_id in block_excluded:
+                    block_excluded[block_id] += area
+                    print(f"  [calc] Block {item.get('blockName')}: +{area:.4f} ha from cross-block sub-area '{sa.get('name')}'")
+        else:
+            # Fallback: use single block_id (old behavior)
+            block_id = sa.get("block_id") or sa.get("blockId")
+            area = sa.get("area_hectares", 0)
+            if block_id and block_id in block_excluded:
+                block_excluded[block_id] += area
+                print(f"  [calc] Block {block_id}: +{area:.4f} ha from single-block sub-area '{sa.get('name')}'")
+
+    return block_excluded
 
 
 @router.get("/community-forests", response_model=List[CommunityForestResponse])
@@ -136,7 +208,7 @@ async def get_community_forest(forest_id: int, db: Session = Depends(get_db)):
         func.ST_AsGeoJSON(CommunityForest.geom).label("geojson")
     ).filter(CommunityForest.id == forest_id).first()
 
-    geometry = json.loads(geojson_query.geojson) if geojson_query else None
+    geometry = json.loads(geojson_query.geojson) if geojson_query and geojson_query.geojson else None
 
     return {
         "id": forest.id,
@@ -421,11 +493,11 @@ async def upload_forest_boundary(
     db.commit()
     db.refresh(calculation)
 
-    # Get the calculation ID before analysis
+    # Get the calculation ID
     calc_id = calculation.id
 
-    # Note: Analysis is NOT started here - it starts after block naming
-    # The PENDING status triggers analysis in the create_blocks_from_polygons endpoint
+    # Note: Analysis is NOT started here - it should be triggered separately from Analysis page
+    # User will configure blocks first, then trigger analysis when ready
 
     # Re-query calculation to ensure we have fresh data
     calculation = db.query(Calculation).filter(Calculation.id == calc_id).first()
@@ -542,11 +614,15 @@ async def create_forest_from_map(
         [block.model_dump() for block in request.blocks]
     )
 
+    # Calculate total area from all blocks
+    total_area_hectares = sum(block["area_hectares"] for block in blocks_for_analysis)
+
     # Create initial result_data with blocks
     initial_result_data = {
         "total_blocks": len(blocks_for_analysis),
         "blocks": blocks_for_analysis,
         "creation_method": "map_creation",
+        "area_hectares": round(total_area_hectares, 4),
     }
 
     # Add GPS points and sub-areas to metadata
@@ -581,10 +657,38 @@ async def create_forest_from_map(
                     print(f"    Total points: {len(first_ring)}")
         print(f"{'='*60}\n")
 
-        # Track excluded area (private land)
-        if metadata.get("excluded_area_hectares"):
-            initial_result_data["excluded_area_hectares"] = metadata["excluded_area_hectares"]
-            print(f"  Excluded area total: {metadata['excluded_area_hectares']:.4f} ha")
+        # Calculate excluded area from sub-areas (use helper for consistency)
+        excluded_area = calculate_total_excluded_area(metadata["sub_areas"])
+        initial_result_data["excluded_area_hectares"] = round(excluded_area, 4)
+        initial_result_data["effective_area_hectares"] = round(total_area_hectares - excluded_area, 4)
+
+        if excluded_area > 0:
+            print(f"  Excluded area total: {excluded_area:.4f} ha")
+            print(f"  Effective forest area: {initial_result_data['effective_area_hectares']:.4f} ha")
+
+        # Calculate excluded area per block (handles cross-block sub-areas)
+            print(f"\n[create-from-map] Calculating per-block excluded areas...")
+            block_excluded_map = calculate_block_excluded_areas(blocks_for_analysis, metadata["sub_areas"])
+
+            for block in blocks_for_analysis:
+                block_id = block.get("block_id")
+                block_name = block.get("block_name")
+                block_excluded = block_excluded_map.get(block_id, 0.0)
+
+                block["excluded_area_hectares"] = round(block_excluded, 4)
+                original_area = block.get("area_hectares", 0)
+                block["effective_area_hectares"] = round(original_area - block_excluded, 4)
+
+                if block_excluded > 0:
+                    print(f"  Block '{block_name}': {original_area:.2f} ha - {block_excluded:.2f} ha = {block['effective_area_hectares']:.2f} ha")
+    else:
+        # No sub-areas: set excluded to 0 and effective = total
+        initial_result_data["excluded_area_hectares"] = 0.0
+        initial_result_data["effective_area_hectares"] = round(total_area_hectares, 4)
+        # Set effective_area_hectares for each block
+        for block in blocks_for_analysis:
+            block["excluded_area_hectares"] = 0
+            block["effective_area_hectares"] = block.get("area_hectares", 0)
 
     # Create Calculation record
     calculation = Calculation(
@@ -601,103 +705,13 @@ async def create_forest_from_map(
     db.commit()
     db.refresh(calculation)
 
-    # Prepare analysis options
-    analysis_options = request.analysis_options or {}
-    map_options = request.map_options or {}
-    
-    # Check if we should run analysis (default to False for map creation)
-    run_analysis = getattr(request, 'run_analysis', False)
-    print(f"[create-forest-from-map] run_analysis value: {run_analysis}")
-
-    # Run analysis only if requested
-    if run_analysis:
-        try:
-            result_data, processing_time_seconds = await analyze_forest_boundary(
-                calculation.id,
-                db,
-                options=analysis_options
-            )
-
-            # Update calculation with results
-            calculation.result_data = result_data
-            calculation.status = CalculationStatus.COMPLETED
-            calculation.completed_at = datetime.datetime.now(datetime.timezone.utc)
-            calculation.processing_time_seconds = processing_time_seconds
-
-            # DEBUG LOGGING: Verify sub-areas survived analysis
-            if result_data.get("sub_areas"):
-                print(f"\n✓ SUB-AREAS AFTER ANALYSIS: {result_data.get('sub_areas_count', len(result_data['sub_areas']))} sub-areas preserved")
-                for idx, sub_area in enumerate(result_data["sub_areas"]):
-                    print(f"  ✓ {sub_area.get('name', f'SubArea {idx+1}')}: {sub_area.get('area_hectares', 0):.4f} ha")
-            else:
-                print(f"\n⚠️  WARNING: No sub-areas in result_data after analysis!")
-                print(f"   Initial sub-areas count: {initial_result_data.get('sub_areas_count', 0)}")
-
-            flag_modified(calculation, "result_data")
-            db.commit()
-            db.refresh(calculation)
-
-            # Auto-generate fieldbook if requested
-            if analysis_options.get('auto_generate_fieldbook', True):
-                try:
-                    print(f"🔄 Auto-generating fieldbook for calculation {calculation.id}...")
-                    result = generate_fieldbook_points(
-                        db=db,
-                        calculation_id=calculation.id,
-                        interpolation_distance=100.0,
-                        extract_elevation=True,
-                        calculate_reference=False
-                    )
-                    print(f"✓ Fieldbook auto-generated: {result.total_points} points created")
-
-                    # Verify data is in database immediately after generation
-                    from app.models.fieldbook import Fieldbook
-                    verify_count = db.query(Fieldbook).filter(Fieldbook.calculation_id == calculation.id).count()
-                    print(f"✓ Verification in endpoint: {verify_count} fieldbook points in database")
-                except Exception as e:
-                    print(f"⚠️  Warning: Fieldbook generation failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-            # Auto-generate sampling if requested
-            if analysis_options.get('auto_generate_sampling', True):
-                try:
-                    print(f"🔄 Auto-generating sampling design for calculation {calculation.id}...")
-                    result = create_sampling_design(
-                        db=db,
-                        calculation_id=calculation.id,
-                        sampling_type="systematic",
-                        sampling_intensity_percent=Decimal("0.5"),
-                        min_samples_per_block=5,
-                        plot_shape="circular",
-                        plot_radius_meters=Decimal("12.6156")
-                    )
-                    print(f"✓ Sampling auto-generated: {result.total_plots} plots created")
-
-                    # Verify data is in database immediately after generation
-                    from app.models.sampling import SamplingDesign
-                    verify_count = db.query(SamplingDesign).filter(SamplingDesign.calculation_id == calculation.id).count()
-                    print(f"✓ Verification in endpoint: {verify_count} sampling designs in database")
-                except Exception as e:
-                    print(f"⚠️  Warning: Sampling generation failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-        except Exception as e:
-            calculation.status = CalculationStatus.FAILED
-            calculation.error_message = str(e)
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Analysis failed: {str(e)}"
-            )
-    else:
-        # Not running analysis - keep status as PENDING
-        print(f"[create-forest-from-map] Analysis skipped, status set to PENDING")
-        # The calculation is already created with PENDING status
-        # Just commit any pending changes to result_data
-        flag_modified(calculation, "result_data")
-        db.commit()
-        db.refresh(calculation)
+    # Status is set to PENDING (ready for analysis to be triggered separately from Analysis page)
+    # The calculation is already created with PENDING status
+    # Just commit any pending changes to result_data
+    print(f"[create-forest-from-map] Forest created with status PENDING. Analysis can be triggered from Analysis page.")
+    flag_modified(calculation, "result_data")
+    db.commit()
+    db.refresh(calculation)
 
     # Prepare response
     geometry_json = None
@@ -842,6 +856,11 @@ async def reanalyze_calculation(
             **analysis_results
         }
 
+        # Sanitize data to remove NaN/Infinity values before JSON serialization
+        from ..utils.json_utils import sanitize_for_json
+        sanitized_result_data = sanitize_for_json(updated_result_data)
+        sanitized_analysis_options = sanitize_for_json(analysis_options)
+
         # Update calculation with new results and options
         update_query = text("""
             UPDATE public.calculations
@@ -855,8 +874,8 @@ async def reanalyze_calculation(
         """)
 
         db.execute(update_query, {
-            "result_data": json.dumps(updated_result_data),
-            "analysis_options": json.dumps(analysis_options),
+            "result_data": json.dumps(sanitized_result_data),
+            "analysis_options": json.dumps(sanitized_analysis_options),
             "processing_time": processing_time,
             "status": "COMPLETED",
             "calc_id": str(calculation_id)
@@ -891,7 +910,7 @@ async def reanalyze_calculation(
         func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
     ).filter(Calculation.id == calculation_id).first()
 
-    geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+    geometry_json = json.loads(geojson_query.geojson) if geojson_query and geojson_query.geojson else None
 
     # Filter out removed species from potential_species
     result_data = calculation.result_data or {}
@@ -1325,7 +1344,7 @@ async def get_calculation(
         func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
     ).filter(Calculation.id == calculation_id).first()
 
-    geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+    geometry_json = json.loads(geojson_query.geojson) if geojson_query and geojson_query.geojson else None
 
     # Filter out removed species from potential_species
     result_data = calculation.result_data or {}
@@ -1355,7 +1374,9 @@ async def get_calculation(
         processing_time_seconds=calculation.processing_time_seconds,
         error_message=calculation.error_message,
         created_at=calculation.created_at,
+        updated_at=calculation.updated_at,
         completed_at=calculation.completed_at,
+        is_draft=calculation.is_draft,
         geometry=geometry_json,
         result_data=result_data
     )
@@ -1391,7 +1412,9 @@ async def list_calculations(
             processing_time_seconds=calc.processing_time_seconds,
             error_message=calc.error_message,
             created_at=calc.created_at,
+            updated_at=calc.updated_at,
             completed_at=calc.completed_at,
+            is_draft=calc.is_draft,
             geometry=None,  # Don't include geometry in list view
             result_data=None  # Don't include full results in list view
         ))
@@ -2736,7 +2759,7 @@ async def update_calculation_geometry(
             func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
         ).filter(Calculation.id == calculation_id).first()
 
-        geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+        geometry_json = json.loads(geojson_query.geojson) if geojson_query and geojson_query.geojson else None
 
         return {
             "success": True,
@@ -2782,6 +2805,20 @@ async def add_sub_area(
     from shapely.geometry import shape
     from shapely.validation import make_valid
     import uuid
+
+    # Debug logging
+    print(f"\n[add_sub_area] Received request:")
+    print(f"  name: {request.name}")
+    print(f"  category: {request.category}")
+    print(f"  block_id: {request.block_id}")
+    print(f"  block_name: {request.block_name}")
+    print(f"  block_breakdown: {request.block_breakdown}")
+    print(f"  is_excluded: {request.is_excluded}")
+    print(f"  area_hectares: {request.area_hectares}")
+    if request.block_breakdown:
+        print(f"  block_breakdown items: {len(request.block_breakdown)}")
+        for item in request.block_breakdown:
+            print(f"    - blockId: {item.blockId}, blockName: {item.blockName}, area: {item.area}, percentage: {item.percentage}")
 
     # Get calculation
     calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
@@ -2848,18 +2885,19 @@ async def add_sub_area(
             geom = clipped_geom
             print(f"Sub-area clipped: original area={original_area_sqm/10000:.2f}ha, clipped={geom.area/10000:.2f}ha")
 
-        # Calculate area (after clipping)
-        area_sqm = geom.area
-        area_hectares = area_sqm / 10000
-        
-        # Use provided area if available (from frontend calculation), otherwise use calculated
+        # Calculate area (after clipping) using accurate geodesic calculation
+        # Import the helper function
+        from ..utils.geometry_utils import calculate_area_geodesic_from_shapely
+
+        # Use provided area if available (from frontend calculation which may use turf.js)
         if request.area_hectares and request.area_hectares > 0:
             area_hectares = request.area_hectares
             area_sqm = area_hectares * 10000
             print(f"[add_sub_area] Using PROVIDED area: {area_hectares} ha (from request)")
         else:
-            area_hectares = area_sqm / 10000
-            print(f"[add_sub_area] Using CALCULATED area: {area_hectares} ha")
+            # Calculate using UTM projection for accuracy
+            area_sqm, area_hectares = calculate_area_geodesic_from_shapely(geom)
+            print(f"[add_sub_area] Using CALCULATED geodesic area: {area_hectares} ha")
 
         # Generate unique ID
         sub_area_id = str(uuid.uuid4())
@@ -2874,6 +2912,7 @@ async def add_sub_area(
             "area_hectares": round(area_hectares, 4),
             "blockId": request.block_id,
             "blockName": request.block_name,
+            "blockBreakdown": [item.model_dump() for item in request.block_breakdown] if request.block_breakdown else None,
             "isExcluded": request.is_excluded,
             "created_at": datetime.now().isoformat()
         }
@@ -2888,19 +2927,38 @@ async def add_sub_area(
         # Add new sub-area
         result_data["sub_areas"].append(new_sub_area)
         result_data["sub_areas_count"] = len(result_data["sub_areas"])
-        
+
         print(f"[add_sub_area] Added sub-area {sub_area_id}, total now: {len(result_data['sub_areas'])}")
-        
-        # Track excluded area if this is private land
-        if request.is_excluded:
-            current_excluded = result_data.get("excluded_area_hectares", 0)
-            result_data["excluded_area_hectares"] = round(current_excluded + area_hectares, 4)
+
+        # Recalculate total excluded area from scratch (avoids accumulation errors)
+        excluded_total = calculate_total_excluded_area(result_data["sub_areas"])
+        result_data["excluded_area_hectares"] = round(excluded_total, 4)
+
+        # Recalculate effective_area_hectares at forest level
+        total_area = result_data.get("area_hectares", 0)
+        result_data["effective_area_hectares"] = round(total_area - excluded_total, 4)
+
+        # Recalculate per-block excluded and effective areas (handles cross-block sub-areas)
+        blocks = result_data.get("blocks", [])
+        block_excluded_map = calculate_block_excluded_areas(blocks, result_data["sub_areas"])
+
+        for block in blocks:
+            block_id = block.get("block_id")
+            block_excluded = block_excluded_map.get(block_id, 0.0)
+
+            block["excluded_area_hectares"] = round(block_excluded, 4)
+            original_area = block.get("area_hectares", 0)
+            block["effective_area_hectares"] = round(original_area - block_excluded, 4)
+
+        result_data["blocks"] = blocks
 
         # Update calculation
         calculation.result_data = result_data
         flag_modified(calculation, "result_data")
         db.commit()
         db.refresh(calculation)
+
+        print(f"[add_sub_area] Updated totals - excluded: {excluded_total:.4f} ha, effective: {result_data['effective_area_hectares']:.4f} ha")
 
         return SubAreaResponse(
             id=sub_area_id,
@@ -2910,13 +2968,17 @@ async def add_sub_area(
             area_hectares=round(area_hectares, 4),
             block_id=request.block_id,
             block_name=request.block_name,
+            block_breakdown=request.block_breakdown,
             is_excluded=request.is_excluded
         )
 
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         db.rollback()
+        print(f"[add_sub_area] ERROR: {str(e)}")
+        print(f"[add_sub_area] Traceback:\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to add sub-area: {str(e)}"
@@ -3009,6 +3071,16 @@ async def list_sub_areas(
                 except Exception as e:
                     print(f"[list_sub_areas] Error recalculating area: {e}")
         
+        # Get blockBreakdown if exists
+        block_breakdown = sa.get("blockBreakdown")
+        block_breakdown_items = None
+        if block_breakdown:
+            from ..schemas.forest import BlockBreakdownItem
+            block_breakdown_items = [
+                BlockBreakdownItem(**item) if isinstance(item, dict) else item
+                for item in block_breakdown
+            ]
+
         sub_area_responses.append(SubAreaResponse(
             id=sa.get("id", ""),
             name=sa.get("name", ""),
@@ -3017,6 +3089,7 @@ async def list_sub_areas(
             area_hectares=round(sa_area, 4),
             block_id=sa.get("blockId"),
             block_name=sa.get("blockName"),
+            block_breakdown=block_breakdown_items,
             is_excluded=sa.get("isExcluded", False)
         ))
         total_area += sa_area
@@ -3086,17 +3159,6 @@ async def update_sub_area(
             if request.block_name is not None:
                 sub_areas[i]["blockName"] = request.block_name
             if request.is_excluded is not None:
-                # Recalculate excluded area if changing exclusion status
-                old_excluded = sub_areas[i].get("isExcluded", False)
-                area_ha = sub_areas[i].get("area_hectares", 0)
-
-                if request.is_excluded != old_excluded:
-                    current_excluded = result_data.get("excluded_area_hectares", 0)
-                    if request.is_excluded:
-                        result_data["excluded_area_hectares"] = round(current_excluded + area_ha, 4)
-                    else:
-                        result_data["excluded_area_hectares"] = round(current_excluded - area_ha, 4)
-
                 sub_areas[i]["isExcluded"] = request.is_excluded
 
             sub_areas[i]["updated_at"] = datetime.now().isoformat()
@@ -3110,6 +3172,28 @@ async def update_sub_area(
 
     # Save updated result_data
     result_data["sub_areas"] = sub_areas
+
+    # Recalculate total excluded area from scratch (avoids accumulation errors)
+    excluded_total = calculate_total_excluded_area(sub_areas)
+    result_data["excluded_area_hectares"] = round(excluded_total, 4)
+
+    # Recalculate effective_area_hectares at forest level
+    total_area = result_data.get("area_hectares", 0)
+    result_data["effective_area_hectares"] = round(total_area - excluded_total, 4)
+
+    # Recalculate per-block excluded and effective areas (handles cross-block sub-areas)
+    blocks = result_data.get("blocks", [])
+    block_excluded_map = calculate_block_excluded_areas(blocks, sub_areas)
+
+    for block in blocks:
+        block_id = block.get("block_id")
+        block_excluded = block_excluded_map.get(block_id, 0.0)
+
+        block["excluded_area_hectares"] = round(block_excluded, 4)
+        original_area = block.get("area_hectares", 0)
+        block["effective_area_hectares"] = round(original_area - block_excluded, 4)
+
+    result_data["blocks"] = blocks
     calculation.result_data = result_data
     flag_modified(calculation, "result_data")
     db.commit()
@@ -3154,17 +3238,11 @@ async def delete_sub_area(
 
     # Find and remove the sub-area
     sub_area_found = False
-    deleted_area = 0
     new_sub_areas = []
 
     for sa in sub_areas:
         if sa.get("id") == sub_area_id:
             sub_area_found = True
-            deleted_area = sa.get("area_hectares", 0)
-            if sa.get("isExcluded", False):
-                # Reduce excluded area
-                current_excluded = result_data.get("excluded_area_hectares", 0)
-                result_data["excluded_area_hectares"] = round(max(0, current_excluded - deleted_area), 4)
         else:
             new_sub_areas.append(sa)
 
@@ -3177,10 +3255,34 @@ async def delete_sub_area(
     # Save updated result_data
     result_data["sub_areas"] = new_sub_areas
     result_data["sub_areas_count"] = len(new_sub_areas)
+
+    # Recalculate total excluded area from scratch (avoids accumulation errors)
+    excluded_total = calculate_total_excluded_area(new_sub_areas)
+    result_data["excluded_area_hectares"] = round(excluded_total, 4)
+
+    # Recalculate effective_area_hectares at forest level
+    total_area = result_data.get("area_hectares", 0)
+    result_data["effective_area_hectares"] = round(total_area - excluded_total, 4)
+
+    # Recalculate per-block excluded and effective areas (handles cross-block sub-areas)
+    blocks = result_data.get("blocks", [])
+    block_excluded_map = calculate_block_excluded_areas(blocks, new_sub_areas)
+
+    for block in blocks:
+        block_id = block.get("block_id")
+        block_excluded = block_excluded_map.get(block_id, 0.0)
+
+        block["excluded_area_hectares"] = round(block_excluded, 4)
+        original_area = block.get("area_hectares", 0)
+        block["effective_area_hectares"] = round(original_area - block_excluded, 4)
+
+    result_data["blocks"] = blocks
     calculation.result_data = result_data
     flag_modified(calculation, "result_data")
     db.commit()
     db.refresh(calculation)
+
+    print(f"[delete_sub_area] Deleted sub-area, new excluded total: {excluded_total:.4f} ha, effective: {result_data['effective_area_hectares']:.4f} ha")
 
     return {
         "success": True,
@@ -3384,7 +3486,7 @@ async def edit_boundary_interactive(
             func.ST_AsGeoJSON(Calculation.boundary_geom).label("geojson")
         ).filter(Calculation.id == calculation_id).first()
 
-        geometry_json = json.loads(geojson_query.geojson) if geojson_query else None
+        geometry_json = json.loads(geojson_query.geojson) if geojson_query and geojson_query.geojson else None
 
         return {
             "success": True,
@@ -3551,6 +3653,105 @@ async def get_calculation_polygons(
     )
 
 
+@router.post("/calculations/{calculation_id}/create-single-block", response_model=BlockResponse)
+async def create_single_default_block(
+    calculation_id: UUID,
+    block_name: Optional[str] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a single default block from the calculation's boundary geometry.
+    Used when user chooses "Single Block" option in Block Naming or Map Creation.
+
+    Args:
+        calculation_id: The calculation UUID
+        block_name: Optional custom name (default: "{forest_name} - Block 1")
+
+    Returns:
+        Created block data with geometry and area
+    """
+    # 1. Get calculation and verify ownership
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # 2. Delete existing blocks if any
+    deleted_count = db.query(ForestBlock).filter(
+        ForestBlock.calculation_id == calculation_id
+    ).delete()
+
+    if deleted_count > 0:
+        print(f"Deleted {deleted_count} existing blocks for calculation {calculation_id}")
+
+    # 3. Get boundary geometry as WKT
+    boundary_wkt = db.scalar(
+        select(func.ST_AsText(calculation.boundary_geom))
+    )
+
+    if not boundary_wkt:
+        raise HTTPException(status_code=400, detail="Calculation has no boundary geometry")
+
+    # 4. Calculate area in hectares (using UTM projection 32645 for Nepal)
+    area_hectares = db.scalar(
+        select(func.ST_Area(func.ST_Transform(calculation.boundary_geom, 32645)) / 10000)
+    )
+
+    # 5. Create default block name if not provided
+    if not block_name:
+        block_name = f"{calculation.forest_name} - Block 1" if calculation.forest_name else "Block 1"
+
+    print(f"Creating single block '{block_name}' for calculation {calculation_id}")
+
+    # 6. Create ForestBlock record
+    forest_block = ForestBlock(
+        id=uuid4(),
+        calculation_id=calculation_id,
+        name=block_name,
+        geometry=func.ST_GeomFromText(boundary_wkt, 4326),
+        area_hectares=area_hectares,
+        index=0,
+        created_at=datetime.utcnow()
+    )
+    db.add(forest_block)
+
+    # 7. Update calculation result_data with block info
+    block_geojson = db.scalar(
+        select(func.ST_AsGeoJSON(func.ST_GeomFromText(boundary_wkt, 4326)))
+    )
+
+    result_data = calculation.result_data or {}
+    result_data['blocks'] = [{
+        'block_index': 0,
+        'block_name': block_name,
+        'area_hectares': float(area_hectares) if area_hectares else 0,
+        'geometry': json.loads(block_geojson)
+    }]
+    result_data['total_blocks'] = 1
+
+    calculation.result_data = result_data
+    calculation.status = CalculationStatus.PENDING  # Ready for analysis
+
+    db.commit()
+    db.refresh(forest_block)
+
+    print(f"Successfully created single block with ID {forest_block.id}")
+
+    # 8. Return block response
+    return BlockResponse(
+        id=str(forest_block.id),
+        name=forest_block.name,
+        geometry=json.loads(block_geojson),
+        area_hectares=float(forest_block.area_hectares),
+        index=forest_block.index,
+        created_at=forest_block.created_at
+    )
+
+
 @router.post("/calculations/{calculation_id}/blocks", response_model=BlockListResponse)
 async def create_blocks_from_polygons(
     calculation_id: UUID,
@@ -3587,11 +3788,12 @@ async def create_blocks_from_polygons(
     
     for block_req in request.blocks:
         # Get the polygon geometry for this index
+        # Use ST_Area(geography()) for accurate geodesic calculation
         polygon_query = db.execute(
             text("""
-                SELECT 
+                SELECT
                     (ST_Dump(boundary_geom)).geom as polygon_geom,
-                    ST_Area((ST_Dump(boundary_geom)).geom) / 10000.0 as area_hectares
+                    ST_Area(geography((ST_Dump(boundary_geom)).geom)) / 10000.0 as area_hectares
                 FROM calculations
                 WHERE id = :calc_id
                 OFFSET :offset LIMIT 1
@@ -3639,63 +3841,11 @@ async def create_blocks_from_polygons(
         calculation.result_data['blocks'] = blocks_for_result_data
         flag_modified(calculation, 'result_data')
         db.commit()
-    
-    # After saving blocks, trigger the analysis if status was PENDING and run_analysis is True
-    if request.run_analysis and calculation.status == CalculationStatus.PENDING:
-        calculation.status = CalculationStatus.PROCESSING
-        db.commit()
-        
-        # Get analysis options from the calculation
-        analysis_options = calculation.analysis_options or {}
-        
-        # Build analysis service options
-        analysis_service_options = {
-            'run_raster_analysis': analysis_options.get('run_raster_analysis', True),
-            'run_elevation': analysis_options.get('run_elevation', True),
-            'run_slope': analysis_options.get('run_slope', True),
-            'run_aspect': analysis_options.get('run_aspect', True),
-            'run_canopy': analysis_options.get('run_canopy', True),
-            'run_biomass': analysis_options.get('run_biomass', True),
-            'run_forest_health': analysis_options.get('run_forest_health', True),
-            'run_forest_type': analysis_options.get('run_forest_type', True),
-            'run_landcover': analysis_options.get('run_landcover', True),
-            'run_forest_loss': analysis_options.get('run_forest_loss', True),
-            'run_forest_gain': analysis_options.get('run_forest_gain', True),
-            'run_fire_loss': analysis_options.get('run_fire_loss', True),
-            'run_temperature': analysis_options.get('run_temperature', True),
-            'run_precipitation': analysis_options.get('run_precipitation', True),
-            'run_soil': analysis_options.get('run_soil', True),
-            'run_proximity': analysis_options.get('run_proximity', True),
-        }
-        
-        # Run the analysis
-        try:
-            analysis_results, processing_time = await analyze_forest_boundary(calculation_id, db, options=analysis_service_options)
-            
-            # Update with results
-            update_query = text("""
-                UPDATE public.calculations
-                SET
-                    result_data = result_data || CAST(:analysis_data AS jsonb),
-                    processing_time_seconds = :processing_time,
-                    status = :status,
-                    completed_at = NOW()
-                WHERE id = :calc_id
-            """)
-            
-            db.execute(update_query, {
-                "analysis_data": json.dumps(analysis_results),
-                "processing_time": processing_time,
-                "status": "COMPLETED",
-                "calc_id": str(calculation_id)
-            })
-            db.commit()
-            print(f"Analysis completed for calculation {calculation_id}")
-        except Exception as e:
-            print(f"Analysis failed for calculation {calculation_id}: {e}")
-            calculation.status = CalculationStatus.FAILED
-            calculation.error_message = str(e)[:500]
-            db.commit()
+
+    # Set status to PENDING (ready for analysis to be triggered separately from Analysis page)
+    calculation.status = CalculationStatus.PENDING
+    db.commit()
+    print(f"Blocks saved for calculation {calculation_id}. Status set to PENDING.")
     
     # Refresh to get IDs
     for block in created_blocks:
@@ -3868,3 +4018,433 @@ async def delete_block(
     
     db.delete(block)
     db.commit()
+
+
+@router.post("/calculations/{calculation_id}/recalculate-areas")
+async def recalculate_areas(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Recalculate all area values for blocks and sub-areas using accurate geodesic calculations.
+
+    This endpoint will:
+    1. Recalculate areas for all blocks using ST_Area(geography())
+    2. Recalculate areas for all sub-areas using UTM projection
+    3. Update the result_data with corrected values
+
+    Use this endpoint to fix any area calculations that were done with the old (incorrect) method.
+    """
+    from ..utils.geometry_utils import calculate_area_geodesic_from_shapely
+    from shapely import wkb
+
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+
+    recalculated_blocks = 0
+    recalculated_subareas = 0
+
+    # Recalculate block areas
+    blocks = db.query(ForestBlock).filter(ForestBlock.calculation_id == calculation_id).all()
+    for block in blocks:
+        # Use PostGIS geography for accurate calculation
+        area_query = db.execute(
+            text("SELECT ST_Area(geography(geometry)) / 10000.0 as area_ha FROM forest_blocks WHERE id = :block_id"),
+            {"block_id": str(block.id)}
+        ).fetchone()
+
+        if area_query:
+            new_area = round(area_query.area_ha, 4)
+            old_area = block.area_hectares
+            block.area_hectares = new_area
+            recalculated_blocks += 1
+            print(f"Block {block.name}: {old_area:.4f} ha -> {new_area:.4f} ha (diff: {abs(new_area - old_area):.4f} ha)")
+
+    db.commit()
+
+    # Recalculate sub-area areas in result_data
+    result_data = calculation.result_data or {}
+    sub_areas = result_data.get("sub_areas", [])
+
+    for sa in sub_areas:
+        if "geometry" in sa:
+            try:
+                # Calculate using geodesic method
+                area_sqm, area_hectares = calculate_area_geodesic(sa["geometry"])
+                old_area = sa.get("area_hectares", 0)
+                sa["area_hectares"] = round(area_hectares, 4)
+                sa["area_sqm"] = round(area_sqm, 4)
+                recalculated_subareas += 1
+                print(f"Sub-area {sa.get('name', 'Unknown')}: {old_area:.4f} ha -> {area_hectares:.4f} ha (diff: {abs(area_hectares - old_area):.4f} ha)")
+            except Exception as e:
+                print(f"Error recalculating sub-area {sa.get('name', 'Unknown')}: {e}")
+
+    # Recalculate total excluded area
+    excluded_total = sum(sa.get("area_hectares", 0) for sa in sub_areas if sa.get("isExcluded", False) or sa.get("is_excluded", False))
+    result_data["excluded_area_hectares"] = round(excluded_total, 4)
+
+    # Update blocks in result_data with new areas
+    if "blocks" in result_data:
+        for block_data in result_data["blocks"]:
+            block_name = block_data.get("block_name")
+            # Find corresponding ForestBlock
+            for db_block in blocks:
+                if db_block.name == block_name:
+                    block_data["area_hectares"] = round(db_block.area_hectares, 4)
+                    break
+
+    # Recalculate block-level excluded areas
+    if "blocks" in result_data:
+        for block_data in result_data["blocks"]:
+            block_name = block_data.get("block_name")
+            block_excluded = sum(
+                sa.get("area_hectares", 0)
+                for sa in sub_areas
+                if (sa.get("isExcluded", False) or sa.get("is_excluded", False))
+                and sa.get("blockName") == block_name
+            )
+            block_data["excluded_area_hectares"] = round(block_excluded, 4)
+            original_area = block_data.get("area_hectares", 0)
+            block_data["effective_area_hectares"] = round(original_area - block_excluded, 4)
+
+    # Recalculate whole forest effective area
+    total_area = result_data.get("area_hectares", 0)
+    result_data["effective_area_hectares"] = round(total_area - excluded_total, 4)
+
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Recalculated areas for {recalculated_blocks} blocks and {recalculated_subareas} sub-areas",
+        "blocks_updated": recalculated_blocks,
+        "sub_areas_updated": recalculated_subareas,
+        "total_excluded_area": round(excluded_total, 4)
+    }
+
+
+# ============================================
+# DRAFT ENDPOINTS - Save work-in-progress
+# ============================================
+
+@router.post("/save-draft", response_model=DraftResponse, status_code=status.HTTP_200_OK)
+async def save_draft(
+    request: DraftSaveRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Save work-in-progress polygon creation (islands) as a draft.
+
+    Allows users to save their progress while creating forest boundaries with multiple islands.
+    Drafts can be resumed later from any device.
+
+    - **forest_name**: Name for the forest (required)
+    - **islands**: Array of island objects with geometry and area
+    - **mode**: Creation mode ('auto' or 'manual')
+    - **draft_id**: Optional UUID of existing draft to update
+    """
+    try:
+        # Calculate summary data
+        total_area = sum(island.get('area', 0) for island in request.islands)
+        islands_count = len(request.islands)
+
+        # Prepare draft data
+        draft_data = {
+            "islands": request.islands,
+            "mode": request.mode,
+            "islands_count": islands_count,
+            "total_area": total_area,
+        }
+
+        if request.draft_id:
+            # Update existing draft by ID
+            calculation = db.query(Calculation).filter(
+                Calculation.id == request.draft_id,
+                Calculation.user_id == current_user.id,
+                Calculation.is_draft == True
+            ).first()
+
+            if not calculation:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Draft not found or you don't have permission to update it"
+                )
+
+            calculation.forest_name = request.forest_name
+            calculation.draft_data = draft_data
+            calculation.updated_at = datetime.utcnow()
+
+        else:
+            # Check for existing draft with same forest name
+            existing_draft = db.query(Calculation).filter(
+                Calculation.user_id == current_user.id,
+                Calculation.forest_name == request.forest_name,
+                Calculation.is_draft == True
+            ).first()
+
+            if existing_draft:
+                # Update existing draft instead of creating new one
+                existing_draft.draft_data = draft_data
+                existing_draft.updated_at = datetime.utcnow()
+                
+                db.commit()
+                db.refresh(existing_draft)
+                
+                return DraftResponse(
+                    id=existing_draft.id,
+                    forest_name=existing_draft.forest_name,
+                    islands_count=islands_count,
+                    total_area=total_area,
+                    mode=request.mode,
+                    created_at=existing_draft.created_at,
+                    updated_at=existing_draft.updated_at
+                )
+            
+            # Create new draft - use placeholder values for required fields
+            calculation = Calculation(
+                user_id=current_user.id,
+                forest_name=request.forest_name,
+                status=CalculationStatus.PENDING,
+                is_draft=True,
+                draft_data=draft_data,
+                result_data={"draft": True},  # Minimal result_data
+                uploaded_filename="draft",  # Required field - placeholder for drafts
+                boundary_geom=None,  # Will be set when draft is converted to final
+            )
+            db.add(calculation)
+
+        db.commit()
+        db.refresh(calculation)
+
+        return DraftResponse(
+            id=calculation.id,
+            forest_name=calculation.forest_name,
+            islands_count=islands_count,
+            total_area=total_area,
+            mode=request.mode,
+            created_at=calculation.created_at,
+            updated_at=calculation.updated_at
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save draft: {str(e)}"
+        )
+
+
+@router.get("/drafts", response_model=List[DraftResponse])
+async def list_drafts(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    List all drafts for the current user.
+
+    Returns summary information for each draft including:
+    - Forest name
+    - Number of islands
+    - Total area
+    - Creation mode
+    - Timestamps
+    """
+    try:
+        drafts = db.query(Calculation).filter(
+            Calculation.user_id == current_user.id,
+            Calculation.is_draft == True
+        ).order_by(Calculation.updated_at.desc()).all()
+
+        response = []
+        for draft in drafts:
+            draft_data = draft.draft_data or {}
+            response.append(DraftResponse(
+                id=draft.id,
+                forest_name=draft.forest_name or "Untitled Draft",
+                islands_count=draft_data.get('islands_count', 0),
+                total_area=draft_data.get('total_area', 0.0),
+                mode=draft_data.get('mode', 'manual'),
+                created_at=draft.created_at,
+                updated_at=draft.updated_at
+            ))
+
+        return response
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list drafts: {str(e)}"
+        )
+
+
+@router.get("/drafts/{draft_id}", response_model=DraftDetailResponse)
+async def get_draft(
+    draft_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get full draft data including all islands and geometries.
+
+    Used when resuming a draft to restore the exact state.
+    """
+    try:
+        draft = db.query(Calculation).filter(
+            Calculation.id == draft_id,
+            Calculation.user_id == current_user.id,
+            Calculation.is_draft == True
+        ).first()
+
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found or you don't have permission to access it"
+            )
+
+        return DraftDetailResponse(
+            id=draft.id,
+            forest_name=draft.forest_name or "Untitled Draft",
+            draft_data=draft.draft_data or {},
+            created_at=draft.created_at,
+            updated_at=draft.updated_at
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get draft: {str(e)}"
+        )
+
+
+@router.delete("/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_draft(
+    draft_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a draft.
+
+    Permanently removes the draft from the database.
+    """
+    try:
+        draft = db.query(Calculation).filter(
+            Calculation.id == draft_id,
+            Calculation.user_id == current_user.id,
+            Calculation.is_draft == True
+        ).first()
+
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found or you don't have permission to delete it"
+            )
+
+        db.delete(draft)
+        db.commit()
+
+        return None
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete draft: {str(e)}"
+        )
+
+
+@router.post("/drafts/{draft_id}/convert", response_model=CalculationResponse)
+async def convert_draft_to_calculation(
+    draft_id: UUID,
+    request: ConvertDraftRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Convert a draft into an actual calculation.
+
+    Called when user completes the wizard after loading from draft.
+    Updates the is_draft flag and saves the boundary geometry.
+    """
+    try:
+        draft = db.query(Calculation).filter(
+            Calculation.id == draft_id,
+            Calculation.user_id == current_user.id,
+            Calculation.is_draft == True
+        ).first()
+
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found or you don't have permission to convert it"
+            )
+
+        # Get the outer boundary from the request
+        outer_boundary = request.outer_boundary
+        
+        # Debug: Log what we received
+        print(f"[convert_draft] Received outer_boundary type: {type(outer_boundary)}")
+        print(f"[convert_draft] outer_boundary: {outer_boundary}")
+        
+        # Convert GeoJSON to WKT for PostGIS storage
+        from ..services.map_creation_service import geojson_to_wkt
+        boundary_wkt = geojson_to_wkt(outer_boundary)
+
+        # Update calculation
+        draft.is_draft = False
+        draft.boundary_geom = func.ST_GeomFromText(boundary_wkt, 4326)
+        draft.draft_data = None  # Clear draft data
+        if not draft.uploaded_filename or draft.uploaded_filename == "draft":
+            draft.uploaded_filename = f"{draft.forest_name or 'Forest'}.geojson"
+        draft.updated_at = datetime.utcnow()
+
+        db.commit()
+        db.refresh(draft)
+
+        # Return as CalculationResponse
+        return CalculationResponse(
+            id=draft.id,
+            user_id=draft.user_id,
+            uploaded_filename=draft.uploaded_filename,
+            forest_name=draft.forest_name,
+            block_name=draft.block_name,
+            status=draft.status,
+            processing_time_seconds=draft.processing_time_seconds,
+            error_message=draft.error_message,
+            created_at=draft.created_at,
+            updated_at=draft.updated_at,
+            completed_at=draft.completed_at,
+            is_draft=draft.is_draft,
+            geometry=json.loads(db.scalar(func.ST_AsGeoJSON(draft.boundary_geom))) if draft.boundary_geom else None,
+            result_data=draft.result_data
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to convert draft: {str(e)}"
+        )
+

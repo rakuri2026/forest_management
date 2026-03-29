@@ -3,6 +3,8 @@ from .user import User, UserRole, UserStatus
 from .organization import Organization, SubscriptionType
 from .forest_manager import ForestManager
 from .calculation import Calculation, CalculationStatus
+from .forest_block import ForestBlock
+from .forest_sub_area import ForestSubArea
 from .community_forest import CommunityForest
 from .inventory import (
     TreeSpeciesCoefficient,
@@ -35,6 +37,8 @@ __all__ = [
     "ForestManager",
     "Calculation",
     "CalculationStatus",
+    "ForestBlock",
+    "ForestSubArea",
     "CommunityForest",
     "TreeSpeciesCoefficient",
     "InventoryCalculation",

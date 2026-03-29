@@ -2,7 +2,7 @@
 Calculation model - maps to existing calculations table
 Stores uploaded boundaries and analysis results
 """
-from sqlalchemy import Column, String, DateTime, Enum as SQLEnum, Integer, ForeignKey, Text, Index
+from sqlalchemy import Column, String, DateTime, Enum as SQLEnum, Integer, ForeignKey, Text, Index, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from geoalchemy2 import Geometry
@@ -15,6 +15,7 @@ from ..core.database import Base
 
 class CalculationStatus(str, enum.Enum):
     """Calculation processing status"""
+    PENDING = "pending"  # Waiting for block naming (multi-polygon upload)
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -36,8 +37,8 @@ class Calculation(Base):
     application_id = Column(UUID(as_uuid=True), nullable=True)  # Optional reference to application
 
     # File and geometry data
-    uploaded_filename = Column(String(255), nullable=False)
-    boundary_geom = Column(Geometry(srid=4326), nullable=False)  # Accepts Polygon or MultiPolygon
+    uploaded_filename = Column(String(255), nullable=True)  # Nullable for drafts
+    boundary_geom = Column(Geometry(srid=4326), nullable=True)  # Nullable for drafts
 
     # Forest-specific metadata
     forest_name = Column(String(255), nullable=True)
@@ -45,6 +46,10 @@ class Calculation(Base):
 
     # Analysis results stored as JSONB
     result_data = Column(JSONB, nullable=True)
+
+    # Draft support for work-in-progress polygon creation
+    is_draft = Column(Boolean, nullable=False, default=False)
+    draft_data = Column(JSONB, nullable=True)  # Stores islands and other draft data
 
     # User's selected analysis and map options (for re-analysis and tracking)
     analysis_options = Column(JSONB, nullable=True)  # e.g., {"run_elevation": true, "run_slope": false, ...}
@@ -57,6 +62,7 @@ class Calculation(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships

@@ -7,8 +7,10 @@ import BlockSplitterPro from './BlockSplitterPro';
 import SubAreaManager from './SubAreaManager';
 import BaseMapSelector from './BaseMapSelector';
 import LocationSearch from './LocationSearch';
+import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import { GPSPoint } from '../../utils/gpsUtils';
 import { formatArea, calculateAreaHectares, cleanAndValidateBlocks } from '../../utils/geometryValidation';
+import { getGeometryCenter } from '../../utils/geometryHelpers';
 
 interface Block {
   id: string;
@@ -34,10 +36,12 @@ interface MapCreationWizardProps {
     gpsPoints: GPSPoint[];
     blocks: Block[];
     subAreas: SubArea[];
-    runAnalysis?: boolean;
   }) => void;
   onCancel: () => void;
   isProcessing?: boolean;
+  initialPolygon?: any;  // For resuming drafts
+  initialDraftId?: string;  // Draft ID to update when saving
+  isDraft?: boolean;    // For drafts
 }
 
 const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
@@ -45,20 +49,31 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
   onComplete,
   onCancel,
   isProcessing = false,
+  initialPolygon,
+  initialDraftId,
+  isDraft = false,
 }) => {
-  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [currentStep, setCurrentStep] = useState<number>(isDraft ? 2 : 1);  // Skip GPS points for drafts
 
   // Step 1: GPS Points (optional)
   const [gpsPoints, setGpsPoints] = useState<GPSPoint[]>([]);
 
-  // Step 2: Outer Boundary
-  const [outerBoundary, setOuterBoundary] = useState<any>(null);
+  // Step 2: Outer Boundary - initialize from draft if available
+  const [outerBoundary, setOuterBoundary] = useState<any>(initialPolygon || null);
 
   // Step 3: Blocks
   const [blocks, setBlocks] = useState<Block[]>([]);
 
   // Step 4: Sub-areas (optional)
   const [subAreas, setSubAreas] = useState<SubArea[]>([]);
+
+  // Draft state - initialize from initialDraftId if resuming
+  const [draftId, setDraftId] = useState<string | null>(initialDraftId || null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  
+  // Edited block names (for review step renaming)
+  const [editedBlockNames, setEditedBlockNames] = useState<Record<string, string>>({});
 
   // Location search state
   const polygonCreatorRef = useRef<any>(null);
@@ -68,10 +83,48 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
   const steps = [
     { number: 1, name: 'GPS Points', optional: true },
     { number: 2, name: 'Outer Boundary', optional: false },
-    { number: 3, name: 'Forest Blocks', optional: false },
+    { number: 3, name: 'Forest Blocks', optional: true }, // Now optional!
     { number: 4, name: 'Sub-areas', optional: true },
     { number: 5, name: 'Review', optional: false },
   ];
+
+  // Auto-create default blocks from islands if no blocks defined manually
+  const getEffectiveBlocks = (): Block[] => {
+    if (blocks.length > 0) {
+      return blocks;
+    }
+    
+    // Auto-create blocks from islands (one block per island)
+    if (outerBoundary) {
+      // Check if it's a MultiPolygon (multiple islands)
+      if (outerBoundary.type === 'MultiPolygon' && outerBoundary.coordinates) {
+        // Create one block for each island
+        return outerBoundary.coordinates.map((coords: any, index: number) => {
+          const polygonGeom = {
+            type: 'Polygon',
+            coordinates: coords
+          };
+          const area = calculateAreaHectares(polygonGeom);
+          return {
+            id: `block-${Date.now()}-${index}`,
+            name: `${forestName} - Block ${index + 1}`,
+            geometry: polygonGeom,
+            area: area,
+          };
+        });
+      } else {
+        // Single polygon - create one block
+        const area = calculateAreaHectares(outerBoundary);
+        return [{
+          id: `block-${Date.now()}`,
+          name: `${forestName} - Block 1`,
+          geometry: outerBoundary,
+          area: area,
+        }];
+      }
+    }
+    return [];
+  };
 
   const canProceed = () => {
     switch (currentStep) {
@@ -80,11 +133,11 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
       case 2:
         return outerBoundary !== null;
       case 3:
-        return blocks.length > 0;
+        return true; // Blocks now optional - auto-creates default
       case 4:
         return true; // Sub-areas are optional
       case 5:
-        return outerBoundary !== null && blocks.length > 0;
+        return outerBoundary !== null;
       default:
         return false;
     }
@@ -108,26 +161,123 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
     }
   };
 
-  const handleFinish = (runAnalysis: boolean = true) => {
-    console.log('[MapCreationWizard] handleFinish called, runAnalysis:', runAnalysis);
+  // Save draft to server
+  const handleSaveDraft = async () => {
+    if (!outerBoundary) {
+      setSaveMessage('Please draw the boundary first');
+      return;
+    }
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      setSaveMessage('Please login first to save draft');
+      return;
+    }
+
+    // Prevent multiple saves while one is in progress
+    if (isSaving) {
+      setSaveMessage('Saving in progress...');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveMessage(null);
+
+    try {
+      // Convert islands to the format expected by the API
+      const islands = [{
+        id: `island-${Date.now()}`,
+        geometry: outerBoundary,
+        area: calculateAreaHectares(outerBoundary),
+      }];
+
+      // Capture current draftId to avoid closure issues
+      const currentDraftId = draftId;
+      
+      console.log('[MapCreationWizard] Saving draft...', {
+        forest_name: forestName,
+        islands_count: islands.length,
+        mode: 'manual',
+        draft_id: currentDraftId,
+      });
+
+      const response = await fetch('http://localhost:8001/api/forests/save-draft', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          forest_name: forestName,
+          islands: islands,
+          mode: 'manual',
+          draft_id: currentDraftId,  // Use captured value
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to save draft');
+      }
+
+      const result = await response.json();
+      console.log('[MapCreationWizard] Draft saved:', result);
+      
+      // Only update draftId if this was a new draft (currentDraftId was null)
+      if (!currentDraftId) {
+        setDraftId(result.id);
+      }
+      
+      setSaveMessage('Draft saved! You can close this page and resume later.');
+      setTimeout(() => setSaveMessage(null), 5000);
+    } catch (error: any) {
+      console.error('[MapCreationWizard] Error saving draft:', error);
+      const errorMsg = error.message || 'Failed to save draft. Please try again.';
+      setSaveMessage(errorMsg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleFinish = () => {
+    console.log('[MapCreationWizard] handleFinish called - saving without analysis');
+
+    // Use effective blocks (auto-create default if none defined)
+    let finalBlocks = getEffectiveBlocks();
+    
+    // Apply edited block names if user renamed any
+    if (Object.keys(editedBlockNames).length > 0) {
+      finalBlocks = finalBlocks.map(block => ({
+        ...block,
+        name: editedBlockNames[block.id] || block.name
+      }));
+    }
+    
     console.log('[MapCreationWizard] Data being sent:', {
       outerBoundary,
       gpsPoints,
-      blocks: blocks.length,
+      blocks: finalBlocks.length,
       subAreas: subAreas.length
     });
 
     // Clean and validate blocks before sending to backend
     console.log('[MapCreationWizard] Cleaning and validating blocks...');
-    const cleanedBlocks = cleanAndValidateBlocks(blocks, outerBoundary);
+    const cleanedBlocks = cleanAndValidateBlocks(finalBlocks, outerBoundary);
     console.log('[MapCreationWizard] Cleaned blocks:', cleanedBlocks.length);
+
+    // Clear polygon creator draft since we're completing the wizard
+    try {
+      localStorage.removeItem('polygon_creator_draft');
+      console.log('[MapCreationWizard] Cleared polygon creator draft');
+    } catch (error) {
+      console.error('[MapCreationWizard] Error clearing draft:', error);
+    }
 
     onComplete({
       outerBoundary,
       gpsPoints,
       blocks: cleanedBlocks,
       subAreas,
-      runAnalysis,
     });
   };
 
@@ -240,11 +390,16 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                   onBoundaryToggle={handleBoundaryToggle}
                 />
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="font-semibold text-blue-900 text-sm mb-2">💡 Tip</h4>
-                  <p className="text-xs text-blue-800">
-                    Use the location search to find your area, then draw the forest boundary on the map.
-                    Toggle to satellite view for better visibility of natural features.
-                  </p>
+                  <div className="flex items-start">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-blue-900 text-sm mb-2">💡 सुझाव</h4>
+                      <p className="text-xs text-blue-800">
+                        तपाईंको क्षेत्र फेला पार्न location search प्रयोग गर्नुहोस्, त्यसपछि नक्शामा वन सीमाना कोर्नुहोस्।
+                        प्राकृतिक विशेषताहरू राम्रोसँग देख्न satellite view मा टगल गर्नुहोस्।
+                      </p>
+                    </div>
+                    <HelpTooltip helpText={helpTexts.drawPolygon.text} position="left" />
+                  </div>
                 </div>
               </div>
 
@@ -261,17 +416,26 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
           )}
 
           {currentStep === 3 && outerBoundary && (
-            <BlockSplitterPro
-              outerBoundary={outerBoundary}
-              gpsPoints={gpsPoints}
-              onBlocksChange={setBlocks}
-              initialBlocks={blocks}
-            />
+            <div>
+              {/* Info banner - blocks are now optional */}
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                <p className="text-sm text-blue-800">
+                  <strong>Optional:</strong> Blocks are optional. If you don't create blocks, the entire forest boundary will be treated as one block. 
+                  Use "Save Draft" to save your progress and resume later.
+                </p>
+              </div>
+              <BlockSplitterPro
+                outerBoundary={outerBoundary}
+                gpsPoints={gpsPoints}
+                onBlocksChange={setBlocks}
+                initialBlocks={blocks}
+              />
+            </div>
           )}
 
-          {currentStep === 4 && blocks.length > 0 && (
+          {currentStep === 4 && (
             <SubAreaManager
-              blocks={blocks}
+              blocks={getEffectiveBlocks()}
               outerBoundary={outerBoundary}
               onSubAreasChange={setSubAreas}
               initialSubAreas={subAreas}
@@ -285,14 +449,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                 <h2 className="text-xl font-bold mb-4">Visual Review</h2>
                 <div style={{ height: '500px', width: '100%' }} className="border border-gray-300 rounded-lg overflow-hidden">
                   <MapContainer
-                    center={
-                      outerBoundary && outerBoundary.coordinates && outerBoundary.coordinates[0]
-                        ? [
-                            (outerBoundary.coordinates[0][0][1] + outerBoundary.coordinates[0][2][1]) / 2,
-                            (outerBoundary.coordinates[0][0][0] + outerBoundary.coordinates[0][2][0]) / 2,
-                          ]
-                        : [27.7172, 85.324]
-                    }
+                    center={getGeometryCenter(outerBoundary, [27.7172, 85.324])}
                     zoom={14}
                     style={{ height: '100%', width: '100%' }}
                   >
@@ -310,8 +467,8 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                       />
                     )}
 
-                    {/* Blocks - Blue */}
-                    {blocks.map((block) => (
+                    {/* Blocks - Blue (use effective blocks - auto-creates default if none defined) */}
+                    {getEffectiveBlocks().map((block) => (
                       <React.Fragment key={block.id}>
                         <GeoJSON
                           data={block.geometry}
@@ -323,10 +480,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                         />
                         {/* Block label */}
                         <Marker
-                          position={[
-                            block.geometry.coordinates[0].reduce((sum: number, coord: number[]) => sum + coord[1], 0) / block.geometry.coordinates[0].length,
-                            block.geometry.coordinates[0].reduce((sum: number, coord: number[]) => sum + coord[0], 0) / block.geometry.coordinates[0].length,
-                          ]}
+                          position={getGeometryCenter(block.geometry, [27.7172, 85.324])}
                           icon={L.divIcon({
                             className: 'block-label-review',
                             html: `<div style="background: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; border: 2px solid #3b82f6; white-space: nowrap;">${block.name}</div>`,
@@ -360,10 +514,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                           />
                           {/* Sub-area label */}
                           <Marker
-                            position={[
-                              subArea.geometry.coordinates[0].reduce((sum: number, coord: number[]) => sum + coord[1], 0) / subArea.geometry.coordinates[0].length,
-                              subArea.geometry.coordinates[0].reduce((sum: number, coord: number[]) => sum + coord[0], 0) / subArea.geometry.coordinates[0].length,
-                            ]}
+                            position={getGeometryCenter(subArea.geometry, [27.7172, 85.324])}
                             icon={L.divIcon({
                               className: 'subarea-label-review',
                               html: `<div style="background: ${color}; color: white; padding: 3px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; white-space: nowrap;">${subArea.name}</div>`,
@@ -421,7 +572,10 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
 
                   {/* Blocks */}
                   <div className="border-b pb-4">
-                    <h3 className="font-semibold mb-2">Forest Blocks ({blocks.length})</h3>
+                    <h3 className="font-semibold mb-2">
+                      Forest Blocks ({getEffectiveBlocks().length})
+                      {blocks.length === 0 && <span className="ml-2 text-xs text-gray-500">(auto-created from boundary)</span>}
+                    </h3>
                     <div className="max-h-48 overflow-y-auto">
                       <table className="min-w-full text-sm">
                         <thead className="bg-gray-50">
@@ -435,12 +589,31 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {blocks.map((block) => (
-                            <tr key={block.id}>
-                              <td className="px-3 py-2">{block.name}</td>
-                              <td className="px-3 py-2">{formatArea(block.area)}</td>
-                            </tr>
-                          ))}
+                          {getEffectiveBlocks().map((block, index) => {
+                            // Check if user has edited this block name
+                            const editedName = editedBlockNames[block.id] !== undefined 
+                              ? editedBlockNames[block.id] 
+                              : block.name;
+                            return (
+                              <tr key={block.id}>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="text"
+                                    value={editedName}
+                                    onChange={(e) => {
+                                      setEditedBlockNames(prev => ({
+                                        ...prev,
+                                        [block.id]: e.target.value
+                                      }));
+                                    }}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                    placeholder="Enter block name"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">{formatArea(block.area)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -502,7 +675,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                     <p className="text-sm text-green-800">
                       <strong>Ready to proceed!</strong>
                       <br />
-                      Review the map and details above, then click "Finish & Analyze" to create the calculation and run the forest analysis.
+                      Review the map and details above, then click "Save" to create the forest. You can run analysis from the Analysis page when ready.
                     </p>
                   </div>
                 </div>
@@ -513,8 +686,15 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
 
         {/* Navigation Buttons */}
         <div className="bg-white p-6 rounded-lg shadow">
+          {/* Save Draft Message */}
+          {saveMessage && (
+            <div className={`mb-4 p-3 rounded-md ${saveMessage.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+              {saveMessage}
+            </div>
+          )}
+
           <div className="flex justify-between items-center">
-            <div>
+            <div className="flex gap-3">
               {currentStep > 1 && (
                 <button
                   onClick={handleBack}
@@ -522,6 +702,21 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                 >
                   Back
                 </button>
+              )}
+              
+              {/* Save Draft Button - available after step 2 */}
+              {currentStep >= 2 && outerBoundary && (
+                <div className="flex items-center">
+                  <HelpTooltip helpText={helpTexts.saveDraft.text} position="top">
+                    <button
+                      onClick={handleSaveDraft}
+                      disabled={isSaving}
+                      className="px-4 py-2 text-blue-700 bg-blue-100 border border-blue-300 rounded-md hover:bg-blue-200 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    >
+                      {isSaving ? 'Saving...' : (draftId ? 'Update Draft' : 'Save Draft')}
+                    </button>
+                  </HelpTooltip>
+                </div>
               )}
             </div>
 
@@ -546,13 +741,17 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
               )}
 
               {currentStep === steps.length && (
-                <button
-                  onClick={() => handleFinish(false)}
-                  disabled={!canProceed() || isProcessing}
-                  className="px-8 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-semibold"
-                >
-                  {isProcessing ? 'Processing...' : 'Save'}
-                </button>
+                <div className="flex items-center">
+                  <HelpTooltip helpText={helpTexts.saveAndNext.text} position="top">
+                    <button
+                      onClick={handleFinish}
+                      disabled={!canProceed() || isProcessing}
+                      className="px-8 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-semibold"
+                    >
+                      {isProcessing ? 'Processing...' : 'Save'}
+                    </button>
+                  </HelpTooltip>
+                </div>
               )}
             </div>
           </div>

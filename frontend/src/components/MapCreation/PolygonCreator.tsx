@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, GeoJSON, Marker, Polyline, useMap } from 'reac
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
+import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import { GPSPoint, gpsPointsToPolygon } from '../../utils/gpsUtils';
 import {
   validatePolygonGeometry,
@@ -23,6 +24,15 @@ export interface PolygonCreatorHandle {
   setWardBoundary: (geometry: any) => void;
 }
 
+interface Island {
+  id: string;
+  geometry: any;
+  area: number;
+  layer?: L.Layer;
+}
+
+const ISLAND_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+
 // Component to capture map reference
 const MapRefCapture: React.FC<{ onMapReady: (map: L.Map) => void }> = ({ onMapReady }) => {
   const map = useMap();
@@ -36,26 +46,28 @@ const MapRefCapture: React.FC<{ onMapReady: (map: L.Map) => void }> = ({ onMapRe
   return null;
 };
 
-// Map component with Leaflet-Geoman drawing controls
-const DrawingControls: React.FC<{
+// Map component with Leaflet-Geoman drawing controls for multiple islands
+const MultiIslandDrawingControls: React.FC<{
   mode: 'auto' | 'manual';
   onPolygonCreated: (polygon: any) => void;
-  initialPolygon?: any;
-}> = ({ mode, onPolygonCreated, initialPolygon }) => {
+  islands: Island[];
+  activeIslandId: string | null;
+  onIslandLayerCreated: (islandId: string, layer: L.Layer) => void;
+}> = ({ mode, onPolygonCreated, islands, activeIslandId, onIslandLayerCreated }) => {
   const map = useMap();
-  const layerRef = useRef<L.Layer | null>(null);
+  const layersRef = useRef<Map<string, L.Layer>>(new Map());
 
   useEffect(() => {
     if (mode === 'manual') {
-      // Enable Leaflet-Geoman controls
+      // Enable Leaflet-Geoman controls (polygon disabled by default until Add Island is clicked)
       map.pm.addControls({
         position: 'topleft',
-        drawPolygon: true,
+        drawPolygon: false,  // Disabled until Add Island is clicked
         drawMarker: false,
         drawCircle: false,
         drawCircleMarker: false,
         drawPolyline: false,
-        drawRectangle: true,
+        drawRectangle: false,  // Also disable rectangle
         editMode: true,
         dragMode: false,
         cutPolygon: false,
@@ -66,8 +78,17 @@ const DrawingControls: React.FC<{
       const handleCreate = (e: any) => {
         const layer = e.layer;
         const geoJSON = layer.toGeoJSON();
-        layerRef.current = layer;
+
+        // Store layer reference for the active island
+        if (activeIslandId) {
+          layersRef.current.set(activeIslandId, layer);
+          onIslandLayerCreated(activeIslandId, layer);
+        }
+
         onPolygonCreated(geoJSON.geometry);
+        
+        // Disable polygon drawing after completion
+        map.pm.disableDraw('Polygon');
       };
 
       // Listen for polygon editing
@@ -79,38 +100,102 @@ const DrawingControls: React.FC<{
         });
       };
 
+      // Listen for polygon removal
+      const handleRemove = (e: any) => {
+        const layer = e.layer;
+        // Find and remove from layersRef
+        for (const [id, storedLayer] of layersRef.current.entries()) {
+          if (storedLayer === layer) {
+            layersRef.current.delete(id);
+            break;
+          }
+        }
+      };
+
       map.on('pm:create', handleCreate);
       map.on('pm:edit', handleEdit);
+      map.on('pm:remove', handleRemove);
 
       return () => {
         map.pm.removeControls();
         map.off('pm:create', handleCreate);
         map.off('pm:edit', handleEdit);
+        map.off('pm:remove', handleRemove);
 
-        // Remove drawn layer if exists
-        if (layerRef.current) {
-          map.removeLayer(layerRef.current);
-        }
+        // DON'T remove layers here - they're managed by the islands display useEffect
+        // Only cleanup event listeners
       };
     }
   }, [mode, map, onPolygonCreated]);
 
-  // Load initial polygon if exists
+  // Control polygon tool based on activeIslandId
   useEffect(() => {
-    if (initialPolygon && mode === 'manual') {
-      const geoJsonLayer = L.geoJSON(initialPolygon, {
-        pmIgnore: false,
-      });
-      geoJsonLayer.addTo(map);
-      layerRef.current = geoJsonLayer;
-
-      // Fit bounds to polygon
-      map.fitBounds(geoJsonLayer.getBounds(), { padding: [50, 50] });
+    if (mode === 'manual' && map) {
+      if (activeIslandId) {
+        // Enable polygon drawing when an island is being added
+        map.pm.enableDraw('Polygon', {
+          snappable: true,
+          snapDistance: 20,
+        });
+      } else {
+        // Disable polygon drawing when no island is being added
+        map.pm.disableDraw('Polygon');
+      }
     }
-  }, [initialPolygon, map, mode]);
+  }, [mode, activeIslandId, map]);
+
+  // Display existing islands on map
+  useEffect(() => {
+    if (mode === 'manual') {
+      // Remove old layers that are not in current islands
+      const currentIslandIds = new Set(islands.map(i => i.id));
+      for (const [id, layer] of layersRef.current.entries()) {
+        if (!currentIslandIds.has(id) && map.hasLayer(layer)) {
+          map.removeLayer(layer);
+          layersRef.current.delete(id);
+        }
+      }
+
+      // Add islands that don't have layers yet
+      islands.forEach((island, index) => {
+        if (!layersRef.current.has(island.id) && island.geometry) {
+          const color = ISLAND_COLORS[index % ISLAND_COLORS.length];
+          const geoJsonLayer = L.geoJSON(island.geometry, {
+            pmIgnore: false,
+            style: {
+              color: color,
+              weight: 3,
+              fillOpacity: 0.2,
+              fillColor: color,
+            }
+          });
+          geoJsonLayer.addTo(map);
+          layersRef.current.set(island.id, geoJsonLayer);
+        }
+      });
+
+      // Fit bounds to show all islands
+      if (islands.length > 0) {
+        const allBounds: L.LatLngBounds[] = [];
+        islands.forEach(island => {
+          const layer = layersRef.current.get(island.id);
+          if (layer && (layer as any).getBounds) {
+            allBounds.push((layer as any).getBounds());
+          }
+        });
+
+        if (allBounds.length > 0) {
+          const combinedBounds = allBounds.reduce((acc, bounds) => acc.extend(bounds), allBounds[0]);
+          map.fitBounds(combinedBounds, { padding: [50, 50] });
+        }
+      }
+    }
+  }, [islands, map, mode]);
 
   return null;
 };
+
+const DRAFT_STORAGE_KEY = 'polygon_creator_draft';
 
 const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
   gpsPoints = [],
@@ -118,19 +203,83 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
   initialPolygon,
 }, ref) => {
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
-  const [polygon, setPolygon] = useState<any>(initialPolygon);
+  const [islands, setIslands] = useState<Island[]>([]);
+  const [activeIslandId, setActiveIslandId] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
   const [validation, setValidation] = useState<{
     valid: boolean;
     error?: string;
     warnings?: string[];
   } | null>(null);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showSaveIndicator, setShowSaveIndicator] = useState(false);
 
   // Refs for map control
   const mapRef = useRef<L.Map | null>(null);
   const wardBoundaryLayerRef = useRef<L.GeoJSON | null>(null);
 
-  // Expose methods to parent via ref
+  // Load from initialPolygon on mount
+  useEffect(() => {
+    if (initialPolygon) {
+      // Check if it's a MultiPolygon
+      if (initialPolygon.type === 'MultiPolygon') {
+        const loadedIslands: Island[] = initialPolygon.coordinates.map((coords: any, index: number) => {
+          const polygonGeom = {
+            type: 'Polygon',
+            coordinates: coords
+          };
+          return {
+            id: `island-${Date.now()}-${index}`,
+            geometry: polygonGeom,
+            area: calculateAreaHectares(polygonGeom),
+          };
+        });
+        setIslands(loadedIslands);
+        // Notify parent with MultiPolygon
+        onPolygonChange(initialPolygon);
+      } else if (initialPolygon.type === 'Polygon') {
+        // Single polygon
+        const newIsland = {
+          id: `island-${Date.now()}-0`,
+          geometry: initialPolygon,
+          area: calculateAreaHectares(initialPolygon),
+        };
+        setIslands([newIsland]);
+        // Notify parent with the polygon
+        onPolygonChange(initialPolygon);
+      }
+    }
+  }, [initialPolygon]);
+
+  // Manual save draft (called by user clicking Save Draft button)
+  const saveDraft = () => {
+    try {
+      const draft = {
+        islands: islands,
+        mode,
+        activeIslandId: activeIslandId,
+        timestamp: new Date().toISOString(),
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      setLastSaved(new Date());
+      setShowSaveIndicator(true);
+      setTimeout(() => setShowSaveIndicator(false), 2000);
+    } catch (error) {
+      console.error('[PolygonCreator] Error saving draft:', error);
+    }
+  };
+
+  // Clear draft when completing (passing polygon to parent)
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      setLastSaved(null);
+    } catch (error) {
+      console.error('[PolygonCreator] Error clearing draft:', error);
+    }
+  };
+
+  // Expose saveDraft method to parent
   useImperativeHandle(ref, () => ({
     zoomToBounds: (bounds: [number, number, number, number]) => {
       console.log('[PolygonCreator] zoomToBounds called:', bounds);
@@ -197,13 +346,14 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
   const handleModeChange = (newMode: 'auto' | 'manual') => {
     setMode(newMode);
     setError('');
+    setActiveIslandId(null);
 
     if (newMode === 'auto' && gpsPoints.length < 3) {
       setError('At least 3 GPS points are required for auto-create mode');
     }
   };
 
-  // Auto-create polygon from GPS points
+  // Auto-create polygon from GPS points (single island only)
   const handleAutoCreate = () => {
     setError('');
 
@@ -225,10 +375,47 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
         return;
       }
 
-      setPolygon(geometry);
-      onPolygonChange(geometry);
+      // Create single island from GPS points
+      const newIsland: Island = {
+        id: `island-${Date.now()}`,
+        geometry: geometry,
+        area: calculateAreaHectares(geometry),
+      };
+
+      setIslands([newIsland]);
+      updateParentWithCombinedGeometry([newIsland]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create polygon');
+    }
+  };
+
+  // Add new island for manual drawing
+  const handleAddIsland = () => {
+    const newIslandId = `island-${Date.now()}`;
+    setActiveIslandId(newIslandId);
+    setError('');
+
+    // Add placeholder island (will be updated when drawn)
+    const newIsland: Island = {
+      id: newIslandId,
+      geometry: null,
+      area: 0,
+    };
+
+    setIslands(prev => [...prev, newIsland]);
+  };
+
+  // Remove island
+  const handleRemoveIsland = (islandId: string) => {
+    // Compute new value first
+    const updatedIslands = islands.filter(i => i.id !== islandId);
+    
+    // Update state and parent geometry separately
+    setIslands(updatedIslands);
+    updateParentWithCombinedGeometry(updatedIslands);
+
+    if (activeIslandId === islandId) {
+      setActiveIslandId(null);
     }
   };
 
@@ -245,25 +432,52 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
       return;
     }
 
-    setPolygon(geometry);
-    onPolygonChange(geometry);
-  };
-
-  // Simplify polygon (reduce vertices)
-  const handleSimplify = () => {
-    if (!polygon) return;
-
-    try {
-      const simplified = simplifyPolygon(polygon, 0.0001);
-      setPolygon(simplified);
-      onPolygonChange(simplified);
-    } catch (err) {
-      setError('Failed to simplify polygon');
+    if (activeIslandId) {
+      // Update the active island - compute new value first
+      const updatedIslands = islands.map(island =>
+        island.id === activeIslandId
+          ? { ...island, geometry, area: calculateAreaHectares(geometry) }
+          : island
+      );
+      
+      // Update state and parent geometry separately to avoid setState during render warning
+      setIslands(updatedIslands);
+      updateParentWithCombinedGeometry(updatedIslands);
+      setActiveIslandId(null); // Clear active island after drawing
     }
   };
 
-  // Calculate area
-  const area = polygon ? calculateAreaHectares(polygon) : 0;
+  // Update layer reference for island
+  const handleIslandLayerCreated = (islandId: string, layer: L.Layer) => {
+    setIslands(prev =>
+      prev.map(island =>
+        island.id === islandId ? { ...island, layer } : island
+      )
+    );
+  };
+
+  // Combine all islands into single geometry (Polygon or MultiPolygon)
+  const updateParentWithCombinedGeometry = (islandList: Island[]) => {
+    const validIslands = islandList.filter(i => i.geometry);
+
+    if (validIslands.length === 0) {
+      onPolygonChange(null);
+    } else if (validIslands.length === 1) {
+      // Single polygon
+      onPolygonChange(validIslands[0].geometry);
+    } else {
+      // MultiPolygon
+      const multiPolygon = {
+        type: 'MultiPolygon',
+        coordinates: validIslands.map(i => i.geometry.coordinates)
+      };
+      onPolygonChange(multiPolygon);
+    }
+  };
+
+  // Calculate total area
+  const totalArea = islands.reduce((sum, island) => sum + island.area, 0);
+  const validIslandsCount = islands.filter(i => i.geometry).length;
 
   // Prepare map data
   const mapCenter: [number, number] =
@@ -274,7 +488,26 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-lg shadow">
-        <h2 className="text-xl font-bold mb-4">Create Outer Boundary</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Create Outer Boundary</h2>
+
+          {/* Auto-save indicator */}
+          <div className="flex items-center gap-2">
+            {showSaveIndicator && (
+              <span className="text-sm text-green-600 flex items-center gap-1">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                Saved
+              </span>
+            )}
+            {lastSaved && !showSaveIndicator && (
+              <span className="text-xs text-gray-500">
+                Last saved: {lastSaved.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        </div>
 
         {/* Mode Selection */}
         <div className="mb-6">
@@ -305,7 +538,7 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
             >
               <div className="font-semibold">Manual Digitizing</div>
               <div className="text-sm text-gray-600 mt-1">
-                Draw polygon directly on map
+                Draw polygon(s) directly on map
               </div>
             </button>
           </div>
@@ -333,23 +566,103 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
           </div>
         )}
 
-        {/* Manual Mode */}
+        {/* Manual Mode - Island Management */}
         {mode === 'manual' && (
           <div className="space-y-4">
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
-              <p className="text-sm text-blue-800">
-                <strong>Instructions:</strong>
-                <br />
-                • Click the <strong>polygon icon</strong> in the map toolbar to start drawing
-                <br />
-                • Click on the map to add vertices
-                <br />
-                • Double-click or click the first point to complete
-                <br />
-                • Use <strong>edit mode</strong> to move vertices
-                <br />• Use <strong>delete mode</strong> to remove polygon
-              </p>
+              <div className="flex items-start">
+                <p className="text-sm text-blue-800 flex-1">
+                  <strong>Instructions:</strong>
+                  <br />
+                  1. Click <strong>"+ Add Island"</strong> button first
+                  <br />
+                  2. Then click the <strong>polygon icon</strong> in the map toolbar to draw
+                  <br />
+                  3. Click on map to add vertices, double-click to complete polygon
+                </p>
+                <HelpTooltip helpText={helpTexts.addIsland.text} position="left" />
+              </div>
             </div>
+
+            {/* Island List - Only show completed islands */}
+            {validIslandsCount > 0 && (
+              <div className="border border-gray-300 rounded-lg p-4">
+                {/* Drawing indicator */}
+                {activeIslandId && (
+                  <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                    <span className="font-semibold">Drawing active!</span> Click polygon tool, draw polygon, double-click to finish.
+                  </div>
+                )}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center">
+                    <h3 className="font-semibold text-gray-800">
+                      Islands: {validIslandsCount}
+                    </h3>
+                    <HelpTooltip helpText={helpTexts.islands.text} position="right" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <HelpTooltip helpText={helpTexts.addIsland.text} position="top">
+                      <button
+                        onClick={handleAddIsland}
+                        disabled={activeIslandId !== null}
+                        className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        + Add Island
+                      </button>
+                    </HelpTooltip>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {islands.filter(i => i.geometry).map((island, index) => (
+                    <div
+                      key={island.id}
+                      className="flex items-center gap-3 p-3 rounded border-2 border-gray-200 bg-gray-50"
+                    >
+                      {/* Color indicator */}
+                      <div
+                        className="w-8 h-8 rounded border-2"
+                        style={{
+                          backgroundColor: ISLAND_COLORS[index % ISLAND_COLORS.length],
+                          borderColor: ISLAND_COLORS[index % ISLAND_COLORS.length],
+                        }}
+                      ></div>
+
+                      {/* Island info */}
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">
+                          Island {index + 1}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Area: {formatArea(island.area)}
+                        </div>
+                      </div>
+
+                      {/* Remove button */}
+                      <button
+                        onClick={() => handleRemoveIsland(island.id)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Remove island"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add First Island Button */}
+            {islands.length === 0 && (
+              <button
+                onClick={handleAddIsland}
+                className="w-full px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              >
+                + Add First Island
+              </button>
+            )}
           </div>
         )}
 
@@ -372,30 +685,49 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
           </div>
         )}
 
-        {/* Polygon Info */}
-        {polygon && (
+        {/* Total Info */}
+        {validIslandsCount > 0 && (
           <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-md">
-            <h3 className="font-semibold text-green-800 mb-2">Polygon Created</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-gray-600">Area:</span>
-                <span className="ml-2 font-semibold">{formatArea(area)}</span>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <h3 className="font-semibold text-green-800 mb-2">
+                  {validIslandsCount === 1 ? 'Polygon Created' : `${validIslandsCount} Islands Created`}
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Total Area:</span>
+                    <span className="ml-2 font-semibold">{formatArea(totalArea)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Type:</span>
+                    <span className="ml-2 font-semibold">
+                      {validIslandsCount === 1 ? 'Polygon' : 'MultiPolygon'}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <span className="text-gray-600">Type:</span>
-                <span className="ml-2 font-semibold">{polygon.type}</span>
-              </div>
-            </div>
 
-            <div className="mt-3 flex gap-2">
-              {mode === 'auto' && gpsPoints.length > 20 && (
+              {/* Clear Draft Button */}
+              {lastSaved && (
                 <button
-                  onClick={handleSimplify}
-                  className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                  onClick={() => {
+                    if (window.confirm('Clear saved draft? This cannot be undone.')) {
+                      clearDraft();
+                      setIslands([]);
+                      setActiveIslandId(null);
+                      onPolygonChange(null);
+                    }
+                  }}
+                  className="ml-4 px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded border border-red-300 transition-colors"
+                  title="Clear saved draft and start fresh"
                 >
-                  Simplify (Reduce Vertices)
+                  Clear Draft
                 </button>
               )}
+            </div>
+
+            <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+              Click <strong>Next</strong> when done drawing all islands.
             </div>
           </div>
         )}
@@ -431,10 +763,10 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
               </>
             )}
 
-            {/* Show created polygon */}
-            {polygon && mode === 'auto' && (
+            {/* Show created polygon in auto mode */}
+            {mode === 'auto' && islands.length > 0 && islands[0].geometry && (
               <GeoJSON
-                data={polygon}
+                data={islands[0].geometry}
                 style={{
                   color: '#10b981',
                   weight: 3,
@@ -443,11 +775,13 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
               />
             )}
 
-            {/* Drawing controls for manual mode */}
-            <DrawingControls
+            {/* Drawing controls for manual mode with multi-island support */}
+            <MultiIslandDrawingControls
               mode={mode}
               onPolygonCreated={handleManualPolygon}
-              initialPolygon={initialPolygon}
+              islands={islands}
+              activeIslandId={activeIslandId}
+              onIslandLayerCreated={handleIslandLayerCreated}
             />
           </MapContainer>
         </div>

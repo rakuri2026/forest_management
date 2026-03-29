@@ -1,7 +1,7 @@
 """add building size categories
 
-Revision ID: 011_add_building_size_categories
-Revises: 010_add_user_group_extent_tables
+Revision ID: 011
+Revises: 010
 Create Date: 2026-03-21
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '011_add_building_size_categories'
-down_revision = '010_add_user_group_extent_tables'
+revision = '011'
+down_revision = '010'
 branch_labels = None
 depends_on = None
 

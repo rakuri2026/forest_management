@@ -230,14 +230,16 @@ export interface AnalysisResultData {
 export interface Calculation {
   id: string;
   user_id: string;
-  uploaded_filename: string;
+  uploaded_filename?: string | null;
   forest_name?: string;
   block_name?: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   processing_time_seconds?: number;
   error_message?: string;
   created_at: string;
+  updated_at?: string;
   completed_at?: string;
+  is_draft?: boolean;
   geometry?: any;
   result_data?: AnalysisResultData;
 }

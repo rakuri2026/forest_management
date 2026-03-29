@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import {
   parseCSVCoordinates,
   parsePastedCoordinates,
@@ -443,9 +444,12 @@ const GPSPointInput: React.FC<GPSPointInputProps> = ({ onPointsChange, initialPo
       {points.length > 0 && (
         <div className="bg-white p-6 rounded-lg shadow">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              GPS Points ({points.length})
-            </h3>
+            <div className="flex items-center">
+              <h3 className="text-lg font-semibold">
+                GPS Points ({points.length})
+              </h3>
+              <HelpTooltip helpText={helpTexts.gpsPoints.text} position="right" />
+            </div>
             <button
               onClick={handleClearAll}
               className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"

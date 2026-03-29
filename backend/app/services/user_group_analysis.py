@@ -1167,7 +1167,7 @@ class UserGroupAnalysisService:
     # Land Cover Analysis
     # ============================================================================
 
-    async def analyze_land_cover(self, calculation_id: str) -> Dict[str, Any]:
+    async def analyze_land_cover(self, calculation_id: str, force_refresh: bool = False) -> Dict[str, Any]:
         """
         Perform comprehensive land cover and biomass analysis for user group map
 
@@ -1178,8 +1178,11 @@ class UserGroupAnalysisService:
         4. Performs land cover classification (ESA World Cover)
         5. Calculates biomass and timber volume (AGB 2022 Nepal)
 
+        Results are cached in database for performance optimization.
+
         Args:
             calculation_id: The calculation (community forest) ID
+            force_refresh: If True, bypass cache and re-run analysis
 
         Returns:
             Dictionary with land cover classes, biomass, and area statistics
@@ -1190,7 +1193,7 @@ class UserGroupAnalysisService:
         from datetime import datetime
 
         try:
-            logger.info(f"Starting land cover analysis for calculation {calculation_id}")
+            logger.info(f"Starting land cover analysis for calculation {calculation_id} (force_refresh={force_refresh})")
 
             # Step 1: Get community forest boundary
             calc = self.db.query(Calculation).filter(
@@ -1202,6 +1205,13 @@ class UserGroupAnalysisService:
                     "Community Forest boundary not found. "
                     "Please upload a forest boundary in the Analysis tab first."
                 )
+
+            # Step 1.5: Check for cached results (unless force_refresh)
+            if not force_refresh and calc.result_data and 'user_group_land_cover' in calc.result_data:
+                logger.info(f"Returning cached land cover results for calculation {calculation_id}")
+                cached_results = calc.result_data['user_group_land_cover']
+                cached_results['from_cache'] = True
+                return cached_results
 
             # Step 2: Get user group extent
             extent = self.db.query(UserGroupExtent).filter(
@@ -1288,7 +1298,8 @@ class UserGroupAnalysisService:
             logger.info(f"Land cover analysis completed: {len(land_cover_classes)} classes found")
             logger.info(f"Total biomass: {total_biomass:.2f} Mg, Total volume: {total_volume:.2f} m³")
 
-            return {
+            # Prepare results
+            results = {
                 'user_group_area_ha': round(user_group_area, 4),
                 'forest_overlap_area_ha': round(forest_overlap_area, 4),
                 'net_analysis_area_ha': round(net_area, 4),
@@ -1297,9 +1308,19 @@ class UserGroupAnalysisService:
                 'total_volume_m3': round(total_volume, 2),
                 'avg_biomass_mg_per_ha': round(avg_biomass, 2),
                 'avg_volume_m3_per_ha': round(avg_volume, 2),
-                'analysis_date': datetime.utcnow(),
-                'has_forest_overlap': forest_overlap_area > 0
+                'analysis_date': datetime.utcnow().isoformat(),
+                'has_forest_overlap': forest_overlap_area > 0,
+                'from_cache': False
             }
+
+            # Cache results in database for future retrieval
+            if calc.result_data is None:
+                calc.result_data = {}
+            calc.result_data['user_group_land_cover'] = results
+            self.db.commit()
+            logger.info(f"Cached land cover results in database for calculation {calculation_id}")
+
+            return results
 
         except ValueError:
             # Re-raise ValueError with original message

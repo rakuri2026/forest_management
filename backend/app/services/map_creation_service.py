@@ -4,6 +4,7 @@ from shapely.wkt import dumps as wkt_dumps
 from geoalchemy2.shape import from_shape
 import json
 import logging
+from ..utils.geometry_utils import calculate_area_geodesic_from_shapely
 
 # Configure logging for geometry validation
 logger = logging.getLogger(__name__)
@@ -24,6 +25,16 @@ def geojson_to_wkt(geojson_geometry: Dict[str, Any]) -> str:
         WKT string with SRID prefix
     """
     try:
+        if not geojson_geometry:
+            raise ValueError("GeoJSON geometry is None or empty")
+        
+        if not isinstance(geojson_geometry, dict):
+            raise ValueError(f"GeoJSON geometry must be a dict, got {type(geojson_geometry)}")
+        
+        geom_type = geojson_geometry.get('type')
+        if not geom_type:
+            raise ValueError("GeoJSON geometry missing 'type' property")
+        
         # Convert GeoJSON to Shapely geometry
         geom = shape(geojson_geometry)
 
@@ -32,6 +43,8 @@ def geojson_to_wkt(geojson_geometry: Dict[str, Any]) -> str:
 
         # Add SRID prefix for PostGIS (WGS84 = 4326)
         return f'SRID=4326;{wkt}'
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Failed to convert GeoJSON to WKT: {str(e)}")
 
@@ -87,25 +100,50 @@ def process_map_creation_data(
 
         # Store sub-areas metadata if provided
         if sub_areas:
+            # Convert outer boundary to shapely for clipping
+            outer_geom = shape(outer_boundary)
+            
             metadata["sub_areas"] = []
             excluded_area_total = 0
             for sub_area in sub_areas:
                 is_excluded = sub_area.get("isExcluded", False) or sub_area.get("is_excluded", False)
+                
+                # Clip sub-area to boundary
+                sub_geom = shape(sub_area["geometry"])
+                print(f"[map_creation] Sub-area {sub_area.get('name')} original geometry type: {sub_geom.geom_type}")
+                print(f"[map_creation] Sub-area {sub_area.get('name')} original area: {sub_geom.area}")
+                
+                clipped_geom = sub_geom.intersection(outer_geom)
+                
+                if clipped_geom.is_empty:
+                    logger.warning(f"Sub-area {sub_area.get('name', 'unknown')} is outside boundary, skipping")
+                    continue
+
+                # Use clipped geometry
+                sub_area_geom = clipped_geom
+
+                # Calculate area using proper UTM projection (geodesic calculation)
+                sub_area_area_sqm, sub_area_area_ha = calculate_area_geodesic_from_shapely(sub_area_geom)
+
+                print(f"[map_creation] Sub-area {sub_area.get('name')} clipped area: {sub_area_area_ha} ha")
+                
                 sub_area_data = {
                     "id": sub_area["id"],
                     "name": sub_area["name"],
                     "category": sub_area["category"],
-                    "area_hectares": sub_area["area"],
+                    "area_hectares": round(sub_area_area_ha, 4),
+                    "area_sqm": round(sub_area_area_sqm, 4),
                     "block_id": sub_area.get("blockId"),
                     "block_name": sub_area.get("blockName"),
-                    "geometry": sub_area["geometry"],
-                    "is_excluded": is_excluded,  # Track if this is excluded from forest calculations (private land)
+                    "blockBreakdown": sub_area.get("blockBreakdown"),  # Preserve cross-block breakdown
+                    "geometry": mapping(sub_area_geom),  # Store clipped geometry
+                    "is_excluded": is_excluded,
                 }
                 metadata["sub_areas"].append(sub_area_data)
 
                 # Track excluded area
                 if is_excluded:
-                    excluded_area_total += sub_area["area"]
+                    excluded_area_total += sub_area_area_ha
 
             metadata["sub_areas_count"] = len(sub_areas)
             metadata["excluded_area_hectares"] = excluded_area_total

@@ -127,6 +127,9 @@ class FieldInventoryBlockSummaryResponse(BaseModel):
     # Growing stock
     total_growing_stock_m3_per_ha: Optional[Decimal]
 
+    # Satellite-derived volume (from AGB raster)
+    satellite_volume_m3_per_ha: Optional[Decimal] = Field(None, description="Satellite-derived volume from AGB 2022 Nepal raster (m³/ha)")
+
     # Forest condition
     regeneration_condition: Optional[str]
     forest_condition: Optional[str]

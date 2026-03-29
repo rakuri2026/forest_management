@@ -664,7 +664,10 @@ def transform_to_4326(geometry: Any, source_crs: Optional[CRS]) -> Any:
 
 def calculate_polygon_area_utm(polygon: Polygon) -> Tuple[float, float]:
     """
-    Calculate accurate area of a polygon using UTM projection
+    Calculate accurate area of a polygon using UTM projection.
+
+    Automatically selects the correct UTM zone based on the polygon's location.
+    Works globally for any coordinates.
 
     Args:
         polygon: Shapely Polygon in EPSG:4326 (WGS84)
@@ -672,19 +675,25 @@ def calculate_polygon_area_utm(polygon: Polygon) -> Tuple[float, float]:
     Returns:
         Tuple of (area_sqm, area_hectares)
     """
-    # Get centroid to determine UTM zone
+    # Get centroid to determine appropriate UTM zone
     centroid = polygon.centroid
 
-    # Determine UTM zone for Nepal (32644 or 32645)
-    # Nepal spans approximately 80°E to 88°E
-    # Use 32644 (UTM Zone 44N) for longitude < 84°E
-    # Use 32645 (UTM Zone 45N) for longitude >= 84°E
-    utm_epsg = 32645 if centroid.x >= 84 else 32644
+    # Calculate UTM zone using standard formula
+    # Zone number = floor((longitude + 180) / 6) + 1
+    zone = int((centroid.x + 180) / 6) + 1
+
+    # Determine hemisphere and EPSG code
+    if centroid.y >= 0:
+        # Northern hemisphere: 32601-32660
+        utm_epsg = 32600 + zone
+    else:
+        # Southern hemisphere: 32701-32760
+        utm_epsg = 32700 + zone
 
     # Create transformer from WGS84 to UTM
     transformer = Transformer.from_crs(
         CRS.from_epsg(4326),  # WGS84
-        CRS.from_epsg(utm_epsg),  # UTM
+        CRS.from_epsg(utm_epsg),  # Automatically calculated UTM zone
         always_xy=True
     )
 
@@ -700,7 +709,10 @@ def calculate_polygon_area_utm(polygon: Polygon) -> Tuple[float, float]:
 
 def calculate_area_utm(geometry: Any, crs: Optional[CRS]) -> Tuple[float, float]:
     """
-    Calculate accurate area in square meters using UTM projection
+    Calculate accurate area in square meters using UTM projection.
+
+    Automatically selects the correct UTM zone based on the geometry's location.
+    Works globally for any coordinates.
 
     Args:
         geometry: Shapely geometry in EPSG:4326
@@ -709,14 +721,20 @@ def calculate_area_utm(geometry: Any, crs: Optional[CRS]) -> Tuple[float, float]
     Returns:
         Tuple of (area_sqm, area_hectares)
     """
-    # Get centroid to determine UTM zone
+    # Get centroid to determine appropriate UTM zone
     centroid = geometry.centroid
 
-    # Determine UTM zone for Nepal (32644 or 32645)
-    # Nepal spans approximately 80°E to 88°E
-    # Use 32644 (UTM Zone 44N) for central Nepal
-    # Use 32645 (UTM Zone 45N) for eastern Nepal
-    utm_epsg = 32645 if centroid.x > 84 else 32644
+    # Calculate UTM zone using standard formula
+    # Zone number = floor((longitude + 180) / 6) + 1
+    zone = int((centroid.x + 180) / 6) + 1
+
+    # Determine hemisphere and EPSG code
+    if centroid.y >= 0:
+        # Northern hemisphere: 32601-32660
+        utm_epsg = 32600 + zone
+    else:
+        # Southern hemisphere: 32701-32760
+        utm_epsg = 32700 + zone
 
     # Transform to UTM
     transformer = Transformer.from_crs(

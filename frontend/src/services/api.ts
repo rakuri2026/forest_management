@@ -362,13 +362,73 @@ export const forestApi = {
     return response.data;
   },
 
+  /**
+   * Create a single default block from calculation's boundary
+   * Used when user chooses "Single Block" option
+   */
+  createSingleBlock: async (
+    calculationId: string,
+    blockName?: string
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/forests/calculations/${calculationId}/create-single-block`,
+      null,
+      { params: { block_name: blockName } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Save work-in-progress polygon creation as draft
+   */
+  saveDraft: async (draftData: {
+    forest_name: string;
+    islands: Array<{
+      id: string;
+      geometry: any;
+      area: number;
+    }>;
+    mode: 'auto' | 'manual';
+    draft_id?: string;
+  }): Promise<any> => {
+    const response = await api.post('/api/forests/save-draft', draftData);
+    return response.data;
+  },
+
+  /**
+   * List all drafts for current user
+   */
+  listDrafts: async (): Promise<any[]> => {
+    const response = await api.get('/api/forests/drafts');
+    return response.data;
+  },
+
+  /**
+   * Get full draft data including all islands
+   */
+  getDraft: async (draftId: string): Promise<any> => {
+    const response = await api.get(`/api/forests/drafts/${draftId}`);
+    return response.data;
+  },
+
+  /**
+   * Delete a draft
+   */
+  deleteDraft: async (draftId: string): Promise<void> => {
+    await api.delete(`/api/forests/drafts/${draftId}`);
+  },
+
+  /**
+   * Create multiple blocks from polygon mapping
+   * Note: run_analysis parameter removed - analysis triggered separately from Analysis page
+   */
   createBlocks: async (calculationId: string, blocks: Array<{
     polygon_index: number;
     name: string;
-  }>, runAnalysis: boolean = true): Promise<any> => {
+  }>): Promise<any> => {
     const response = await api.post(
       `/api/forests/calculations/${calculationId}/blocks`,
-      { blocks, run_analysis: runAnalysis }
+      { blocks }
     );
     return response.data;
   },

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { forestApi } from '../services/api';
 import type { Calculation } from '../types';
@@ -31,24 +31,122 @@ export default function MyUploads() {
 
     try {
       await forestApi.deleteCalculation(id);
-      // Refresh the list after deletion
       await loadCalculations();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete calculation');
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      processing: 'bg-yellow-100 text-yellow-800',
-      completed: 'bg-green-100 text-green-800',
-      failed: 'bg-red-100 text-red-800',
+  // Deduplicate: show only one entry per forest, preferring completed over pending/processing over draft
+  const uniqueForests = useMemo(() => {
+    const forestMap = new Map<string, Calculation>();
+
+    // Sort: completed first, then pending, then processing, then draft
+    const sorted = [...calculations].sort((a, b) => {
+      // Priority: completed > pending > processing > draft
+      const getPriority = (calc: Calculation) => {
+        if (calc.status === 'completed') return 0;
+        if (calc.status === 'pending') return 1;
+        if (calc.status === 'processing') return 2;
+        if (calc.is_draft) return 3;
+        return 4;
+      };
+      const priorityDiff = getPriority(a) - getPriority(b);
+      if (priorityDiff !== 0) return priorityDiff;
+      // If same priority, use most recent
+      return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+    });
+
+    for (const calc of sorted) {
+      const key = calc.forest_name || 'Unnamed Forest';
+      if (!forestMap.has(key)) {
+        forestMap.set(key, calc);
+      }
+    }
+
+    return Array.from(forestMap.values());
+  }, [calculations]);
+
+  const getStatusBadge = (calc: Calculation) => {
+    if (calc.is_draft) {
+      return { class: 'bg-blue-100 text-blue-800', text: 'Draft' };
+    }
+    const styles: Record<string, { class: string; text: string }> = {
+      processing: { class: 'bg-yellow-100 text-yellow-800', text: 'Processing' },
+      completed: { class: 'bg-green-100 text-green-800', text: 'Completed' },
+      failed: { class: 'bg-red-100 text-red-800', text: 'Failed' },
+      pending: { class: 'bg-gray-100 text-gray-800', text: 'Pending' },
     };
-    return styles[status as keyof typeof styles] || 'bg-gray-100 text-gray-800';
+    return styles[calc.status] || { class: 'bg-gray-100 text-gray-800', text: calc.status };
   };
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
+  };
+
+  const getActions = (calc: Calculation) => {
+    const actions: React.ReactNode[] = [];
+
+    if (calc.is_draft) {
+      actions.push(
+        <Link
+          key="resume"
+          to={`/drafts/${calc.id}/resume`}
+          className="text-purple-600 hover:text-purple-900 font-semibold"
+        >
+          Resume
+        </Link>
+      );
+    } else if (calc.status === 'completed') {
+      actions.push(
+        <Link
+          key="view"
+          to={`/calculations/${calc.id}`}
+          className="text-green-600 hover:text-green-900"
+        >
+          View Details
+        </Link>
+      );
+    } else if (calc.status === 'pending') {
+      actions.push(
+        <button
+          key="analyze"
+          onClick={() => {
+            window.location.href = `/calculations/${calc.id}/block-naming`;
+          }}
+          className="text-blue-600 hover:text-blue-900 font-semibold"
+        >
+          Analyze
+        </button>
+      );
+      actions.push(
+        <Link
+          key="view"
+          to={`/calculations/${calc.id}`}
+          className="text-gray-600 hover:text-gray-900"
+        >
+          View
+        </Link>
+      );
+    } else if (calc.status === 'processing') {
+      actions.push(
+        <span key="processing" className="text-yellow-600 font-semibold">
+          Processing...
+        </span>
+      );
+    }
+
+    actions.push(
+      <button
+        key="delete"
+        onClick={() => handleDelete(calc.id, calc.forest_name || 'Unnamed Forest')}
+        className="text-red-600 hover:text-red-900"
+      >
+        Delete
+      </button>
+    );
+
+    return actions;
   };
 
   return (
@@ -77,7 +175,7 @@ export default function MyUploads() {
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
           {error}
         </div>
-      ) : calculations.length === 0 ? (
+      ) : uniqueForests.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <svg
             className="mx-auto h-12 w-12 text-gray-400"
@@ -112,16 +210,13 @@ export default function MyUploads() {
                   Forest Name
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  File Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Block
+                  Source
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Uploaded
+                  Updated
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -129,49 +224,38 @@ export default function MyUploads() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {calculations.map((calc) => (
-                <tr key={calc.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
-                      {calc.forest_name || 'Unnamed Forest'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{calc.uploaded_filename}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-500">{calc.block_name || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadge(
-                        calc.status
-                      )}`}
-                    >
-                      {calc.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {formatDate(calc.created_at)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex items-center gap-4">
-                      <Link
-                        to={`/calculations/${calc.id}`}
-                        className="text-green-600 hover:text-green-900"
-                      >
-                        View Details
-                      </Link>
-                      <button
-                        onClick={() => handleDelete(calc.id, calc.forest_name || 'Unnamed Forest')}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {uniqueForests.map((calc) => {
+                const statusInfo = getStatusBadge(calc);
+                return (
+                  <tr key={calc.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">
+                        {calc.forest_name || 'Unnamed Forest'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-500">
+                        {calc.is_draft 
+                          ? 'Map Creation' 
+                          : (calc.uploaded_filename?.replace(/\.(kml|geojson|shp)$/i, '') || 'Imported')}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${statusInfo.class}`}>
+                        {statusInfo.text}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDate(calc.updated_at || calc.created_at)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex items-center gap-4">
+                        {getActions(calc)}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

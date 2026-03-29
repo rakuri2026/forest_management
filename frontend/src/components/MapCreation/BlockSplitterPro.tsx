@@ -17,6 +17,7 @@ import {
   ensurePolygon,
   roundCoordinates,
   applyInwardBuffer,
+  getGeometryCenter,
   GEOMETRY_CONFIG,
 } from '../../utils/geometryHelpers';
 import { GPSPoint } from '../../utils/gpsUtils';
@@ -178,8 +179,14 @@ const ProDrawingControls: React.FC<{
         id: block.id,
         name: block.name,
         area: block.area,
-        geometry: block.geometry
+        geometry: block.geometry ? 'defined' : 'undefined'
       });
+
+      // Skip blocks with undefined geometry
+      if (!block.geometry) {
+        console.warn(`[ProDrawingControls] Skipping block ${block.name} - no geometry`);
+        return;
+      }
 
       try {
         const geoJsonLayer = L.geoJSON(block.geometry, {
@@ -191,8 +198,10 @@ const ProDrawingControls: React.FC<{
         });
 
         // Add label in center
-        const centroid = L.geoJSON(block.geometry).getBounds().getCenter();
-        const label = L.marker(centroid, {
+        try {
+          const geoJsonForCentroid = L.geoJSON(block.geometry);
+          const centroid = geoJsonForCentroid.getBounds().getCenter();
+          const label = L.marker(centroid, {
           icon: L.divIcon({
             className: 'block-label',
             html: `<div style="background: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; border: 2px solid ${step === 'preview' ? '#f59e0b' : '#3b82f6'};">${block.name}</div>`,
@@ -205,6 +214,9 @@ const ProDrawingControls: React.FC<{
         blocksLayerRef.current.set(`${block.id}-label`, label);
 
         console.log(`[ProDrawingControls] Successfully added block ${block.name} to map`);
+        } catch (centroidError) {
+          console.error(`[ProDrawingControls] Error getting centroid for block ${block.name}:`, centroidError);
+        }
       } catch (error) {
         console.error(`[ProDrawingControls] Error rendering block ${block.name}:`, error);
       }
@@ -276,12 +288,45 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
       console.log('[BlockSplitter] Starting polygonize approach');
       console.log('[BlockSplitter] Split lines:', lines.length);
 
-      // Step 1: Convert outer boundary polygon to linestring
-      const outerBoundaryLine = turf.polygonToLine(turf.feature(outerBoundary));
-      console.log('[BlockSplitter] Converted outer boundary to line');
+      // Check if outerBoundary is valid
+      if (!outerBoundary || !outerBoundary.coordinates) {
+        setError('Invalid boundary geometry');
+        return;
+      }
 
-      // Step 2: Collect all lines (outer boundary + split lines)
-      const allLines: any[] = [outerBoundaryLine];
+      // Handle MultiPolygon (multiple islands) - collect lines from all polygons
+      const allLines: any[] = [];
+
+      if (outerBoundary.type === 'MultiPolygon') {
+        console.log('[BlockSplitter] MultiPolygon detected - handling', outerBoundary.coordinates.length, 'polygons');
+        
+        // Convert each polygon to line and add to collection
+        outerBoundary.coordinates.forEach((polyCoords: any, idx: number) => {
+          try {
+            const polyFeature = turf.polygon(polyCoords);
+            const line = turf.polygonToLine(polyFeature);
+            allLines.push(line);
+            console.log(`[BlockSplitter] Added polygon ${idx + 1} as line`);
+          } catch (err) {
+            console.error(`[BlockSplitter] Failed to convert polygon ${idx + 1}:`, err);
+          }
+        });
+
+        if (allLines.length === 0) {
+          setError('Could not process MultiPolygon geometry');
+          return;
+        }
+      } else if (outerBoundary.type === 'Polygon') {
+        // Single polygon - convert to line
+        const outerBoundaryLine = turf.polygonToLine(turf.feature(outerBoundary));
+        console.log('[BlockSplitter] Converted outer boundary to line');
+        allLines.push(outerBoundaryLine);
+      } else {
+        setError(`Unsupported geometry type: ${outerBoundary.type}`);
+        return;
+      }
+
+      console.log(`[BlockSplitter] Total boundary lines: ${allLines.length}`);
 
       lines.forEach((line, idx) => {
         const lineFeature = turf.feature(line.geometry);
@@ -730,12 +775,8 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
 
   const outerArea = calculateAreaHectares(outerBoundary);
 
-  const mapCenter = outerBoundary
-    ? [
-        (outerBoundary.coordinates[0][0][1] + outerBoundary.coordinates[0][2][1]) / 2,
-        (outerBoundary.coordinates[0][0][0] + outerBoundary.coordinates[0][2][0]) / 2,
-      ]
-    : [27.7172, 85.3240];
+  // Use helper function that works for both Polygon and MultiPolygon
+  const mapCenter = getGeometryCenter(outerBoundary, [27.7172, 85.3240]);
 
   return (
     <div className="space-y-6">
