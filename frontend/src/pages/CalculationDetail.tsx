@@ -163,6 +163,7 @@ export default function CalculationDetail() {
 
   const [subAreas, setSubAreas] = useState<any[]>([]);
   const [showSubAreasModal, setShowSubAreasModal] = useState(false);
+  const [savingSubAreas, setSavingSubAreas] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -322,6 +323,39 @@ export default function CalculationDetail() {
       alert(err.response?.data?.detail || 'Failed to reanalyze. Please try again.');
     } finally {
       setReanalyzing(false);
+    }
+  };
+
+  const handleSaveSubAreas = async () => {
+    if (!id) return;
+
+    try {
+      setSavingSubAreas(true);
+      // Delete existing sub-areas and recreate
+      const existing = await forestApi.listSubAreas(id);
+      for (const sa of existing.sub_areas || []) {
+        await forestApi.deleteSubArea(id, sa.id);
+      }
+      // Add current sub-areas
+      for (const sa of subAreas) {
+        await forestApi.addSubArea(id, {
+          name: sa.name,
+          category: sa.category,
+          geometry: sa.geometry,
+          block_id: sa.block_id,
+          block_name: sa.block_name,
+          block_breakdown: sa.block_breakdown,
+          is_excluded: sa.is_excluded,
+          area_hectares: sa.area_hectares,
+        });
+      }
+      setShowSubAreasModal(false);
+      alert('Sub-areas saved successfully!');
+    } catch (err: any) {
+      console.error('Save sub-areas failed:', err);
+      alert(err.response?.data?.detail || 'Failed to save sub-areas. Please try again.');
+    } finally {
+      setSavingSubAreas(false);
     }
   };
 
@@ -2769,13 +2803,25 @@ export default function CalculationDetail() {
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3">
-              <button
-                onClick={() => setShowSubAreasModal(false)}
-                className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
-              >
-                Close
-              </button>
+            <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-between items-center">
+              <span className="text-sm text-gray-500">
+                {subAreas.length} sub-area{subAreas.length !== 1 ? 's' : ''} defined
+              </span>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowSubAreasModal(false)}
+                  className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleSaveSubAreas}
+                  disabled={savingSubAreas}
+                  className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
+                >
+                  {savingSubAreas ? 'Saving...' : 'Save'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
