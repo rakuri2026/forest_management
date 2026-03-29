@@ -97,7 +97,7 @@ const BlockNamingPage: React.FC = () => {
 
   // State
   const [calculation, setCalculation] = useState<Calculation | null>(null);
-  const [blockMode, setBlockMode] = useState<BlockMode>('single');
+  const [blockMode, setBlockMode] = useState<BlockMode>('multiple');
   const [singleBlockName, setSingleBlockName] = useState('');
   const [polygons, setPolygons] = useState<BlockPolygon[]>([]);
   const [namedPolygons, setNamedPolygons] = useState<Map<number, string>>(new Map());
@@ -128,11 +128,6 @@ const BlockNamingPage: React.FC = () => {
       const response = await forestApi.getPolygons(id!);
       if (response.polygons && response.polygons.length > 0) {
         setPolygons(response.polygons);
-
-        // Auto-select mode based on polygon count
-        if (response.polygons.length === 1) {
-          setBlockMode('single');
-        }
 
         // Initialize named polygons with default names
         const initialNames = new Map<number, string>();
@@ -271,85 +266,142 @@ const BlockNamingPage: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Block Table (only for multiple mode) */}
-        {blockMode === 'multiple' && (
-          <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
-            <div className="p-4 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-gray-700">Blocks ({polygons.length})</h2>
-              <p className="text-xs text-gray-500 mt-1">Click to select, double-click name to edit</p>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Color</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Name</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Area (ha)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {polygons.map((poly, idx) => (
-                    <tr
-                      key={idx}
-                      onClick={() => handleRowClick(idx)}
-                      className={`cursor-pointer transition-colors ${
-                        selectedIndex === idx
-                          ? 'bg-blue-50 border-l-4 border-blue-500'
-                          : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <td className="px-4 py-2">
-                        <div
-                          className="w-6 h-6 rounded border-2"
-                          style={{
-                            backgroundColor: getColorForIndex(idx),
-                            borderColor: getColorForIndex(idx)
-                          }}
-                        ></div>
-                      </td>
-                      <td className="px-4 py-2">
-                        {editingIndex === idx ? (
-                          <input
-                            type="text"
-                            value={namedPolygons.get(idx) || ''}
-                            onChange={(e) => handleBlockNameChange(idx, e.target.value)}
-                            onBlur={() => setEditingIndex(null)}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                setEditingIndex(null);
-                              }
-                            }}
-                            autoFocus
-                            className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        ) : (
-                          <div
-                            className="text-sm font-medium text-gray-900 flex items-center justify-between"
-                            onDoubleClick={(e) => handleEditClick(idx, e)}
-                          >
-                            <span>{namedPolygons.get(idx) || `Block ${idx + 1}`}</span>
-                            <button
-                              onClick={(e) => handleEditClick(idx, e)}
-                              className="ml-2 text-gray-400 hover:text-blue-600"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                              </svg>
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-600">
-                        {poly.area_hectares.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* Left Sidebar - Always visible */}
+        <div className="w-72 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+          {/* Block Mode Selection */}
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Block Mode</h2>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-gray-100">
+                <input
+                  type="radio"
+                  value="single"
+                  checked={blockMode === 'single'}
+                  onChange={() => setBlockMode('single')}
+                  className="w-4 h-4 text-blue-600"
+                />
+                <span className="font-medium">Single Block</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-gray-100">
+                <input
+                  type="radio"
+                  value="multiple"
+                  checked={blockMode === 'multiple'}
+                  onChange={() => setBlockMode('multiple')}
+                  className="w-4 h-4 text-blue-600"
+                />
+                <span className="font-medium">Multiple Blocks</span>
+              </label>
             </div>
           </div>
-        )}
+
+          {/* Single Block Name Input */}
+          {blockMode === 'single' && (
+            <div className="p-4 border-b border-gray-200">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Block Name</h3>
+              <input
+                type="text"
+                value={singleBlockName}
+                onChange={(e) => setSingleBlockName(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter block name"
+              />
+            </div>
+          )}
+
+          {/* Multiple Blocks List */}
+          {blockMode === 'multiple' && (
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="px-4 py-2 border-b border-gray-200 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-700">
+                  Blocks ({polygons.length})
+                </h3>
+                <p className="text-xs text-gray-500">Click to select, edit icon to rename</p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Color</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Name</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Area</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {polygons.map((poly, idx) => (
+                      <tr
+                        key={idx}
+                        onClick={() => handleRowClick(idx)}
+                        className={`cursor-pointer transition-colors ${
+                          selectedIndex === idx ? 'bg-blue-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <td className="px-3 py-2">
+                          <div
+                            className="w-5 h-5 rounded border-2"
+                            style={{
+                              backgroundColor: getColorForIndex(idx),
+                              borderColor: getColorForIndex(idx)
+                            }}
+                          ></div>
+                        </td>
+                        <td className="px-3 py-2">
+                          {editingIndex === idx ? (
+                            <input
+                              type="text"
+                              value={namedPolygons.get(idx) || ''}
+                              onChange={(e) => handleBlockNameChange(idx, e.target.value)}
+                              onBlur={() => setEditingIndex(null)}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') setEditingIndex(null);
+                              }}
+                              autoFocus
+                              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <div className="flex items-center justify-between">
+                              <span className="truncate text-gray-900">
+                                {namedPolygons.get(idx) || `Block ${idx + 1}`}
+                              </span>
+                              <button
+                                onClick={(e) => handleEditClick(idx, e)}
+                                className="ml-1 text-gray-400 hover:text-blue-600"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                          {poly.area_hectares.toFixed(2)} ha
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="p-4 border-t border-gray-200 bg-gray-50">
+            <button
+              onClick={handleSave}
+              disabled={saving || (blockMode === 'multiple' && namedPolygons.size !== polygons.length)}
+              className="w-full px-4 py-2.5 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+            >
+              {saving ? 'Saving...' : 'Save & Continue'}
+            </button>
+            <p className="text-xs text-gray-500 text-center mt-2">
+              {blockMode === 'multiple' 
+                ? `${namedPolygons.size} of ${polygons.length} blocks named`
+                : 'All blocks will be saved as single block'}
+            </p>
+          </div>
+        </div>
 
         {/* Map Area */}
         <div className="flex-1 relative">
@@ -364,7 +416,7 @@ const BlockNamingPage: React.FC = () => {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {/* Show boundary for both modes */}
+            {/* Show boundary */}
             {calculation?.geometry && (
               <GeoJSON
                 data={calculation.geometry}
@@ -380,7 +432,7 @@ const BlockNamingPage: React.FC = () => {
             {/* Auto-fit bounds to boundary */}
             <FitBoundaryBounds geometry={calculation?.geometry} />
 
-            {/* Show polygons for multi-block mode (overlay on boundary) */}
+            {/* Show polygons for multi-block mode */}
             {blockMode === 'multiple' && polygons.map((poly, idx) => {
               const centroid = getPolygonCentroid(poly.geometry);
               const blockName = namedPolygons.get(idx) || `Block ${idx + 1}`;
@@ -390,26 +442,22 @@ const BlockNamingPage: React.FC = () => {
                   <GeoJSON
                     data={poly.geometry}
                     style={geoJsonStyle(poly.geometry, idx)}
-                    eventHandlers={{
-                      click: () => handleRowClick(idx)
-                    }}
+                    eventHandlers={{ click: () => handleRowClick(idx) }}
                   >
                     <Popup>
                       <div className="text-sm">
                         <strong>{blockName}</strong><br />
-                        Area: {poly.area_hectares.toFixed(2)} ha<br />
-                        <span className="text-gray-600 text-xs">Click row in table to edit</span>
+                        Area: {poly.area_hectares.toFixed(2)} ha
                       </div>
                     </Popup>
                   </GeoJSON>
 
-                  {/* Show live label at centroid */}
                   {centroid && (
                     <Marker
                       position={centroid}
                       icon={L.divIcon({
                         className: 'block-label',
-                        html: `<div style="background: white; padding: 4px 8px; border-radius: 4px; border: 2px solid ${getColorForIndex(idx)}; font-weight: bold; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2); ${selectedIndex === idx ? 'border-width: 3px;' : ''}">${blockName}</div>`,
+                        html: `<div style="background: white; padding: 4px 8px; border-radius: 4px; border: 2px solid ${getColorForIndex(idx)}; font-weight: bold; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">${blockName}</div>`,
                         iconSize: [0, 0],
                         iconAnchor: [0, 0]
                       })}
@@ -419,85 +467,11 @@ const BlockNamingPage: React.FC = () => {
               );
             })}
 
-            {/* Fit bounds to show all polygons */}
             {blockMode === 'multiple' && polygons.length > 0 && (
               <FitBounds polygons={polygons} />
             )}
           </MapContainer>
         </div>
-      </div>
-
-      {/* Compact Controls Bar */}
-      <div className="compact-controls" style={{ minHeight: '80px' }}>
-        <div className="compact-controls-row">
-          {/* Single Block Option */}
-          <label className="compact-radio-label">
-            <input
-              type="radio"
-              value="single"
-              checked={blockMode === 'single'}
-              onChange={() => setBlockMode('single')}
-            />
-            <span className="font-bold">Single Block</span>
-          </label>
-
-          {/* Block Name Input - Only shown for single mode */}
-          {blockMode === 'single' && (
-            <div className="flex items-center gap-2 flex-1">
-              <label className="text-sm text-gray-600">Name:</label>
-              <input
-                type="text"
-                value={singleBlockName}
-                onChange={(e) => setSingleBlockName(e.target.value)}
-                className="compact-input flex-1 max-w-md"
-                placeholder="Block name"
-              />
-            </div>
-          )}
-
-          {/* Multiple Blocks Option */}
-          <label className="compact-radio-label">
-            <input
-              type="radio"
-              value="multiple"
-              checked={blockMode === 'multiple'}
-              onChange={() => setBlockMode('multiple')}
-            />
-            <span>Multiple Blocks</span>
-          </label>
-
-          {/* Help text for multiple mode */}
-          {blockMode === 'multiple' && (
-            <span className="compact-help-text">
-              Edit names in table or double-click
-            </span>
-          )}
-
-          {/* Tooltip Help */}
-          <Tooltip content="Choose single block or split into multiple blocks. You can add sub-areas and modify blocks later.">
-            <button className="text-gray-400 hover:text-gray-600">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </Tooltip>
-
-          {/* Save Button */}
-          <button
-            onClick={handleSave}
-            disabled={saving || (blockMode === 'multiple' && namedPolygons.size !== polygons.length)}
-            className="ml-auto compact-button compact-button-primary"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-
-        {/* Multi-block naming status */}
-        {blockMode === 'multiple' && polygons.length > 0 && (
-          <div className="mt-2 text-sm text-gray-600">
-            All blocks ready: {namedPolygons.size} / {polygons.length}
-          </div>
-        )}
       </div>
     </div>
   );
