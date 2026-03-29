@@ -21,8 +21,7 @@ import { RasterClickInfo } from '../components/RasterClickInfo';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import SubAreaManager from '../components/MapCreation/SubAreaManager';
-
+import MapEditor from '../components/MapEditor';
 
 // Block colors for mapping
 const BLOCK_COLORS = [
@@ -160,10 +159,8 @@ export default function CalculationDetail() {
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
 
   // Map editor state
-
+  const [showMapEditor, setShowMapEditor] = useState(false);
   const [subAreas, setSubAreas] = useState<any[]>([]);
-  const [showSubAreasModal, setShowSubAreasModal] = useState(false);
-  const [savingSubAreas, setSavingSubAreas] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -323,39 +320,6 @@ export default function CalculationDetail() {
       alert(err.response?.data?.detail || 'Failed to reanalyze. Please try again.');
     } finally {
       setReanalyzing(false);
-    }
-  };
-
-  const handleSaveSubAreas = async () => {
-    if (!id) return;
-
-    try {
-      setSavingSubAreas(true);
-      // Delete existing sub-areas and recreate
-      const existing = await forestApi.listSubAreas(id);
-      for (const sa of existing.sub_areas || []) {
-        await forestApi.deleteSubArea(id, sa.id);
-      }
-      // Add current sub-areas
-      for (const sa of subAreas) {
-        await forestApi.addSubArea(id, {
-          name: sa.name,
-          category: sa.category,
-          geometry: sa.geometry,
-          block_id: sa.block_id,
-          block_name: sa.block_name,
-          block_breakdown: sa.block_breakdown,
-          is_excluded: sa.is_excluded,
-          area_hectares: sa.area_hectares,
-        });
-      }
-      setShowSubAreasModal(false);
-      alert('Sub-areas saved successfully!');
-    } catch (err: any) {
-      console.error('Save sub-areas failed:', err);
-      alert(err.response?.data?.detail || 'Failed to save sub-areas. Please try again.');
-    } finally {
-      setSavingSubAreas(false);
     }
   };
 
@@ -615,14 +579,14 @@ export default function CalculationDetail() {
               </button>
               <button
                 onClick={() => {
-                  // Load sub-areas and blocks first
+                  // Load sub-areas first
                   if (id) {
                     forestApi.listSubAreas(id).then(data => {
                       setSubAreas(data.sub_areas || []);
-                      setShowSubAreasModal(true);
+                      setShowMapEditor(true);
                     }).catch(() => {
                       setSubAreas([]);
-                      setShowSubAreasModal(true);
+                      setShowMapEditor(true);
                     });
                   }
                 }}
@@ -631,7 +595,7 @@ export default function CalculationDetail() {
                 <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
                 </svg>
-                Edit Sub-areas
+                Edit Map
               </button>
               <button
                 onClick={() => setShowReanalysisModal(true)}
@@ -775,9 +739,17 @@ export default function CalculationDetail() {
 
         {activeTab === 'subareas' && (
           <div className="p-6">
-            <div className="mb-4">
-              <h2 className="text-xl font-semibold">Sub-Areas Summary</h2>
-              <p className="text-sm text-gray-600">Sub-areas defined for this forest</p>
+            <div className="mb-4 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold">Sub-Areas Management</h2>
+                <p className="text-sm text-gray-600">Draw and manage sub-areas within the forest boundary</p>
+              </div>
+              <button
+                onClick={() => setShowMapEditor(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                + Add Sub-Area (Draw on Map)
+              </button>
             </div>
             
             {/* Split view: Table and Map */}
@@ -2774,57 +2746,25 @@ export default function CalculationDetail() {
         </div>
       )}
 
-      {/* Sub-Areas Editor Modal */}
-      {showSubAreasModal && calculation && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
-              <div>
-                <h2 className="text-xl font-bold">Edit Sub-areas</h2>
-                <p className="text-sm text-gray-500">{calculation.forest_name}</p>
-              </div>
-              <button
-                onClick={() => setShowSubAreasModal(false)}
-                className="text-gray-500 hover:text-gray-700 text-2xl"
-              >
-                &times;
-              </button>
-            </div>
-
-            {/* Modal Body - SubAreaManager */}
-            <div className="flex-1 overflow-auto p-4">
-              <SubAreaManager
-                blocks={calculation.result_data?.blocks || []}
-                outerBoundary={calculation.geometry}
-                onSubAreasChange={(newSubAreas) => setSubAreas(newSubAreas)}
-                initialSubAreas={subAreas}
-              />
-            </div>
-
-            {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-between items-center">
-              <span className="text-sm text-gray-500">
-                {subAreas.length} sub-area{subAreas.length !== 1 ? 's' : ''} defined
-              </span>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowSubAreasModal(false)}
-                  className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handleSaveSubAreas}
-                  disabled={savingSubAreas}
-                  className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
-                >
-                  {savingSubAreas ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Map Editor Modal */}
+      {showMapEditor && calculation && (
+        <MapEditor
+          calculationId={id!}
+          initialGeometry={calculation.geometry}
+          initialSubAreas={subAreas}
+          initialBlocks={calculation.result_data?.blocks || []}
+          onSave={async (newGeometry, newSubAreas) => {
+            // Don't close - user will click "Done" button when ready
+            // Reload calculation to get updated data
+            await loadCalculation();
+            // Also reload sub-areas to ensure they are fresh
+            if (id) {
+              const subAreaData = await forestApi.listSubAreas(id);
+              setSubAreas(subAreaData.sub_areas || []);
+            }
+          }}
+          onCancel={() => setShowMapEditor(false)}
+        />
       )}
     </div>
   );
