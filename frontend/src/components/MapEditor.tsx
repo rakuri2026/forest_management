@@ -87,12 +87,13 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit_boundary' | 'edit_blocks' | 'edit_subareas'>('edit_boundary');
   
-  // Auto-switch to subareas mode if there are existing sub-areas (after loading)
+  // Auto-switch to subareas mode if there are existing sub-areas (after loading) - but only on initial load
   useEffect(() => {
-    if (isLoaded && subAreas.length > 0) {
+    if (isLoaded && subAreas.length > 0 && mode === 'edit_boundary') {
+      // Only auto-switch on initial load, not after saves
       setMode('edit_subareas');
     }
-  }, [isLoaded, subAreas]);
+  }, [isLoaded, subAreas]); // Intentionally not including mode in deps to only run on load
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
