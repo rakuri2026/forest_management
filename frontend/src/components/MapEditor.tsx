@@ -54,12 +54,16 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [blocks, setBlocks] = useState<any[]>(initialBlocks);
   const [subAreas, setSubAreas] = useState<SubArea[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [blocksInitialized, setBlocksInitialized] = useState(false);
   
-  // Update blocks when initialBlocks prop changes
+  // Initialize blocks from props ONLY once on mount
   useEffect(() => {
-    console.log('[MapEditor] initialBlocks changed:', initialBlocks?.length || 0);
-    setBlocks(initialBlocks || []);
-  }, [initialBlocks]);
+    if (!blocksInitialized && initialBlocks) {
+      console.log('[MapEditor] Initializing blocks from props:', initialBlocks.length);
+      setBlocks(initialBlocks);
+      setBlocksInitialized(true);
+    }
+  }, []); // Empty deps - only run once on mount
   
   // Load sub-areas from backend on mount
   useEffect(() => {
