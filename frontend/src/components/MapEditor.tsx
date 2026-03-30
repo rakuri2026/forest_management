@@ -51,19 +51,10 @@ const MapEditor: React.FC<MapEditorProps> = ({
   console.log('[MapEditor] Component rendered with calculationId:', calculationId);
   
   const [geometry, setGeometry] = useState<any>(initialGeometry);
-  const [blocks, setBlocks] = useState<any[]>(initialBlocks);
+  const [blocks, setBlocks] = useState<any[]>(initialBlocks || []);
+  
   const [subAreas, setSubAreas] = useState<SubArea[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [blocksInitialized, setBlocksInitialized] = useState(false);
-  
-  // Initialize blocks from props ONLY once on mount
-  useEffect(() => {
-    if (!blocksInitialized && initialBlocks) {
-      console.log('[MapEditor] Initializing blocks from props:', initialBlocks.length);
-      setBlocks(initialBlocks);
-      setBlocksInitialized(true);
-    }
-  }, []); // Empty deps - only run once on mount
   
   // Load sub-areas from backend on mount
   useEffect(() => {
@@ -113,6 +104,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
 
   const mapRef = useRef<L.Map | null>(null);
   const subAreaLayersRef = useRef<Map<string, L.GeoJSON>>(new Map());
+  const blockLayersRef = useRef<Map<string, L.GeoJSON>>(new Map()); // Like subAreaLayersRef
 
   // Calculate map center from geometry
   const getMapCenter = () => {
@@ -882,6 +874,9 @@ const MapEditor: React.FC<MapEditorProps> = ({
 
       layer.addTo(mapInstance);
       newBlockLayers.push(layer);
+      
+      // Store in ref like sub-areas do
+      blockLayersRef.current.set(blockId, layer);
     });
 
     setBlockLayers(newBlockLayers);
@@ -1394,16 +1389,44 @@ const MapEditor: React.FC<MapEditorProps> = ({
                   try {
                     console.log('[MapEditor] Saving block edits...');
                     
-                    // Prepare blocks data for API
-                    const blocksData = blocks.map((block, index) => ({
-                      block_id: block.block_id || block.id || `block-${index}`,
-                      block_name: block.block_name || block.name || `Block ${index + 1}`,
-                      geometry: block.geometry,
-                      area_hectares: block.area_hectares || 0,
-                      index: index,
-                    }));
+                    // Extract fresh geometry from Leaflet layers (like sub-areas do!)
+                    const blocksData: any[] = [];
                     
-                    console.log('[MapEditor] Blocks to save:', JSON.stringify(blocksData).substring(0, 500));
+                    for (const block of blocks) {
+                      const blockId = block.block_id || block.id;
+                      const layer = blockLayersRef.current.get(blockId);
+                      
+                      let geometry = block.geometry;
+                      let area_hectares = block.area_hectares || 0;
+                      
+                      if (layer) {
+                        try {
+                          const geoJSON = layer.toGeoJSON();
+                          // Handle FeatureCollection vs Feature
+                          if (geoJSON.type === 'FeatureCollection' && geoJSON.features?.length > 0) {
+                            geometry = geoJSON.features[0].geometry;
+                          } else if (geoJSON.geometry) {
+                            geometry = geoJSON.geometry;
+                          }
+                          
+                          // Recalculate area from fresh geometry
+                          const turfFeature = turf.feature(geometry);
+                          area_hectares = turf.area(turfFeature) / 10000;
+                        } catch (err) {
+                          console.log('[MapEditor] Error getting layer geometry:', err);
+                        }
+                      }
+                      
+                      blocksData.push({
+                        block_id: blockId,
+                        block_name: block.block_name || block.name || `Block ${blocksData.length + 1}`,
+                        geometry: geometry,
+                        area_hectares: Math.max(0.01, area_hectares),
+                        index: blocksData.length,
+                      });
+                    }
+                    
+                    console.log('[MapEditor] Blocks to save (from layers):', blocksData.length);
                     
                     // Call API to update blocks
                     const result = await forestApi.updateBlocksGeometry(calculationId, {
