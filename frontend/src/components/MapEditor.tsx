@@ -596,7 +596,8 @@ const MapEditor: React.FC<MapEditorProps> = ({
       editMode: true, // Enable vertex editing
       dragMode: false,
       cutPolygon: false,
-      removalMode: true, // Allow deleting blocks
+      removalMode: true, // Allow deleting vertices and blocks
+      vertexDeletion: true, // Enable vertex deletion
     });
 
     // Track editing state
@@ -810,7 +811,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
           fillColor: blockColors[index % blockColors.length],
         },
         pmIgnore: !isEditable, // Only allow editing in edit_blocks mode
-        interactive: !isEditable,
+        interactive: true, // Always allow interactions for clicking and selection
         bubblingMouseEvents: false,
       });
       
@@ -1295,6 +1296,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
                   <li><strong>Move</strong> vertices by dragging</li>
                   <li><strong>Add</strong> vertex by clicking on edge</li>
                   <li><strong>Delete</strong> vertex by selecting and pressing Delete</li>
+                  <li><strong>Delete entire block</strong> by selecting block and clicking trash icon</li>
                 </ul>
               </div>
               
