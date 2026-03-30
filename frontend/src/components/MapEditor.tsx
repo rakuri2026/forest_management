@@ -1007,6 +1007,12 @@ const MapEditor: React.FC<MapEditorProps> = ({
   }, [mapInstance, subAreas, selectedSubAreaId, mode]);
 
   const handleSave = async () => {
+    // If in edit_blocks mode, don't run the main save logic - blocks have their own save
+    if (mode === 'edit_blocks') {
+      console.log('[MapEditor] Skipping main save - in edit_blocks mode');
+      return;
+    }
+    
     if (!geometry) {
       setError('Please draw a boundary geometry');
       return;
@@ -1410,6 +1416,13 @@ const MapEditor: React.FC<MapEditorProps> = ({
                       // Reload sub-areas to get clipped versions
                       const subAreaData = await forestApi.listSubAreas(calculationId);
                       setSubAreas(subAreaData.sub_areas || []);
+                      
+                      // Reload calculation to get fresh blocks data
+                      const calcResponse = await forestApi.getCalculation(calculationId);
+                      if (calcResponse.result_data?.blocks) {
+                        setBlocks(calcResponse.result_data.blocks);
+                        console.log('[MapEditor] Reloaded blocks from server:', calcResponse.result_data.blocks.length);
+                      }
                       
                       // Mark as saved
                       setBlocksSaved(true);
