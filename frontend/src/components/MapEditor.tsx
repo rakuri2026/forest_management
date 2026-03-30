@@ -105,6 +105,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const [isEditingVertices, setIsEditingVertices] = useState(false);
   const [editingLayer, setEditingLayer] = useState<L.Layer | null>(null);
+  const [blocksSaved, setBlocksSaved] = useState(false);
 
   const mapRef = useRef<L.Map | null>(null);
   const subAreaLayersRef = useRef<Map<string, L.GeoJSON>>(new Map());
@@ -656,6 +657,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
               ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
               : b
           ));
+          setBlocksSaved(false);
         }
       });
     };
@@ -697,6 +699,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
               ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
               : b
           ));
+          setBlocksSaved(false);
           
           console.log('[MapEditor] Block geometry updated locally, will save on button click');
         }
@@ -713,6 +716,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
         console.log('[MapEditor] Block removed:', blockId);
         // Remove from local state
         setBlocks(prev => prev.filter(b => (b.block_id || b.id) !== blockId));
+        setBlocksSaved(false);
       }
     };
 
@@ -1364,29 +1368,32 @@ const MapEditor: React.FC<MapEditorProps> = ({
                     console.log('[MapEditor] Save result:', result);
                     
                     if (result.success) {
-                      let message = `Saved ${result.blocks?.length || 0} blocks!`;
-                      if (result.clipped_sub_areas?.length > 0) {
-                        message += ` ${result.clipped_sub_areas.length} sub-area(s) were clipped to fit within block boundaries.`;
-                      }
-                      alert(message);
+                      // Silently save - no alert
+                      console.log('[MapEditor] Blocks saved successfully');
                       
                       // Reload sub-areas to get clipped versions
                       const subAreaData = await forestApi.listSubAreas(calculationId);
                       setSubAreas(subAreaData.sub_areas || []);
+                      
+                      // Mark as saved
+                      setBlocksSaved(true);
                     } else {
-                      alert('Failed to save blocks');
+                      console.error('[MapEditor] Failed to save blocks:', result);
                     }
                   } catch (err: any) {
                     console.error('Error saving blocks:', err);
-                    alert('Failed to save blocks: ' + (err.response?.data?.detail || err.message));
                   } finally {
                     setLoading(false);
                   }
                 }}
-                disabled={loading}
-                className="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded font-semibold hover:bg-green-700 disabled:bg-gray-400"
+                disabled={loading || blocksSaved}
+                className={`mt-4 w-full px-4 py-2 rounded font-semibold ${
+                  blocksSaved 
+                    ? 'bg-green-500 text-white cursor-default' 
+                    : 'bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-400'
+                }`}
               >
-                {loading ? 'Saving...' : 'Save Block Changes'}
+                {loading ? 'Saving...' : blocksSaved ? 'Saved ✓' : 'Save Block Changes'}
               </button>
             </div>
           ) : (
