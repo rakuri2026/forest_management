@@ -1101,7 +1101,13 @@ const MapEditor: React.FC<MapEditorProps> = ({
       const verifyResponse = await forestApi.listSubAreas(calculationId);
       console.log('Verified sub-areas after save:', verifyResponse.sub_areas.length);
 
-      onSave(geometry, subAreas);
+      // Only call onSave callback if NOT in edit_blocks mode (edit_blocks has its own save button)
+      if (mode !== 'edit_blocks') {
+        onSave(geometry, subAreas);
+      } else {
+        // Stay on edit_blocks page after saving
+        console.log('[MapEditor] Block save complete, staying on edit_blocks page');
+      }
     } catch (e: any) {
       setError(e.response?.data?.detail || 'Failed to save changes');
     } finally {
