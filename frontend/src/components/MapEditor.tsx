@@ -598,30 +598,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
       dragMode: false,
       cutPolygon: false,
       removalMode: true, // Allow deleting vertices and blocks
-      vertexDeletion: true, // Enable vertex deletion
-      snapVertices: true, // Enable vertex snapping
     });
-
-    // Enable Geoman editing on all existing block layers
-    if (mode === 'edit_blocks') {
-      const existingLayers = mapInstance.layers || [];
-      console.log('[MapEditor] Existing layers:', existingLayers.length);
-      
-      // Try to enable editing on block layers after they are added
-      setTimeout(() => {
-        mapInstance.eachLayer((layer: any) => {
-          if (layer.pm && layer._blockId) {
-            layer.pm.enable({
-              draggable: true,
-              resizable: true,
-              rotatable: false,
-              editable: true,
-              remove: true,
-            });
-            console.log('[MapEditor] Enabled Geoman on block layer:', layer._blockId);
-          }
-        });
-      }, 500);
     }
 
     // Track editing state
@@ -848,18 +825,6 @@ const MapEditor: React.FC<MapEditorProps> = ({
       if (isEditable) {
         // Make layer directly editable - disable pmIgnore
         layer.options.pmIgnore = false;
-        
-        // Enable layer editing after adding to map
-        layer.on('add', () => {
-          if (layer.pm) {
-            layer.pm.enableLayerEdit();
-          }
-        });
-        
-        // If already added, enable immediately
-        if (layer._map) {
-          layer.pm && layer.pm.enableLayerEdit && layer.pm.enableLayerEdit();
-        }
       } else {
         // Disable mouse events when not in edit mode
         layer.on = function() { return layer; };
