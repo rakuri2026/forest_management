@@ -307,6 +307,7 @@ export const forestApi = {
     data: {
       name?: string;
       category?: string;
+      geometry?: any;
       block_id?: string;
       block_name?: string;
       is_excluded?: boolean;
@@ -374,6 +375,30 @@ export const forestApi = {
       `/api/forests/calculations/${calculationId}/create-single-block`,
       null,
       { params: { block_name: blockName } }
+    );
+    return response.data;
+  },
+
+  /**
+   * Update block geometries (from block editor)
+   * Handles vertex editing with automatic sub-area clipping
+   */
+  updateBlocksGeometry: async (
+    calculationId: string,
+    data: {
+      blocks: Array<{
+        block_id: string;
+        block_name: string;
+        geometry: any;
+        area_hectares: number;
+        index: number;
+      }>;
+      update_boundary: boolean;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/forests/calculations/${calculationId}/update-blocks`,
+      data
     );
     return response.data;
   },

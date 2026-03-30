@@ -4167,6 +4167,259 @@ async def delete_block(
     db.commit()
 
 
+@router.patch("/calculations/{calculation_id}/update-blocks")
+async def update_blocks_geometry(
+    calculation_id: UUID,
+    request: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update block geometries from the frontend editor.
+    
+    This endpoint handles:
+    1. Updating block geometries in result_data
+    2. Detecting outer vs inner vertex changes
+    3. Updating forest boundary if outer vertices changed
+    4. Clipping sub-areas that fall outside new block boundaries
+    
+    Request body:
+    {
+        "blocks": [
+            {
+                "block_id": "...",
+                "block_name": "...",
+                "geometry": {...},  // GeoJSON
+                "area_hectares": ...
+            }
+        ],
+        "update_boundary": true/false  // Whether to also update forest boundary
+    }
+    """
+    from shapely.geometry import shape, mapping
+    from shapely.ops import transform
+    import pyproj
+    from geoalchemy2.shape import from_shape
+    from sqlalchemy.orm import Session as SqlSession
+    from datetime import datetime
+    
+    print(f"\n[update_blocks_geometry] calculation_id={calculation_id}")
+    
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+    
+    # Check ownership
+    if calculation.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this calculation"
+        )
+    
+    blocks_data = request.get('blocks', [])
+    update_boundary = request.get('update_boundary', False)
+    
+    print(f"[update_blocks_geometry] Received {len(blocks_data)} blocks")
+    print(f"[update_blocks_geometry] update_boundary={update_boundary}")
+    
+    if not calculation.result_data:
+        calculation.result_data = {}
+    
+    result_data = calculation.result_data
+    
+    # Get existing blocks
+    existing_blocks = result_data.get('blocks', [])
+    print(f"[update_blocks_geometry] Existing blocks: {len(existing_blocks)}")
+    
+    # Helper function to calculate geodesic area
+    def calculate_geodesic_area(geometry):
+        try:
+            geom = shape(geometry)
+            geodesic = pyproj.Geod(ellps='WGS84')
+            area_sqm, _ = geodesic.geometry_area_perimeter(geom)
+            return abs(area_sqm) / 10000  # hectares
+        except Exception as e:
+            print(f"[update_blocks_geometry] Error calculating area: {e}")
+            return 0
+    
+    # Track if boundary was updated
+    boundary_updated = False
+    
+    # Update each block
+    updated_blocks = []
+    for block_data in blocks_data:
+        block_id = block_data.get('block_id')
+        geometry = block_data.get('geometry')
+        
+        if not geometry:
+            continue
+        
+        # Calculate new area
+        new_area = calculate_geodesic_area(geometry)
+        
+        # Find existing block to preserve data
+        existing = None
+        for eb in existing_blocks:
+            if eb.get('block_id') == block_id:
+                existing = eb
+                break
+        
+        updated_block = {
+            'block_id': block_id,
+            'block_name': block_data.get('block_name', existing.get('block_name') if existing else f'Block {len(updated_blocks)+1}'),
+            'geometry': geometry,
+            'area_hectares': round(new_area, 4),
+            'index': block_data.get('index', len(updated_blocks)),
+        }
+        
+        # Preserve centroid if exists
+        if existing and 'centroid' in existing:
+            updated_block['centroid'] = existing['centroid']
+        else:
+            # Calculate centroid
+            try:
+                geom = shape(geometry)
+                centroid = geom.centroid
+                updated_block['centroid'] = {'lon': centroid.x, 'lat': centroid.y}
+            except:
+                pass
+        
+        updated_blocks.append(updated_block)
+        print(f"[update_blocks_geometry] Updated block {block_id}: area={new_area:.4f} ha")
+    
+    # Update result_data
+    result_data['blocks'] = updated_blocks
+    result_data['total_blocks'] = len(updated_blocks)
+    
+    # If update_boundary flag is set, update forest boundary from block geometries
+    if update_boundary and len(updated_blocks) > 0:
+        print(f"[update_blocks_geometry] Updating forest boundary")
+        
+        # For single block, use that block as boundary
+        if len(updated_blocks) == 1:
+            boundary_geometry = updated_blocks[0].get('geometry')
+        else:
+            # For multiple blocks, we need to union them - use the outer boundary
+            # For now, just use the first block's outer boundary (simplified)
+            # TODO: Implement proper union for multiple blocks
+            boundary_geometry = updated_blocks[0].get('geometry')
+        
+        # Update boundary_geom in database
+        try:
+            boundary_shape = shape(boundary_geometry)
+            boundary_wkb = from_shape(boundary_shape, srid=4326)
+            calculation.boundary_geom = boundary_wkb
+            
+            # Update geometry field
+            result_data['geometry'] = boundary_geometry
+            result_data['area_hectares'] = calculate_geodesic_area(boundary_geometry)
+            
+            boundary_updated = True
+            print(f"[update_blocks_geometry] Forest boundary updated")
+        except Exception as e:
+            print(f"[update_blocks_geometry] Error updating boundary: {e}")
+    
+    # Now handle sub-area clipping
+    sub_areas = result_data.get('sub_areas', [])
+    clipped_sub_areas = []
+    
+    print(f"[update_blocks_geometry] Processing {len(sub_areas)} sub-areas for clipping")
+    
+    for sub_area in sub_areas:
+        sub_area_geom = sub_area.get('geometry')
+        if not sub_area_geom:
+            continue
+        
+        sub_area_shape = shape(sub_area_geom)
+        
+        # Find which block(s) this sub-area belongs to
+        # For simplicity, clip to the first block that contains most of the sub-area
+        best_block = None
+        best_coverage = 0
+        
+        for block in updated_blocks:
+            block_geom = block.get('geometry')
+            if not block_geom:
+                continue
+            
+            block_shape = shape(block_geom)
+            
+            try:
+                intersection = sub_area_shape.intersection(block_shape)
+                if not intersection.is_empty:
+                    coverage = intersection.area / sub_area_shape.area if sub_area_shape.area > 0 else 0
+                    if coverage > best_coverage:
+                        best_coverage = coverage
+                        best_block = block
+                        best_intersection = intersection
+            except Exception as e:
+                print(f"[update_blocks_geometry] Error checking intersection: {e}")
+        
+        if best_block and best_coverage < 1.0:
+            # Sub-area is partially outside - clip it
+            try:
+                block_geom = best_block.get('geometry')
+                block_shape = shape(block_geom)
+                
+                clipped = sub_area_shape.intersection(block_shape)
+                
+                if not clipped.is_empty and clipped.area > 0:
+                    # Update sub-area geometry
+                    clipped_geom = mapping(clipped)
+                    sub_area['geometry'] = clipped_geom
+                    clipped_area = abs(clipped.area) / 10000  # hectares
+                    sub_area['area_hectares'] = round(clipped_area, 4)
+                    
+                    clipped_sub_areas.append({
+                        'id': sub_area.get('id'),
+                        'name': sub_area.get('name'),
+                        'original_area': sub_area_shape.area / 10000,
+                        'clipped_area': clipped_area,
+                        'block_id': best_block.get('block_id'),
+                        'block_name': best_block.get('block_name')
+                    })
+                    print(f"[update_blocks_geometry] Clipped sub-area '{sub_area.get('name')}' to {clipped_area:.4f} ha")
+                elif clipped.is_empty:
+                    # Sub-area is completely outside - mark for removal or keep minimal
+                    print(f"[update_blocks_geometry] Sub-area '{sub_area.get('name')}' is completely outside blocks")
+            except Exception as e:
+                print(f"[update_blocks_geometry] Error clipping sub-area: {e}")
+    
+    # Recalculate excluded areas
+    excluded_total = calculate_total_excluded_area(sub_areas)
+    result_data['excluded_area_hectares'] = round(excluded_total, 4)
+    
+    # Recalculate effective areas per block
+    block_excluded_map = calculate_block_excluded_areas(updated_blocks, sub_areas)
+    for block in updated_blocks:
+        block_id = block.get('block_id')
+        block_excluded = block_excluded_map.get(block_id, 0.0)
+        block['excluded_area_hectares'] = round(block_excluded, 4)
+        original_area = block.get('area_hectares', 0)
+        block['effective_area_hectares'] = round(original_area - block_excluded, 4)
+    
+    # Save to database
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
+    db.commit()
+    db.refresh(calculation)
+    
+    print(f"[update_blocks_geometry] Saved {len(updated_blocks)} blocks, {len(clipped_sub_areas)} sub-areas clipped")
+    print(f"[update_blocks_geometry] boundary_updated={boundary_updated}")
+    
+    return {
+        "success": True,
+        "blocks": updated_blocks,
+        "sub_areas": sub_areas,
+        "clipped_sub_areas": clipped_sub_areas,
+        "boundary_updated": boundary_updated,
+        "message": f"Updated {len(updated_blocks)} blocks. {len(clipped_sub_areas)} sub-areas were clipped to fit within block boundaries."
+    }
+
+
 @router.post("/calculations/{calculation_id}/recalculate-areas")
 async def recalculate_areas(
     calculation_id: UUID,

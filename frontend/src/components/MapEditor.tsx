@@ -85,7 +85,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>(SUB_AREA_CATEGORIES[0].value);
   const [activeCategory, setActiveCategory] = useState<string | null>(null); // Drawing mode - category that will trigger auto-draw
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'edit_boundary' | 'edit_subareas'>('edit_boundary');
+  const [mode, setMode] = useState<'edit_boundary' | 'edit_blocks' | 'edit_subareas'>('edit_boundary');
   
   // Auto-switch to subareas mode if there are existing sub-areas (after loading)
   useEffect(() => {
@@ -568,6 +568,166 @@ const MapEditor: React.FC<MapEditorProps> = ({
     }
   }, [mapInstance, activeCategory, mode]);
 
+  // Block editing controls
+  useEffect(() => {
+    if (!mapInstance) {
+      console.log('[MapEditor] No mapInstance yet');
+      return;
+    }
+    
+    if (mode !== 'edit_blocks') {
+      console.log('[MapEditor] Not in edit_blocks mode, skipping controls');
+      return;
+    }
+    
+    console.log('[MapEditor] Setting up block editing controls');
+    console.log('[MapEditor] Blocks available:', blocks.length);
+
+    // Add drawing controls for block editing
+    mapInstance.pm.addControls({
+      position: 'topleft',
+      drawPolygon: false,
+      drawMarker: false,
+      drawCircle: false,
+      drawCircleMarker: false,
+      drawPolyline: false,
+      drawRectangle: false,
+      editMode: true, // Enable vertex editing
+      dragMode: false,
+      cutPolygon: false,
+      removalMode: true, // Allow deleting blocks
+    });
+
+    // Track editing state
+    let isEditingBlock = false;
+    let editingBlockId: string | null = null;
+
+    const handleEditStart = (e: any) => {
+      const layer = e.layer;
+      if (layer) {
+        isEditingBlock = true;
+        // Find which block this layer belongs to
+        const blockId = (layer as any)._blockId;
+        if (blockId) {
+          editingBlockId = blockId;
+          console.log('[MapEditor] Started editing block:', blockId);
+          (layer as any)._pmEditMode = true;
+        }
+      }
+    };
+
+    const handleEdit = (e: any) => {
+      console.log('[MapEditor] Block edit event fired');
+      const layers = e.layers;
+      if (!layers) return;
+      
+      layers.eachLayer((layer: any) => {
+        const geoJSON = layer.toGeoJSON();
+        
+        // Handle FeatureCollection vs Feature
+        let editedGeometry = null;
+        if (geoJSON.type === 'FeatureCollection' && geoJSON.features && geoJSON.features.length > 0) {
+          editedGeometry = geoJSON.features[0].geometry;
+        } else if (geoJSON.type === 'Feature') {
+          editedGeometry = geoJSON.geometry;
+        } else if (geoJSON.geometry) {
+          editedGeometry = geoJSON.geometry;
+        }
+        
+        const blockId = (layer as any)._blockId;
+        console.log('[MapEditor] Block edited:', blockId, 'has geometry:', !!editedGeometry);
+        
+        if (blockId && editedGeometry) {
+          // Calculate new area
+          let newArea = 0;
+          try {
+            const turfFeature = turf.feature(editedGeometry);
+            newArea = turf.area(turfFeature) / 10000;
+            console.log('[MapEditor] New block area:', newArea);
+          } catch (err) {
+            console.error('Error calculating area:', err);
+          }
+          
+          // Update local state
+          setBlocks(prev => prev.map(b => 
+            b.block_id === blockId || b.id === blockId
+              ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
+              : b
+          ));
+        }
+      });
+    };
+
+    const handleEditEnd = (e: any) => {
+      console.log('[MapEditor] Block edit ended');
+      const layer = e.layer;
+      if (layer) {
+        (layer as any)._pmEditMode = false;
+        
+        const geoJSON = layer.toGeoJSON();
+        
+        // Handle FeatureCollection vs Feature
+        let editedGeometry = null;
+        if (geoJSON.type === 'FeatureCollection' && geoJSON.features && geoJSON.features.length > 0) {
+          editedGeometry = geoJSON.features[0].geometry;
+        } else if (geoJSON.type === 'Feature') {
+          editedGeometry = geoJSON.geometry;
+        } else if (geoJSON.geometry) {
+          editedGeometry = geoJSON.geometry;
+        }
+        
+        const blockId = (layer as any)._blockId;
+        console.log('[MapEditor] Block edit end - blockId:', blockId);
+        
+        if (blockId && editedGeometry) {
+          // Calculate new area
+          let newArea = 0;
+          try {
+            const turfFeature = turf.feature(editedGeometry);
+            newArea = turf.area(turfFeature) / 10000;
+          } catch (err) {
+            console.error('Error calculating area:', err);
+          }
+          
+          // Update blocks in state
+          setBlocks(prev => prev.map(b => 
+            b.block_id === blockId || b.id === blockId
+              ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
+              : b
+          ));
+          
+          console.log('[MapEditor] Block geometry updated locally, will save on button click');
+        }
+      }
+      
+      isEditingBlock = false;
+      editingBlockId = null;
+    };
+
+    const handleRemove = (e: any) => {
+      const layer = e.layer;
+      const blockId = (layer as any)._blockId;
+      if (blockId) {
+        console.log('[MapEditor] Block removed:', blockId);
+        // Remove from local state
+        setBlocks(prev => prev.filter(b => (b.block_id || b.id) !== blockId));
+      }
+    };
+
+    mapInstance.on('pm:editstart', handleEditStart);
+    mapInstance.on('pm:edit', handleEdit);
+    mapInstance.on('pm:editend', handleEditEnd);
+    mapInstance.on('pm:remove', handleRemove);
+
+    return () => {
+      mapInstance.pm.removeControls();
+      mapInstance.off('pm:editstart', handleEditStart);
+      mapInstance.off('pm:edit', handleEdit);
+      mapInstance.off('pm:editend', handleEditEnd);
+      mapInstance.off('pm:remove', handleRemove);
+    };
+  }, [mapInstance, mode, blocks]);
+
   // Render boundary geometry
   useEffect(() => {
     if (!mapInstance || !geometry) return;
@@ -606,7 +766,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
   useEffect(() => {
     if (!mapInstance) return;
     
-    console.log('[MapEditor] Rendering blocks:', blocks?.length || 0);
+    console.log('[MapEditor] Rendering blocks:', blocks?.length || 0, 'mode:', mode);
     if (blocks && blocks.length > 0) {
       console.log('[MapEditor] First block:', JSON.stringify(blocks[0]).substring(0, 300));
     }
@@ -622,33 +782,55 @@ const MapEditor: React.FC<MapEditorProps> = ({
 
     if (!blocks || blocks.length === 0) return;
 
+    // Only render blocks in edit_boundary or edit_blocks mode
+    if (mode !== 'edit_boundary' && mode !== 'edit_blocks') {
+      console.log('[MapEditor] Skipping block render - not in edit_boundary or edit_blocks mode');
+      return;
+    }
+
     // Create new block layers
     const newBlockLayers: L.GeoJSON[] = [];
     const blockColors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6', '#ec4899'];
 
+    // Determine if blocks should be editable
+    const isEditable = mode === 'edit_blocks';
+
     blocks.forEach((block, index) => {
       if (!block.geometry) return;
+
+      const blockId = block.block_id || block.id || `block-${index}`;
+      const blockName = block.block_name || block.name || `Block ${index + 1}`;
 
       const layer = L.geoJSON(block.geometry, {
         style: {
           color: blockColors[index % blockColors.length],
-          weight: 3,
+          weight: isEditable ? 3 : 3,
           fillOpacity: 0.2,
           fillColor: blockColors[index % blockColors.length],
         },
-        pmIgnore: true,
-        interactive: false,
+        pmIgnore: !isEditable, // Only allow editing in edit_blocks mode
+        interactive: !isEditable,
         bubblingMouseEvents: false,
       });
       
-      // Disable mouse events
-      layer.on = function() { return layer; };
-      layer.off = function() { return layer; };
-      layer.getEvents = function() { return {}; };
+      // Store block ID on layer for event handling
+      (layer as any)._blockId = blockId;
+      
+      if (isEditable) {
+        // Allow click events for selection
+        layer.on('click', () => {
+          console.log('[MapEditor] Block clicked:', blockId);
+        });
+      } else {
+        // Disable mouse events when not in edit mode
+        layer.on = function() { return layer; };
+        layer.off = function() { return layer; };
+        layer.getEvents = function() { return {}; };
+      }
 
       // Add popup with block info
       layer.bindPopup(`
-        <strong>${block.block_name || `Block ${index + 1}`}</strong><br/>
+        <strong>${blockName}</strong><br/>
         Area: ${block.area_hectares?.toFixed(2) || 'N/A'} ha
       `);
 
@@ -657,7 +839,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
     });
 
     setBlockLayers(newBlockLayers);
-  }, [mapInstance, blocks]);
+  }, [mapInstance, blocks, mode]);
 
   // Render sub-areas
   useEffect(() => {
@@ -1004,6 +1186,16 @@ const MapEditor: React.FC<MapEditorProps> = ({
           Edit Boundary
         </button>
         <button
+          onClick={() => setMode('edit_blocks')}
+          className={`px-4 py-2 rounded font-medium ${
+            mode === 'edit_blocks'
+              ? 'bg-blue-600 text-white'
+              : 'bg-white text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Edit Blocks ({blocks.length})
+        </button>
+        <button
           onClick={() => setMode('edit_subareas')}
           className={`px-4 py-2 rounded font-medium ${
             mode === 'edit_subareas'
@@ -1090,6 +1282,103 @@ const MapEditor: React.FC<MapEditorProps> = ({
                   No boundary drawn. Use the <strong>polygon tool</strong> (top-left of map) to draw one.
                 </div>
               )}
+            </div>
+          ) : mode === 'edit_blocks' ? (
+            <div>
+              <h3 className="font-semibold mb-3">Block Editing</h3>
+              <div className="bg-purple-50 border border-purple-200 rounded p-3 text-sm mb-4">
+                <p className="mb-2"><strong>Instructions:</strong></p>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li>Click on a <strong>block</strong> to select it</li>
+                  <li>Use the <strong>pencil tool</strong> (top-left) to edit vertices</li>
+                  <li><strong>Move</strong> vertices by dragging</li>
+                  <li><strong>Add</strong> vertex by clicking on edge</li>
+                  <li><strong>Delete</strong> vertex by selecting and pressing Delete</li>
+                </ul>
+              </div>
+              
+              {blocks.length > 0 ? (
+                <div className="space-y-2 mb-4">
+                  <h4 className="font-medium text-sm">Blocks ({blocks.length})</h4>
+                  {blocks.map((block, index) => {
+                    const blockColors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6', '#ec4899'];
+                    const color = blockColors[index % blockColors.length];
+                    return (
+                      <div key={block.block_id || block.id || index} className="p-2 bg-white border rounded flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{ backgroundColor: color }}></div>
+                          <span className="text-sm font-medium">{block.block_name || block.name || `Block ${index + 1}`}</span>
+                        </div>
+                        <span className="text-xs text-gray-500">{block.area_hectares?.toFixed(2) || 'N/A'} ha</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                  No blocks defined. Blocks are created during forest creation.
+                </div>
+              )}
+              
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
+                <p className="font-medium text-blue-800 mb-1">Outer vs Inner Vertices:</p>
+                <ul className="list-disc pl-4 space-y-1 text-gray-700">
+                  <li><strong>Outer vertices</strong> (shared with forest boundary) - moving these updates the forest boundary too</li>
+                  <li><strong>Inner vertices</strong> (between blocks) - can be edited freely</li>
+                </ul>
+              </div>
+              
+              <button
+                onClick={async () => {
+                  if (!calculationId) return;
+                  setLoading(true);
+                  try {
+                    console.log('[MapEditor] Saving block edits...');
+                    
+                    // Prepare blocks data for API
+                    const blocksData = blocks.map((block, index) => ({
+                      block_id: block.block_id || block.id || `block-${index}`,
+                      block_name: block.block_name || block.name || `Block ${index + 1}`,
+                      geometry: block.geometry,
+                      area_hectares: block.area_hectares || 0,
+                      index: index,
+                    }));
+                    
+                    console.log('[MapEditor] Blocks to save:', JSON.stringify(blocksData).substring(0, 500));
+                    
+                    // Call API to update blocks
+                    const result = await forestApi.updateBlocksGeometry(calculationId, {
+                      blocks: blocksData,
+                      update_boundary: true, // Always update boundary for outer vertices
+                    });
+                    
+                    console.log('[MapEditor] Save result:', result);
+                    
+                    if (result.success) {
+                      let message = `Saved ${result.blocks?.length || 0} blocks!`;
+                      if (result.clipped_sub_areas?.length > 0) {
+                        message += ` ${result.clipped_sub_areas.length} sub-area(s) were clipped to fit within block boundaries.`;
+                      }
+                      alert(message);
+                      
+                      // Reload sub-areas to get clipped versions
+                      const subAreaData = await forestApi.listSubAreas(calculationId);
+                      setSubAreas(subAreaData.sub_areas || []);
+                    } else {
+                      alert('Failed to save blocks');
+                    }
+                  } catch (err: any) {
+                    console.error('Error saving blocks:', err);
+                    alert('Failed to save blocks: ' + (err.response?.data?.detail || err.message));
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded font-semibold hover:bg-green-700 disabled:bg-gray-400"
+              >
+                {loading ? 'Saving...' : 'Save Block Changes'}
+              </button>
             </div>
           ) : (
             <div>
