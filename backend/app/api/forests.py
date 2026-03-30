@@ -144,6 +144,62 @@ def calculate_block_excluded_areas(blocks: List[Dict], sub_areas: List[Dict]) ->
     return block_excluded
 
 
+def calculate_block_breakdown(geometry: Dict, blocks: List[Dict]) -> List[Dict]:
+    """
+    Calculate how a sub-area's geometry intersects with each block.
+    
+    Args:
+        geometry: GeoJSON geometry dict
+        blocks: List of block dictionaries with geometry
+        
+    Returns:
+        List of dicts with blockId, blockName, area, percentage
+    """
+    from shapely.geometry import shape
+    from shapely.ops import transform
+    
+    try:
+        sub_geom = shape(geometry)
+        sub_area = sub_geom.area
+        
+        if sub_area == 0:
+            return []
+        
+        breakdown = []
+        for block in blocks:
+            block_geom = block.get("geometry")
+            if not block_geom:
+                continue
+            
+            try:
+                block_shape = shape(block_geom)
+                
+                # Calculate intersection
+                if sub_geom.intersects(block_shape):
+                    intersection = sub_geom.intersection(block_shape)
+                    intersection_area = intersection.area
+                    
+                    if intersection_area > 0:
+                        percentage = (intersection_area / sub_area) * 100
+                        breakdown.append({
+                            "blockId": block.get("block_id"),
+                            "blockName": block.get("block_name"),
+                            "area": round(intersection_area / 10000, 4),  # Convert to hectares
+                            "percentage": round(percentage, 2)
+                        })
+            except Exception as e:
+                print(f"Error calculating intersection with block: {e}")
+                continue
+        
+        # Sort by area descending
+        breakdown.sort(key=lambda x: x.get("area", 0), reverse=True)
+        return breakdown
+        
+    except Exception as e:
+        print(f"Error calculating block breakdown: {e}")
+        return []
+
+
 @router.get("/community-forests", response_model=List[CommunityForestResponse])
 async def list_community_forests(
     search: Optional[str] = None,
@@ -3110,12 +3166,17 @@ async def update_sub_area(
     db: Session = Depends(get_db)
 ):
     """
-    Update a sub-area's properties (name, category, etc.)
-
-    Note: Geometry update is not supported via this endpoint.
-    Use geometry update endpoint to change the shape.
+    Update a sub-area's properties (name, category, geometry, etc.)
     """
     from datetime import datetime
+    
+    # Log incoming request for debugging
+    print(f"[update_sub_area] calculation_id={calculation_id}, sub_area_id={sub_area_id}")
+    print(f"[update_sub_area] request.name={request.name}")
+    print(f"[update_sub_area] request.geometry is not None: {request.geometry is not None}")
+    if request.geometry:
+        print(f"[update_sub_area] request.geometry type: {request.geometry.get('type')}")
+        print(f"[update_sub_area] request.geometry: {str(request.geometry)[:500]}")
     
     # Get calculation
     calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
@@ -3137,10 +3198,16 @@ async def update_sub_area(
     result_data = calculation.result_data or {}
     sub_areas = result_data.get("sub_areas", [])
 
+    # Debug: print all sub-area IDs for comparison
+    print(f"[update_sub_area] Looking for sub_area_id: '{sub_area_id}'")
+    print(f"[update_sub_area] Available sub-area IDs: {[sa.get('id') for sa in sub_areas]}")
+
     # Find the sub-area
     sub_area_found = False
     for i, sa in enumerate(sub_areas):
-        if sa.get("id") == sub_area_id:
+        sa_id = sa.get("id")
+        print(f"[update_sub_area] Comparing: '{sa_id}' == '{sub_area_id}' -> {sa_id == sub_area_id}")
+        if sa_id == sub_area_id:
             sub_area_found = True
 
             # Update fields
@@ -3160,6 +3227,73 @@ async def update_sub_area(
                 sub_areas[i]["blockName"] = request.block_name
             if request.is_excluded is not None:
                 sub_areas[i]["isExcluded"] = request.is_excluded
+            if request.geometry is not None:
+                # Validate geometry
+                if not isinstance(request.geometry, dict):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Geometry must be a valid GeoJSON object"
+                    )
+                if request.geometry.get("type") not in ["Polygon", "MultiPolygon"]:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Geometry type must be Polygon or MultiPolygon"
+                    )
+                
+                # Update geometry
+                sub_areas[i]["geometry"] = request.geometry
+                print(f"[update_sub_area] Stored geometry in sub_areas[{i}]: {str(sub_areas[i]['geometry'])[:200]}")
+                
+                # Recalculate area from new geometry
+                try:
+                    from geoalchemy2.shape import to_shape
+                    from shapely.geometry import shape
+                    import pyproj
+                    
+                    geom_obj = shape(request.geometry)
+                    print(f"[update_sub_area] Shapely geom area (degrees^2): {geom_obj.area}")
+                    
+                    # Use pyproj for accurate geodesic area calculation
+                    # Project to UTM zone for Nepal (approximately zone 44 or 45)
+                    # Use geodesic area calculation instead
+                    from shapely.ops import transform
+                    
+                    # Create a geodesic transformer
+                    geodesic = pyproj.Geod(ellps='WGS84')
+                    
+                    # For a Polygon, we need to extract coordinates
+                    coords = list(geom_obj.exterior.coords)
+                    # Flatten coordinates for pyproj
+                    lons = [c[0] for c in coords]
+                    lats = [c[1] for c in coords]
+                    
+                    # Calculate geodesic area
+                    area_sqm, _ = geodesic.geometry_area_perimeter(geom_obj)
+                    area_sqm = abs(area_sqm)  # Ensure positive
+                    area_ha = area_sqm / 10000  # Convert to hectares
+                    
+                    print(f"[update_sub_area] Geodesic area: {area_sqm} sqm, {area_ha} ha")
+                    
+                    sub_areas[i]["area_sqm"] = round(area_sqm, 4)
+                    sub_areas[i]["area_hectares"] = round(area_ha, 4)
+                    
+                    # Recalculate block breakdown for new geometry
+                    blocks = result_data.get("blocks", [])
+                    block_breakdown = calculate_block_breakdown(request.geometry, blocks)
+                    if block_breakdown:
+                        sub_areas[i]["blockBreakdown"] = block_breakdown
+                        # Update primary block assignment based on largest coverage
+                        if block_breakdown:
+                            primary = max(block_breakdown, key=lambda x: x.get("area", 0))
+                            sub_areas[i]["blockId"] = primary.get("blockId")
+                            sub_areas[i]["blockName"] = primary.get("blockName")
+                            
+                except Exception as e:
+                    # If area calculation fails, log but continue
+                    import traceback
+                    print(f"[update_sub_area] Error in area calculation: {e}")
+                    traceback.print_exc()
+                    logger.warning(f"Failed to recalculate area for sub-area: {e}")
 
             sub_areas[i]["updated_at"] = datetime.now().isoformat()
             break
@@ -3198,6 +3332,17 @@ async def update_sub_area(
     flag_modified(calculation, "result_data")
     db.commit()
     db.refresh(calculation)
+    
+    # Verify saved data
+    saved_result_data = calculation.result_data
+    saved_sub_areas = saved_result_data.get("sub_areas", [])
+    saved_sub_area = next((sa for sa in saved_sub_areas if sa.get("id") == sub_area_id), None)
+    if saved_sub_area:
+        print(f"[update_sub_area] VERIFIED - saved geometry type: {saved_sub_area.get('geometry', {}).get('type')}")
+        print(f"[update_sub_area] VERIFIED - saved geometry coords exist: {'coordinates' in saved_sub_area.get('geometry', {})}")
+        print(f"[update_sub_area] VERIFIED - saved area_hectares: {saved_sub_area.get('area_hectares')}")
+    else:
+        print(f"[update_sub_area] ERROR - sub_area not found after save!")
 
     return {
         "success": True,
