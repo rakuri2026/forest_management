@@ -585,6 +585,15 @@ const MapEditor: React.FC<MapEditorProps> = ({
     console.log('[MapEditor] Setting up block editing controls');
     console.log('[MapEditor] Blocks available:', blocks.length);
 
+    // Enable global snapping options (Problem D)
+    mapInstance.pm.setGlobalOptions({
+      snappable: true,
+      snapDistance: 20,
+      snapGeometry: true,
+      preventMarkerRemoval: false,
+      allowSelfIntersection: false,
+    });
+
     // Add drawing controls for block editing
     mapInstance.pm.addControls({
       position: 'topleft',
@@ -599,127 +608,154 @@ const MapEditor: React.FC<MapEditorProps> = ({
       cutPolygon: false,
       removalMode: true, // Allow deleting vertices and blocks
     });
-    }
 
-    // Track editing state
-    let isEditingBlock = false;
-    let editingBlockId: string | null = null;
-
-    const handleEditStart = (e: any) => {
-      const layer = e.layer;
-      if (layer) {
-        isEditingBlock = true;
-        // Find which block this layer belongs to
-        const blockId = (layer as any)._blockId;
-        if (blockId) {
-          editingBlockId = blockId;
-          console.log('[MapEditor] Started editing block:', blockId);
-          (layer as any)._pmEditMode = true;
-        }
-      }
-    };
-
-    const handleEdit = (e: any) => {
-      console.log('[MapEditor] Block edit event fired');
-      const layers = e.layers;
-      if (!layers) return;
+    // Helper function to sync shared vertices between blocks (Problem D)
+    const syncSharedVertices = (editedLayer: any, newCoords: [number, number]) => {
+      const editedBlockId = editedLayer._blockId;
+      const editedGeometry = editedLayer.toGeoJSON();
+      const editedCoords = editedGeometry.geometry?.coordinates?.[0] || [];
       
-      layers.eachLayer((layer: any) => {
-        const geoJSON = layer.toGeoJSON();
-        
-        // Handle FeatureCollection vs Feature
-        let editedGeometry = null;
-        if (geoJSON.type === 'FeatureCollection' && geoJSON.features && geoJSON.features.length > 0) {
-          editedGeometry = geoJSON.features[0].geometry;
-        } else if (geoJSON.type === 'Feature') {
-          editedGeometry = geoJSON.geometry;
-        } else if (geoJSON.geometry) {
-          editedGeometry = geoJSON.geometry;
-        }
-        
-        const blockId = (layer as any)._blockId;
-        console.log('[MapEditor] Block edited:', blockId, 'has geometry:', !!editedGeometry);
-        
-        if (blockId && editedGeometry) {
-          // Calculate new area
-          let newArea = 0;
-          try {
-            const turfFeature = turf.feature(editedGeometry);
-            newArea = turf.area(turfFeature) / 10000;
-            console.log('[MapEditor] New block area:', newArea);
-          } catch (err) {
-            console.error('Error calculating area:', err);
-          }
+      // Find all other block layers
+      mapInstance.eachLayer((layer: any) => {
+        if (layer._blockId && layer._blockId !== editedBlockId && layer.pm && layer.pm.enabled()) {
+          const otherGeoJSON = layer.toGeoJSON();
+          const otherCoords = otherGeoJSON.geometry?.coordinates?.[0] || [];
           
-          // Update local state
-          setBlocks(prev => prev.map(b => 
-            b.block_id === blockId || b.id === blockId
-              ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
-              : b
-          ));
-          setBlocksSaved(false);
+          // Find and update matching vertices
+          let updated = false;
+          const newOtherCoords = otherCoords.map((coord: [number, number]) => {
+            // Check if this coord matches the moved vertex (within tolerance)
+            const tolerance = 0.0001; // ~10 meters
+            if (Math.abs(coord[0] - newCoords[0]) < tolerance && Math.abs(coord[1] - newCoords[1]) < tolerance) {
+              updated = true;
+              return newCoords; // Use new coordinates
+            }
+            return coord;
+          });
+          
+          if (updated) {
+            // Update the other layer's coordinates
+            try {
+              const newRing = turf.lineString(newOtherCoords);
+              const newPolygon = turf.polygon([newOtherCoords]);
+              layer.setLatLngs(newOtherCoords);
+              console.log('[MapEditor] Synced shared vertex on block:', layer._blockId);
+            } catch (e) {
+              console.log('[MapEditor] Error syncing vertex:', e);
+            }
+          }
         }
       });
     };
 
+    // Helper function to update block state with new geometry
+    const updateBlockGeometry = (layer: any) => {
+      const geoJSON = layer.toGeoJSON();
+      
+      // Handle FeatureCollection vs Feature
+      let editedGeometry = null;
+      if (geoJSON.type === 'FeatureCollection' && geoJSON.features && geoJSON.features.length > 0) {
+        editedGeometry = geoJSON.features[0].geometry;
+      } else if (geoJSON.type === 'Feature') {
+        editedGeometry = geoJSON.geometry;
+      } else if (geoJSON.geometry) {
+        editedGeometry = geoJSON.geometry;
+      }
+      
+      const blockId = layer._blockId;
+      
+      if (blockId && editedGeometry) {
+        // Calculate new area
+        let newArea = 0;
+        try {
+          const turfFeature = turf.feature(editedGeometry);
+          newArea = turf.area(turfFeature) / 10000;
+        } catch (err) {
+          console.error('Error calculating area:', err);
+        }
+        
+        // Update local state
+        setBlocks(prev => prev.map(b => 
+          b.block_id === blockId || b.id === blockId
+            ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
+            : b
+        ));
+        setBlocksSaved(false);
+        console.log('[MapEditor] Block geometry updated:', blockId);
+      }
+    };
+
+    // Problem A & B: Handle vertex drag end - extract and save geometry
+    const handleMarkerDragEnd = (e: any) => {
+      const marker = e.marker;
+      const layer = marker._layer;
+      if (layer && layer._blockId) {
+        console.log('[MapEditor] pm:markerdragend - vertex dragged');
+        updateBlockGeometry(layer);
+        
+        // Sync shared vertices (Problem D)
+        const newLatLng = marker.getLatLng();
+        const newCoords: [number, number] = [newLatLng.lng, newLatLng.lat];
+        syncSharedVertices(layer, newCoords);
+      }
+    };
+
+    // Problem A: Handle vertex removal
+    const handleVertexRemoved = (e: any) => {
+      console.log('[MapEditor] pm:vertexremoved event');
+      const layer = e.layer;
+      if (layer && layer._blockId) {
+        console.log('[MapEditor] Vertex removed from block:', layer._blockId);
+        updateBlockGeometry(layer);
+      }
+    };
+
+    // Handle layer edit start
+    const handleEditStart = (e: any) => {
+      const layer = e.layer;
+      if (layer && layer._blockId) {
+        console.log('[MapEditor] Started editing block:', layer._blockId);
+        (layer as any)._pmEditMode = true;
+      }
+    };
+
+    // Handle general edit (for non-marker operations)
+    const handleEdit = (e: any) => {
+      console.log('[MapEditor] Block edit event fired');
+      const layers = e.layers;
+      if (layers) {
+        layers.eachLayer((layer: any) => {
+          if (layer._blockId) {
+            updateBlockGeometry(layer);
+          }
+        });
+      }
+    };
+
+    // Handle edit end
     const handleEditEnd = (e: any) => {
       console.log('[MapEditor] Block edit ended');
       const layer = e.layer;
-      if (layer) {
+      if (layer && layer._blockId) {
         (layer as any)._pmEditMode = false;
-        
-        const geoJSON = layer.toGeoJSON();
-        
-        // Handle FeatureCollection vs Feature
-        let editedGeometry = null;
-        if (geoJSON.type === 'FeatureCollection' && geoJSON.features && geoJSON.features.length > 0) {
-          editedGeometry = geoJSON.features[0].geometry;
-        } else if (geoJSON.type === 'Feature') {
-          editedGeometry = geoJSON.geometry;
-        } else if (geoJSON.geometry) {
-          editedGeometry = geoJSON.geometry;
-        }
-        
-        const blockId = (layer as any)._blockId;
-        console.log('[MapEditor] Block edit end - blockId:', blockId);
-        
-        if (blockId && editedGeometry) {
-          // Calculate new area
-          let newArea = 0;
-          try {
-            const turfFeature = turf.feature(editedGeometry);
-            newArea = turf.area(turfFeature) / 10000;
-          } catch (err) {
-            console.error('Error calculating area:', err);
-          }
-          
-          // Update blocks in state
-          setBlocks(prev => prev.map(b => 
-            b.block_id === blockId || b.id === blockId
-              ? { ...b, geometry: editedGeometry, area_hectares: Math.max(0.01, newArea) }
-              : b
-          ));
-          setBlocksSaved(false);
-          
-          console.log('[MapEditor] Block geometry updated locally, will save on button click');
-        }
+        updateBlockGeometry(layer);
       }
-      
-      isEditingBlock = false;
-      editingBlockId = null;
     };
 
+    // Handle block removal (entire polygon deleted)
     const handleRemove = (e: any) => {
       const layer = e.layer;
       const blockId = (layer as any)._blockId;
       if (blockId) {
         console.log('[MapEditor] Block removed:', blockId);
-        // Remove from local state
         setBlocks(prev => prev.filter(b => (b.block_id || b.id) !== blockId));
         setBlocksSaved(false);
       }
     };
 
+    // Register event listeners
+    mapInstance.on('pm:markerdragend', handleMarkerDragEnd);
+    mapInstance.on('pm:vertexremoved', handleVertexRemoved);
     mapInstance.on('pm:editstart', handleEditStart);
     mapInstance.on('pm:edit', handleEdit);
     mapInstance.on('pm:editend', handleEditEnd);
@@ -727,6 +763,8 @@ const MapEditor: React.FC<MapEditorProps> = ({
 
     return () => {
       mapInstance.pm.removeControls();
+      mapInstance.off('pm:markerdragend', handleMarkerDragEnd);
+      mapInstance.off('pm:vertexremoved', handleVertexRemoved);
       mapInstance.off('pm:editstart', handleEditStart);
       mapInstance.off('pm:edit', handleEdit);
       mapInstance.off('pm:editend', handleEditEnd);

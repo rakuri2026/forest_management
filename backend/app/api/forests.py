@@ -4296,31 +4296,55 @@ async def update_blocks_geometry(
     
     # If update_boundary flag is set, update forest boundary from block geometries
     if update_boundary and len(updated_blocks) > 0:
-        print(f"[update_blocks_geometry] Updating forest boundary")
+        print(f"[update_blocks_geometry] Updating forest boundary using ST_Union")
         
-        # For single block, use that block as boundary
-        if len(updated_blocks) == 1:
-            boundary_geometry = updated_blocks[0].get('geometry')
-        else:
-            # For multiple blocks, we need to union them - use the outer boundary
-            # For now, just use the first block's outer boundary (simplified)
-            # TODO: Implement proper union for multiple blocks
-            boundary_geometry = updated_blocks[0].get('geometry')
-        
-        # Update boundary_geom in database
         try:
-            boundary_shape = shape(boundary_geometry)
-            boundary_wkb = from_shape(boundary_shape, srid=4326)
-            calculation.boundary_geom = boundary_wkb
+            from shapely.ops import unary_union
             
-            # Update geometry field
-            result_data['geometry'] = boundary_geometry
-            result_data['area_hectares'] = calculate_geodesic_area(boundary_geometry)
+            # Collect all block geometries
+            block_geometries = []
+            for block in updated_blocks:
+                block_geom = block.get('geometry')
+                if block_geom:
+                    block_shape = shape(block_geom)
+                    block_geometries.append(block_shape)
             
-            boundary_updated = True
-            print(f"[update_blocks_geometry] Forest boundary updated")
+            if len(block_geometries) == 1:
+                # Single block - use its geometry directly
+                boundary_shape = block_geometries[0]
+            elif len(block_geometries) > 1:
+                # Multiple blocks - use ST_Union (unary_union) to create proper boundary
+                boundary_shape = unary_union(block_geometries)
+            else:
+                boundary_shape = None
+            
+            if boundary_shape:
+                # Convert to GeoJSON
+                boundary_geometry = mapping(boundary_shape)
+                
+                # Ensure it's MultiPolygon (for consistency)
+                if boundary_shape.geom_type == 'Polygon':
+                    boundary_geometry = {
+                        'type': 'MultiPolygon',
+                        'coordinates': [boundary_geometry['coordinates']]
+                    }
+                
+                # Update boundary_geom in database
+                boundary_wkb = from_shape(boundary_shape, srid=4326)
+                calculation.boundary_geom = boundary_wkb
+                
+                # Update geometry field
+                result_data['geometry'] = boundary_geometry
+                result_data['area_hectares'] = calculate_geodesic_area(boundary_geometry)
+                
+                boundary_updated = True
+                print(f"[update_blocks_geometry] Forest boundary updated using ST_Union")
+            else:
+                print(f"[update_blocks_geometry] No block geometries to create boundary")
         except Exception as e:
+            import traceback
             print(f"[update_blocks_geometry] Error updating boundary: {e}")
+            traceback.print_exc()
     
     # Now handle sub-area clipping
     sub_areas = result_data.get('sub_areas', [])
