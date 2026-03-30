@@ -599,7 +599,30 @@ const MapEditor: React.FC<MapEditorProps> = ({
       cutPolygon: false,
       removalMode: true, // Allow deleting vertices and blocks
       vertexDeletion: true, // Enable vertex deletion
+      snapVertices: true, // Enable vertex snapping
     });
+
+    // Enable Geoman editing on all existing block layers
+    if (mode === 'edit_blocks') {
+      const existingLayers = mapInstance.layers || [];
+      console.log('[MapEditor] Existing layers:', existingLayers.length);
+      
+      // Try to enable editing on block layers after they are added
+      setTimeout(() => {
+        mapInstance.eachLayer((layer: any) => {
+          if (layer.pm && layer._blockId) {
+            layer.pm.enable({
+              draggable: true,
+              resizable: true,
+              rotatable: false,
+              editable: true,
+              remove: true,
+            });
+            console.log('[MapEditor] Enabled Geoman on block layer:', layer._blockId);
+          }
+        });
+      }, 500);
+    }
 
     // Track editing state
     let isEditingBlock = false;
@@ -823,9 +846,13 @@ const MapEditor: React.FC<MapEditorProps> = ({
       (layer as any)._blockId = blockId;
       
       if (isEditable) {
-        // Allow click events for selection
-        layer.on('click', () => {
-          console.log('[MapEditor] Block clicked:', blockId);
+        // Enable Geoman editing on this layer
+        layer.pm && layer.pm.enable && layer.pm.enable({
+          draggable: true,
+          resizable: true,
+          rotatable: false,
+          editable: true,
+          remove: true,
         });
       } else {
         // Disable mouse events when not in edit mode
