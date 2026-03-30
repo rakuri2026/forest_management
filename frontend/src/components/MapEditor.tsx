@@ -846,14 +846,20 @@ const MapEditor: React.FC<MapEditorProps> = ({
       (layer as any)._blockId = blockId;
       
       if (isEditable) {
-        // Enable Geoman editing on this layer
-        layer.pm && layer.pm.enable && layer.pm.enable({
-          draggable: true,
-          resizable: true,
-          rotatable: false,
-          editable: true,
-          remove: true,
+        // Make layer directly editable - disable pmIgnore
+        layer.options.pmIgnore = false;
+        
+        // Enable layer editing after adding to map
+        layer.on('add', () => {
+          if (layer.pm) {
+            layer.pm.enableLayerEdit();
+          }
         });
+        
+        // If already added, enable immediately
+        if (layer._map) {
+          layer.pm && layer.pm.enableLayerEdit && layer.pm.enableLayerEdit();
+        }
       } else {
         // Disable mouse events when not in edit mode
         layer.on = function() { return layer; };
