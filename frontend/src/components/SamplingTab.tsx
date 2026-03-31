@@ -22,6 +22,8 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showSuccessSummary, setShowSuccessSummary] = useState(false);
+  const [successResult, setSuccessResult] = useState<any>(null);
 
   // Sampling points table
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null);
@@ -248,19 +250,11 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
       const result = await samplingApi.create(calculationId, params);
 
-      // Build per-block summary for alert
-      let blockSummary = '';
-      if (result.blocks_info && result.blocks_info.length > 0) {
-        blockSummary = '\n\nPer-Block Summary:';
-        result.blocks_info.forEach((block: any) => {
-          const warning = block.minimum_enforced ? ' ⚠️ Min enforced' : '';
-          blockSummary += `\n- ${block.block_name}: ${block.samples_generated} samples (${parseFloat(block.actual_intensity_percent).toFixed(2)}%)${warning}`;
-        });
-      }
-
-      alert(`Sampling design created successfully!\n\nType: ${result.sampling_type}\nTotal Blocks: ${result.total_blocks}\nTotal Points: ${result.total_points}\nRequested Intensity: ${result.requested_intensity_percent}%\nActual Sampling: ${parseFloat(result.sampling_percentage || 0).toFixed(2)}%${blockSummary}`);
-
+      // Store result and show success summary
+      setSuccessResult(result);
+      setShowSuccessSummary(true);
       setShowCreateForm(false);
+
       try {
         await loadDesigns();
       } catch (loadErr) {
@@ -1033,6 +1027,131 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
               {error}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Success Summary Modal */}
+      {showSuccessSummary && successResult && (
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-green-700">
+              ✓ Sampling Design Created Successfully
+            </h3>
+            <button
+              onClick={() => {
+                setShowSuccessSummary(false);
+                setSuccessResult(null);
+              }}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Summary Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+            <div>
+              <div className="text-sm text-gray-600">Total Points</div>
+              <div className="text-xl font-bold">{successResult.total_points}</div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-600">Total Blocks</div>
+              <div className="text-xl font-bold">{successResult.total_blocks}</div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-600">Requested Intensity</div>
+              <div className="text-xl font-bold">{successResult.requested_intensity_percent}%</div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-600">Actual Sampling</div>
+              <div className="text-xl font-bold">
+                {parseFloat(successResult.sampling_percentage || 0).toFixed(2)}%
+              </div>
+            </div>
+          </div>
+
+          {/* Per-Block Summary Table */}
+          {successResult.blocks_info && successResult.blocks_info.length > 0 && (
+            <div>
+              <h4 className="text-md font-semibold mb-3">Per-Block Summary</h4>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block Name</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Block Area (ha)</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Accessible Forest (ha)</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Protected</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"># Samples</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Grid Spacing (m)</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actual Intensity (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {successResult.blocks_info.map((block: any, index: number) => (
+                      <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="px-4 py-2 text-sm font-medium text-gray-900">
+                          {block.block_name || `Block ${index + 1}`}
+                          {block.minimum_enforced && (
+                            <span className="ml-2 text-xs text-yellow-600" title="Minimum samples enforced">⚠️</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 text-right">
+                          {block.block_area_hectares ? parseFloat(block.block_area_hectares).toFixed(4) : '-'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 text-right">
+                          {block.accessible_forest_area_ha ? parseFloat(block.accessible_forest_area_ha).toFixed(4) : '-'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 text-right">
+                          {block.is_protected ? 'Yes' : 'No'}
+                        </td>
+                        <td className="px-4 py-2 text-sm font-semibold text-gray-900 text-right">
+                          {block.samples_generated}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 text-right">
+                          {block.grid_spacing_meters ? parseFloat(block.grid_spacing_meters).toFixed(1) : '-'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 text-right">
+                          {block.actual_intensity_percent ? parseFloat(block.actual_intensity_percent).toFixed(4) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-100">
+                    <tr>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900">Total</td>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">
+                        {successResult.blocks_info.reduce((sum: number, b: any) => sum + (parseFloat(b.block_area_hectares) || 0), 0).toFixed(4)}
+                      </td>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">
+                        {successResult.blocks_info.reduce((sum: number, b: any) => sum + (parseFloat(b.accessible_forest_area_ha) || 0), 0).toFixed(4)}
+                      </td>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">-</td>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">
+                        {successResult.blocks_info.reduce((sum: number, b: any) => sum + (b.samples_generated || 0), 0)}
+                      </td>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">-</td>
+                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">
+                        {parseFloat(successResult.sampling_percentage || 0).toFixed(4)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 flex justify-end">
+            <button
+              onClick={() => {
+                setShowSuccessSummary(false);
+                setSuccessResult(null);
+              }}
+              className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
 
