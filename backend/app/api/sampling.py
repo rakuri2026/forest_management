@@ -8,6 +8,9 @@ from sqlalchemy import text
 from typing import List, Optional
 from uuid import UUID
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.utils.auth import get_current_user
@@ -20,9 +23,16 @@ from app.schemas.sampling import (
     SamplingDesign as SamplingDesignSchema,
     SamplingGenerateResponse,
     SamplingPointsGeoJSON,
-    SamplingExportFormat
+    SamplingExportFormat,
+    SamplingMethod,
+    ProtectedZoneInfo
 )
-from app.services.sampling import create_sampling_design, get_sampling_points_geojson
+from app.services.sampling import (
+    create_sampling_design,
+    create_sampling_design_guideline_2061,
+    get_sampling_points_geojson
+)
+from app.services.guideline_sampling import detect_protected_zones
 from app.services.export import (
     export_sampling_csv,
     export_sampling_gpx,
@@ -50,18 +60,20 @@ async def create_sampling(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Create a sampling design for a calculation with PER-BLOCK sampling.
+    Create a sampling design with either Guideline-2061 or Manual method.
 
-    Generates sampling points based on:
-    - Systematic: Regular grid pattern (preferred for forestry)
-    - Random: Random points with optional minimum distance
-    - Stratified: Random points within grid strata
+    **Guideline-2061 Method (Recommended):**
+    - Nepal DoF standard sampling methodology
+    - Sample counts determined by lookup tables based on block size
+    - Supports 0.5%, 1%, or 0.1% intensity
+    - Systematic sampling only
+    - Automatic protected zone detection
 
-    NEW APPROACH:
-    - Uses sampling_intensity_percent (% of block area) instead of grid spacing
-    - Enforces minimum samples per block (default: 5 for blocks ≥1ha, 2 for <1ha)
-    - Calculates grid spacing automatically for systematic sampling
-    - Ensures each block is adequately sampled for statistical validity
+    **Manual Method (Advanced):**
+    - Full control over sampling parameters
+    - Supports systematic, random, stratified algorithms
+    - Intensity as percentage with min samples rules
+    - Custom plot sizes and shapes
     """
     # Verify calculation exists and belongs to user
     calculation = db.query(Calculation).filter(
@@ -87,41 +99,69 @@ async def create_sampling(
         )
 
     try:
-        # Convert block_overrides from Pydantic models to dicts if present
-        block_overrides_dict = None
-        if request.block_overrides:
-            block_overrides_dict = {}
-            for block_name, override in request.block_overrides.items():
-                if hasattr(override, 'model_dump'):
-                    block_overrides_dict[block_name] = override.model_dump(exclude_none=True)
-                elif hasattr(override, 'dict'):
-                    block_overrides_dict[block_name] = override.dict(exclude_none=True)
-                else:
-                    block_overrides_dict[block_name] = override
+        if request.sampling_method == SamplingMethod.GUIDELINE_2061:
+            # Use Guideline-2061 method
+            logger.info(f"Creating Guideline-2061 sampling design for calculation {calculation_id}")
 
-        # Create sampling design with new intensity-based approach
-        summary = create_sampling_design(
-            db=db,
-            calculation_id=calculation_id,
-            sampling_type=request.sampling_type,
-            sampling_intensity_percent=request.sampling_intensity_percent,
-            min_samples_per_block=request.min_samples_per_block or 5,
-            min_samples_small_blocks=request.min_samples_small_blocks or 2,
-            boundary_buffer_meters=request.boundary_buffer_meters or 50.0,
-            # Accessible forest filtering parameters (Phase 2 - NEW)
-            filter_tree_cover=request.filter_tree_cover if request.filter_tree_cover is not None else True,
-            filter_slope=request.filter_slope if request.filter_slope is not None else False,
-            max_slope_degrees=request.max_slope_degrees or 45.0,
-            intensity_per_hectare=request.intensity_per_hectare,  # Deprecated fallback
-            grid_spacing_meters=request.grid_spacing_meters,  # Deprecated
-            min_distance_meters=request.min_distance_meters,
-            plot_shape=request.plot_shape or "circular",
-            plot_radius_meters=request.plot_radius_meters,
-            plot_length_meters=request.plot_length_meters,
-            plot_width_meters=request.plot_width_meters,
-            notes=request.notes,
-            block_overrides=block_overrides_dict
-        )
+            # Calculate plot dimensions from plot_size_sqm
+            plot_size_sqm = request.plot_size_sqm or 500
+            if request.plot_shape == "circular":
+                import math
+                plot_radius_meters = math.sqrt(plot_size_sqm / math.pi)
+            else:
+                plot_side_meters = math.sqrt(plot_size_sqm)
+
+            summary = create_sampling_design_guideline_2061(
+                db=db,
+                calculation_id=calculation_id,
+                productive_intensity=float(request.productive_intensity.value) if request.productive_intensity else 0.5,
+                sample_protected_zone=request.sample_protected_zone or False,
+                plot_size_sqm=plot_size_sqm,
+                plot_shape=request.plot_shape or "circular",
+                filter_tree_cover=request.filter_tree_cover if request.filter_tree_cover is not None else True,
+                filter_slope=request.filter_slope if request.filter_slope is not None else False,
+                max_slope_degrees=request.max_slope_degrees or 45.0,
+                boundary_buffer_meters=request.boundary_buffer_meters or 50.0,
+                notes=request.notes
+            )
+
+        else:
+            # Use existing manual method
+            logger.info(f"Creating manual sampling design for calculation {calculation_id}")
+
+            # Convert block_overrides from Pydantic models to dicts if present
+            block_overrides_dict = None
+            if request.block_overrides:
+                block_overrides_dict = {}
+                for block_name, override in request.block_overrides.items():
+                    if hasattr(override, 'model_dump'):
+                        block_overrides_dict[block_name] = override.model_dump(exclude_none=True)
+                    elif hasattr(override, 'dict'):
+                        block_overrides_dict[block_name] = override.dict(exclude_none=True)
+                    else:
+                        block_overrides_dict[block_name] = override
+
+            summary = create_sampling_design(
+                db=db,
+                calculation_id=calculation_id,
+                sampling_type=request.sampling_type,
+                sampling_intensity_percent=request.sampling_intensity_percent,
+                min_samples_per_block=request.min_samples_per_block or 5,
+                min_samples_small_blocks=request.min_samples_small_blocks or 2,
+                boundary_buffer_meters=request.boundary_buffer_meters or 50.0,
+                filter_tree_cover=request.filter_tree_cover if request.filter_tree_cover is not None else True,
+                filter_slope=request.filter_slope if request.filter_slope is not None else False,
+                max_slope_degrees=request.max_slope_degrees or 45.0,
+                intensity_per_hectare=request.intensity_per_hectare,
+                grid_spacing_meters=request.grid_spacing_meters,
+                min_distance_meters=request.min_distance_meters,
+                plot_shape=request.plot_shape or "circular",
+                plot_radius_meters=request.plot_radius_meters,
+                plot_length_meters=request.plot_length_meters,
+                plot_width_meters=request.plot_width_meters,
+                notes=request.notes,
+                block_overrides=block_overrides_dict
+            )
 
         db.commit()
 
@@ -134,6 +174,42 @@ async def create_sampling(
         import logging
         logging.error(f"Sampling design creation failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create sampling design: {str(e)}")
+
+
+@router.get("/calculations/{calculation_id}/protected-zones", response_model=ProtectedZoneInfo)
+async def get_protected_zones(
+    calculation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get protected zone information for a calculation.
+
+    Used to determine if protected zone sampling option should be shown
+    in Guideline-2061 sampling method.
+
+    Returns information about:
+    - Whether protected zones exist
+    - Total protected area
+    - Names of protected zones
+    - Productive (non-protected) area
+
+    This endpoint is called by the frontend when user selects Guideline-2061
+    method to display protected zone sampling checkbox if applicable.
+    """
+    # Verify calculation exists and belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Detect protected zones
+    protected_info = detect_protected_zones(calculation)
+
+    return ProtectedZoneInfo(**protected_info)
 
 
 @router.get("/calculations/{calculation_id}/sampling", response_model=List[SamplingDesignSchema])

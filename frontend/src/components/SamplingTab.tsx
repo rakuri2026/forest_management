@@ -42,8 +42,14 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const [expandedBlocks, setExpandedBlocks] = useState<Record<string, boolean>>({});
 
   // Form state
+  const [samplingMethod, setSamplingMethod] = useState<'guideline_2061' | 'manual'>('guideline_2061');
   const [samplingType, setSamplingType] = useState<'systematic' | 'random'>('systematic');
-  const [samplingIntensity, setSamplingIntensity] = useState(0.5); // NEW: percentage of block area
+  const [samplingIntensity, setSamplingIntensity] = useState(0.5); // percentage of block area
+  const [productiveIntensity, setProductiveIntensity] = useState<'0.5' | '1.0'>('0.5');
+  const [sampleProtectedZone, setSampleProtectedZone] = useState(false);
+  const [plotSizeSqm, setPlotSizeSqm] = useState(500);
+  const [protectedZoneInfo, setProtectedZoneInfo] = useState<any>(null);
+  const [loadingProtectedInfo, setLoadingProtectedInfo] = useState(false);
   const [minSamplesPerBlock, setMinSamplesPerBlock] = useState(5); // NEW: min for blocks >= 1ha
   const [minSamplesSmallBlocks, setMinSamplesSmallBlocks] = useState(2); // NEW: min for blocks < 1ha
   const [minDistance, setMinDistance] = useState(30);
@@ -65,6 +71,26 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
     loadDesigns();
     loadCalculation();
   }, [calculationId]);
+
+  const loadProtectedZoneInfo = async () => {
+    setLoadingProtectedInfo(true);
+    try {
+      const data = await samplingApi.getProtectedZones(calculationId);
+      setProtectedZoneInfo(data);
+    } catch (err: any) {
+      console.error('Failed to load protected zone info:', err);
+      setProtectedZoneInfo(null);
+    } finally {
+      setLoadingProtectedInfo(false);
+    }
+  };
+
+  // Load protected zone info when guideline method is selected
+  useEffect(() => {
+    if (samplingMethod === 'guideline_2061' && showCreateForm) {
+      loadProtectedZoneInfo();
+    }
+  }, [samplingMethod, showCreateForm, calculationId]);
 
   const loadCalculation = async () => {
     try {
@@ -159,59 +185,64 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
     setError(null);
     try {
       const params: any = {
-        sampling_type: samplingType,
-        sampling_intensity_percent: samplingIntensity, // NEW: Use percentage instead of grid spacing
-        min_samples_per_block: minSamplesPerBlock, // NEW: Minimum for blocks >= 1ha
-        min_samples_small_blocks: minSamplesSmallBlocks, // NEW: Minimum for blocks < 1ha
+        sampling_method: samplingMethod,
         plot_shape: plotShape,
-        // Accessible forest filtering (Phase 2)
         filter_tree_cover: filterTreeCover,
         filter_slope: filterSlope,
         max_slope_degrees: maxSlopeDegrees,
       };
 
-      // For random sampling, add minimum distance
-      if (samplingType === 'random') {
-        params.min_distance_meters = minDistance;
-      }
-
-      if (plotShape === 'circular') {
-        params.plot_radius_meters = plotRadius;
+      if (samplingMethod === 'guideline_2061') {
+        params.productive_intensity = productiveIntensity;
+        params.sample_protected_zone = sampleProtectedZone;
+        params.plot_size_sqm = plotSizeSqm;
       } else {
-        params.plot_length_meters = plotSide;
-        params.plot_width_meters = plotSide;
-      }
+        params.sampling_type = samplingType;
+        params.sampling_intensity_percent = samplingIntensity;
+        params.min_samples_per_block = minSamplesPerBlock;
+        params.min_samples_small_blocks = minSamplesSmallBlocks;
 
-      // Add block overrides if enabled
-      if (enableBlockOverrides) {
-        const overrides: Record<string, any> = {};
-        Object.entries(blockOverrides).forEach(([blockName, override]) => {
-          if (override.enabled) {
-            const blockOverride: any = {};
-            if (override.sampling_type !== undefined) {
-              blockOverride.sampling_type = override.sampling_type;
-            }
-            if (override.sampling_intensity_percent !== undefined) {
-              blockOverride.sampling_intensity_percent = override.sampling_intensity_percent;
-            }
-            if (override.min_samples_per_block !== undefined) {
-              blockOverride.min_samples_per_block = override.min_samples_per_block;
-            }
-            if (override.boundary_buffer_meters !== undefined) {
-              blockOverride.boundary_buffer_meters = override.boundary_buffer_meters;
-            }
-            if (override.min_distance_meters !== undefined) {
-              blockOverride.min_distance_meters = override.min_distance_meters;
-            }
+        if (samplingType === 'random') {
+          params.min_distance_meters = minDistance;
+        }
 
-            if (Object.keys(blockOverride).length > 0) {
-              overrides[blockName] = blockOverride;
+        if (plotShape === 'circular') {
+          params.plot_radius_meters = plotRadius;
+        } else {
+          params.plot_length_meters = plotSide;
+          params.plot_width_meters = plotSide;
+        }
+
+        if (enableBlockOverrides) {
+          const overrides: Record<string, any> = {};
+          Object.entries(blockOverrides).forEach(([blockName, override]) => {
+            if (override.enabled) {
+              const blockOverride: any = {};
+              if (override.sampling_type !== undefined) {
+                blockOverride.sampling_type = override.sampling_type;
+              }
+              if (override.sampling_intensity_percent !== undefined) {
+                blockOverride.sampling_intensity_percent = override.sampling_intensity_percent;
+              }
+              if (override.min_samples_per_block !== undefined) {
+                blockOverride.min_samples_per_block = override.min_samples_per_block;
+              }
+              if (override.boundary_buffer_meters !== undefined) {
+                blockOverride.boundary_buffer_meters = override.boundary_buffer_meters;
+              }
+              if (override.min_distance_meters !== undefined) {
+                blockOverride.min_distance_meters = override.min_distance_meters;
+              }
+
+              if (Object.keys(blockOverride).length > 0) {
+                overrides[blockName] = blockOverride;
+              }
             }
+          });
+
+          if (Object.keys(overrides).length > 0) {
+            params.block_overrides = overrides;
           }
-        });
-
-        if (Object.keys(overrides).length > 0) {
-          params.block_overrides = overrides;
         }
       }
 
@@ -230,9 +261,25 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
       alert(`Sampling design created successfully!\n\nType: ${result.sampling_type}\nTotal Blocks: ${result.total_blocks}\nTotal Points: ${result.total_points}\nRequested Intensity: ${result.requested_intensity_percent}%\nActual Sampling: ${parseFloat(result.sampling_percentage || 0).toFixed(2)}%${blockSummary}`);
 
       setShowCreateForm(false);
-      await loadDesigns();
+      try {
+        await loadDesigns();
+      } catch (loadErr) {
+        console.error('Failed to reload designs:', loadErr);
+      }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create sampling design');
+      console.error('Create sampling error:', err);
+      let errorMsg = 'Failed to create sampling design';
+      if (err.response?.data?.detail) {
+        errorMsg = typeof err.response.data.detail === 'string' 
+          ? err.response.data.detail 
+          : JSON.stringify(err.response.data.detail);
+      } else if (err.message) {
+        errorMsg = err.message;
+      } else if (typeof err === 'string') {
+        errorMsg = err;
+      }
+      setError(errorMsg);
+      alert(`Error: ${errorMsg}`);
     } finally {
       setCreating(false);
     }
@@ -323,42 +370,154 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
           </div>
 
           <div className="space-y-4">
-            {/* Sampling Type */}
+            {/* Sampling Method Selection */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Sampling Type
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Sampling Method
               </label>
-              <select
-                value={samplingType}
-                onChange={(e) => setSamplingType(e.target.value as 'systematic' | 'random')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              >
-                <option value="systematic">Systematic (Grid) - Recommended</option>
-                <option value="random">Random</option>
-              </select>
-              <p className="mt-1 text-xs text-gray-500">
-                Systematic sampling is preferred in forestry for even coverage
-              </p>
+              <div className="space-y-3">
+                <label className="flex items-start cursor-pointer border border-blue-300 rounded-lg p-4 bg-blue-50 hover:bg-blue-100 transition-colors">
+                  <input
+                    type="radio"
+                    value="guideline_2061"
+                    checked={samplingMethod === 'guideline_2061'}
+                    onChange={(e) => setSamplingMethod(e.target.value as 'guideline_2061' | 'manual')}
+                    className="mt-1 h-5 w-5 text-blue-600"
+                  />
+                  <div className="ml-3 flex-1">
+                    <div className="font-semibold text-gray-900">
+                      Guideline-2061 (Recommended)
+                      <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">
+                        Standard
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Nepal Department of Forest standard sampling method. Sample counts automatically
+                      determined based on block size and plot size using official guideline tables.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-start cursor-pointer border border-gray-300 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                  <input
+                    type="radio"
+                    value="manual"
+                    checked={samplingMethod === 'manual'}
+                    onChange={(e) => setSamplingMethod(e.target.value as 'guideline_2061' | 'manual')}
+                    className="mt-1 h-5 w-5 text-gray-600"
+                  />
+                  <div className="ml-3 flex-1">
+                    <div className="font-semibold text-gray-900">Manual (Advanced)</div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Custom sampling with full control over intensity, spacing, and algorithms.
+                      For advanced users or special requirements.
+                    </p>
+                  </div>
+                </label>
+              </div>
             </div>
 
-            {/* Sampling Intensity (Common to both types) */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Sampling Intensity (% of block area)
-              </label>
-              <input
-                type="number"
-                min="0.1"
-                max="10"
-                step="0.1"
-                value={samplingIntensity}
-                onChange={(e) => setSamplingIntensity(parseFloat(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Default: 0.5% (grid spacing calculated automatically)
-              </p>
-            </div>
+            {/* Guideline-2061 Specific Options */}
+            {samplingMethod === 'guideline_2061' && (
+              <div className="space-y-4 border-t pt-4">
+                <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <span className="text-blue-600">📋</span>
+                  Guideline-2061 Configuration
+                </h4>
+
+                {/* Sampling Intensity */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Sampling Intensity for Productive Forest
+                  </label>
+                  <select
+                    value={productiveIntensity}
+                    onChange={(e) => setProductiveIntensity(e.target.value as '0.5' | '1.0')}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  >
+                    <option value="0.5">0.5% - Standard intensity (Recommended)</option>
+                    <option value="1.0">1.0% - Detailed inventory (More samples)</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Sample count per block will be determined from Guideline-2061 lookup tables based on block size
+                  </p>
+                </div>
+
+                {/* Plot Size */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Plot Size
+                  </label>
+                  <select
+                    value={plotSizeSqm}
+                    onChange={(e) => setPlotSizeSqm(parseInt(e.target.value))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  >
+                    <option value="500">500 m² (12.62m radius) - Standard</option>
+                    <option value="400">400 m² (11.28m radius)</option>
+                    <option value="300">300 m² (9.77m radius)</option>
+                    <option value="200">200 m² (7.98m radius)</option>
+                    <option value="100">100 m² (5.64m radius)</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Circular plots with radius calculated from area. Sample counts vary by plot size.
+                  </p>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-gray-700">
+                    <strong className="text-blue-900">Note:</strong> Guideline-2061 method uses <strong>systematic (grid) sampling only</strong>,
+                    as specified by the Department of Forest. Sample counts are predetermined by lookup tables.
+                    For random or stratified sampling, use the Manual method.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Manual Method Options */}
+            {samplingMethod === 'manual' && (
+              <div className="space-y-4 border-t pt-4">
+                <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <span className="text-gray-600">⚙️</span>
+                  Manual Sampling Configuration
+                </h4>
+
+                {/* Sampling Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Sampling Type
+                  </label>
+                  <select
+                    value={samplingType}
+                    onChange={(e) => setSamplingType(e.target.value as 'systematic' | 'random')}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="systematic">Systematic (Grid) - Recommended</option>
+                    <option value="random">Random</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Systematic sampling is preferred in forestry for even coverage
+                  </p>
+                </div>
+
+                {/* Sampling Intensity */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Sampling Intensity (% of block area)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="10"
+                    step="0.1"
+                    value={samplingIntensity}
+                    onChange={(e) => setSamplingIntensity(parseFloat(e.target.value))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Default: 0.5% (grid spacing calculated automatically)
+                  </p>
+                </div>
 
             {/* Minimum Samples Configuration */}
             <div className="grid grid-cols-2 gap-4">
@@ -458,7 +617,10 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
               </div>
             )}
 
-            {/* Accessible Forest Filtering (Phase 2) */}
+              </div>
+            )}
+
+            {/* Accessible Forest Filtering (common to both methods) */}
             <div className="border-t pt-6 mt-6">
               <h4 className="text-md font-semibold text-gray-900 mb-3">
                 Sampling Area Filters

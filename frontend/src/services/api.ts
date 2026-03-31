@@ -859,27 +859,54 @@ export const samplingApi = {
   create: async (
     calculationId: string,
     params: {
-      sampling_type: "systematic" | "random" | "stratified";
-      sampling_intensity_percent?: number; // NEW: Percentage of block area (0.1-10%, default 0.5%)
-      min_samples_per_block?: number; // NEW: Minimum samples for blocks >= 1ha (2-10, default 5)
-      min_samples_small_blocks?: number; // NEW: Minimum samples for blocks < 1ha (1-5, default 2)
+      // Method selection (NEW - Phase 3: Guideline-2061)
+      sampling_method?: "guideline_2061" | "manual"; // Default: guideline_2061
+
+      // Guideline-2061 specific parameters
+      productive_intensity?: "0.5" | "1.0"; // For productive blocks (default: 0.5)
+      sample_protected_zone?: boolean; // Include protected zone at 0.1% (default: false)
+      plot_size_sqm?: number; // 100-500 for production, 25-100 for protected (default: 500)
+
+      // Manual method parameters
+      sampling_type?: "systematic" | "random" | "stratified";
+      sampling_intensity_percent?: number; // Percentage of block area (0.1-10%, default 0.5%)
+      min_samples_per_block?: number; // Minimum samples for blocks >= 1ha (2-10, default 5)
+      min_samples_small_blocks?: number; // Minimum samples for blocks < 1ha (1-5, default 2)
       intensity_per_hectare?: number; // DEPRECATED: Use sampling_intensity_percent instead
       grid_spacing_meters?: number; // DEPRECATED: Calculated automatically
       min_distance_meters?: number;
+
+      // Common parameters
       plot_shape?: "circular" | "square" | "rectangular";
-      plot_radius_meters?: number;
-      plot_length_meters?: number;
-      plot_width_meters?: number;
+      plot_radius_meters?: number; // For manual method
+      plot_length_meters?: number; // For manual method
+      plot_width_meters?: number; // For manual method
       notes?: string;
-      // Accessible forest filtering (Phase 2)
+
+      // Accessible forest filtering (common to both methods)
       filter_tree_cover?: boolean; // Filter to tree cover only (default: true)
       filter_slope?: boolean; // Filter by slope (default: false)
       max_slope_degrees?: number; // Max slope threshold (default: 45.0)
+      boundary_buffer_meters?: number; // Minimum distance from boundary (default: 50)
     }
   ): Promise<any> => {
     const response = await api.post(
       `/api/calculations/${calculationId}/sampling/create`,
       params
+    );
+    return response.data;
+  },
+
+  getProtectedZones: async (calculationId: string): Promise<{
+    has_protected: boolean;
+    protected_area_hectares: number;
+    protected_zone_names: string[];
+    protected_zone_count: number;
+    productive_area_hectares: number;
+    total_area_hectares: number;
+  }> => {
+    const response = await api.get(
+      `/api/calculations/${calculationId}/protected-zones`
     );
     return response.data;
   },

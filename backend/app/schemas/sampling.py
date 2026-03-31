@@ -1,11 +1,29 @@
 """
 Pydantic schemas for Sampling Design API
+
+Supports two sampling methods:
+1. Guideline-2061: Nepal DoF standard (sample counts from lookup tables)
+2. Manual: Custom sampling with full control (existing method)
 """
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, Literal, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
+from enum import Enum
+
+
+class SamplingMethod(str, Enum):
+    """Sampling methodology selection"""
+    GUIDELINE_2061 = "guideline_2061"
+    MANUAL = "manual"
+
+
+class GuidelineIntensity(str, Enum):
+    """Forest Inventory Guideline-2061 sampling intensities"""
+    HALF_PERCENT = "0.5"      # Standard production forest
+    ONE_PERCENT = "1.0"        # Detailed inventory
+    POINT_ONE_PERCENT = "0.1"  # Protected zones only
 
 
 class BlockOverride(BaseModel):
@@ -143,24 +161,105 @@ class SamplingDesignBase(BaseModel):
 
 
 class SamplingDesignCreate(SamplingDesignBase):
-    """Schema for creating sampling design"""
+    """
+    Schema for creating sampling design with either Guideline-2061 or Manual method.
+
+    Guideline-2061 Method:
+    - Sample counts determined by lookup tables based on block size
+    - Supports 0.5%, 1%, or 0.1% intensity
+    - Systematic sampling only
+    - Plot size in sqm (100-500 for production, 25-100 for protected)
+
+    Manual Method:
+    - Existing flexible sampling system
+    - Supports systematic, random, stratified
+    - Intensity as percentage with min samples rules
+    - Plot dimensions in meters
+    """
+    # Override sampling_type to be optional - it's required for Manual method but not for Guideline-2061
+    sampling_type: Optional[Literal["systematic", "random", "stratified"]] = Field(
+        default="systematic",
+        description="Sampling methodology (optional for Guideline-2061, required for Manual)"
+    )
+    
+    # Method selection
+    sampling_method: SamplingMethod = Field(
+        default=SamplingMethod.GUIDELINE_2061,
+        description="Sampling methodology: guideline_2061 (recommended) or manual (advanced)"
+    )
+
+    # Guideline-2061 specific parameters
+    productive_intensity: Optional[GuidelineIntensity] = Field(
+        default=GuidelineIntensity.HALF_PERCENT,
+        description="Sampling intensity for productive forest (0.5% or 1%) - Guideline-2061 only"
+    )
+    sample_protected_zone: Optional[bool] = Field(
+        default=False,
+        description="Include protected zone sampling at 0.1% intensity - Guideline-2061 only"
+    )
+    plot_size_sqm: Optional[int] = Field(
+        default=500,
+        description="Plot size in square meters - Guideline-2061 only. "
+                   "Options: 500, 400, 300, 200, 100 (production); 25, 100 (protected)"
+    )
+
+    @field_validator('plot_size_sqm')
+    @classmethod
+    def validate_plot_size_sqm(cls, v, info):
+        """Validate plot size for Guideline-2061 method"""
+        if info.data.get('sampling_method') == SamplingMethod.GUIDELINE_2061 and v is not None:
+            valid_production_sizes = [100, 200, 300, 400, 500]
+            valid_protected_sizes = [25, 100]
+
+            # Check if sampling protected zone
+            if info.data.get('sample_protected_zone'):
+                # Protected sampling needs 25 or 100
+                if v not in valid_protected_sizes:
+                    raise ValueError(
+                        f"Protected zone sampling requires 25 or 100 sqm plots. Got: {v}"
+                    )
+            else:
+                # Production sampling needs 100-500
+                if v not in valid_production_sizes:
+                    raise ValueError(
+                        f"Production forest requires one of {valid_production_sizes} sqm plots. Got: {v}"
+                    )
+        return v
 
     @field_validator('plot_radius_meters')
     @classmethod
     def validate_plot_radius(cls, v, info):
-        """Validate plot radius for circular plots"""
-        if info.data.get('plot_shape') == 'circular' and v is None:
-            # Default to 12.6156m (500m² plot)
-            return Decimal("12.6156")
+        """Validate plot radius for circular plots (Manual method)"""
+        if info.data.get('sampling_method') == SamplingMethod.MANUAL:
+            if info.data.get('plot_shape') == 'circular' and v is None:
+                # Default to 12.6156m (500m² plot)
+                return Decimal("12.6156")
         return v
 
     @field_validator('plot_length_meters', 'plot_width_meters')
     @classmethod
     def validate_rectangular_dimensions(cls, v, info):
-        """Validate dimensions for rectangular plots"""
-        if info.data.get('plot_shape') in ['square', 'rectangular']:
-            if v is None:
-                raise ValueError(f"plot_length_meters and plot_width_meters required for {info.data.get('plot_shape')} plots")
+        """Validate dimensions for rectangular plots (Manual method)"""
+        if info.data.get('sampling_method') == SamplingMethod.MANUAL:
+            if info.data.get('plot_shape') in ['square', 'rectangular']:
+                if v is None:
+                    raise ValueError(
+                        f"plot_length_meters and plot_width_meters required for "
+                        f"{info.data.get('plot_shape')} plots"
+                    )
+        return v
+
+    @field_validator('sampling_type')
+    @classmethod
+    def validate_sampling_type(cls, v, info):
+        """Ensure systematic sampling for Guideline-2061"""
+        if info.data.get('sampling_method') == SamplingMethod.GUIDELINE_2061:
+            if v and v != 'systematic':
+                raise ValueError(
+                    "Guideline-2061 method only supports systematic sampling. "
+                    "For random/stratified, use manual method."
+                )
+            return 'systematic'  # Force systematic for guideline
         return v
 
     model_config = ConfigDict(extra='forbid')
@@ -218,6 +317,20 @@ class BlockSamplingInfo(BaseModel):
     actual_intensity_percent: Decimal = Field(
         ...,
         description="Actual sampling intensity achieved for this block"
+    )
+
+    # Guideline-2061 specific fields
+    samples_from_guideline: Optional[int] = Field(
+        None,
+        description="Sample count from Guideline-2061 table (if using guideline method)"
+    )
+    is_protected: Optional[bool] = Field(
+        None,
+        description="Whether block was classified as protected (>50% overlap)"
+    )
+    guideline_fallback_used: Optional[bool] = Field(
+        None,
+        description="Whether manual calculation was used because block exceeded table range"
     )
 
     # Accessible forest area breakdown
@@ -278,3 +391,36 @@ class SamplingExportFormat(str):
     GPX = "gpx"
     GEOJSON = "geojson"
     KML = "kml"
+
+
+class ProtectedZoneInfo(BaseModel):
+    """
+    Information about protected zones in a calculation.
+    Used to determine if protected zone sampling option should be shown.
+    """
+    has_protected: bool = Field(
+        ...,
+        description="Whether calculation has any protected zones"
+    )
+    protected_area_hectares: float = Field(
+        ...,
+        description="Total protected area in hectares"
+    )
+    protected_zone_names: list[str] = Field(
+        default_factory=list,
+        description="Names of protected zones"
+    )
+    protected_zone_count: int = Field(
+        ...,
+        description="Number of protected zones"
+    )
+    productive_area_hectares: float = Field(
+        ...,
+        description="Non-protected (productive) area in hectares"
+    )
+    total_area_hectares: float = Field(
+        ...,
+        description="Total forest area in hectares"
+    )
+
+    model_config = ConfigDict(from_attributes=True)
