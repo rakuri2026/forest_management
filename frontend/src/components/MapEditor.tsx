@@ -81,6 +81,8 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [activeCategory, setActiveCategory] = useState<string | null>(null); // Drawing mode - category that will trigger auto-draw
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit_boundary' | 'edit_blocks' | 'edit_subareas'>('edit_boundary');
+  const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
+  const [slopeThreshold, setSlopeThreshold] = useState<number>(4);
   
   // Auto-switch to subareas mode if there are existing sub-areas (after loading) - but only on initial load
   useEffect(() => {
@@ -1510,6 +1512,44 @@ const MapEditor: React.FC<MapEditorProps> = ({
                 })}
               </div>
 
+              {/* Steep Slope Mask Control */}
+              <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="showSteepSlope"
+                      checked={showSteepSlopeMask}
+                      onChange={(e) => setShowSteepSlopeMask(e.target.checked)}
+                      className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 mr-2"
+                    />
+                    <label htmlFor="showSteepSlope" className="text-sm font-medium text-gray-800">
+                      Show Steep Slope Areas
+                    </label>
+                  </div>
+                </div>
+                
+                {showSteepSlopeMask && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-700">
+                      Slope Threshold:
+                    </label>
+                    <select
+                      value={slopeThreshold}
+                      onChange={(e) => setSlopeThreshold(Number(e.target.value))}
+                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-amber-500 focus:border-amber-500"
+                    >
+                      <option value={4}>Class 4 (&gt;30°)</option>
+                      <option value={3}>Class 3 (&gt;20°)</option>
+                      <option value={2}>Class 2 (&gt;10°)</option>
+                    </select>
+                    <span className="text-xs text-gray-600">
+                      (red = class {slopeThreshold}+)
+                    </span>
+                  </div>
+                )}
+              </div>
+
               {/* Active Drawing Indicator */}
               {activeCategory && (
                 <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
@@ -1985,6 +2025,17 @@ const MapEditor: React.FC<MapEditorProps> = ({
               attribution='&copy; OpenStreetMap'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+            
+            {/* Steep Slope Mask Layer - shows areas above threshold in red */}
+            {showSteepSlopeMask && (
+              <TileLayer
+                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?threshold=${slopeThreshold}&alpha=150`}
+                opacity={0.7}
+                zIndex={5}
+                minZoom={13}
+                maxZoom={16}
+              />
+            )}
           </MapContainer>
         </div>
       </div>

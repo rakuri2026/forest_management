@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
+import * as turf from '@turf/turf';
 import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import {
   validateSubAreasNoOverlap,
@@ -39,6 +40,7 @@ interface SubAreaManagerProps {
   outerBoundary: any;
   onSubAreasChange: (subAreas: SubArea[]) => void;
   initialSubAreas?: SubArea[];
+  calculationId?: string;  // Required for steep slope tile layer
 }
 
 // Predefined sub-area categories
@@ -56,6 +58,7 @@ const SUB_AREA_CATEGORIES = [
 // Map component with drawing controls for sub-areas
 const SubAreaDrawingControls: React.FC<{
   blocks: Block[];
+  outerBoundary: any;
   selectedCategory: string;
   onSubAreaCreated: (geometry: any, removeTempLayer: () => void) => void;
   subAreas: SubArea[];
@@ -64,6 +67,7 @@ const SubAreaDrawingControls: React.FC<{
   onSubAreaDelete: (subAreaId: string) => void;
 }> = ({
   blocks,
+  outerBoundary,
   selectedCategory,
   onSubAreaCreated,
   subAreas,
@@ -74,6 +78,7 @@ const SubAreaDrawingControls: React.FC<{
   const map = useMap();
   const layersRef = useRef<Map<string, L.Layer>>(new Map());
   const pendingLayersRef = useRef<L.Layer[]>([]);
+  const boundaryLayerRef = useRef<L.Layer | null>(null);
 
   // Stabilize callbacks to prevent effect re-triggering
   const callbacksRef = useRef({ onSubAreaCreated, onSubAreaEdit, onSubAreaDelete });
@@ -86,6 +91,35 @@ const SubAreaDrawingControls: React.FC<{
     // Get the category color
     const category = SUB_AREA_CATEGORIES.find(c => c.value === selectedCategory);
     const categoryColor = category?.color || '#3b82f6';
+
+    // Add outer boundary as a snapping guide layer
+    if (outerBoundary && !boundaryLayerRef.current) {
+      const boundaryLayer = L.geoJSON(outerBoundary, {
+        style: {
+          color: '#1d4ed8',
+          weight: 3,
+          fillOpacity: 0,
+          opacity: 0.7,
+        },
+        pmIgnore: true, // Don't let geoman edit this layer
+      }).addTo(map);
+      boundaryLayerRef.current = boundaryLayer;
+      
+      // Set snapping options to snap to boundary edges
+      map.pm.setGlobalOptions({
+        snapDistance: 25,
+        snapSegment: true,
+      });
+      
+      // Add boundary layer to geoman's snap list
+      boundaryLayer.eachLayer((layer: any) => {
+        if (layer.pm) {
+          layer.pm.set({
+            snappable: true,
+          });
+        }
+      });
+    }
 
     // Enable Leaflet-Geoman controls
     map.pm.addControls({
@@ -115,11 +149,82 @@ const SubAreaDrawingControls: React.FC<{
       }
     };
 
+    // Helper to check if polygon is within boundary
+    const isWithinBoundary = (polygon: any): boolean => {
+      if (!outerBoundary) return true;
+      try {
+        const poly = turf.polygon(polygon.coordinates);
+        const boundary = turf.polygon(outerBoundary.coordinates);
+        const intersection = turf.intersect(turf.featureCollection([poly, boundary]));
+        if (!intersection) return false;
+        const polyArea = turf.area(poly);
+        const intersectionArea = turf.area(intersection);
+        return intersectionArea >= polyArea * 0.99; // 99% tolerance
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // Helper to update layer style based on boundary containment
+    const updateLayerBoundaryStatus = (layer: any, isValid: boolean) => {
+      if (isValid) {
+        layer.setStyle({
+          color: categoryColor,
+          fillColor: categoryColor,
+          fillOpacity: 0.3,
+          weight: 3,
+        });
+      } else {
+        layer.setStyle({
+          color: '#ef4444',
+          fillColor: '#ef4444',
+          fillOpacity: 0.2,
+          weight: 3,
+          dashArray: '5, 5',
+        });
+      }
+    };
+
+    // Handle vertex added - check boundary containment
+    const handleVertexAdded = (e: any) => {
+      const layer = e.workingLayer;
+      if (layer && outerBoundary) {
+        try {
+          const geoJSON = layer.toGeoJSON();
+          if (geoJSON.geometry && geoJSON.geometry.type === 'Polygon') {
+            const valid = isWithinBoundary(geoJSON.geometry);
+            updateLayerBoundaryStatus(layer, valid);
+          }
+        } catch (err) {
+          // Ignore errors during drawing
+        }
+      }
+    };
+
     // Handle polygon creation
     const handleCreate = (e: any) => {
       console.log('[SubAreaDrawingControls] handleCreate triggered');
       const layer = e.layer;
       const geoJSON = layer.toGeoJSON();
+
+      // Check if polygon is within boundary
+      if (outerBoundary && geoJSON.geometry) {
+        const valid = isWithinBoundary(geoJSON.geometry);
+        if (!valid) {
+          console.log('[SubAreaDrawingControls] Rejected: polygon outside boundary');
+          // Remove the layer immediately
+          map.removeLayer(layer);
+          // Show a brief error indicator on the map
+          L.popup()
+            .setLatLng(map.getCenter())
+            .setContent('<div style="color: red; font-weight: bold;">Sub-area must be drawn within the boundary!</div>')
+            .openOn(map);
+          setTimeout(() => {
+            try { map.closePopup(); } catch (e) {}
+          }, 3000);
+          return;
+        }
+      }
 
       // Style the layer immediately so it's visible
       layer.setStyle({
@@ -180,6 +285,7 @@ const SubAreaDrawingControls: React.FC<{
     };
 
     map.on('pm:drawstart', handleDrawStart);
+    map.on('pm:vertexadded', handleVertexAdded);
     map.on('pm:create', handleCreate);
     map.on('pm:edit', handleEdit);
     map.on('pm:remove', handleRemove);
@@ -187,9 +293,22 @@ const SubAreaDrawingControls: React.FC<{
     return () => {
       map.pm.removeControls();
       map.off('pm:drawstart', handleDrawStart);
+      map.off('pm:vertexadded', handleVertexAdded);
       map.off('pm:create', handleCreate);
       map.off('pm:edit', handleEdit);
       map.off('pm:remove', handleRemove);
+
+      // Clean up boundary layer
+      if (boundaryLayerRef.current) {
+        map.removeLayer(boundaryLayerRef.current);
+        boundaryLayerRef.current = null;
+      }
+
+      // Reset global geoman options
+      map.pm.setGlobalOptions({
+        snapDistance: 0,
+        snappable: false,
+      });
 
       // Clean up pending layers only (removed layersRef cleanup from here)
       pendingLayersRef.current.forEach((layer) => {
@@ -201,7 +320,7 @@ const SubAreaDrawingControls: React.FC<{
       });
       pendingLayersRef.current = [];
     };
-  }, [map, selectedCategory]); // Dependency array minimized - removed callback dependencies
+  }, [map, selectedCategory, outerBoundary]); // Dependency array minimized - removed callback dependencies
 
   // SECOND useEffect: STRICTLY State to Map Rendering
   useEffect(() => {
@@ -278,12 +397,15 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
   outerBoundary,
   onSubAreasChange,
   initialSubAreas = [],
+  calculationId,
 }) => {
   const [subAreas, setSubAreas] = useState<SubArea[]>(initialSubAreas);
   const [selectedCategory, setSelectedCategory] = useState<string>(SUB_AREA_CATEGORIES[0].value);
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
   const [selectedBlockFilter, setSelectedBlockFilter] = useState<string>('all');
   const [error, setError] = useState<string>('');
+  const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
+  const [slopeThreshold, setSlopeThreshold] = useState<number>(30);
 
   // Validate sub-areas whenever they change
   useEffect(() => {
@@ -463,7 +585,9 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
             <br />
             • Select a category below
             <br />
-            • Click the <strong>polygon icon</strong> to draw sub-areas within blocks
+            • Click the <strong>polygon icon</strong> to draw sub-areas within the boundary
+            <br />
+            • <strong>Sub-areas must be inside the boundary</strong> - edges will snap to boundary
             <br />
             • Sub-areas must not overlap
             <br />• Total sub-area in a block cannot exceed the block area
@@ -507,6 +631,48 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Steep Slope Mask Control */}
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="showSteepSlope"
+                checked={showSteepSlopeMask}
+                onChange={(e) => setShowSteepSlopeMask(e.target.checked)}
+                className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 mr-2"
+              />
+              <label htmlFor="showSteepSlope" className="text-sm font-medium text-gray-800">
+                Show Steep Slope Areas
+              </label>
+            </div>
+            <HelpTooltip 
+              helpText="When enabled, areas with slope above the threshold will be highlighted in red to help identify protected zones." 
+              position="top" 
+            />
+          </div>
+          
+          {showSteepSlopeMask && (
+            <div className="flex items-center gap-4">
+              <label className="text-sm text-gray-700">
+                Slope Threshold:
+              </label>
+              <select
+                value={slopeThreshold}
+                onChange={(e) => setSlopeThreshold(Number(e.target.value))}
+                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-amber-500 focus:border-amber-500"
+              >
+                <option value={4}>Class 4 (&gt;30°)</option>
+                <option value={3}>Class 3 (&gt;20°)</option>
+                <option value={2}>Class 2 (&gt;10°)</option>
+              </select>
+              <span className="text-sm text-gray-600">
+                {slopeThreshold === 4 ? '(>30° shown in red)' : slopeThreshold === 3 ? '(>20° shown in red)' : '(>10° shown in red)'}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Error Messages */}
@@ -714,6 +880,26 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                 <span className="text-sm">{category.label}</span>
               </div>
             ))}
+            <div className="flex items-center ml-4 pl-4 border-l border-gray-300">
+              <div
+                className="w-4 h-4 rounded mr-2 border-2"
+                style={{ 
+                  backgroundColor: 'transparent',
+                  borderColor: '#1d4ed8',
+                  borderStyle: 'solid',
+                }}
+              />
+              <span className="text-sm text-blue-700">Boundary (snaps to edge)</span>
+            </div>
+            {showSteepSlopeMask && (
+              <div className="flex items-center ml-4 pl-4 border-l border-gray-300">
+                <div
+                  className="w-4 h-4 rounded mr-2"
+                  style={{ backgroundColor: '#e74c3c' }}
+                />
+                <span className="text-sm text-red-700">Steep Slope (&gt;{slopeThreshold}°)</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -724,6 +910,17 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
             style={{ height: '100%', width: '100%' }}
           >
             <BaseMapSelector />
+
+            {/* Steep Slope Mask Layer - shows areas above threshold in red */}
+            {showSteepSlopeMask && calculationId && (
+              <TileLayer
+                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?threshold=${slopeThreshold}&alpha=150`}
+                opacity={0.7}
+                zIndex={5}
+                minZoom={13}
+                maxZoom={16}
+              />
+            )}
 
             {/* Blocks */}
             {blocks.map((block) => (
@@ -742,6 +939,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
             {/* Drawing controls */}
             <SubAreaDrawingControls
               blocks={blocks}
+              outerBoundary={outerBoundary}
               selectedCategory={selectedCategory}
               onSubAreaCreated={handleSubAreaCreated}
               subAreas={subAreas}

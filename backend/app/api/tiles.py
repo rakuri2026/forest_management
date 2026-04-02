@@ -2,6 +2,7 @@
 API endpoints for raster tile generation
 Provides XYZ tile service for map visualization
 """
+import math
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -407,3 +408,218 @@ async def query_point(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+@router.get("/calculations/{calculation_id}/steep-slope-mask/{z}/{x}/{y}.png")
+async def get_steep_slope_mask_tile(
+    calculation_id: str,
+    z: int,
+    x: int,
+    y: int,
+    threshold: int = Query(default=4, ge=2, le=4, description="Slope class threshold (2=class 2+, 3=class 3+, 4=class 4 only)"),
+    alpha: int = Query(default=180, ge=0, le=255, description="Transparency (0=transparent, 255=opaque)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get steep slope mask tile - shows areas with slope ABOVE the threshold
+    
+    **Purpose:**
+    - Helps users visually identify steep slopes for defining protected zones
+    - Shows only areas where slope exceeds the threshold (default 30°)
+    - Areas above threshold are colored red
+    
+    **Parameters:**
+    - **threshold**: Slope threshold in degrees (default 30). Areas ABOVE this value are shown.
+    - **alpha**: Transparency level (default 180 = 70%)
+    
+    **Returns:**
+    - PNG image (256×256 pixels) with steep slopes in red
+    - HTTP 404 if calculation not found
+    - HTTP 500 if tile generation fails
+    
+    **Example:**
+    ```
+    GET /api/calculations/{calc_id}/steep-slope-mask/14/12345/6789.png?threshold=30
+    ```
+    """
+    try:
+        from sqlalchemy import text
+        import io
+        from PIL import Image, ImageDraw
+        
+        print(f"[SteepSlope] ===== Tile request: calc={calculation_id}, z={z}, x={x}, y={y}, threshold={threshold} =====")
+        
+        # Get boundary WKT
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM calculations
+            WHERE id = :calc_id
+        """)
+        
+        boundary_result = db.execute(boundary_query, {"calc_id": calculation_id}).first()
+        
+        if not boundary_result or not boundary_result.wkt:
+            raise HTTPException(status_code=404, detail="Calculation not found")
+        
+        boundary_wkt = boundary_result.wkt
+        print(f"[SteepSlope] Boundary WKT length: {len(boundary_wkt)}")
+        print(f"[SteepSlope] Boundary WKT sample: {boundary_wkt[:100]}...")
+        
+        # Convert XYZ to bounds
+        n = 2.0 ** z
+        lon_min = x / n * 360.0 - 180.0
+        lon_max = (x + 1) / n * 360.0 - 180.0
+        
+        lat_max_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
+        lat_max = math.degrees(lat_max_rad)
+        
+        lat_min_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n)))
+        lat_min = math.degrees(lat_min_rad)
+        
+        print(f"[SteepSlope] Tile bounds: lon=[{lon_min:.4f}, {lon_max:.4f}], lat=[{lat_min:.4f}, {lat_max:.4f}]")
+
+        # Map class threshold to degree threshold
+        if threshold == 4:
+            min_class = 4
+        elif threshold == 3:
+            min_class = 3
+        else:
+            min_class = 2
+            
+        print(f"[SteepSlope] Showing classes >= {min_class}")
+        
+        try:
+            # Use the exact same grid sampling approach as tile_service
+            sample_size = 32
+            lon_step = (lon_max - lon_min) / sample_size
+            lat_step = (lat_max - lat_min) / sample_size
+            
+            # Same query as tile_service uses
+            query = text("""
+                WITH forest_boundary AS (
+                    SELECT ST_GeomFromText(:boundary_wkt, 4326) as geom
+                ),
+                relevant_rasters AS (
+                    SELECT r.rast
+                    FROM rasters.slope r, forest_boundary f
+                    WHERE ST_Intersects(r.rast, f.geom)
+                ),
+                grid AS (
+                    SELECT
+                        i.i as i,
+                        j.j as j,
+                        :min_lon + (i.i * :lon_step) + (:lon_step / 2.0) as lon,
+                        :min_lat + (j.j * :lat_step) + (:lat_step / 2.0) as lat
+                    FROM
+                        generate_series(0, :sample_size - 1) as i(i),
+                        generate_series(0, :sample_size - 1) as j(j)
+                )
+                SELECT
+                    g.i,
+                    g.j,
+                    ST_Value(r.rast, ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326)) as val
+                FROM grid g
+                CROSS JOIN relevant_rasters r
+                CROSS JOIN forest_boundary f
+                WHERE
+                    ST_Contains(f.geom, ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326))
+                    AND ST_Value(r.rast, ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326)) IS NOT NULL
+                LIMIT 2000
+            """)
+            
+            result = db.execute(query, {
+                "boundary_wkt": boundary_wkt,
+                "min_lon": lon_min,
+                "min_lat": lat_min,
+                "lon_step": lon_step,
+                "lat_step": lat_step,
+                "sample_size": sample_size
+            }).fetchall()
+            
+            print(f"[SteepSlope] Grid samples: {len(result)}")
+            
+            if not result or len(result) == 0:
+                print(f"[SteepSlope] No grid data - returning fallback")
+                raise ValueError("No grid data found")
+            
+            # Count by class
+            class_counts = {}
+            for row in result:
+                c = int(row.val) if row.val else 0
+                class_counts[c] = class_counts.get(c, 0) + 1
+            print(f"[SteepSlope] Class distribution: {class_counts}")
+            
+            # Convert to list of dicts for the drawing loop
+            raster_data = [{'i': row.i, 'j': row.j, 'val': row.val} for row in result]
+            
+            # Create 256x256 image using same approach as tile_service
+            cell_size = 256 // sample_size  # 8
+            img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            
+            # Draw each grid cell with reclass logic
+            for sample in raster_data:
+                i = sample['i']
+                j = sample['j']
+                val = sample['val']
+                
+                if val is None:
+                    continue
+                
+                # Reclass: only show cells >= min_class
+                if val >= min_class:
+                    color = (220, 38, 38, alpha)  # Red
+                else:
+                    continue  # Skip non-steep cells (transparent)
+                
+                x1 = i * cell_size
+                y1 = (sample_size - 1 - j) * cell_size  # Flip Y axis like tile_service
+                x2 = x1 + cell_size
+                y2 = y1 + cell_size
+                
+                draw.rectangle([x1, y1, x2, y2], fill=color)
+            
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format='PNG')
+            img_bytes.seek(0)
+            
+            print(f"[SteepSlope] Generated PNG with {len(raster_data)} data points, size={len(img_bytes.getvalue())} bytes")
+            return Response(
+                content=img_bytes.getvalue(),
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Content-Type": "image/png",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+             
+        except Exception as e:
+            print(f"[SteepSlope] Query failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Fallback: return empty transparent tile
+        img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        return Response(
+            content=img_bytes.getvalue(),
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Content-Type": "image/png",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+        
+    except HTTPException:
+        raise
+        
+    except Exception as e:
+        print(f"Steep slope tile error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Tile generation failed: {str(e)}")
