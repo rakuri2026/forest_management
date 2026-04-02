@@ -9,9 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.1.0",
     "@geoman-io/leaflet-geoman-free": "^2.19.2",
     "@turf/turf": "^7.3.4",
     "@types/html2canvas": "^0.5.35",
+    "antd": "^6.3.3",
     "axios": "^1.6.2",
     "html2canvas": "^1.4.1",
     "leaflet": "^1.9.4",
@@ -22,7 +24,7 @@
     "react-dom": "^18.2.0",
     "react-leaflet": "^4.2.1",
     "react-router-dom": "^6.20.0",
-    "recharts": "^3.7.0",
+    "recharts": "^3.8.0",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {

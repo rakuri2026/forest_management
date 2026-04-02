@@ -44,7 +44,7 @@ def add_validation_to_excel(
     """
     # Load existing workbook
     wb = load_workbook(excel_filepath)
-    ws_data = wb['Tree Model']
+    ws_data = wb['Data Template']
 
     # Step 1: Create SPECIES_DATABASE sheet (hidden, for validation reference)
     ws_species = wb.create_sheet("SPECIES_DATABASE")
@@ -224,6 +224,54 @@ def add_validation_to_excel(
             'error': 'Tree height must be between 7 and 50 meters'
         })
 
+    # firewood_kg_per_100sqm_per_year: minimum value=0, maximum value=500
+    if 'firewood_kg_per_100sqm_per_year' in col_map:
+        validation_rules.append({
+            'col': col_map['firewood_kg_per_100sqm_per_year'],
+            'type': 'whole',
+            'operator': 'between',
+            'formula1': 0,
+            'formula2': 500,
+            'error_title': 'Invalid Firewood',
+            'error': 'Firewood must be between 0 and 500 kg/100sqm/year'
+        })
+
+    # grass_kg_per_100sqm_per_year: minimum value=0, maximum value=500
+    if 'grass_kg_per_100sqm_per_year' in col_map:
+        validation_rules.append({
+            'col': col_map['grass_kg_per_100sqm_per_year'],
+            'type': 'whole',
+            'operator': 'between',
+            'formula1': 0,
+            'formula2': 500,
+            'error_title': 'Invalid Grass',
+            'error': 'Grass must be between 0 and 500 kg/100sqm/year'
+        })
+
+    # bedding_material_kg_per_100sqm_per_year: minimum value=0, maximum value=500
+    if 'bedding_material_kg_per_100sqm_per_year' in col_map:
+        validation_rules.append({
+            'col': col_map['bedding_material_kg_per_100sqm_per_year'],
+            'type': 'whole',
+            'operator': 'between',
+            'formula1': 0,
+            'formula2': 500,
+            'error_title': 'Invalid Bedding Material',
+            'error': 'Bedding material must be between 0 and 500 kg/100sqm/year'
+        })
+
+    # ntfp_kg_per_100sqm_per_year: minimum value=0, maximum value=100
+    if 'ntfp_kg_per_100sqm_per_year' in col_map:
+        validation_rules.append({
+            'col': col_map['ntfp_kg_per_100sqm_per_year'],
+            'type': 'whole',
+            'operator': 'between',
+            'formula1': 0,
+            'formula2': 100,
+            'error_title': 'Invalid NTFP',
+            'error': 'NTFP must be between 0 and 100 kg/100sqm/year'
+        })
+
     # Apply numeric validation rules
     for rule in validation_rules:
         dv = DataValidation(
@@ -333,6 +381,10 @@ def add_validation_to_excel(
         ['tree_dbh_cm', '30 to 200 cm'],
         ['tree_height_m', '7 to 50 meters'],
         ['tree_class', '1,2,3,4,A,B,C,D,a,b,c,d,i,ii,iii,iv,I,II,III,IV'],
+        ['firewood_kg_per_100sqm_per_year', '0 to 500 kg/100sqm/year'],
+        ['grass_kg_per_100sqm_per_year', '0 to 500 kg/100sqm/year'],
+        ['bedding_material_kg_per_100sqm_per_year', '0 to 500 kg/100sqm/year'],
+        ['ntfp_kg_per_100sqm_per_year', '0 to 100 kg/100sqm/year'],
         ['', ''],
         ['SPECIES VALIDATION (Non-strict - Enter any value):', ''],
         ['Green highlight', 'Species found in database (valid)'],
@@ -355,6 +407,10 @@ def add_validation_to_excel(
         ['SN COLUMNS:', ''],
         ['regen_sn, sapling_sn, pole_sn, tree_sn', 'Keep existing values (no validation)'],
         ['', ''],
+        ['RESOURCE HARVEST COLUMNS (Per Sample Plot):', ''],
+        ['firewood, grass, bedding_material, ntfp', 'Default values populated once per sample plot (first row only)'],
+        ['Note:', 'Edit values only in the first row of each sample plot'],
+        ['', ''],
         ['IMPORTANT:', ''],
         ['- Numeric columns: Excel will reject values outside range', ''],
         ['- Species columns: Enter any value, colors show if in database', ''],
@@ -371,19 +427,20 @@ def add_validation_to_excel(
     bold_font = Font(bold=True, size=12)
     ws_guide['A1'].font = Font(bold=True, size=14)
     ws_guide['A3'].font = bold_font
-    ws_guide['A14'].font = bold_font
-    ws_guide['A17'].font = bold_font
-    ws_guide['A21'].font = bold_font
-    ws_guide['A27'].font = bold_font
-    ws_guide['A30'].font = bold_font
+    ws_guide['A18'].font = bold_font  # SPECIES VALIDATION
+    ws_guide['A21'].font = bold_font  # SIZE CLASS DEFINITIONS
+    ws_guide['A27'].font = bold_font  # TREE CLASS
+    ws_guide['A33'].font = bold_font  # SN COLUMNS
+    ws_guide['A36'].font = bold_font  # RESOURCE HARVEST COLUMNS
+    ws_guide['A40'].font = bold_font  # IMPORTANT
 
     # Define fill colors for the guide
-    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    green_fill_guide = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red_fill_guide = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
-    # Add color examples in guide
-    ws_guide['A18'].fill = green_fill
-    ws_guide['A19'].fill = red_fill
+    # Add color examples in guide (Green/Red highlight rows)
+    ws_guide['A19'].fill = green_fill_guide
+    ws_guide['A20'].fill = red_fill_guide
 
     # Save enhanced workbook
     print(f"[Excel Validator] Saving workbook to {excel_filepath}")

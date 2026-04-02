@@ -852,6 +852,7 @@ def generate_regeneration_entries(
 def export_to_gpkg(
     trees: List[Dict[str, Any]],
     calculation_id: uuid.UUID,
+    db: Session = None,
     output_dir: str = "exports"
 ) -> Tuple[str, float]:
     """
@@ -872,6 +873,7 @@ def export_to_gpkg(
     Args:
         trees: List of tree dictionaries
         calculation_id: UUID of calculation
+        db: Database session (optional, for forest name)
         output_dir: Directory to save GPKG files
 
     Returns:
@@ -880,9 +882,22 @@ def export_to_gpkg(
     # Create output directory if needed
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Generate filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"tree_model_{calculation_id}_{timestamp}.gpkg"
+    # Get forest name from calculation for filename
+    forest_name = "forest"
+    if db is not None:
+        try:
+            from app.models.calculation import Calculation
+            calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+            if calculation and calculation.forest_name:
+                # Sanitize forest name for filename (remove special characters)
+                forest_name = calculation.forest_name.replace(' ', '_')
+                forest_name = ''.join(c for c in forest_name if c.isalnum() or c == '_')
+        except Exception as e:
+            print(f"Warning: Could not retrieve forest name: {e}")
+
+    # Generate filename with new format: forest_name_inventory_data_entry_date
+    timestamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{forest_name}_inventory_data_entry_{timestamp}.gpkg"
     filepath = os.path.join(output_dir, filename)
 
     # Create list of records - REGULATION FORMAT (16 columns)
@@ -1068,9 +1083,22 @@ def export_to_excel(
     # Create output directory if needed
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Generate filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"tree_model_{calculation_id}_{timestamp}.xlsx"
+    # Get forest name from calculation for filename
+    forest_name = "forest"
+    if db is not None:
+        try:
+            from app.models.calculation import Calculation
+            calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+            if calculation and calculation.forest_name:
+                # Sanitize forest name for filename (remove special characters)
+                forest_name = calculation.forest_name.replace(' ', '_')
+                forest_name = ''.join(c for c in forest_name if c.isalnum() or c == '_')
+        except Exception as e:
+            print(f"Warning: Could not retrieve forest name: {e}")
+
+    # Generate filename with new format: forest_name_inventory_data_entry_date
+    timestamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{forest_name}_inventory_data_entry_{timestamp}.xlsx"
     filepath = os.path.join(output_dir, filename)
 
     # Get sample plot center coordinates from sampling design
@@ -1172,7 +1200,12 @@ def export_to_excel(
             'tree_firewood_m3': None,
             # Coordinates (for Excel convenience)
             'longitude': lon,
-            'latitude': lat
+            'latitude': lat,
+            # Additional resource columns (populated once per sample plot)
+            'firewood_kg_per_100sqm_per_year': None,
+            'grass_kg_per_100sqm_per_year': None,
+            'bedding_material_kg_per_100sqm_per_year': None,
+            'ntfp_kg_per_100sqm_per_year': None,
         }
 
         # Populate appropriate columns based on DBH (size class)
@@ -1344,6 +1377,11 @@ def export_to_excel(
         'tree_gross_volume_m3': 'first',
         'tree_net_volume_m3': 'first',
         'tree_firewood_m3': 'first',
+        # Additional resource columns
+        'firewood_kg_per_100sqm_per_year': 'first',
+        'grass_kg_per_100sqm_per_year': 'first',
+        'bedding_material_kg_per_100sqm_per_year': 'first',
+        'ntfp_kg_per_100sqm_per_year': 'first',
     }
     
     # Group by merge_key and aggregate
@@ -1390,6 +1428,10 @@ def export_to_excel(
         'tree_dbh_cm',
         'tree_height_m',
         'tree_class',
+        'firewood_kg_per_100sqm_per_year',
+        'grass_kg_per_100sqm_per_year',
+        'bedding_material_kg_per_100sqm_per_year',
+        'ntfp_kg_per_100sqm_per_year',
     ]
     
     # REMOVE EMPTY ROWS (rows with no species data in any category)
@@ -1404,6 +1446,19 @@ def export_to_excel(
 
     # Reassign FID after removing empty rows
     df['fid'] = range(1, len(df) + 1)
+
+    # Populate default values for additional resource columns (only first row per sample plot)
+    # Track which sample plots have been populated
+    populated_plots = set()
+    for idx in df.index:
+        sample_plot = df.loc[idx, 'sample_plot_number']
+        if sample_plot not in populated_plots:
+            # First row of this sample plot - populate default values
+            df.loc[idx, 'firewood_kg_per_100sqm_per_year'] = 50
+            df.loc[idx, 'grass_kg_per_100sqm_per_year'] = 50
+            df.loc[idx, 'bedding_material_kg_per_100sqm_per_year'] = 50
+            df.loc[idx, 'ntfp_kg_per_100sqm_per_year'] = 1
+            populated_plots.add(sample_plot)
 
     # DBH columns - keep full precision for Field Inventory recalculation
     # Round DBH and Height to 6 decimal places (preserves precision for volume calculation)
@@ -1449,24 +1504,48 @@ def export_to_excel(
     
     # Write to Excel - optimized for speed
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        # Sheet 1: Tree Model (original format)
-        df_tree_model.to_excel(writer, sheet_name='Tree Model', index=False)
-        
+        # Sheet 1: Data Template (renamed from Tree Model)
+        df_tree_model.to_excel(writer, sheet_name='Data Template', index=False)
+
         # Sheet 2: Volumes (for verification) - includes block_number and total_sample_plots
         df_volumes.to_excel(writer, sheet_name='Volumes', index=False)
-    
-    # Set fixed column widths for faster processing
+
+    # Apply formatting to Excel
     from openpyxl import load_workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
     wb = load_workbook(filepath)
-    
-    # Set fixed column widths (faster than calculating)
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        for col in ws.columns:
-            col_letter = col[0].column_letter
-            # Use reasonable fixed widths
-            ws.column_dimensions[col_letter].width = 15
-    
+
+    # Format Data Template sheet
+    ws_data = wb['Data Template']
+
+    # 1. Format header row (dark background, white text)
+    header_fill = PatternFill(start_color="2F4F4F", end_color="2F4F4F", fill_type="solid")  # Dark slate gray
+    header_font = Font(color="FFFFFF", bold=True)  # White text, bold
+
+    for cell in ws_data[1]:  # First row
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # 2. Set column widths
+    for col in ws_data.columns:
+        col_letter = col[0].column_letter
+        ws_data.column_dimensions[col_letter].width = 15
+
+    # 3. Hide column A (fid column)
+    ws_data.column_dimensions['A'].hidden = True
+
+    # 4. Center justify column C (sample_plot_number)
+    for row in ws_data.iter_rows(min_row=2, min_col=3, max_col=3):  # Column C, skip header
+        for cell in row:
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # 5. Freeze first row and columns B and C (freeze pane at D2)
+    ws_data.freeze_panes = 'D2'
+
+    # 6. Hide the Volumes sheet
+    wb['Volumes'].sheet_state = 'hidden'
+
     wb.save(filepath)
 
     # Calculate file size
@@ -1749,7 +1828,7 @@ def generate_synthetic_trees(
 
     # Step 5: Export to GPKG and Excel
     report(90, "Exporting to GPKG file")
-    gpkg_filepath, gpkg_size_mb = export_to_gpkg(trees, calculation_id)
+    gpkg_filepath, gpkg_size_mb = export_to_gpkg(trees, calculation_id, db=db)
 
     # Add block number and total sample plots to each tree for Excel export
     # Get unique blocks and assign block numbers

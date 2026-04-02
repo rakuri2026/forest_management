@@ -530,6 +530,7 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
     writer.writerow([
         'Plot No',
         'Block',
+        'Zone Type',
         'Longitude',
         'Latitude',
         'Elevation (m)',
@@ -593,32 +594,24 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
 
         # Find block assignment for this point
         block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
-        block_number = block_info.get('block_number', '') if block_info else ''
-        block_name = block_info.get('block_name', '') if block_info else ''
+        block_name = block_info.get('block_name', f'Plot {i+1}') if block_info else f'Plot {i+1}'
+        zone_type = block_info.get('zone_type', 'Productive') if block_info else 'Productive'
+        zone_type_display = zone_type.capitalize() if zone_type else 'Productive'
 
         # Calculate UTM coordinates
-        utm_zone = 44 if lon < 84 else 45  # Nepal is in zones 44N and 45N
+        utm_zone = 44 if lon < 84 else 45
         transformer = Transformer.from_crs(f"EPSG:4326", f"EPSG:326{utm_zone}", always_xy=True)
         utm_easting, utm_northing = transformer.transform(lon, lat)
 
-        # Extract elevation (ASLM - Above Sea Level Meter)
-        # Wrap in try-except with rollback to prevent transaction abort
-        elevation_m = None
-        try:
-            elevation_m = extract_elevation_at_point(db, lon, lat)
-        except Exception as e:
-            logger.debug(f"Failed to extract elevation for point {i+1}: {e}")
-            try:
-                db.rollback()
-            except:
-                pass
+        # Extract elevation
+        elevation_m = extract_elevation_at_point(db, lon, lat)
 
-        # Calculate distance from boundary (if available)
+        # Calculate distance from boundary
         distance_from_boundary = None
         if boundary_wkt:
             try:
                 boundary_geom = shapely_wkt.loads(boundary_wkt)
-                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320  # Convert degrees to meters (approximate)
+                distance_from_boundary = point.distance(boundary_geom.boundary) * 111320
             except:
                 pass
 
@@ -646,21 +639,17 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
                     feature_type = topo_feature.get("feature_type", "")
                     feature_distance = f'{int(topo_feature.get("distance_meters", 0))}'
                     feature_direction = topo_feature.get("direction", "")
-                    # DEBUG: Log successful extraction
-                    if i == 0:  # Only log first point to avoid spam
-                        logger.info(f"Point 1: Found {feature_type} '{feature_name}' at {feature_distance}m {feature_direction}")
                 else:
                     if i == 0:
                         logger.warning(f"Point 1: No topographic feature found within 1000m")
             except Exception as e:
                 logger.warning(f"Failed to find topographic feature for point {i+1}: {e}", exc_info=True)
-        else:
-            if i == 0:
-                logger.warning(f"Point 1: clipped_features is None, skipping topographic extraction")
 
+        # Write CSV row
         writer.writerow([
             i + 1,  # Plot number starts at 1
             block_name,
+            zone_type_display,
             f'{lon:.7f}',
             f'{lat:.7f}',
             f'{int(elevation_m)}' if elevation_m and elevation_m > 0 else 'N/A',
@@ -680,8 +669,14 @@ def export_sampling_csv(db: Session, design_id: UUID) -> bytes:
 def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
     """
     Export sampling points to GPX format with complete field data.
-    Includes elevation, UTM coordinates, and block information.
+    Includes elevation, UTM coordinates, block information, and zone type.
     """
+    # CRITICAL: Rollback any previous failed transactions at the START
+    try:
+        db.rollback()
+    except:
+        pass
+
     design = db.query(SamplingDesign).filter(SamplingDesign.id == design_id).first()
 
     if not design or not design.points_geometry:
@@ -722,13 +717,7 @@ def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
 
     # Import required modules for calculations
     from app.utils.geospatial import extract_elevation_at_point
-    from app.utils.geospatial_vector_optimized import (
-        preclip_topographic_features,
-        find_nearest_topographic_feature_optimized
-    )
     from pyproj import Transformer
-    import logging
-    logger = logging.getLogger(__name__)
 
     # Create GPX XML
     gpx = ET.Element('gpx', {
@@ -747,6 +736,7 @@ def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
         # Find block assignment for this point
         block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
         block_name = block_info.get('block_name', f'Plot {i+1}') if block_info else f'Plot {i+1}'
+        zone_type = block_info.get('zone_type', 'Productive') if block_info else 'Productive'
 
         # Calculate UTM coordinates
         utm_zone = 44 if lon < 84 else 45
@@ -779,6 +769,7 @@ def export_sampling_gpx(db: Session, design_id: UUID) -> bytes:
         # Build description with all fields
         desc_parts = []
         desc_parts.append(f'Block: {block_name}')
+        desc_parts.append(f'Zone: {zone_type.capitalize()}')
         desc_parts.append(f'UTM: {utm_easting:.2f}E, {utm_northing:.2f}N ({utm_zone}N)')
         if elevation_m:
             desc_parts.append(f'Elevation: {int(elevation_m)}m')
@@ -881,6 +872,7 @@ def export_sampling_kml(db: Session, design_id: UUID) -> bytes:
         # Find block assignment for this point
         block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
         block_name = block_info.get('block_name', f'Plot {i+1}') if block_info else f'Plot {i+1}'
+        zone_type = block_info.get('zone_type', 'Productive') if block_info else 'Productive'
 
         # Calculate UTM coordinates
         utm_zone = 44 if lon < 84 else 45
@@ -906,6 +898,7 @@ def export_sampling_kml(db: Session, design_id: UUID) -> bytes:
         # Build HTML description with all fields
         desc = f'<b>Plot {i+1}</b><br/>'
         desc += f'Block: {block_name}<br/>'
+        desc += f'Zone Type: {zone_type.capitalize()}<br/>'
         desc += f'Longitude: {lon:.7f}<br/>'
         desc += f'Latitude: {lat:.7f}<br/>'
         if elevation_m:

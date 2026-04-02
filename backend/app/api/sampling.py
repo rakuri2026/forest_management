@@ -377,6 +377,31 @@ async def get_sampling_points(
             buffer_meters=100.0
         )
 
+    # Helper function to safely convert float to JSON-compatible value
+    def safe_float(value, decimals=2):
+        """Convert float to JSON-safe value, replacing NaN/inf with None"""
+        if value is None:
+            return None
+        try:
+            import math
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return float(f"{value:.{decimals}f}")
+        except (TypeError, ValueError):
+            return None
+
+    def safe_int(value):
+        """Convert to int, replacing NaN/None with None"""
+        if value is None:
+            return None
+        try:
+            import math
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     # Build points array
     points = []
     for i, point in enumerate(multipoint.geoms):
@@ -386,6 +411,7 @@ async def get_sampling_points(
         block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
         block_number = block_info.get('block_number', 1) if block_info else 1
         block_name = block_info.get('block_name', f'Block {block_number}') if block_info else f'Block {block_number}'
+        zone_type = block_info.get('zone_type', 'Productive') if block_info else 'Productive'
 
         # Calculate UTM coordinates
         utm_zone = 44 if lon < 84 else 45  # Nepal is in zones 44N and 45N
@@ -433,26 +459,27 @@ async def get_sampling_points(
             "plot_number": i + 1,
             "block_number": block_number,
             "block_name": block_name,
-            "longitude": float(f"{lon:.7f}"),
-            "latitude": float(f"{lat:.7f}"),
-            "utm_easting": float(f"{utm_easting:.2f}"),
-            "utm_northing": float(f"{utm_northing:.2f}"),
+            "zone_type": zone_type,
+            "longitude": safe_float(lon, 7),
+            "latitude": safe_float(lat, 7),
+            "utm_easting": safe_float(utm_easting, 2),
+            "utm_northing": safe_float(utm_northing, 2),
             "utm_zone": f"{utm_zone}N",
-            "distance_from_boundary": float(f"{distance_from_boundary:.2f}") if distance_from_boundary else None,
+            "distance_from_boundary": safe_float(distance_from_boundary, 2),
         }
 
         # Add elevation if calculated
         if include_elevation:
-            point_data["elevation_m"] = int(elevation_m) if elevation_m else None
+            point_data["elevation_m"] = safe_int(elevation_m)
 
         # Add topographic context if calculated
         if include_topographic_features:
             point_data["topographic_context"] = topo_context
             point_data["nearest_feature_type"] = topo_feature.get("feature_type") if topo_feature else None
             point_data["nearest_feature_name"] = topo_feature.get("feature_name") if topo_feature else None  # NEW!
-            point_data["nearest_feature_distance_m"] = int(topo_feature.get("distance_meters", 0)) if topo_feature else None
+            point_data["nearest_feature_distance_m"] = safe_int(topo_feature.get("distance_meters", 0) if topo_feature else None)
             point_data["nearest_feature_direction"] = topo_feature.get("direction") if topo_feature else None
-            point_data["nearest_feature_bearing"] = int(topo_feature.get("bearing_degrees", 0)) if topo_feature else None
+            point_data["nearest_feature_bearing"] = safe_int(topo_feature.get("bearing_degrees", 0) if topo_feature else None)
 
         points.append(point_data)
 
@@ -930,6 +957,7 @@ async def get_sampling_map_layers(
                 # Find block assignment
                 block_info = next((b for b in block_assignments if b.get('point_index') == i), None)
                 block_name = block_info.get('block_name', f'Plot {i+1}') if block_info else f'Plot {i+1}'
+                zone_type = block_info.get('zone_type', 'Productive') if block_info else 'Productive'
 
                 feature = {
                     "type": "Feature",
@@ -940,6 +968,7 @@ async def get_sampling_map_layers(
                     "properties": {
                         "plot_number": i + 1,
                         "block_name": block_name,
+                        "zone_type": zone_type,
                         "plot_id": f"P{i+1}"
                     }
                 }
@@ -967,5 +996,6 @@ async def get_sampling_map_layers(
             }
         } if accessible_forest_geojson else None,
         "sampling_points": points_geojson,
-        "filter_settings": filter_info
+        "filter_settings": filter_info,
+        "calculation_id": str(design.calculation_id)
     }

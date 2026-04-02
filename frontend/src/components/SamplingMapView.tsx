@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Marker, Popup, useMap, LayersControl } from 'react-leaflet';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { samplingApi } from '../services/api';
+import { samplingApi, forestApi } from '../services/api';
 
 // Fix Leaflet default marker icon
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -11,6 +11,18 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
+
+// Sub-area category colors
+const CATEGORY_COLORS: Record<string, { fill: string; border: string; label: string }> = {
+  protected: { fill: '#ef4444', border: '#dc2626', label: 'Protected Area' },
+  private_land: { fill: '#f97316', border: '#ea580c', label: 'Private Land (Excluded)' },
+  plantation: { fill: '#22c55e', border: '#16a34a', label: 'Plantation' },
+  pro_poor: { fill: '#3b82f6', border: '#2563eb', label: 'Pro-Poor' },
+  religious: { fill: '#a855f7', border: '#9333ea', label: 'Religious' },
+  biodiversity: { fill: '#14b8a6', border: '#0d9488', label: 'Biodiversity' },
+  tourist: { fill: '#eab308', border: '#ca8a04', label: 'Tourist' },
+  office: { fill: '#64748b', border: '#475569', label: 'Office' },
+};
 
 // Component to handle auto-zoom and scale
 function MapController({ geometry }: { geometry: any }) {
@@ -65,6 +77,7 @@ interface SamplingMapViewProps {
 
 export function SamplingMapView({ designId }: SamplingMapViewProps) {
   const [mapLayers, setMapLayers] = useState<any>(null);
+  const [subAreas, setSubAreas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +91,17 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
     try {
       const response = await samplingApi.getMapLayers(designId);
       setMapLayers(response);
+      
+      // Also load sub-areas from the calculation
+      if (response.calculation_id) {
+        try {
+          const calc = await forestApi.getCalculation(response.calculation_id);
+          const subAreasData = calc.result_data?.sub_areas || [];
+          setSubAreas(subAreasData);
+        } catch (err) {
+          console.error('Failed to load sub-areas:', err);
+        }
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load map layers');
     } finally {
@@ -203,10 +227,65 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
     }
   };
 
+  // Get unique categories from sub-areas
+  const uniqueCategories = [...new Set(subAreas.map(sa => sa.category))];
+
+  // Get sub-area style
+  const getSubAreaStyle = (category: string, isExcluded?: boolean) => {
+    const info = CATEGORY_COLORS[category] || { fill: '#6b7280', border: '#4b5563' };
+    return {
+      color: info.border,
+      weight: 2,
+      opacity: 0.8,
+      fillColor: info.fill,
+      fillOpacity: isExcluded ? 0.15 : 0.35,
+      dashArray: isExcluded ? '5, 5' : undefined,
+    };
+  };
+
+  // Create sub-area label
+  const createSubAreaLabel = (name: string, category: string, area: number, isExcluded?: boolean) => {
+    const info = CATEGORY_COLORS[category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
+    return new L.DivIcon({
+      className: 'custom-subarea-label',
+      html: `
+        <div style="
+          background-color: rgba(255, 255, 255, 0.95);
+          padding: 3px 6px;
+          border-radius: 3px;
+          border: 1px solid ${info.border};
+          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+          min-width: 80px;
+          max-width: 150px;
+        ">
+          <div style="
+            font-weight: bold;
+            font-size: 10px;
+            color: ${info.border};
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          " title="${name}">
+            ${name}
+          </div>
+          <div style="
+            font-size: 8px;
+            color: #6b7280;
+            white-space: nowrap;
+          ">
+            ${area.toFixed(2)} ha${isExcluded ? ' • Excluded' : ''}
+          </div>
+        </div>
+      `,
+      iconSize: [0, 0],
+      iconAnchor: [40, 20],
+    });
+  };
+
   return (
     <div className="relative">
       {/* Map Legend */}
-      <div className="absolute top-4 left-4 z-[1000] bg-white rounded-lg shadow-lg p-3 border border-gray-300 max-w-xs">
+      <div className="absolute top-4 left-4 z-[1000] bg-white rounded-lg shadow-lg p-3 border border-gray-300 max-w-xs max-h-[400px] overflow-y-auto">
         <h3 className="text-sm font-bold text-gray-800 mb-2">Map Legend</h3>
         <div className="space-y-1 text-xs">
           <div className="flex items-center gap-2">
@@ -236,6 +315,34 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
             }}>1</div>
             <span>Sample Plot Locations (numbered)</span>
           </div>
+          
+          {/* Sub-Area Categories */}
+          {subAreas.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-gray-200">
+              <div className="font-semibold text-gray-700 mb-1">Sub-Areas:</div>
+              {uniqueCategories.map(category => {
+                const info = CATEGORY_COLORS[category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
+                const count = subAreas.filter(sa => sa.category === category).length;
+                return (
+                  <div key={category} className="flex items-center gap-2">
+                    <div 
+                      className="w-3 h-3 rounded"
+                      style={{ 
+                        backgroundColor: info.fill, 
+                        border: `1px solid ${info.border}`,
+                      }}
+                    />
+                    <span className="text-gray-600">{info.label}</span>
+                    <span className="text-gray-400">({count})</span>
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-2 mt-1">
+                <div className="w-3 h-3 rounded border border-dashed border-gray-400"></div>
+                <span className="text-gray-500 text-[10px]">Dashed = Excluded</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Filter Info */}
@@ -363,6 +470,44 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
           />
         )}
 
+        {/* Sub-Area Layers with Labels */}
+        {subAreas.map((subArea, index) => {
+          const style = getSubAreaStyle(subArea.category, subArea.isExcluded);
+          const centroid = getPolygonCentroid(subArea.geometry?.coordinates);
+          const info = CATEGORY_COLORS[subArea.category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
+          
+          return (
+            <GeoJSON
+              key={subArea.id || `subarea-${index}`}
+              data={subArea.geometry}
+              style={() => style}
+              onEachFeature={(feature, layer) => {
+                layer.bindPopup(`
+                  <div class="text-sm">
+                    <strong style="color: ${info.border}">${subArea.name}</strong><br/>
+                    <span class="text-gray-600">${info.label}</span><br/>
+                    <span class="text-gray-500">${subArea.area_hectares?.toFixed(2) || 0} ha</span>
+                    ${subArea.isExcluded ? '<br/><span class="text-orange-600 font-medium">⚠ Excluded from sampling</span>' : ''}
+                  </div>
+                `);
+              }}
+            >
+              {centroid && (
+                <Marker
+                  position={centroid}
+                  icon={createSubAreaLabel(
+                    subArea.name,
+                    subArea.category,
+                    subArea.area_hectares || 0,
+                    subArea.isExcluded
+                  )}
+                  interactive={false}
+                />
+              )}
+            </GeoJSON>
+          );
+        })}
+
         {/* Sampling Points Layer - Numbered Markers */}
         {mapLayers.sampling_points && mapLayers.sampling_points.features && (
           mapLayers.sampling_points.features.map((feature: any, index: number) => {
@@ -395,11 +540,17 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
 
       {/* Map Info Footer */}
       <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded p-2">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center flex-wrap gap-2">
           <div>
             <span className="font-semibold">Total Sampling Points:</span>{' '}
             {mapLayers.sampling_points?.features?.length || 0}
           </div>
+          {subAreas.length > 0 && (
+            <div>
+              <span className="font-semibold">Sub-Areas:</span>{' '}
+              {subAreas.length} ({subAreas.filter(sa => sa.category === 'protected').length} protected, {subAreas.filter(sa => sa.isExcluded).length} excluded)
+            </div>
+          )}
           <div>
             <span className="font-semibold">Basemap:</span> Switch using layer control (top-right)
           </div>

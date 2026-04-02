@@ -3,6 +3,7 @@ Sampling design service for forest inventory
 Implements systematic, random, and stratified sampling algorithms
 
 Phase 2: Enhanced with accessible forest filtering
+Phase 3: Added Guideline-2061 support (Nepal DoF standard)
 """
 import random
 import math
@@ -28,6 +29,12 @@ from app.services.tree_cover_analysis import (
 from app.services.tree_cover_analysis_optimized import (
     extract_tree_cover_pixel_centers_FAST as extract_tree_cover_pixel_centers
 )
+# Guideline-2061 support
+from app.services.guideline_sampling import (
+    get_sample_count_from_guideline,
+    classify_block_by_majority_area,
+    validate_guideline_parameters
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +58,40 @@ def get_excluded_areas_for_calculation(db: Session, calculation_id: UUID) -> Lis
     sub_areas = calculation.result_data.get("sub_areas", [])
 
     for sub_area in sub_areas:
-        if sub_area.get("is_excluded", False):
+        if sub_area.get("is_excluded", False) or sub_area.get("isExcluded", False):  # Support both naming conventions
             try:
-                from shapely.geometry import shape
-                geom = shape(sub_area["geometry"])
-                if isinstance(geom, Polygon):
-                    excluded_polygons.append(geom)
-                elif isinstance(geom, MultiPolygon):
-                    excluded_polygons.extend(list(geom.geoms))
+                from shapely.geometry import shape, GeometryCollection
+                geom_data = sub_area["geometry"]
+
+                # Handle GeometryCollection - extract only Polygon/MultiPolygon
+                if geom_data.get('type') == 'GeometryCollection':
+                    geom_collection = shape(geom_data)
+
+                    # Extract only polygonal geometries (filter out LineStrings, Points)
+                    polygons = [g for g in geom_collection.geoms
+                               if g.geom_type in ('Polygon', 'MultiPolygon') and g.area > 0]
+
+                    for poly in polygons:
+                        if isinstance(poly, Polygon):
+                            excluded_polygons.append(poly)
+                        elif isinstance(poly, MultiPolygon):
+                            excluded_polygons.extend(list(poly.geoms))
+                else:
+                    # Regular Polygon or MultiPolygon
+                    geom = shape(geom_data)
+
+                    # Skip zero-area geometries
+                    if geom.area == 0:
+                        logger.warning(
+                            f"Excluded area '{sub_area.get('name', 'unnamed')}' has zero area. Skipping."
+                        )
+                        continue
+
+                    if isinstance(geom, Polygon):
+                        excluded_polygons.append(geom)
+                    elif isinstance(geom, MultiPolygon):
+                        excluded_polygons.extend(list(geom.geoms))
+
             except Exception as e:
                 logger.warning(f"Failed to parse excluded area geometry: {e}")
                 continue
@@ -438,7 +471,7 @@ def extract_blocks_from_calculation(
     calculation_id: UUID
 ) -> List[Tuple[int, str, str, float]]:
     """
-    Extract individual blocks from calculation geometry.
+    Extract individual blocks from calculation's result_data->blocks array.
 
     Args:
         db: Database session
@@ -447,47 +480,79 @@ def extract_blocks_from_calculation(
     Returns:
         List of tuples: (block_number, block_geom_wkt, block_name, block_area_hectares)
     """
-    query = text("""
-        WITH blocks AS (
+    # Fetch calculation to get blocks from result_data
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise ValueError(f"Calculation {calculation_id} not found")
+
+    result_data = calculation.result_data or {}
+    blocks_array = result_data.get('blocks', [])
+
+    if not blocks_array:
+        logger.warning(f"No blocks found in result_data for calculation {calculation_id}")
+        # Fallback: use entire boundary as single block
+        query = text("""
             SELECT
-                (ST_Dump(boundary_geom)).path[1] as block_number,
-                (ST_Dump(boundary_geom)).geom as block_geom,
-                result_data->'blocks' as blocks_data
+                ST_AsText(boundary_geom) as block_wkt,
+                ST_Area(ST_Transform(boundary_geom,
+                    CASE
+                        WHEN ST_X(ST_Centroid(boundary_geom)) < 84.0 THEN 32644
+                        ELSE 32645
+                    END
+                )) / 10000.0 as area_hectares
             FROM public.calculations
             WHERE id = :calc_id
-        )
-        SELECT
-            block_number,
-            ST_AsText(block_geom) as block_wkt,
-            ST_Area(ST_Transform(block_geom,
-                CASE
-                    WHEN ST_X(ST_Centroid(block_geom)) < 84.0 THEN 32644
-                    ELSE 32645
-                END
-            )) / 10000.0 as area_hectares,
-            blocks_data
-        FROM blocks
-        ORDER BY block_number
-    """)
-
-    results = db.execute(query, {"calc_id": str(calculation_id)}).fetchall()
+        """)
+        result = db.execute(query, {"calc_id": str(calculation_id)}).fetchone()
+        if result:
+            forest_name = calculation.forest_name or "Forest"
+            return [(1, result.block_wkt, f"{forest_name} - Block 1", float(result.area_hectares))]
+        return []
 
     blocks = []
-    for row in results:
-        block_number = row.block_number if row.block_number is not None else 1
-        block_wkt = row.block_wkt
-        area_hectares = float(row.area_hectares)
-        blocks_data = row.blocks_data if row.blocks_data else []
+    from shapely.geometry import shape
 
-        # Get block name from result_data
-        block_name = f"Block {block_number}"
-        if blocks_data:
-            for block in blocks_data:
-                if block.get('block_index') == block_number - 1:  # 0-indexed in result_data
-                    block_name = block.get('block_name', block_name)
-                    break
+    for idx, block_data in enumerate(blocks_array):
+        block_number = idx + 1  # 1-indexed for display
+        block_name = block_data.get('block_name', f'Block {block_number}')
 
-        blocks.append((block_number, block_wkt, block_name, area_hectares))
+        # Debug: log available keys
+        logger.warning(f"DEBUG Block {block_name} keys: {list(block_data.keys())}")
+
+        # Extract geometry - try multiple possible keys
+        block_geometry = (
+            block_data.get('block_geometry') or
+            block_data.get('geometry') or
+            block_data.get('polygon_geometry')
+        )
+
+        if not block_geometry:
+            logger.warning(f"Block {block_name} has no geometry, skipping. Available keys: {list(block_data.keys())}")
+            continue
+
+        try:
+            # Convert GeoJSON to Shapely geometry
+            geom = shape(block_geometry)
+            block_wkt = geom.wkt
+
+            # Calculate area using PostGIS (proper projection)
+            query = text("""
+                SELECT
+                    ST_Area(ST_Transform(ST_GeomFromText(:wkt, 4326),
+                        CASE
+                            WHEN ST_X(ST_Centroid(ST_GeomFromText(:wkt, 4326))) < 84.0 THEN 32644
+                            ELSE 32645
+                        END
+                    )) / 10000.0 as area_hectares
+            """)
+            result = db.execute(query, {"wkt": block_wkt}).fetchone()
+            area_hectares = float(result.area_hectares) if result else 0.0
+
+            blocks.append((block_number, block_wkt, block_name, area_hectares))
+
+        except Exception as e:
+            logger.error(f"Failed to process block {block_name}: {e}")
+            continue
 
     logger.info(f"Extracted {len(blocks)} blocks from calculation {calculation_id}")
     return blocks
@@ -729,6 +794,9 @@ def create_sampling_design(
             else:
                 logger.info(f"    - Found {len(candidate_pixels)} candidate tree pixels")
 
+        # Track grid spacing for this block (for reporting)
+        block_grid_spacing_meters = None
+
         # Generate points for this block
         if candidate_pixels:
             # PIXEL-BASED SAMPLING: Sample from tree cover pixel centers
@@ -759,6 +827,10 @@ def create_sampling_design(
                     # Subsample systematically: take every Nth pixel
                     step = max(1, len(pixel_points) // samples_for_block)
                     block_points = pixel_points[::step][:samples_for_block]
+
+                # Estimate grid spacing (approximate)
+                block_area_sqm = float(effective_block_area) * 10000.0
+                block_grid_spacing_meters = math.sqrt(block_area_sqm / float(max(1, len(block_points))))
 
                 logger.info(f"    - Systematic sampling: selected {len(block_points)}/{len(pixel_points)} pixels")
 
@@ -799,6 +871,7 @@ def create_sampling_design(
             if block_sampling_type == "systematic":
                 block_area_sqm = float(effective_block_area) * 10000.0
                 spacing_meters = math.sqrt(block_area_sqm / float(samples_for_block))
+                block_grid_spacing_meters = spacing_meters  # Track for reporting
 
                 bounds = get_polygon_bounds(sampling_polygon_wkt)
                 block_points = generate_systematic_grid(
@@ -847,7 +920,8 @@ def create_sampling_design(
             block_assignments.append({
                 'point_index': len(all_points) - 1,
                 'block_number': block_number,
-                'block_name': block_name
+                'block_name': block_name,
+                'zone_type': 'productive'  # Default zone type for basic sampling
             })
 
         # Calculate actual intensity for this block (based on effective area)
@@ -861,11 +935,13 @@ def create_sampling_design(
             "block_area_hectares": Decimal(str(round(block_area_ha, 4))),
             "samples_generated": len(block_points),
             "minimum_enforced": minimum_enforced,
-            "actual_intensity_percent": actual_intensity_pct
+            "actual_intensity_percent": actual_intensity_pct,
+            "grid_spacing_meters": Decimal(str(round(block_grid_spacing_meters, 1))) if block_grid_spacing_meters else None
         }
 
-        # Add accessible area information if filtering was applied
+        # Add accessible area information
         if accessible_area_info:
+            # Filtering was applied - use calculated values
             block_info_dict["accessible_forest_area_ha"] = Decimal(
                 str(round(accessible_area_info.get("accessible_forest_area_ha", 0), 4))
             )
@@ -879,6 +955,10 @@ def create_sampling_design(
                 block_info_dict["non_forest_area_ha"] = Decimal(
                     str(round(accessible_area_info.get("non_forest_area_ha", 0), 4))
                 )
+        else:
+            # No filtering applied - entire block area is accessible
+            block_info_dict["accessible_forest_area_ha"] = Decimal(str(round(block_area_ha, 4)))
+            block_info_dict["accessible_forest_percentage"] = Decimal("100.00")
 
         blocks_info.append(BlockSamplingInfo(**block_info_dict))
 
@@ -1086,6 +1166,7 @@ def get_sampling_points_geojson(db: Session, design_id: UUID) -> dict:
         block_info = next((b for b in block_assignment if b.get('point_index') == i), None)
         block_number = block_info.get('block_number', '') if block_info else ''
         block_name = block_info.get('block_name', '') if block_info else ''
+        zone_type = block_info.get('zone_type', 'productve') if block_info else 'productive'
 
         # Calculate UTM coordinates
         utm_zone = 44 if lon < 84 else 45  # Nepal is in zones 44N and 45N
@@ -1114,6 +1195,7 @@ def get_sampling_points_geojson(db: Session, design_id: UUID) -> dict:
                 "plot_number": i + 1,
                 "block_number": block_number,
                 "block_name": block_name,
+                "zone_type": zone_type,  # 'productive' or 'protected'
                 "longitude": float(f"{lon:.7f}"),
                 "latitude": float(f"{lat:.7f}"),
                 "elevation_m": int(elevation_m) if elevation_m else None,
@@ -1130,6 +1212,823 @@ def get_sampling_points_geojson(db: Session, design_id: UUID) -> dict:
         "type": "FeatureCollection",
         "features": features
     }
+
+
+def calculate_geometry_area_hectares(geom):
+    """
+    Calculate geometry area in hectares using proper UTM projection.
+
+    Args:
+        geom: Shapely geometry in EPSG:4326
+
+    Returns:
+        Area in hectares
+    """
+    from shapely.ops import transform
+    from pyproj import Transformer
+
+    if geom is None or geom.is_empty:
+        return 0.0
+
+    # Get centroid to determine UTM zone
+    centroid = geom.centroid
+    lon = centroid.x
+
+    # Determine UTM zone for Nepal (44N or 45N)
+    utm_zone = 44 if lon < 84.0 else 45
+    utm_epsg = f"EPSG:326{utm_zone}"
+
+    # Transform to UTM
+    to_utm = Transformer.from_crs("EPSG:4326", utm_epsg, always_xy=True)
+    geom_utm = transform(to_utm.transform, geom)
+
+    # Area in square meters, convert to hectares
+    return geom_utm.area / 10000.0
+
+
+def calculate_zone_net_areas(
+    block_wkt: str,
+    sub_areas: List[Dict],
+    excluded_areas: List[Polygon],
+    calculate_protected_separately: bool = True
+) -> Dict:
+    """
+    Calculate net productive and protected areas after private land deduction.
+
+    Args:
+        block_wkt: WKT string of block polygon
+        sub_areas: List of sub-area dictionaries
+        excluded_areas: List of excluded (private land) polygons
+        calculate_protected_separately: If True, calculate protected as separate zone.
+                                        If False, treat protected as excluded area.
+
+    Returns:
+        Dictionary with:
+        {
+            "productive_area_ha": float - Net productive forest area
+            "protected_area_ha": float - Net protected zone area
+            "private_land_area_ha": float - Total private land in block
+            "block_geometry": Polygon - Block geometry object
+            "productive_geometry": Polygon/MultiPolygon - Productive zone geometry
+            "protected_geometry": Polygon/MultiPolygon - Protected zone geometry (or None)
+        }
+    """
+    from shapely.ops import unary_union
+    from shapely.geometry import GeometryCollection, shape
+
+    # Parse block geometry
+    block_geom = wkt.loads(block_wkt)
+
+    # Calculate area properly using UTM projection
+    block_area_ha = calculate_geometry_area_hectares(block_geom)
+
+    # Extract protected zone geometries from sub-areas (only if calculating separately)
+    protected_geoms = []
+    if calculate_protected_separately:
+        for sa in sub_areas:
+            if sa.get('category') == 'protected' and not sa.get('isExcluded', False):
+                try:
+                    geom_data = sa['geometry']
+
+                    # Handle GeometryCollection
+                    if geom_data.get('type') == 'GeometryCollection':
+                        geom_collection = shape(geom_data)
+                        polygons = [g for g in geom_collection.geoms
+                                   if g.geom_type in ('Polygon', 'MultiPolygon') and not g.is_empty]
+                        if polygons:
+                            geom = unary_union(polygons) if len(polygons) > 1 else polygons[0]
+                            protected_geoms.append(geom)
+                    else:
+                        geom = shape(geom_data)
+                        if not geom.is_empty:
+                            protected_geoms.append(geom)
+                except Exception as e:
+                    logger.warning(f"Failed to parse protected zone in area calculation: {e}")
+
+    # Combine all protected zones within this block
+    if protected_geoms:
+        protected_union = unary_union(protected_geoms)
+        protected_in_block = block_geom.intersection(protected_union)
+    else:
+        protected_in_block = None
+
+    # Combine all excluded areas (private land)
+    if excluded_areas:
+        excluded_union = unary_union(excluded_areas)
+        excluded_in_block = block_geom.intersection(excluded_union)
+    else:
+        excluded_in_block = None
+
+    # Calculate areas using proper UTM projection
+    protected_area_ha = calculate_geometry_area_hectares(protected_in_block) if protected_in_block else 0.0
+    private_land_area_ha = calculate_geometry_area_hectares(excluded_in_block) if excluded_in_block else 0.0
+
+    # Calculate net productive area (block - protected - private land)
+    productive_geom = block_geom
+    if protected_in_block and not protected_in_block.is_empty:
+        productive_geom = productive_geom.difference(protected_in_block)
+    if excluded_in_block and not excluded_in_block.is_empty:
+        productive_geom = productive_geom.difference(excluded_in_block)
+
+    productive_area_ha = calculate_geometry_area_hectares(productive_geom) if productive_geom and not productive_geom.is_empty else 0.0
+
+    # Calculate net protected area (protected - private land)
+    protected_net_geom = None
+    if protected_in_block and not protected_in_block.is_empty:
+        protected_net_geom = protected_in_block
+        if excluded_in_block and not excluded_in_block.is_empty:
+            protected_net_geom = protected_net_geom.difference(excluded_in_block)
+
+    protected_net_area_ha = calculate_geometry_area_hectares(protected_net_geom) if protected_net_geom else 0.0
+
+    # Debug logging
+    logger.warning(
+        f"DEBUG Area Calculation (FIXED WITH UTM):\n"
+        f"  Block total: {block_area_ha:.4f} ha\n"
+        f"  Protected overlap: {protected_area_ha:.4f} ha\n"
+        f"  Private land: {private_land_area_ha:.4f} ha\n"
+        f"  Productive (net): {productive_area_ha:.4f} ha\n"
+        f"  Protected (net): {protected_net_area_ha:.4f} ha"
+    )
+
+    return {
+        "productive_area_ha": productive_area_ha,
+        "protected_area_ha": protected_net_area_ha,
+        "private_land_area_ha": private_land_area_ha,
+        "block_geometry": block_geom,
+        "productive_geometry": productive_geom if productive_geom and not productive_geom.is_empty else None,
+        "protected_geometry": protected_net_geom if protected_net_geom and not protected_net_geom.is_empty else None
+    }
+
+
+def create_sampling_design_guideline_2061(
+    db: Session,
+    calculation_id: UUID,
+    productive_intensity: float,  # 0.5 or 1.0
+    sample_protected_zone: bool,
+    plot_size_sqm: int,
+    plot_shape: str = "circular",
+    filter_tree_cover: bool = True,
+    filter_slope: bool = False,
+    max_slope_degrees: float = 45.0,
+    boundary_buffer_meters: float = 50.0,
+    notes: Optional[str] = None
+) -> SamplingGenerateResponse:
+    """
+    Create sampling design using Forest Inventory Guideline-2061.
+
+    This implements Nepal's Department of Forest standard sampling methodology
+    where sample counts are determined by lookup tables based on block size,
+    rather than calculated from intensity percentages.
+
+    Key differences from manual sampling:
+    1. Sample counts determined by guideline tables (not intensity %)
+    2. Different intensities for productive (0.5% or 1%) vs protected (0.1%) zones
+    3. Supports mixed sampling (productive + protected in same forest)
+    4. Systematic sampling only (as per guideline)
+    5. Falls back to manual calculation if block exceeds table range
+
+    Block Classification:
+    - Blocks are classified as productive or protected based on >50% overlap rule
+    - Protected blocks sampled at 0.1% (if sample_protected_zone=True)
+    - Productive blocks sampled at 0.5% or 1% (user choice)
+
+    Args:
+        db: Database session
+        calculation_id: Calculation ID
+        productive_intensity: 0.5 or 1.0 (for productive blocks)
+        sample_protected_zone: If True, sample protected areas at 0.1%
+        plot_size_sqm: Plot size (100-500 for production, 25-100 for protected)
+        plot_shape: 'circular' or 'square'
+        filter_tree_cover: Exclude non-forest areas (recommended)
+        filter_slope: Exclude steep slopes (optional, slow)
+        max_slope_degrees: Maximum slope threshold
+        boundary_buffer_meters: Minimum distance from boundary
+        notes: Design notes
+
+    Returns:
+        SamplingGenerateResponse with per-block summary
+
+    Raises:
+        ValueError: If parameters are invalid or calculation not found
+    """
+    import math  # Import at function start for NaN checks
+
+    logger.info(
+        f"Creating Guideline-2061 sampling design: "
+        f"productive={productive_intensity}%, protected={'Yes' if sample_protected_zone else 'No'}, "
+        f"plot_size={plot_size_sqm}sqm"
+    )
+
+    # Validate guideline parameters for productive zones only
+    # (Protected zones always use 100 sqm, so no need to validate user's choice)
+    validate_guideline_parameters(
+        intensity_percent=productive_intensity,
+        plot_size_sqm=plot_size_sqm,
+        is_protected_sampling=False  # Validating production params
+    )
+
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise ValueError(f"Calculation {calculation_id} not found")
+
+    # Calculate plot dimensions for PRODUCTIVE zones
+    productive_plot_size_sqm = plot_size_sqm
+    productive_plot_area_hectares = productive_plot_size_sqm / 10000.0
+
+    # For PROTECTED zones, always use 100 sqm (standard for protected areas)
+    protected_plot_size_sqm = 100
+    protected_plot_area_hectares = protected_plot_size_sqm / 10000.0
+
+    if plot_shape == "circular":
+        productive_plot_radius = math.sqrt(productive_plot_size_sqm / math.pi)
+        protected_plot_radius = math.sqrt(protected_plot_size_sqm / math.pi)
+    else:
+        productive_plot_radius = None
+        protected_plot_radius = None
+
+    logger.info(
+        f"Plot configuration:\n"
+        f"  Productive zones: {productive_plot_size_sqm} sqm\n"
+        f"  Protected zones: {protected_plot_size_sqm} sqm (standard for protected areas)"
+    )
+
+    # Extract blocks from calculation
+    blocks = extract_blocks_from_calculation(db, calculation_id)
+
+    # Get excluded areas (private land)
+    excluded_areas = get_excluded_areas_for_calculation(db, calculation_id)
+    if excluded_areas:
+        logger.info(f"Found {len(excluded_areas)} excluded areas (private land)")
+
+    # Get sub-areas for block classification
+    sub_areas = calculation.result_data.get('sub_areas', [])
+
+    # Protected zone geometries (if NOT sampling them, add to excluded areas)
+    if not sample_protected_zone:
+        protected_geometries = []
+        for sa in sub_areas:
+            if sa.get('category') == 'protected' and not sa.get('isExcluded', False):
+                from shapely.geometry import shape, GeometryCollection
+                try:
+                    geom_data = sa['geometry']
+
+                    # Handle GeometryCollection - extract only Polygon/MultiPolygon
+                    if geom_data.get('type') == 'GeometryCollection':
+                        geom_collection = shape(geom_data)
+
+                        # Extract only polygonal geometries
+                        polygons = [g for g in geom_collection.geoms
+                                   if g.geom_type in ('Polygon', 'MultiPolygon') and g.area > 0]
+
+                        if polygons:
+                            from shapely.ops import unary_union
+                            geom = unary_union(polygons) if len(polygons) > 1 else polygons[0]
+                            protected_geometries.append(geom)
+                    else:
+                        # Regular Polygon or MultiPolygon
+                        geom = shape(geom_data)
+
+                        # Skip zero-area geometries
+                        if geom.area > 0:
+                            protected_geometries.append(geom)
+
+                except Exception as e:
+                    logger.warning(f"Failed to parse protected zone geometry: {e}")
+
+        if protected_geometries:
+            # Add protected zones to excluded areas so they're treated as off-limits
+            excluded_areas.extend(protected_geometries)
+            logger.warning(
+                f"Protected zones will be excluded from sampling "
+                f"({len(protected_geometries)} zones added to excluded areas)"
+            )
+
+    # Generate sampling points PER BLOCK with SEPARATE ZONE SAMPLING
+    all_points = []
+    block_assignments = []
+    blocks_info = []
+    total_forest_area = 0.0
+
+    for block_number, block_wkt, block_name, block_area_ha in blocks:
+        total_forest_area += block_area_ha
+
+        logger.warning(
+            f"\n{'='*60}\n"
+            f"Processing: {block_name} ({block_area_ha:.2f} ha total)\n"
+            f"{'='*60}"
+        )
+
+        # ENHANCED DIAGNOSTICS
+        logger.warning(f"DEBUG: sample_protected_zone = {sample_protected_zone}")
+        logger.warning(f"DEBUG: Number of sub_areas = {len(sub_areas)}")
+        logger.warning(f"DEBUG: Number of excluded_areas = {len(excluded_areas)}")
+
+        # Calculate net areas for productive and protected zones (after private land deduction)
+        try:
+            zone_areas = calculate_zone_net_areas(
+                block_wkt,
+                sub_areas,
+                excluded_areas,
+                calculate_protected_separately=sample_protected_zone
+            )
+            logger.warning(f"DEBUG: zone_areas keys = {list(zone_areas.keys())}")
+        except Exception as e:
+            logger.error(f"ERROR calculating areas for {block_name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Fallback: use entire block as productive
+            zone_areas = {
+                "productive_area_ha": block_area_ha,
+                "protected_area_ha": 0.0,
+                "private_land_area_ha": 0.0,
+                "block_geometry": wkt.loads(block_wkt),
+                "productive_geometry": wkt.loads(block_wkt),
+                "protected_geometry": None
+            }
+
+        productive_area_ha = zone_areas["productive_area_ha"]
+        protected_area_ha = zone_areas["protected_area_ha"]
+        private_land_ha = zone_areas["private_land_area_ha"]
+        productive_geom = zone_areas.get("productive_geometry")
+        protected_geom = zone_areas.get("protected_geometry")
+
+        logger.warning(
+            f"Area Breakdown:\n"
+            f"  Total: {block_area_ha:.4f} ha\n"
+            f"  Productive (net): {productive_area_ha:.4f} ha\n"
+            f"  Protected (net): {protected_area_ha:.4f} ha\n"
+            f"  Private Land: {private_land_ha:.4f} ha\n"
+            f"  Productive geometry: {'EMPTY' if not productive_geom or productive_geom.is_empty else 'OK'}\n"
+            f"  Protected geometry: {'EMPTY' if not protected_geom or (hasattr(protected_geom, 'is_empty') and protected_geom.is_empty) else 'OK' if protected_geom else 'None'}"
+        )
+
+        # Determine which zones to sample
+        sample_productive = productive_area_ha > 0.01  # At least 0.01 ha (100 sqm)
+        sample_protected_this_block = sample_protected_zone and protected_area_ha > 0.01
+
+        logger.warning(f"DEBUG: sample_productive = {sample_productive} (area: {productive_area_ha:.4f} ha)")
+        logger.warning(f"DEBUG: sample_protected_this_block = {sample_protected_this_block} (area: {protected_area_ha:.4f} ha)")
+
+        if not sample_productive and not sample_protected_this_block:
+            logger.warning(f"⚠ No sampleable area in {block_name} - SKIPPING BLOCK!")
+            logger.warning(f"   Reason: productive_area_ha={productive_area_ha:.4f}, protected_area_ha={protected_area_ha:.4f}, sample_protected_zone={sample_protected_zone}")
+            continue
+
+        # PRODUCTIVE ZONE SAMPLING
+        productive_samples = []
+        productive_sample_count = 0
+        productive_spacing = None
+        productive_sampling_method = "systematic"  # Default, will be updated if random used
+
+        if sample_productive:
+            logger.info(f"\n--- Productive Zone ({productive_area_ha:.4f} ha at {productive_intensity}%) ---")
+
+            try:
+                productive_sample_count = get_sample_count_from_guideline(
+                    db=db,
+                    block_area_hectares=productive_area_ha,
+                    intensity_percent=productive_intensity,
+                    plot_size_sqm=productive_plot_size_sqm
+                )
+                logger.info(f"✓ Guideline table: {productive_sample_count} samples ({productive_plot_size_sqm} sqm plots)")
+            except ValueError:
+                # Fallback to manual calculation
+                sample_area_ha = productive_area_ha * (productive_intensity / 100.0)
+                productive_sample_count = max(2, int(sample_area_ha / productive_plot_area_hectares))
+                logger.info(f"✓ Manual calc: {productive_sample_count} samples ({productive_plot_size_sqm} sqm plots)")
+
+            logger.warning(f"DEBUG: Checking productive sample generation: count={productive_sample_count}, geometry={'OK' if zone_areas.get('productive_geometry') else 'NONE/EMPTY'}")
+
+            if productive_sample_count > 0 and zone_areas["productive_geometry"]:
+                # Generate samples in productive zone only
+                productive_wkt = zone_areas["productive_geometry"].wkt
+                productive_buffered = apply_boundary_buffer(productive_wkt, boundary_buffer_meters)
+                productive_sampling_method = "systematic"
+
+                logger.warning(f"DEBUG: productive_buffered WKT length = {len(productive_buffered)}")
+
+                # Try systematic grid with current buffer first
+                effective_area_sqm = productive_area_ha * 10000.0
+                systematic_success = False
+
+                for iteration in range(5):
+                    spacing = math.sqrt(effective_area_sqm / float(productive_sample_count))
+                    bounds = get_polygon_bounds(productive_buffered)
+                    candidates = generate_systematic_grid(
+                        bounds[0], bounds[1], bounds[2], bounds[3],
+                        int(spacing), productive_buffered, 0.0  # No additional buffer - already buffered
+                    )
+
+                    logger.warning(f"DEBUG: Iteration {iteration}: spacing={spacing:.1f}m, candidates={len(candidates)}, target={productive_sample_count}")
+
+                    if len(candidates) >= productive_sample_count:
+                        productive_samples = candidates[:productive_sample_count]
+                        productive_spacing = spacing
+                        systematic_success = True
+                        logger.info(f"  Generated {len(productive_samples)} productive samples (systematic)")
+                        break
+                    effective_area_sqm *= 0.9
+
+                # Fallback 1: Try smaller buffer (15m)
+                if not systematic_success and productive_sample_count > 0:
+                    logger.warning(f"  ⚠ Systematic failed with {boundary_buffer_meters}m buffer, trying 15m buffer...")
+                    productive_buffered_15m = apply_boundary_buffer(productive_wkt, 15.0)
+                    effective_area_sqm = productive_area_ha * 10000.0
+
+                    for iteration in range(5):
+                        spacing = math.sqrt(effective_area_sqm / float(productive_sample_count))
+                        bounds = get_polygon_bounds(productive_buffered_15m)
+                        candidates = generate_systematic_grid(
+                            bounds[0], bounds[1], bounds[2], bounds[3],
+                            int(spacing), productive_buffered_15m, 0.0
+                        )
+
+                        if len(candidates) >= productive_sample_count:
+                            productive_samples = candidates[:productive_sample_count]
+                            productive_spacing = spacing
+                            systematic_success = True
+                            logger.info(f"  Generated {len(productive_samples)} productive samples (systematic, 15m buffer)")
+                            break
+                        effective_area_sqm *= 0.9
+
+                # Fallback 2: Random sampling
+                if not systematic_success and productive_sample_count > 0:
+                    logger.warning(f"  ⚠ Systematic failed, falling back to random sampling...")
+                    min_distance = int(math.sqrt(effective_area_sqm / productive_sample_count))
+                    productive_samples = generate_random_points(
+                        productive_buffered,
+                        productive_sample_count,
+                        min_distance_meters=min_distance,
+                        boundary_buffer_meters=0.0  # Already buffered
+                    )
+                    if len(productive_samples) > 0:
+                        productive_sampling_method = "random"
+                        logger.info(f"  Generated {len(productive_samples)} productive samples (random)")
+                    else:
+                        logger.warning("  ⚠ Failed to generate productive samples (random also failed)")
+
+        # PROTECTED ZONE SAMPLING
+        protected_samples = []
+        protected_sample_count = 0
+        protected_spacing = None
+        protected_sampling_method = "systematic"  # Default, will be updated if random used
+
+        if sample_protected_this_block:
+            logger.info(f"\n--- Protected Zone ({protected_area_ha:.4f} ha at 0.1%) ---")
+
+            try:
+                protected_sample_count = get_sample_count_from_guideline(
+                    db=db,
+                    block_area_hectares=protected_area_ha,
+                    intensity_percent=0.1,
+                    plot_size_sqm=protected_plot_size_sqm
+                )
+                logger.info(f"✓ Guideline table: {protected_sample_count} samples ({protected_plot_size_sqm} sqm plots)")
+            except ValueError:
+                # Fallback to manual calculation
+                sample_area_ha = protected_area_ha * 0.001  # 0.1%
+                protected_sample_count = max(1, int(sample_area_ha / protected_plot_area_hectares))
+                logger.info(f"✓ Manual calc: {protected_sample_count} samples ({protected_plot_size_sqm} sqm plots)")
+
+            if protected_sample_count > 0 and zone_areas["protected_geometry"]:
+                # Generate samples in protected zone only
+                protected_wkt = zone_areas["protected_geometry"].wkt
+                protected_buffered = apply_boundary_buffer(protected_wkt, boundary_buffer_meters)
+                protected_sampling_method = "systematic"
+
+                # Try systematic grid with current buffer first
+                effective_area_sqm = protected_area_ha * 10000.0
+                systematic_success = False
+
+                for iteration in range(5):
+                    spacing = math.sqrt(effective_area_sqm / float(protected_sample_count))
+                    bounds = get_polygon_bounds(protected_buffered)
+                    candidates = generate_systematic_grid(
+                        bounds[0], bounds[1], bounds[2], bounds[3],
+                        int(spacing), protected_buffered, 0.0  # No additional buffer - already buffered
+                    )
+
+                    if len(candidates) >= protected_sample_count:
+                        protected_samples = candidates[:protected_sample_count]
+                        protected_spacing = spacing
+                        systematic_success = True
+                        logger.info(f"  Generated {len(protected_samples)} protected samples (systematic)")
+                        break
+                    effective_area_sqm *= 0.9
+
+                # Fallback 1: Try smaller buffer (15m)
+                if not systematic_success and protected_sample_count > 0:
+                    logger.warning(f"  ⚠ Systematic failed with {boundary_buffer_meters}m buffer, trying 15m buffer...")
+                    protected_buffered_15m = apply_boundary_buffer(protected_wkt, 15.0)
+                    effective_area_sqm = protected_area_ha * 10000.0
+
+                    for iteration in range(5):
+                        spacing = math.sqrt(effective_area_sqm / float(protected_sample_count))
+                        bounds = get_polygon_bounds(protected_buffered_15m)
+                        candidates = generate_systematic_grid(
+                            bounds[0], bounds[1], bounds[2], bounds[3],
+                            int(spacing), protected_buffered_15m, 0.0
+                        )
+
+                        if len(candidates) >= protected_sample_count:
+                            protected_samples = candidates[:protected_sample_count]
+                            protected_spacing = spacing
+                            systematic_success = True
+                            logger.info(f"  Generated {len(protected_samples)} protected samples (systematic, 15m buffer)")
+                            break
+                        effective_area_sqm *= 0.9
+
+                # Fallback 2: Random sampling
+                if not systematic_success and protected_sample_count > 0:
+                    logger.warning(f"  ⚠ Systematic failed for protected zone, falling back to random sampling...")
+                    min_distance = int(math.sqrt(effective_area_sqm / protected_sample_count))
+                    protected_samples = generate_random_points(
+                        protected_buffered,
+                        protected_sample_count,
+                        min_distance_meters=min_distance,
+                        boundary_buffer_meters=0.0  # Already buffered
+                    )
+                    if len(protected_samples) > 0:
+                        protected_sampling_method = "random"
+                        logger.info(f"  Generated {len(protected_samples)} protected samples (random)")
+                    else:
+                        logger.warning("  ⚠ Failed to generate protected samples (random also failed)")
+
+        # Combine samples from both zones
+        block_points = productive_samples + protected_samples
+        total_samples = len(block_points)
+
+        logger.info(
+            f"\n✓ Total for {block_name}: {total_samples} samples "
+            f"({len(productive_samples)} productive + {len(protected_samples)} protected)"
+        )
+
+        # NO POST-FILTERING NEEDED
+        # Samples already generated in correct zones with private land excluded
+
+        # Store points with block assignment and zone type
+        for i, point in enumerate(block_points):
+            all_points.append(point)
+            # Determine zone type and sampling method for this sample
+            if i < len(productive_samples):
+                zone_type = 'productive'
+                sampling_method = productive_sampling_method
+            else:
+                zone_type = 'protected'
+                sampling_method = protected_sampling_method
+
+            block_assignments.append({
+                'point_index': len(all_points) - 1,
+                'block_number': block_number,
+                'block_name': block_name,
+                'zone_type': zone_type,
+                'sampling_method': sampling_method
+            })
+
+        # Calculate net accessible area (productive + protected, excluding private land)
+        accessible_area_ha = productive_area_ha + protected_area_ha
+
+        # Calculate overall actual intensity (weighted by plot sizes)
+        total_sampled_area_ha = (
+            len(productive_samples) * productive_plot_area_hectares +
+            len(protected_samples) * protected_plot_area_hectares
+        )
+
+        # Safe intensity calculation with NaN protection
+        if accessible_area_ha > 0 and total_sampled_area_ha > 0:
+            intensity_value = (total_sampled_area_ha / accessible_area_ha) * 100
+            # Check for NaN/inf before converting to Decimal
+            if math.isnan(intensity_value) or math.isinf(intensity_value):
+                actual_intensity_pct = Decimal("0")
+            else:
+                actual_intensity_pct = Decimal(str(intensity_value))
+        else:
+            actual_intensity_pct = Decimal("0")
+
+        # Determine block protection status for reporting
+        # "Mixed" if both zones present, otherwise "Yes" or "No"
+        if protected_area_ha > 0 and productive_area_ha > 0:
+            is_protected_status = "Mixed"
+        elif protected_area_ha > 0:
+            is_protected_status = "Yes"
+        else:
+            is_protected_status = "No"
+
+        # Calculate average grid spacing (weighted by sample count)
+        if total_samples > 0:
+            if len(productive_samples) > 0 and len(protected_samples) > 0:
+                # Mixed - report productive spacing (dominant)
+                avg_spacing = productive_spacing if productive_spacing else protected_spacing
+            elif len(productive_samples) > 0:
+                avg_spacing = productive_spacing
+            else:
+                avg_spacing = protected_spacing
+        else:
+            avg_spacing = None
+
+        # Safe accessible percentage calculation
+        if block_area_ha > 0 and accessible_area_ha >= 0:
+            accessible_pct_value = (accessible_area_ha / block_area_ha) * 100
+            if math.isnan(accessible_pct_value) or math.isinf(accessible_pct_value):
+                accessible_forest_percentage = Decimal("0")
+            else:
+                accessible_forest_percentage = Decimal(str(round(accessible_pct_value, 2)))
+        else:
+            accessible_forest_percentage = Decimal("0")
+
+        # Determine overall sampling method for this block
+        # If either zone used random, report random for the block
+        if protected_area_ha > 0:
+            # Both zones exist
+            if productive_sampling_method == "random" or protected_sampling_method == "random":
+                block_sampling_method = "random"
+            else:
+                block_sampling_method = "systematic"
+        else:
+            # Only productive zone
+            block_sampling_method = productive_sampling_method
+
+        # Store block info with detailed zone breakdown
+        block_info_dict = {
+            "block_number": block_number,
+            "block_name": block_name,
+            "block_area_hectares": Decimal(str(round(block_area_ha, 4))),
+            "samples_generated": total_samples,
+            "minimum_enforced": False,
+            "actual_intensity_percent": actual_intensity_pct,
+            "grid_spacing_meters": Decimal(str(round(avg_spacing, 1))) if avg_spacing else None,
+            "accessible_forest_area_ha": Decimal(str(round(accessible_area_ha, 4))),
+            "accessible_forest_percentage": accessible_forest_percentage,
+            "samples_from_guideline": productive_sample_count + protected_sample_count,
+            "is_protected": is_protected_status,
+            "sampling_method": block_sampling_method,
+            "guideline_fallback_used": False,
+            # Protected zone details
+            "protected_area_ha": Decimal(str(round(protected_area_ha, 4))) if protected_area_ha > 0 else None,
+            "protected_samples_count": len(protected_samples) if protected_area_ha > 0 else None,
+            "protected_sampling_method": protected_sampling_method if protected_area_ha > 0 else None,
+            "protected_grid_spacing_meters": Decimal(str(round(protected_spacing, 1))) if protected_spacing and protected_area_ha > 0 else None,
+            "protected_intensity_percent": None,  # Calculate below if protected samples exist
+            # Productive zone details
+            "productive_area_ha": Decimal(str(round(productive_area_ha, 4))) if productive_area_ha > 0 else None,
+            "productive_samples_count": len(productive_samples) if productive_area_ha > 0 else None,
+            "productive_sampling_method": productive_sampling_method if productive_area_ha > 0 else None,
+        }
+
+        # Calculate protected intensity if samples were generated
+        if protected_area_ha > 0 and len(protected_samples) > 0:
+            protected_sampled_area_ha = len(protected_samples) * protected_plot_area_hectares
+            if protected_area_ha > 0:
+                protected_intensity = (protected_sampled_area_ha / protected_area_ha) * 100
+                block_info_dict["protected_intensity_percent"] = Decimal(str(round(protected_intensity, 4)))
+
+        blocks_info.append(BlockSamplingInfo(**block_info_dict))
+
+        logger.info(f"{'='*60}\n")
+
+    points = all_points
+    logger.info(
+        f"\n{'='*60}\n"
+        f"SUMMARY: Generated {len(points)} total samples across {len(blocks)} blocks\n"
+        f"{'='*60}\n"
+    )
+
+    if not points:
+        raise ValueError(
+            "No sampling points generated. Check if all blocks are protected and "
+            "sample_protected_zone=False, or if filters are too restrictive."
+        )
+
+    # Create MultiPoint geometry WKT
+    points_wkt = "MULTIPOINT(" + ", ".join([f"{lon} {lat}" for lon, lat in points]) + ")"
+
+    # Calculate plot dimensions for database record
+    # Use the productive plot size as the "default" for the design record
+    if plot_shape == "circular":
+        plot_radius_meters = math.sqrt(plot_size_sqm / math.pi)
+        plot_side_meters = None
+    else:  # square
+        plot_radius_meters = None
+        plot_side_meters = math.sqrt(plot_size_sqm)
+
+    # Create sampling design record
+    sampling_design = SamplingDesign(
+        calculation_id=calculation_id,
+        sampling_type="systematic",  # Guideline-2061 uses systematic only
+        intensity_per_hectare=Decimal(str(len(points) / float(total_forest_area))),
+        grid_spacing_meters=None,
+        min_distance_meters=None,
+        plot_shape=plot_shape,
+        plot_radius_meters=Decimal(str(plot_radius_meters)) if plot_radius_meters else None,
+        plot_length_meters=Decimal(str(plot_side_meters)) if plot_side_meters else None,
+        plot_width_meters=Decimal(str(plot_side_meters)) if plot_side_meters else None,
+        total_points=len(points),
+        notes=notes
+    )
+
+    db.add(sampling_design)
+    db.flush()  # Get ID
+
+    # Save guideline-specific parameters
+    import json
+    guideline_parameters = {
+        "sampling_method": "guideline_2061",
+        "productive_intensity": productive_intensity,
+        "sample_protected_zone": sample_protected_zone,
+        "plot_size_sqm": plot_size_sqm,
+        "boundary_buffer_meters": boundary_buffer_meters,
+        "filter_tree_cover": filter_tree_cover,
+        "filter_slope": filter_slope,
+        "max_slope_degrees": max_slope_degrees
+    }
+
+    update_params_query = text("""
+        UPDATE public.sampling_designs
+        SET default_parameters = CAST(:params AS jsonb)
+        WHERE id = :design_id
+    """)
+    db.execute(update_params_query, {
+        "params": json.dumps(guideline_parameters),
+        "design_id": str(sampling_design.id)
+    })
+
+    # Update geometry using PostGIS
+    update_geom_query = text("""
+        UPDATE public.sampling_designs
+        SET points_geometry = ST_GeomFromText(:points_wkt, 4326)
+        WHERE id = :design_id
+    """)
+    db.execute(update_geom_query, {
+        "points_wkt": points_wkt,
+        "design_id": str(sampling_design.id)
+    })
+
+    # Save block assignments
+    update_assignments_query = text("""
+        UPDATE public.sampling_designs
+        SET points_block_assignment = CAST(:assignments AS jsonb)
+        WHERE id = :design_id
+    """)
+    db.execute(update_assignments_query, {
+        "assignments": json.dumps(block_assignments),
+        "design_id": str(sampling_design.id)
+    })
+
+    db.commit()
+
+    # Calculate statistics
+    # Count productive vs protected samples across all blocks
+    total_productive_samples = sum(1 for assignment in block_assignments
+                                   if assignment.get('zone_type') == 'productive')
+    total_protected_samples = sum(1 for assignment in block_assignments
+                                  if assignment.get('zone_type') == 'protected')
+
+    # If zone_type wasn't set, assume all productive (backward compatibility)
+    if total_productive_samples == 0 and total_protected_samples == 0:
+        total_productive_samples = len(points)
+
+    # Calculate total sampled area (weighted by plot sizes)
+    total_sampled_area_sqm = (
+        total_productive_samples * productive_plot_size_sqm +
+        total_protected_samples * protected_plot_size_sqm
+    )
+    total_sampled_area_hectares = Decimal(str(total_sampled_area_sqm / 10000.0))
+
+    # Safe percentage calculations with NaN protection
+    if total_forest_area > 0:
+        actual_intensity_val = len(points) / float(total_forest_area)
+        sampling_pct_val = (total_sampled_area_sqm / (float(total_forest_area) * 10000.0)) * 100
+
+        if math.isnan(actual_intensity_val) or math.isinf(actual_intensity_val):
+            actual_intensity = Decimal("0")
+        else:
+            actual_intensity = Decimal(str(actual_intensity_val))
+
+        if math.isnan(sampling_pct_val) or math.isinf(sampling_pct_val):
+            sampling_percentage = Decimal("0")
+        else:
+            sampling_percentage = Decimal(str(sampling_pct_val))
+    else:
+        actual_intensity = Decimal("0")
+        sampling_percentage = Decimal("0")
+
+    return SamplingGenerateResponse(
+        sampling_design_id=sampling_design.id,
+        calculation_id=calculation_id,
+        sampling_type="systematic",
+        total_points=len(points),
+        total_blocks=len(blocks),
+        forest_area_hectares=Decimal(str(round(total_forest_area, 4))),
+        requested_intensity_percent=Decimal(str(productive_intensity)),
+        actual_intensity_per_hectare=actual_intensity,
+        plot_area_sqm=Decimal(str(round(productive_plot_size_sqm, 2))),  # Report productive plot size
+        total_sampled_area_hectares=total_sampled_area_hectares,
+        sampling_percentage=sampling_percentage,
+        blocks_info=blocks_info
+    )
+
 
 def assign_blocks_to_sampling(db: Session, design_id: UUID, calculation_id: UUID):
     """

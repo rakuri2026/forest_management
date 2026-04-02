@@ -343,13 +343,16 @@ async def download_tree_model(
             detail="GPKG file not found"
         )
 
-    # Return file
+    # Return file with proper Unicode filename encoding (RFC 5987)
+    from urllib.parse import quote
+    encoded_filename = quote(model.gpkg_filename)
+
     return FileResponse(
         path=model.file_path,
         filename=model.gpkg_filename,
         media_type="application/geopackage+sqlite3",
         headers={
-            "Content-Disposition": f"attachment; filename={model.gpkg_filename}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
 
@@ -406,13 +409,16 @@ async def download_tree_model_excel(
             detail="Excel file not found"
         )
 
-    # Return file
+    # Return file with proper Unicode filename encoding (RFC 5987)
+    from urllib.parse import quote
+    encoded_filename = quote(model.excel_filename)
+
     return FileResponse(
         path=model.excel_path,
         filename=model.excel_filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f"attachment; filename={model.excel_filename}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
 

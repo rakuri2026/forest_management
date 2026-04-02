@@ -206,24 +206,19 @@ class SamplingDesignCreate(SamplingDesignBase):
     @field_validator('plot_size_sqm')
     @classmethod
     def validate_plot_size_sqm(cls, v, info):
-        """Validate plot size for Guideline-2061 method"""
+        """Validate plot size for Guideline-2061 method
+
+        When sampling protected zones, the user-specified plot size is for PRODUCTIVE zones.
+        Protected zones will automatically use 100 sqm plots (standard for protected areas).
+        """
         if info.data.get('sampling_method') == SamplingMethod.GUIDELINE_2061 and v is not None:
             valid_production_sizes = [100, 200, 300, 400, 500]
-            valid_protected_sizes = [25, 100]
 
-            # Check if sampling protected zone
-            if info.data.get('sample_protected_zone'):
-                # Protected sampling needs 25 or 100
-                if v not in valid_protected_sizes:
-                    raise ValueError(
-                        f"Protected zone sampling requires 25 or 100 sqm plots. Got: {v}"
-                    )
-            else:
-                # Production sampling needs 100-500
-                if v not in valid_production_sizes:
-                    raise ValueError(
-                        f"Production forest requires one of {valid_production_sizes} sqm plots. Got: {v}"
-                    )
+            # Plot size is for productive forests (or both if 100 sqm)
+            if v not in valid_production_sizes:
+                raise ValueError(
+                    f"Plot size must be one of {valid_production_sizes} sqm. Got: {v}"
+                )
         return v
 
     @field_validator('plot_radius_meters')
@@ -318,15 +313,19 @@ class BlockSamplingInfo(BaseModel):
         ...,
         description="Actual sampling intensity achieved for this block"
     )
+    grid_spacing_meters: Optional[Decimal] = Field(
+        None,
+        description="Grid spacing used for systematic sampling (meters)"
+    )
 
     # Guideline-2061 specific fields
     samples_from_guideline: Optional[int] = Field(
         None,
         description="Sample count from Guideline-2061 table (if using guideline method)"
     )
-    is_protected: Optional[bool] = Field(
+    is_protected: Optional[str | bool] = Field(
         None,
-        description="Whether block was classified as protected (>50% overlap)"
+        description="Protection status: 'Yes'/'No'/'Mixed' (string) or True/False (bool, legacy)"
     )
     guideline_fallback_used: Optional[bool] = Field(
         None,
@@ -349,6 +348,42 @@ class BlockSamplingInfo(BaseModel):
     accessible_forest_percentage: Optional[Decimal] = Field(
         None,
         description="Percentage of block that is accessible forest"
+    )
+    sampling_method: Optional[str] = Field(
+        None,
+        description="Sampling method used: 'systematic' or 'random' (random used as fallback when systematic fails)"
+    )
+    protected_area_ha: Optional[Decimal] = Field(
+        None,
+        description="Protected area in hectares within this block"
+    )
+    protected_samples_count: Optional[int] = Field(
+        None,
+        description="Number of samples generated in protected area"
+    )
+    protected_sampling_method: Optional[str] = Field(
+        None,
+        description="Sampling method used for protected area: 'systematic' or 'random'"
+    )
+    protected_grid_spacing_meters: Optional[Decimal] = Field(
+        None,
+        description="Grid spacing used for protected area systematic sampling (meters)"
+    )
+    protected_intensity_percent: Optional[Decimal] = Field(
+        None,
+        description="Actual sampling intensity achieved for protected area"
+    )
+    productive_area_ha: Optional[Decimal] = Field(
+        None,
+        description="Productive (non-protected) forest area in hectares"
+    )
+    productive_samples_count: Optional[int] = Field(
+        None,
+        description="Number of samples generated in productive area"
+    )
+    productive_sampling_method: Optional[str] = Field(
+        None,
+        description="Sampling method used for productive area: 'systematic' or 'random'"
     )
 
     model_config = ConfigDict(from_attributes=True)

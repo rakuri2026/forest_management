@@ -440,7 +440,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                 {/* Plot Size */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Plot Size
+                    Plot Size (Productive Forest)
                   </label>
                   <select
                     value={plotSizeSqm}
@@ -454,9 +454,40 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                     <option value="100">100 m² (5.64m radius)</option>
                   </select>
                   <p className="mt-1 text-xs text-gray-500">
-                    Circular plots with radius calculated from area. Sample counts vary by plot size.
+                    Plot size for productive forest sampling. {sampleProtectedZone && protectedZoneInfo?.has_protected ? (
+                      <span className="text-green-700 font-medium">Protected zones will use 100 m² plots (standard for protected areas).</span>
+                    ) : (
+                      'Sample counts vary by plot size.'
+                    )}
                   </p>
                 </div>
+
+                {/* Protected Zone Sampling Option */}
+                {protectedZoneInfo && protectedZoneInfo.has_protected && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sampleProtectedZone}
+                        onChange={(e) => setSampleProtectedZone(e.target.checked)}
+                        className="mt-0.5 mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-gray-900">
+                          Sample Protected Zones at 0.1% intensity (100 m² plots)
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Found {protectedZoneInfo.protected_zone_count} protected zone(s) covering {protectedZoneInfo.protected_area_hectares} ha.
+                          {sampleProtectedZone ? (
+                            <span className="text-green-700 font-medium"> Protected zones will be sampled separately at 0.1% intensity with 100 m² plots (as per guideline).</span>
+                          ) : (
+                            <span className="text-orange-700 font-medium"> Protected zones will be excluded from sampling.</span>
+                          )}
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                )}
 
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <p className="text-xs text-gray-700">
@@ -1070,6 +1101,159 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
             </div>
           </div>
 
+          {/* Protected Area Preview */}
+          {successResult.blocks_info && successResult.blocks_info.some((b: any) => b.protected_area_ha > 0) && (
+            <div className="mt-6 bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <h4 className="text-md font-semibold text-purple-800 mb-3 flex items-center gap-2">
+                <span className="text-lg">🛡️</span> Protected Area Sampling Preview
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div className="bg-white rounded p-3 shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase">Total Protected Area</div>
+                  <div className="text-lg font-semibold text-purple-700">
+                    {successResult.blocks_info
+                      .reduce((sum: number, b: any) => sum + (parseFloat(b.protected_area_ha) || 0), 0)
+                      .toFixed(4)} ha
+                  </div>
+                </div>
+                <div className="bg-white rounded p-3 shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase">Blocks with Protected Area</div>
+                  <div className="text-lg font-semibold text-purple-700">
+                    {successResult.blocks_info.filter((b: any) => b.protected_area_ha > 0).length}
+                  </div>
+                </div>
+                <div className="bg-white rounded p-3 shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase">Protected Samples</div>
+                  <div className="text-lg font-semibold text-purple-700">
+                    {successResult.blocks_info
+                      .reduce((sum: number, b: any) => sum + (b.protected_samples_count || 0), 0)}
+                  </div>
+                </div>
+                <div className="bg-white rounded p-3 shadow-sm">
+                  <div className="text-xs text-gray-500 uppercase">Protected Intensity</div>
+                  <div className="text-lg font-semibold text-purple-700">
+                    {(() => {
+                      const totalProtectedArea = successResult.blocks_info
+                        .reduce((sum: number, b: any) => sum + (parseFloat(b.protected_area_ha) || 0), 0);
+                      const totalProtectedSamples = successResult.blocks_info
+                        .reduce((sum: number, b: any) => sum + (b.protected_samples_count || 0), 0);
+                      if (totalProtectedArea > 0 && totalProtectedSamples > 0) {
+                        const plotAreaHa = 0.01; // 100 sqm = 0.01 ha
+                        const intensity = (totalProtectedSamples * plotAreaHa / totalProtectedArea) * 100;
+                        return intensity.toFixed(4) + '%';
+                      }
+                      return '0.0000%';
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Protected Area Details by Block */}
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs border border-purple-200 rounded bg-white">
+                  <thead className="bg-purple-100">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-purple-700">Block Name</th>
+                      <th className="px-3 py-2 text-right font-medium text-purple-700">Protected Area (ha)</th>
+                      <th className="px-3 py-2 text-right font-medium text-purple-700"># Samples</th>
+                      <th className="px-3 py-2 text-center font-medium text-purple-700">Method</th>
+                      <th className="px-3 py-2 text-right font-medium text-purple-700">Grid Spacing (m)</th>
+                      <th className="px-3 py-2 text-right font-medium text-purple-700">Intensity (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-purple-100">
+                    {successResult.blocks_info
+                      .filter((b: any) => b.protected_area_ha > 0)
+                      .map((block: any, index: number) => (
+                        <tr key={index}>
+                          <td className="px-3 py-2 font-medium text-gray-900">
+                            {block.block_name}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-700">
+                            {block.protected_area_ha ? parseFloat(block.protected_area_ha).toFixed(4) : '-'}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-gray-900">
+                            {block.protected_samples_count || 0}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {block.protected_sampling_method ? (
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                block.protected_sampling_method === 'random' 
+                                  ? 'bg-yellow-100 text-yellow-800' 
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {block.protected_sampling_method === 'random' ? 'Random' : 'Systematic'}
+                              </span>
+                            ) : '-'}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-700">
+                            {block.protected_grid_spacing_meters ? parseFloat(block.protected_grid_spacing_meters).toFixed(1) : '-'}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-700">
+                            {block.protected_intensity_percent ? parseFloat(block.protected_intensity_percent).toFixed(4) : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Productive vs Protected Summary */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-green-50 rounded p-3 border border-green-200">
+                  <h5 className="text-sm font-semibold text-green-800 mb-2">🌲 Productive Zone Summary</h5>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>Total Area:</div>
+                    <div className="text-right font-medium">
+                      {successResult.blocks_info
+                        .reduce((sum: number, b: any) => sum + (parseFloat(b.productive_area_ha) || 0), 0)
+                        .toFixed(4)} ha
+                    </div>
+                    <div>Total Samples:</div>
+                    <div className="text-right font-medium">
+                      {successResult.blocks_info
+                        .reduce((sum: number, b: any) => sum + (b.productive_samples_count || 0), 0)}
+                    </div>
+                    <div>Method:</div>
+                    <div className="text-right">
+                      {successResult.blocks_info.some((b: any) => b.productive_sampling_method === 'random') ? (
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-800">Random (fallback)</span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-800">Systematic</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-purple-50 rounded p-3 border border-purple-200">
+                  <h5 className="text-sm font-semibold text-purple-800 mb-2">🛡️ Protected Zone Summary</h5>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>Total Area:</div>
+                    <div className="text-right font-medium">
+                      {successResult.blocks_info
+                        .reduce((sum: number, b: any) => sum + (parseFloat(b.protected_area_ha) || 0), 0)
+                        .toFixed(4)} ha
+                    </div>
+                    <div>Total Samples:</div>
+                    <div className="text-right font-medium">
+                      {successResult.blocks_info
+                        .reduce((sum: number, b: any) => sum + (b.protected_samples_count || 0), 0)}
+                    </div>
+                    <div>Method:</div>
+                    <div className="text-right">
+                      {successResult.blocks_info.some((b: any) => b.protected_sampling_method === 'random') ? (
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-800">Random (fallback)</span>
+                      ) : successResult.blocks_info.some((b: any) => b.protected_sampling_method === 'systematic') ? (
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-800">Systematic</span>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Per-Block Summary Table */}
           {successResult.blocks_info && successResult.blocks_info.length > 0 && (
             <div>
@@ -1085,6 +1269,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"># Samples</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Grid Spacing (m)</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actual Intensity (%)</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Method</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -1103,7 +1288,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                           {block.accessible_forest_area_ha ? parseFloat(block.accessible_forest_area_ha).toFixed(4) : '-'}
                         </td>
                         <td className="px-4 py-2 text-sm text-gray-700 text-right">
-                          {block.is_protected ? 'Yes' : 'No'}
+                          {typeof block.is_protected === 'string' ? block.is_protected : (block.is_protected ? 'Yes' : 'No')}
                         </td>
                         <td className="px-4 py-2 text-sm font-semibold text-gray-900 text-right">
                           {block.samples_generated}
@@ -1113,6 +1298,15 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                         </td>
                         <td className="px-4 py-2 text-sm text-gray-700 text-right">
                           {block.actual_intensity_percent ? parseFloat(block.actual_intensity_percent).toFixed(4) : '-'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-center">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            block.sampling_method === 'random' 
+                              ? 'bg-yellow-100 text-yellow-800' 
+                              : 'bg-green-100 text-green-800'
+                          }`} title={block.sampling_method === 'random' ? 'Random fallback used (systematic failed)' : 'Systematic grid'}>
+                            {block.sampling_method === 'random' ? 'Random' : 'Systematic'}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -1130,10 +1324,11 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                       <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">
                         {successResult.blocks_info.reduce((sum: number, b: any) => sum + (b.samples_generated || 0), 0)}
                       </td>
-                      <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">-</td>
+                      <td className="px-4 py-2 text-right">-</td>
                       <td className="px-4 py-2 text-sm font-bold text-gray-900 text-right">
                         {parseFloat(successResult.sampling_percentage || 0).toFixed(4)}
                       </td>
+                      <td className="px-4 py-2 text-right">-</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1203,27 +1398,84 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                       )}
                     </div>
 
-                    {/* Per-Block Summary */}
+                    {/* Per-Block Summary Table */}
                     {design.blocks_info && design.blocks_info.length > 0 && (
                       <div className="mt-4 border-t pt-4">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Per-Block Distribution:</h4>
-                        <div className="space-y-2">
-                          {design.blocks_info.map((block: any, idx: number) => (
-                            <div key={idx} className="flex justify-between items-center text-sm bg-gray-50 rounded px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{block.block_name}</span>
-                                <span className="text-gray-500">({parseFloat(block.block_area_hectares).toFixed(2)} ha)</span>
-                                {block.minimum_enforced && (
-                                  <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
-                                    Min enforced
-                                  </span>
-                                )}
-                              </div>
-                              <div className="font-semibold">
-                                {block.samples_generated} samples ({parseFloat(block.actual_intensity_percent).toFixed(2)}%)
-                              </div>
-                            </div>
-                          ))}
+                        <h4 className="text-sm font-semibold text-gray-700 mb-3">Per-Block Summary:</h4>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-xs border border-gray-200 rounded">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left font-medium text-gray-600">Block Name</th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-600">Area (ha)</th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-600">Accessible (ha)</th>
+                                <th className="px-2 py-2 text-center font-medium text-gray-600">Protected</th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-600"># Samples</th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-600">Spacing (m)</th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-600">Intensity (%)</th>
+                                <th className="px-2 py-2 text-center font-medium text-gray-600">Method</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-100">
+                              {design.blocks_info.map((block: any, idx: number) => (
+                                <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                  <td className="px-2 py-2 font-medium text-gray-900">
+                                    {block.block_name}
+                                    {block.minimum_enforced && (
+                                      <span className="ml-1 text-yellow-600" title="Minimum samples enforced">⚠️</span>
+                                    )}
+                                  </td>
+                                  <td className="px-2 py-2 text-right text-gray-700">
+                                    {block.block_area_hectares ? parseFloat(block.block_area_hectares).toFixed(4) : '-'}
+                                  </td>
+                                  <td className="px-2 py-2 text-right text-gray-700">
+                                    {block.accessible_forest_area_ha ? parseFloat(block.accessible_forest_area_ha).toFixed(4) : '-'}
+                                  </td>
+                                  <td className="px-2 py-2 text-center text-gray-700">
+                                    {typeof block.is_protected === 'string' ? block.is_protected : (block.is_protected ? 'Yes' : (block.is_protected === false ? 'No' : '-'))}
+                                  </td>
+                                  <td className="px-2 py-2 text-right font-semibold text-gray-900">
+                                    {block.samples_generated}
+                                  </td>
+                                  <td className="px-2 py-2 text-right text-gray-700">
+                                    {block.grid_spacing_meters ? parseFloat(block.grid_spacing_meters).toFixed(1) : '-'}
+                                  </td>
+                                  <td className="px-2 py-2 text-right text-gray-700">
+                                    {block.actual_intensity_percent ? parseFloat(block.actual_intensity_percent).toFixed(4) : '-'}
+                                  </td>
+                                  <td className="px-2 py-2 text-center">
+                                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                      block.sampling_method === 'random' 
+                                        ? 'bg-yellow-100 text-yellow-800' 
+                                        : 'bg-green-100 text-green-800'
+                                    }`}>
+                                      {block.sampling_method === 'random' ? 'Random' : 'Systematic'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-100">
+                              <tr className="font-semibold">
+                                <td className="px-2 py-2 text-gray-900">Total</td>
+                                <td className="px-2 py-2 text-right text-gray-900">
+                                  {design.blocks_info.reduce((sum: number, b: any) => sum + (parseFloat(b.block_area_hectares) || 0), 0).toFixed(4)}
+                                </td>
+                                <td className="px-2 py-2 text-right text-gray-900">
+                                  {design.blocks_info.reduce((sum: number, b: any) => sum + (parseFloat(b.accessible_forest_area_ha) || 0), 0).toFixed(4)}
+                                </td>
+                                <td className="px-2 py-2 text-center text-gray-900">-</td>
+                                <td className="px-2 py-2 text-right text-gray-900">
+                                  {design.blocks_info.reduce((sum: number, b: any) => sum + (b.samples_generated || 0), 0)}
+                                </td>
+                                <td className="px-2 py-2 text-right text-gray-900">-</td>
+                                <td className="px-2 py-2 text-right text-gray-900">
+                                  {design.sampling_percentage ? parseFloat(design.sampling_percentage).toFixed(4) : '-'}
+                                </td>
+                                <td className="px-2 py-2 text-center text-gray-900">-</td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         </div>
                       </div>
                     )}
@@ -1346,6 +1598,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                             <tr>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plot #</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Zone</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Longitude</th>
                               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latitude</th>
                               {includeElevation && samplingPoints.some(p => p.elevation_m !== undefined) && (
@@ -1371,6 +1624,15 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                                 <td className="px-4 py-2 text-sm">
                                   <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
                                     {point.block_name || `Block ${point.block_number}`}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-sm">
+                                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                    point.zone_type === 'protected' 
+                                      ? 'bg-red-100 text-red-800' 
+                                      : 'bg-blue-100 text-blue-800'
+                                  }`}>
+                                    {point.zone_type === 'protected' ? 'Protected' : 'Productive'}
                                   </span>
                                 </td>
                                 <td className="px-4 py-2 text-sm font-mono">{parseFloat(point.longitude).toFixed(7)}</td>
