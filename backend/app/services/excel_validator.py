@@ -317,24 +317,90 @@ def add_validation_to_excel(
         dv_class.add(f"{col_map['tree_class']}2:{col_map['tree_class']}{max_row}")
         ws_data.add_data_validation(dv_class)
 
-    # ===== SPECIES VALIDATION - Conditional Formatting =====
-    # Add conditional formatting for species columns (green for valid, red for invalid)
-    
-    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    green_font = Font(color="006100")
-    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    red_font = Font(color="9C0006")
+    # ===== SPECIES VALIDATION - Dropdown with Auto-conversion =====
+    # Create combined species list (scientific + local names) in SPECIES_DATABASE for dropdown
 
-    # Species columns to check (with conditional formatting)
+    # Add a new column header for combined display
+    species_db_last_col = get_column_letter(ws_species.max_column + 1)
+    ws_species[f'{species_db_last_col}1'] = 'display_name_combined'
+    ws_species[f'{species_db_last_col}1'].fill = header_fill
+    ws_species[f'{species_db_last_col}1'].font = header_font
+
+    # Populate combined display names "Scientific Name (Local Name)"
+    for row_idx in range(2, len(species_list) + 2):
+        scientific = ws_species[f'B{row_idx}'].value or ''
+        local = ws_species[f'C{row_idx}'].value or ''
+        if scientific and local:
+            ws_species[f'{species_db_last_col}{row_idx}'] = f"{scientific} ({local})"
+        elif scientific:
+            ws_species[f'{species_db_last_col}{row_idx}'] = scientific
+        else:
+            ws_species[f'{species_db_last_col}{row_idx}'] = local
+
+    # Create SPECIES_LOOKUP sheet for dropdowns (hidden)
+    ws_lookup = wb.create_sheet("SPECIES_LOOKUP")
+    ws_lookup.sheet_state = 'hidden'
+
+    # Build combined list: scientific names + local names
+    all_species_names = []
+    for sp in species_list:
+        scientific = sp[1] or ''
+        local = sp[2] or ''
+        if scientific:
+            all_species_names.append(scientific)
+        if local and local != scientific:  # Add local name only if different
+            all_species_names.append(local)
+
+    # Remove duplicates and sort
+    all_species_names = sorted(list(set(all_species_names)))
+
+    # Write to SPECIES_LOOKUP sheet
+    ws_lookup['A1'] = 'species_list'
+    ws_lookup['A1'].font = header_font
+    ws_lookup['A1'].fill = header_fill
+    for idx, name in enumerate(all_species_names, start=2):
+        ws_lookup[f'A{idx}'] = name
+
+    lookup_range = f"SPECIES_LOOKUP!$A$2:$A${len(all_species_names) + 1}"
+
+    # Get number of species rows for validation range
+    species_count = len(species_list)
+
+    print(f"[Excel Validator] Created species lookup list with {len(all_species_names)} entries")
+
+    # ===== SPECIES DATA VALIDATION - Dropdown =====
+    # Add dropdown validation to species columns
     species_columns = [
         'regen_species_scientific',
-        'sapling_species_scientific', 
+        'sapling_species_scientific',
         'pole_species_scientific',
         'tree_species_scientific'
     ]
 
-    # Get number of species rows for range
-    species_count = len(species_list)
+    for species_col_name in species_columns:
+        if species_col_name in col_map:
+            col_letter = col_map[species_col_name]
+
+            # Add dropdown validation
+            dv_species = DataValidation(
+                type='list',
+                formula1=lookup_range,
+                allow_blank=True,
+                showDropDown=True,
+                showErrorMessage=False  # Allow custom entries
+            )
+            dv_species.add(f"{col_letter}2:{col_letter}{max_row}")
+            ws_data.add_data_validation(dv_species)
+
+            print(f"[Excel Validator] Added dropdown validation to {col_letter} ({species_col_name})")
+
+    # ===== SPECIES CONDITIONAL FORMATTING =====
+    # Add conditional formatting for species columns (green for valid, red for invalid)
+
+    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    green_font = Font(color="006100")
+    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    red_font = Font(color="9C0006")
 
     print(f"[Excel Validator] Adding species conditional formatting for {len(species_columns)} columns")
 
@@ -342,32 +408,91 @@ def add_validation_to_excel(
         if species_col_name in col_map:
             col_letter = col_map[species_col_name]
             col_num = column_index_from_string(col_letter)
-            
+
             # Use proper range string format for conditional formatting
             range_str = f"{col_letter}2:{col_letter}{max_row}"
-            
+
             try:
                 # Green for valid species (found in database)
                 # Check if species is in scientific_name (col B) or local_name (col C) of SPECIES_DATABASE
                 green_formula = f'OR(ISNUMBER(MATCH({col_letter}2,SPECIES_DATABASE!$B$2:$B${species_count+1},0)),ISNUMBER(MATCH({col_letter}2,SPECIES_DATABASE!$C$2:$C${species_count+1},0)))'
                 green_rule = FormulaRule(formula=[green_formula], fill=green_fill, font=green_font)
                 ws_data.conditional_formatting.add(range_str, green_rule)
-                
+
                 # Red for invalid species (not found in database)
                 red_formula = f'AND(LEN({col_letter}2)>0,NOT(ISNUMBER(MATCH({col_letter}2,SPECIES_DATABASE!$B$2:$B${species_count+1},0))),NOT(ISNUMBER(MATCH({col_letter}2,SPECIES_DATABASE!$C$2:$C${species_count+1},0))))'
                 red_rule = FormulaRule(formula=[red_formula], fill=red_fill, font=red_font)
                 ws_data.conditional_formatting.add(range_str, red_rule)
-                
+
                 print(f"[Excel Validator] Added conditional formatting to {col_letter} ({species_col_name})")
-                
+
             except Exception as e:
                 print(f"[Excel Validator] Warning: Could not add conditional formatting to {species_col_name}: {e}")
+
+    # ===== AUTO-CONVERSION HELPER COLUMNS =====
+    # Add helper columns at the end that show scientific name conversions
+    # Users can reference these to verify conversions
+
+    print(f"[Excel Validator] Adding auto-conversion helper columns at end of sheet")
+
+    # Get the last column number
+    last_col_num = ws_data.max_column
+
+    # Add helper columns for each species column
+    helper_col_num = last_col_num + 1
+
+    for species_col_name in species_columns:
+        if species_col_name in col_map:
+            col_letter = col_map[species_col_name]
+            helper_col_letter = get_column_letter(helper_col_num)
+
+            # Set header for helper column with informative name
+            helper_header = f"✓ {species_col_name.replace('_scientific', '')}_CONVERTED"
+            ws_data[f"{helper_col_letter}1"] = helper_header
+            ws_data[f"{helper_col_letter}1"].fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")  # Blue
+            ws_data[f"{helper_col_letter}1"].font = Font(color="FFFFFF", bold=True, size=9)
+            ws_data[f"{helper_col_letter}1"].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+            # Set column width
+            ws_data.column_dimensions[helper_col_letter].width = 20
+
+            # Add formula to convert local name to scientific name
+            # Formula logic:
+            # 1. If cell is empty, return empty
+            # 2. If value is in scientific_name column, return as is (already correct)
+            # 3. If value is in local_name column, lookup and return scientific_name
+            # 4. Otherwise return the value as is with note
+
+            for row in range(2, max_row + 1):
+                cell_ref = f"{col_letter}{row}"
+                formula = f'=IF(ISBLANK({cell_ref}),"",IF(ISNUMBER(MATCH({cell_ref},SPECIES_DATABASE!$B$2:$B${species_count+1},0)),{cell_ref},IF(ISNUMBER(MATCH({cell_ref},SPECIES_DATABASE!$C$2:$C${species_count+1},0)),INDEX(SPECIES_DATABASE!$B$2:$B${species_count+1},MATCH({cell_ref},SPECIES_DATABASE!$C$2:$C${species_count+1},0)),{cell_ref}&" (⚠ not in DB)")))'
+                ws_data[f"{helper_col_letter}{row}"] = formula
+
+            print(f"[Excel Validator] Added auto-conversion helper column for {species_col_name} at column {helper_col_letter}")
+
+            helper_col_num += 1
 
     # ===== VALIDATION_GUIDE SHEET =====
     ws_guide = wb.create_sheet("VALIDATION_GUIDE")
 
     guide_content = [
         ['Field Data Validation Guide', ''],
+        ['', ''],
+        ['SPECIES ENTRY SYSTEM (NEW!):', ''],
+        ['How to enter species:', ''],
+        ['1. Click dropdown arrow on species column', 'Select from list of scientific AND local names'],
+        ['2. Type scientific name directly', 'E.g., "Shorea robusta" - turns green if valid'],
+        ['3. Type local name directly', 'E.g., "Sal" - turns green, auto-converts to scientific name'],
+        ['', ''],
+        ['Auto-conversion feature:', ''],
+        ['- Enter local name (e.g., "Sal")', 'Check helper column at end to see "Shorea robusta"'],
+        ['- Green highlight confirms valid species', 'Check SPECIES_DATABASE sheet for all species'],
+        ['- Red highlight means not found', 'Check spelling or add new species to database'],
+        ['', ''],
+        ['HELPER COLUMNS (Blue headers at end):', ''],
+        ['✓ regen_CONVERTED, etc.', 'Shows scientific name for any entry (local or scientific)'],
+        ['Purpose', 'Verify that local names are correctly matched to scientific names'],
+        ['Usage', 'Reference these columns to check conversions before import'],
         ['', ''],
         ['NUMERIC VALIDATION (Strict - Excel will reject invalid values):', ''],
         ['Column', 'Allowed Range'],
@@ -385,11 +510,6 @@ def add_validation_to_excel(
         ['grass_kg_per_100sqm_per_year', '0 to 500 kg/100sqm/year'],
         ['bedding_material_kg_per_100sqm_per_year', '0 to 500 kg/100sqm/year'],
         ['ntfp_kg_per_100sqm_per_year', '0 to 100 kg/100sqm/year'],
-        ['', ''],
-        ['SPECIES VALIDATION (Non-strict - Enter any value):', ''],
-        ['Green highlight', 'Species found in database (valid)'],
-        ['Red highlight', 'Species NOT found in database (check spelling or enter new species)'],
-        ['No highlight', 'Cell is empty'],
         ['', ''],
         ['SIZE CLASS DEFINITIONS:', ''],
         ['Regeneration', 'DBH: 1-3.99 cm'],
@@ -413,8 +533,9 @@ def add_validation_to_excel(
         ['', ''],
         ['IMPORTANT:', ''],
         ['- Numeric columns: Excel will reject values outside range', ''],
-        ['- Species columns: Enter any value, colors show if in database', ''],
+        ['- Species columns: Dropdown + auto-conversion from local to scientific name', ''],
         ['- Check SPECIES_DATABASE sheet for complete species list', ''],
+        ['- Helper columns (hidden) show scientific name conversions', ''],
         ['- You can leave cells blank if no data for that category', ''],
     ]
 
@@ -426,21 +547,23 @@ def add_validation_to_excel(
 
     bold_font = Font(bold=True, size=12)
     ws_guide['A1'].font = Font(bold=True, size=14)
-    ws_guide['A3'].font = bold_font
-    ws_guide['A18'].font = bold_font  # SPECIES VALIDATION
-    ws_guide['A21'].font = bold_font  # SIZE CLASS DEFINITIONS
-    ws_guide['A27'].font = bold_font  # TREE CLASS
-    ws_guide['A33'].font = bold_font  # SN COLUMNS
-    ws_guide['A36'].font = bold_font  # RESOURCE HARVEST COLUMNS
-    ws_guide['A40'].font = bold_font  # IMPORTANT
+    ws_guide['A3'].font = bold_font   # SPECIES ENTRY SYSTEM
+    ws_guide['A14'].font = bold_font  # HELPER COLUMNS
+    ws_guide['A19'].font = bold_font  # NUMERIC VALIDATION
+    ws_guide['A34'].font = bold_font  # SIZE CLASS DEFINITIONS
+    ws_guide['A40'].font = bold_font  # TREE CLASS
+    ws_guide['A47'].font = bold_font  # SN COLUMNS
+    ws_guide['A50'].font = bold_font  # RESOURCE HARVEST COLUMNS
+    ws_guide['A54'].font = bold_font  # IMPORTANT
 
     # Define fill colors for the guide
     green_fill_guide = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     red_fill_guide = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    orange_fill_guide = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
 
-    # Add color examples in guide (Green/Red highlight rows)
-    ws_guide['A19'].fill = green_fill_guide
-    ws_guide['A20'].fill = red_fill_guide
+    # Add color examples in guide
+    ws_guide['A11'].fill = green_fill_guide  # Green highlight example
+    ws_guide['A12'].fill = red_fill_guide   # Red highlight example
 
     # Save enhanced workbook
     print(f"[Excel Validator] Saving workbook to {excel_filepath}")
