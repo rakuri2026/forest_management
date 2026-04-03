@@ -381,18 +381,24 @@ def add_validation_to_excel(
         if species_col_name in col_map:
             col_letter = col_map[species_col_name]
 
-            # Add dropdown validation
+            # Add autocomplete validation (showDropDown=False enables type-ahead)
             dv_species = DataValidation(
                 type='list',
                 formula1=lookup_range,
                 allow_blank=True,
-                showDropDown=True,
+                showDropDown=False,  # This enables autocomplete/type-ahead behavior!
                 showErrorMessage=False  # Allow custom entries
             )
+            # Add helpful prompts
+            dv_species.prompt = 'Type scientific or local name. List will filter as you type.'
+            dv_species.promptTitle = 'Species Entry'
+            dv_species.error = 'Species not found in database. You can still use this value or check spelling.'
+            dv_species.errorTitle = 'Species Validation'
+
             dv_species.add(f"{col_letter}2:{col_letter}{max_row}")
             ws_data.add_data_validation(dv_species)
 
-            print(f"[Excel Validator] Added dropdown validation to {col_letter} ({species_col_name})")
+            print(f"[Excel Validator] Added autocomplete validation to {col_letter} ({species_col_name})")
 
     # ===== SPECIES CONDITIONAL FORMATTING =====
     # Add conditional formatting for species columns (green for valid, red for invalid)
@@ -478,16 +484,17 @@ def add_validation_to_excel(
     guide_content = [
         ['Field Data Validation Guide', ''],
         ['', ''],
-        ['SPECIES ENTRY SYSTEM (NEW!):', ''],
-        ['How to enter species:', ''],
-        ['1. Click dropdown arrow on species column', 'Select from list of scientific AND local names'],
-        ['2. Type scientific name directly', 'E.g., "Shorea robusta" - turns green if valid'],
-        ['3. Type local name directly', 'E.g., "Sal" - turns green, auto-converts to scientific name'],
+        ['SPECIES ENTRY SYSTEM - AUTO-COMPLETE (NEW!):', ''],
+        ['How to enter species (just like surname column!):', ''],
+        ['1. Click on species column cell', 'Start typing scientific OR local name'],
+        ['2. As you type, list filters automatically', 'E.g., type "Sal" → see "Sal" in filtered list'],
+        ['3. Select from filtered list or continue typing', 'E.g., type "Shorea" → see all Shorea species'],
+        ['4. Press Enter to confirm', 'Cell turns green if valid, red if not in database'],
         ['', ''],
-        ['Auto-conversion feature:', ''],
-        ['- Enter local name (e.g., "Sal")', 'Check helper column at end to see "Shorea robusta"'],
-        ['- Green highlight confirms valid species', 'Check SPECIES_DATABASE sheet for all species'],
-        ['- Red highlight means not found', 'Check spelling or add new species to database'],
+        ['Auto-conversion helper columns:', ''],
+        ['- Enter local name (e.g., "Sal")', 'Check blue column at end to see "Shorea robusta"'],
+        ['- Enter scientific name (e.g., "Shorea robusta")', 'Helper column shows same name'],
+        ['- Green highlight = valid species', 'Red highlight = not found in database'],
         ['', ''],
         ['HELPER COLUMNS (Blue headers at end):', ''],
         ['✓ regen_CONVERTED, etc.', 'Shows scientific name for any entry (local or scientific)'],
@@ -547,23 +554,23 @@ def add_validation_to_excel(
 
     bold_font = Font(bold=True, size=12)
     ws_guide['A1'].font = Font(bold=True, size=14)
-    ws_guide['A3'].font = bold_font   # SPECIES ENTRY SYSTEM
-    ws_guide['A14'].font = bold_font  # HELPER COLUMNS
-    ws_guide['A19'].font = bold_font  # NUMERIC VALIDATION
-    ws_guide['A34'].font = bold_font  # SIZE CLASS DEFINITIONS
-    ws_guide['A40'].font = bold_font  # TREE CLASS
-    ws_guide['A47'].font = bold_font  # SN COLUMNS
-    ws_guide['A50'].font = bold_font  # RESOURCE HARVEST COLUMNS
-    ws_guide['A54'].font = bold_font  # IMPORTANT
+    ws_guide['A3'].font = bold_font   # SPECIES ENTRY SYSTEM - AUTO-COMPLETE
+    ws_guide['A15'].font = bold_font  # HELPER COLUMNS (adjusted)
+    ws_guide['A20'].font = bold_font  # NUMERIC VALIDATION
+    ws_guide['A35'].font = bold_font  # SIZE CLASS DEFINITIONS
+    ws_guide['A41'].font = bold_font  # TREE CLASS
+    ws_guide['A48'].font = bold_font  # SN COLUMNS
+    ws_guide['A51'].font = bold_font  # RESOURCE HARVEST COLUMNS
+    ws_guide['A55'].font = bold_font  # IMPORTANT
 
     # Define fill colors for the guide
     green_fill_guide = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     red_fill_guide = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     orange_fill_guide = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
 
-    # Add color examples in guide
-    ws_guide['A11'].fill = green_fill_guide  # Green highlight example
-    ws_guide['A12'].fill = red_fill_guide   # Red highlight example
+    # Add color examples in guide (adjusted row numbers)
+    ws_guide['A12'].fill = green_fill_guide  # Green highlight example
+    ws_guide['A13'].fill = red_fill_guide   # Red highlight example
 
     # Save enhanced workbook
     print(f"[Excel Validator] Saving workbook to {excel_filepath}")
