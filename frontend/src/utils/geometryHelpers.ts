@@ -237,6 +237,87 @@ export function snapPointToLine(
 }
 
 /**
+ * Snap a point to the nearest GPS point with tolerance
+ * Used during digitization to snap to uploaded GPS points
+ *
+ * @param point - Point to snap [lon, lat]
+ * @param gpsPoints - Array of GPS points to snap to
+ * @param tolerancePixels - Maximum snap distance in pixels (screen space)
+ * @param map - Leaflet map instance for pixel distance calculation
+ * @returns Snapped point coordinates or original if too far, and the snapped GPS point if found
+ */
+export function snapToGPSPoint(
+  point: [number, number],
+  gpsPoints: Array<{ latitude: number; longitude: number; id: string }>,
+  tolerancePixels: number = 15,
+  map?: any
+): { snappedPoint: [number, number]; snappedGPSPoint?: { latitude: number; longitude: number; id: string } } {
+  if (!gpsPoints || gpsPoints.length === 0) {
+    return { snappedPoint: point };
+  }
+
+  try {
+    const ptFeature = turf.point(point);
+    let nearestGPSPoint: { latitude: number; longitude: number; id: string } | undefined;
+    let minDistance = Infinity;
+
+    // Find nearest GPS point
+    gpsPoints.forEach(gpsPoint => {
+      const gpsFeature = turf.point([gpsPoint.longitude, gpsPoint.latitude]);
+      const distance = turf.distance(ptFeature, gpsFeature, { units: 'meters' });
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestGPSPoint = gpsPoint;
+      }
+    });
+
+    if (!nearestGPSPoint) {
+      return { snappedPoint: point };
+    }
+
+    // Convert tolerance from pixels to meters (approximate)
+    // Assuming ~100 meters per pixel at typical zoom levels
+    // If map is provided, use actual pixel distance
+    let toleranceMeters = tolerancePixels * 2; // Approximate: 2 meters per pixel
+
+    if (map) {
+      // Calculate actual pixel distance on map
+      const pointLatLng = map.latLngToContainerPoint([point[1], point[0]]);
+      const gpsPointLatLng = map.latLngToContainerPoint([nearestGPSPoint.latitude, nearestGPSPoint.longitude]);
+
+      const pixelDistance = Math.sqrt(
+        Math.pow(pointLatLng.x - gpsPointLatLng.x, 2) +
+        Math.pow(pointLatLng.y - gpsPointLatLng.y, 2)
+      );
+
+      // Check if within pixel tolerance
+      if (pixelDistance <= tolerancePixels) {
+        return {
+          snappedPoint: [nearestGPSPoint.longitude, nearestGPSPoint.latitude],
+          snappedGPSPoint: nearestGPSPoint,
+        };
+      }
+
+      return { snappedPoint: point };
+    }
+
+    // Fallback: use meter-based tolerance if map not provided
+    if (minDistance <= toleranceMeters) {
+      return {
+        snappedPoint: [nearestGPSPoint.longitude, nearestGPSPoint.latitude],
+        snappedGPSPoint: nearestGPSPoint,
+      };
+    }
+
+    return { snappedPoint: point };
+  } catch (error) {
+    console.error('[snapToGPSPoint] Error snapping to GPS point:', error);
+    return { snappedPoint: point };
+  }
+}
+
+/**
  * Apply micro-buffer inward to ensure geometry stays within boundary
  *
  * @param geometry - Geometry to buffer

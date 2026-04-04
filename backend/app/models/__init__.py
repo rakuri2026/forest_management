@@ -6,6 +6,7 @@ from .calculation import Calculation, CalculationStatus
 from .forest_block import ForestBlock
 from .forest_sub_area import ForestSubArea
 from .community_forest import CommunityForest
+from .compartment import CompartmentSplitHistory
 from .inventory import (
     TreeSpeciesCoefficient,
     InventoryCalculation,
@@ -40,6 +41,7 @@ __all__ = [
     "ForestBlock",
     "ForestSubArea",
     "CommunityForest",
+    "CompartmentSplitHistory",
     "TreeSpeciesCoefficient",
     "InventoryCalculation",
     "InventoryTree",

@@ -69,24 +69,158 @@ async def preview_column_mapping(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Preview automatic column mapping for uploaded CSV file
+    Preview automatic column mapping for uploaded CSV or Excel file
+    Excel files must have a sheet named 'Data Template'
+    Supports Unicode filenames (e.g., Nepali characters)
     """
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+    # Handle unicode filenames properly
+    try:
+        filename = file.filename if file.filename else "unknown"
+        # Ensure filename is properly encoded
+        filename = str(filename)
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        filename = "file_with_special_characters"
+
+    # Check file extension
+    is_csv = filename.lower().endswith('.csv')
+    is_excel = filename.lower().endswith(('.xlsx', '.xls'))
+
+    if not (is_csv or is_excel):
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV (.csv) and Excel (.xlsx, .xls) files are supported"
+        )
 
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content), nrows=10)
+
+        if is_excel:
+            # Handle Excel file - Smart sheet detection
+            try:
+                # Read Excel file to check available sheets
+                excel_file = pd.ExcelFile(io.BytesIO(content))
+                available_sheets = excel_file.sheet_names
+
+                # Define required columns for matching
+                required_columns_lower = ['block_name', 'sample_plot_number', 'longitude', 'latitude']
+
+                # Smart detection: Find the best matching sheet
+                best_sheet = None
+                best_match_score = 0
+                sheet_scores = {}
+
+                # First, check if 'Data Template' exists (preferred)
+                if 'Data Template' in available_sheets:
+                    try:
+                        test_df = pd.read_excel(io.BytesIO(content), sheet_name='Data Template', nrows=1)
+                        sheet_columns_lower = [col.lower().strip() for col in test_df.columns]
+                        matches = sum(1 for req_col in required_columns_lower if req_col in sheet_columns_lower)
+
+                        if matches >= 3:  # If Data Template has good structure, use it
+                            best_sheet = 'Data Template'
+                            best_match_score = matches
+                            logger.info(f"[EXCEL] Using 'Data Template' sheet (matches: {matches}/4)")
+                    except:
+                        pass
+
+                # If 'Data Template' doesn't exist or doesn't have good columns, scan all sheets
+                if best_sheet is None:
+                    for sheet_name in available_sheets:
+                        try:
+                            test_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            sheet_columns_lower = [col.lower().strip() for col in test_df.columns]
+
+                            # Calculate match score
+                            matches = sum(1 for req_col in required_columns_lower if req_col in sheet_columns_lower)
+                            sheet_scores[sheet_name] = matches
+
+                            # Update best match if this sheet is better
+                            if matches > best_match_score:
+                                best_match_score = matches
+                                best_sheet = sheet_name
+                        except:
+                            continue
+
+                # Decide what to do based on match quality
+                if best_match_score >= 3:  # Found a sheet with at least 3/4 required columns
+                    logger.info(f"[EXCEL] Auto-detected sheet '{best_sheet}' (score: {best_match_score}/4)")
+                    df = pd.read_excel(io.BytesIO(content), sheet_name=best_sheet, nrows=10)
+
+                    # Add info to response about which sheet was used
+                    if best_sheet != 'Data Template':
+                        logger.info(f"[EXCEL] NOTE: Using sheet '{best_sheet}' instead of 'Data Template'")
+
+                elif best_match_score >= 2:  # Partial match - might need column mapping
+                    # Build detailed sheet information for user
+                    sheet_info = []
+                    for sheet_name in available_sheets:
+                        try:
+                            temp_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            cols_preview = ', '.join(list(temp_df.columns)[:5]) + ('...' if len(temp_df.columns) > 5 else '')
+                            score = sheet_scores.get(sheet_name, 0)
+                            sheet_info.append(f"  • '{sheet_name}' ({score}/4 columns match): {cols_preview}")
+                        except:
+                            sheet_info.append(f"  • '{sheet_name}' (could not read)")
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not find a sheet with all required columns.\n\n"
+                            f"Available sheets:\n" + "\n".join(sheet_info) + "\n\n"
+                            f"Best match: '{best_sheet}' has {best_match_score}/4 required columns.\n\n"
+                            f"Required columns: block_name, sample_plot_number, longitude, latitude\n"
+                            f"Plus at least one stand type (regen/sapling/pole/tree) with species and DBH columns.\n\n"
+                            f"Please either:\n"
+                            f"1. Ensure one sheet has the required column names, OR\n"
+                            f"2. Rename '{best_sheet}' columns to match required names"
+                        )
+                    )
+
+                else:  # No good matches found
+                    # Build detailed sheet information
+                    sheet_info = []
+                    for sheet_name in available_sheets:
+                        try:
+                            temp_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            cols_preview = ', '.join(list(temp_df.columns)[:8]) + ('...' if len(temp_df.columns) > 8 else '')
+                            sheet_info.append(f"  • '{sheet_name}': {cols_preview}")
+                        except:
+                            sheet_info.append(f"  • '{sheet_name}' (could not read)")
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not find a sheet with required column structure.\n\n"
+                            f"Found {len(available_sheets)} sheet(s):\n" + "\n".join(sheet_info) + "\n\n"
+                            f"Required columns: block_name, sample_plot_number, longitude, latitude\n"
+                            f"Plus species and DBH columns for at least one stand type.\n\n"
+                            f"Please ensure your data sheet has these column names."
+                        )
+                    )
+
+            except ValueError as ve:
+                # Handle pandas-specific errors
+                raise HTTPException(status_code=400, detail=f"Error reading Excel file: {str(ve)}")
+        else:
+            # Handle CSV file
+            df = pd.read_csv(io.BytesIO(content), nrows=10)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        file_type = "Excel" if is_excel else "CSV"
+        raise HTTPException(status_code=400, detail=f"Error reading {file_type} file: {str(e)}")
 
     if len(df) == 0:
-        raise HTTPException(status_code=400, detail="CSV file is empty")
+        file_type = "Excel" if is_excel else "CSV"
+        raise HTTPException(status_code=400, detail=f"{file_type} file is empty or 'Data Template' sheet has no data")
 
     # Return preview with column detection (clean NaN values)
     preview_data = {
         "success": True,
-        "filename": file.filename,
+        "filename": filename,  # Use safe filename
+        "file_type": "excel" if is_excel else "csv",
         "total_rows": len(df),
         "csv_columns": df.columns.tolist(),
         "sample_data": df.head(5).to_dict('records'),
@@ -109,10 +243,27 @@ async def upload_field_inventory(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Upload and validate field inventory CSV
+    Upload and validate field inventory CSV or Excel file
+    Excel files must have a sheet named 'Data Template'
+    Supports Unicode filenames (e.g., Nepali characters)
     """
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+    # Handle unicode filenames properly
+    try:
+        filename = file.filename if file.filename else "unknown"
+        # Ensure filename is properly encoded
+        filename = str(filename)
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        filename = "file_with_special_characters"
+
+    # Check file extension
+    is_csv = filename.lower().endswith('.csv')
+    is_excel = filename.lower().endswith(('.xlsx', '.xls'))
+
+    if not (is_csv or is_excel):
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV (.csv) and Excel (.xlsx, .xls) files are supported"
+        )
 
     # Parse mapping
     try:
@@ -120,12 +271,120 @@ async def upload_field_inventory(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid mapping JSON")
 
-    # Read CSV
+    # Read file
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+
+        if is_excel:
+            # Handle Excel file - Smart sheet detection
+            try:
+                # Read Excel file to check available sheets
+                excel_file = pd.ExcelFile(io.BytesIO(content))
+                available_sheets = excel_file.sheet_names
+
+                # Define required columns for matching
+                required_columns_lower = ['block_name', 'sample_plot_number', 'longitude', 'latitude']
+
+                # Smart detection: Find the best matching sheet
+                best_sheet = None
+                best_match_score = 0
+                sheet_scores = {}
+
+                # First, check if 'Data Template' exists (preferred)
+                if 'Data Template' in available_sheets:
+                    try:
+                        test_df = pd.read_excel(io.BytesIO(content), sheet_name='Data Template', nrows=1)
+                        sheet_columns_lower = [col.lower().strip() for col in test_df.columns]
+                        matches = sum(1 for req_col in required_columns_lower if req_col in sheet_columns_lower)
+
+                        if matches >= 3:  # If Data Template has good structure, use it
+                            best_sheet = 'Data Template'
+                            best_match_score = matches
+                            logger.info(f"[EXCEL_UPLOAD] Using 'Data Template' sheet (matches: {matches}/4)")
+                    except:
+                        pass
+
+                # If 'Data Template' doesn't exist or doesn't have good columns, scan all sheets
+                if best_sheet is None:
+                    for sheet_name in available_sheets:
+                        try:
+                            test_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            sheet_columns_lower = [col.lower().strip() for col in test_df.columns]
+
+                            # Calculate match score
+                            matches = sum(1 for req_col in required_columns_lower if req_col in sheet_columns_lower)
+                            sheet_scores[sheet_name] = matches
+
+                            # Update best match if this sheet is better
+                            if matches > best_match_score:
+                                best_match_score = matches
+                                best_sheet = sheet_name
+                        except:
+                            continue
+
+                # Decide what to do based on match quality
+                if best_match_score >= 3:  # Found a sheet with at least 3/4 required columns
+                    logger.info(f"[EXCEL_UPLOAD] Auto-detected sheet '{best_sheet}' (score: {best_match_score}/4)")
+                    df = pd.read_excel(io.BytesIO(content), sheet_name=best_sheet)
+
+                    # Add info about which sheet was used
+                    if best_sheet != 'Data Template':
+                        logger.info(f"[EXCEL_UPLOAD] NOTE: Using sheet '{best_sheet}' instead of 'Data Template'")
+
+                elif best_match_score >= 2:  # Partial match
+                    sheet_info = []
+                    for sheet_name in available_sheets:
+                        try:
+                            temp_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            cols_preview = ', '.join(list(temp_df.columns)[:5]) + ('...' if len(temp_df.columns) > 5 else '')
+                            score = sheet_scores.get(sheet_name, 0)
+                            sheet_info.append(f"  • '{sheet_name}' ({score}/4 match): {cols_preview}")
+                        except:
+                            sheet_info.append(f"  • '{sheet_name}' (unreadable)")
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not find a sheet with all required columns.\n\n"
+                            f"Available sheets:\n" + "\n".join(sheet_info) + "\n\n"
+                            f"Best match: '{best_sheet}' has {best_match_score}/4 required columns.\n\n"
+                            f"Required: block_name, sample_plot_number, longitude, latitude\n\n"
+                            f"Please ensure one sheet has these column names."
+                        )
+                    )
+
+                else:  # No good matches
+                    sheet_info = []
+                    for sheet_name in available_sheets:
+                        try:
+                            temp_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            cols_preview = ', '.join(list(temp_df.columns)[:8]) + ('...' if len(temp_df.columns) > 8 else '')
+                            sheet_info.append(f"  • '{sheet_name}': {cols_preview}")
+                        except:
+                            sheet_info.append(f"  • '{sheet_name}' (unreadable)")
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not find a sheet with required columns.\n\n"
+                            f"Found sheets:\n" + "\n".join(sheet_info) + "\n\n"
+                            f"Required: block_name, sample_plot_number, longitude, latitude\n\n"
+                            f"Please check your column names."
+                        )
+                    )
+
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=f"Error reading Excel file: {str(ve)}")
+        else:
+            # Handle CSV file
+            df = pd.read_csv(io.BytesIO(content))
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        file_type = "Excel" if is_excel else "CSV"
+        raise HTTPException(status_code=400, detail=f"Error reading {file_type} file: {str(e)}")
 
     # Validate
     validator = FieldInventoryValidator(db)
@@ -140,7 +399,7 @@ async def upload_field_inventory(
         field_inventory = FieldInventoryCalculation(
             user_id=current_user.id,
             calculation_id=calc_id,
-            uploaded_filename=file.filename,
+            uploaded_filename=filename,  # Use safe filename
             column_mapping=mapping_dict,
             regeneration_area_sqm=regeneration_area_sqm,
             sapling_area_sqm=sapling_area_sqm,
@@ -166,7 +425,9 @@ async def process_field_inventory(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Process validated field inventory
+    Process validated field inventory (CSV or Excel)
+    Excel files must have a sheet named 'Data Template'
+    Supports Unicode filenames (e.g., Nepali characters)
     """
     field_inventory = db.query(FieldInventoryCalculation).filter(
         FieldInventoryCalculation.id == field_inventory_id,
@@ -179,12 +440,137 @@ async def process_field_inventory(
     if field_inventory.status != 'validated':
         raise HTTPException(status_code=400, detail=f"Cannot process. Status: {field_inventory.status}")
 
-    # Read CSV
+    # Handle unicode filenames properly
+    try:
+        filename = file.filename if file.filename else "unknown"
+        # Ensure filename is properly encoded
+        filename = str(filename)
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        filename = "file_with_special_characters"
+
+    # Check file extension
+    is_csv = filename.lower().endswith('.csv')
+    is_excel = filename.lower().endswith(('.xlsx', '.xls'))
+
+    if not (is_csv or is_excel):
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV (.csv) and Excel (.xlsx, .xls) files are supported"
+        )
+
+    # Read file
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+
+        if is_excel:
+            # Handle Excel file - Smart sheet detection
+            try:
+                # Read Excel file to check available sheets
+                excel_file = pd.ExcelFile(io.BytesIO(content))
+                available_sheets = excel_file.sheet_names
+
+                # Define required columns for matching
+                required_columns_lower = ['block_name', 'sample_plot_number', 'longitude', 'latitude']
+
+                # Smart detection: Find the best matching sheet
+                best_sheet = None
+                best_match_score = 0
+                sheet_scores = {}
+
+                # First, check if 'Data Template' exists (preferred)
+                if 'Data Template' in available_sheets:
+                    try:
+                        test_df = pd.read_excel(io.BytesIO(content), sheet_name='Data Template', nrows=1)
+                        sheet_columns_lower = [col.lower().strip() for col in test_df.columns]
+                        matches = sum(1 for req_col in required_columns_lower if req_col in sheet_columns_lower)
+
+                        if matches >= 3:  # If Data Template has good structure, use it
+                            best_sheet = 'Data Template'
+                            best_match_score = matches
+                            logger.info(f"[EXCEL_PROCESS] Using 'Data Template' sheet (matches: {matches}/4)")
+                    except:
+                        pass
+
+                # If 'Data Template' doesn't exist or doesn't have good columns, scan all sheets
+                if best_sheet is None:
+                    for sheet_name in available_sheets:
+                        try:
+                            test_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            sheet_columns_lower = [col.lower().strip() for col in test_df.columns]
+
+                            # Calculate match score
+                            matches = sum(1 for req_col in required_columns_lower if req_col in sheet_columns_lower)
+                            sheet_scores[sheet_name] = matches
+
+                            # Update best match if this sheet is better
+                            if matches > best_match_score:
+                                best_match_score = matches
+                                best_sheet = sheet_name
+                        except:
+                            continue
+
+                # Decide what to do based on match quality
+                if best_match_score >= 3:  # Found a sheet with at least 3/4 required columns
+                    logger.info(f"[EXCEL_PROCESS] Auto-detected sheet '{best_sheet}' (score: {best_match_score}/4)")
+                    # Note: Extra columns in Excel file will be ignored - only mapped columns are processed
+                    df = pd.read_excel(io.BytesIO(content), sheet_name=best_sheet)
+
+                    # Add info about which sheet was used
+                    if best_sheet != 'Data Template':
+                        logger.info(f"[EXCEL_PROCESS] NOTE: Using sheet '{best_sheet}' instead of 'Data Template'")
+
+                elif best_match_score >= 2:  # Partial match
+                    sheet_info = []
+                    for sheet_name in available_sheets:
+                        try:
+                            temp_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            cols_preview = ', '.join(list(temp_df.columns)[:5]) + ('...' if len(temp_df.columns) > 5 else '')
+                            score = sheet_scores.get(sheet_name, 0)
+                            sheet_info.append(f"  • '{sheet_name}' ({score}/4 match): {cols_preview}")
+                        except:
+                            sheet_info.append(f"  • '{sheet_name}' (unreadable)")
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not find a sheet with all required columns.\n\n"
+                            f"Available sheets:\n" + "\n".join(sheet_info) + "\n\n"
+                            f"Best match: '{best_sheet}' has {best_match_score}/4 required columns.\n\n"
+                            f"Required: block_name, sample_plot_number, longitude, latitude"
+                        )
+                    )
+
+                else:  # No good matches
+                    sheet_info = []
+                    for sheet_name in available_sheets:
+                        try:
+                            temp_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, nrows=1)
+                            cols_preview = ', '.join(list(temp_df.columns)[:8]) + ('...' if len(temp_df.columns) > 8 else '')
+                            sheet_info.append(f"  • '{sheet_name}': {cols_preview}")
+                        except:
+                            sheet_info.append(f"  • '{sheet_name}' (unreadable)")
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not find a sheet with required columns.\n\n"
+                            f"Found sheets:\n" + "\n".join(sheet_info) + "\n\n"
+                            f"Required: block_name, sample_plot_number, longitude, latitude"
+                        )
+                    )
+
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=f"Error reading Excel file: {str(ve)}")
+        else:
+            # Handle CSV file
+            df = pd.read_csv(io.BytesIO(content))
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        file_type = "Excel" if is_excel else "CSV"
+        raise HTTPException(status_code=400, detail=f"Error reading {file_type} file: {str(e)}")
 
     # Process
     service = FieldInventoryService(db)

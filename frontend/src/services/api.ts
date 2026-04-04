@@ -987,6 +987,158 @@ export const samplingApi = {
 // User Group Map API
 // ============================================================================
 
+export const compartmentApi = {
+  getAvailableBlocks: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(`/api/compartments/available-blocks/${calculationId}`);
+    return response.data;
+  },
+
+  getAllBlocks: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(`/api/compartments/calculation/${calculationId}/all-blocks`);
+    return response.data;
+  },
+
+  previewSplit: async (request: {
+    block_id: string;
+    method: 'parallel' | 'grid' | 'custom';
+    parameters: Record<string, any>;
+  }): Promise<any> => {
+    const response = await api.post('/api/compartments/preview-split', request);
+    return response.data;
+  },
+
+  executeSplit: async (request: {
+    block_id: string;
+    method: 'parallel' | 'grid' | 'custom';
+    parameters: Record<string, any>;
+    naming_pattern?: string;
+    reassign_trees?: boolean;
+    notes?: string;
+  }): Promise<any> => {
+    const response = await api.post('/api/compartments/execute-split', request);
+    return response.data;
+  },
+
+  getSplitDirections: async (): Promise<any[]> => {
+    const response = await api.get('/api/compartments/split-directions');
+    return response.data;
+  },
+
+  undoSplit: async (splitHistoryId: string): Promise<any> => {
+    const response = await api.delete(`/api/compartments/split/${splitHistoryId}`);
+    return response.data;
+  },
+
+  deleteCompartments: async (blockId: string): Promise<any> => {
+    const response = await api.delete(`/api/compartments/block/${blockId}/compartments`);
+    return response.data;
+  },
+
+  getTreesNeedingAssignment: async (blockId: string): Promise<any> => {
+    const response = await api.get(`/api/compartments/trees-needing-assignment/${blockId}`);
+    return response.data;
+  },
+
+  reassignTrees: async (request: {
+    block_id: string;
+    auto_assign?: boolean;
+    manual_assignments?: Record<string, string>;
+  }): Promise<any> => {
+    const response = await api.post('/api/compartments/reassign-trees', request);
+    return response.data;
+  },
+
+  getTreesForMap: async (calculationId: string): Promise<{ count: number; trees: any[] }> => {
+    const response = await api.get(`/api/compartments/calculation/${calculationId}/trees`);
+    return response.data;
+  },
+
+  exportGpkg: async (calculationId: string): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    console.log('[API] Export GPKG for calculation:', calculationId);
+    
+    const response = await fetch(`/api/compartments/calculation/${calculationId}/export-gpkg`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    console.log('[API] Response status:', response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[API] Export failed:', errorText);
+      throw new Error(`Export failed: ${response.status}`);
+    }
+    
+    const contentDisposition = response.headers.get('content-disposition');
+    console.log('[API] Content-Disposition:', contentDisposition);
+    
+    let filename = 'compartments.gpkg';
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (match) {
+        filename = match[1].replace(/['"]/g, '');
+      }
+    }
+    
+    const blob = await response.blob();
+    console.log('[API] Blob size:', blob.size);
+    
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+
+  exportKml: async (calculationId: string): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    console.log('[API] Export KML for calculation:', calculationId);
+    
+    const response = await fetch(`/api/compartments/calculation/${calculationId}/export-kml`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    console.log('[API] Response status:', response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[API] Export failed:', errorText);
+      throw new Error(`Export failed: ${response.status}`);
+    }
+    
+    const contentDisposition = response.headers.get('content-disposition');
+    let filename = 'compartments.kml';
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (match) {
+        filename = match[1].replace(/['"]/g, '');
+      }
+    }
+    
+    const blob = await response.blob();
+    console.log('[API] Blob size:', blob.size);
+    
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+};
+
+// User Group Map API
 export const userGroupApi = {
   /**
    * Upload user group extent boundary file

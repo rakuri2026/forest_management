@@ -552,6 +552,38 @@ async def upload_forest_boundary(
     # Get the calculation ID
     calc_id = calculation.id
 
+    # Save blocks to ForestBlock table for compartment splitting support
+    from shapely.geometry import shape
+    from geoalchemy2.shape import from_shape
+    
+    try:
+        for idx, block_data in enumerate(blocks_data):
+            geom_dict = block_data.get("geometry")
+            if geom_dict:
+                try:
+                    shapely_geom = shape(geom_dict)
+                    postgis_geom = from_shape(shapely_geom, srid=4326)
+                    
+                    forest_block = ForestBlock(
+                        calculation_id=calc_id,
+                        name=block_data.get("block_name", f"Block {idx + 1}"),
+                        geometry=postgis_geom,
+                        area_hectares=block_data.get("area_hectares", 0),
+                        index=idx,
+                        is_compartment=False,
+                        area_sqm=block_data.get("area_sqm")
+                    )
+                    db.add(forest_block)
+                    print(f"[upload] Saved block '{forest_block.name}' to ForestBlock table")
+                except Exception as block_err:
+                    print(f"[upload] Warning: Could not save block {idx}: {block_err}")
+        
+        db.commit()
+        print(f"[upload] Saved {len(blocks_data)} blocks to ForestBlock table")
+    except Exception as e:
+        print(f"[upload] Warning: Failed to save blocks to ForestBlock table: {e}")
+        db.rollback()
+
     # Note: Analysis is NOT started here - it should be triggered separately from Analysis page
     # User will configure blocks first, then trigger analysis when ready
 
@@ -760,6 +792,38 @@ async def create_forest_from_map(
     db.add(calculation)
     db.commit()
     db.refresh(calculation)
+
+    # Save blocks to ForestBlock table for compartment splitting support
+    from shapely.geometry import shape
+    from geoalchemy2.shape import from_shape
+    
+    try:
+        for idx, block_data in enumerate(blocks_for_analysis):
+            geom_dict = block_data.get("geometry")
+            if geom_dict:
+                try:
+                    shapely_geom = shape(geom_dict)
+                    postgis_geom = from_shape(shapely_geom, srid=4326)
+                    
+                    forest_block = ForestBlock(
+                        calculation_id=calculation.id,
+                        name=block_data.get("block_name", f"Block {idx + 1}"),
+                        geometry=postgis_geom,
+                        area_hectares=block_data.get("area_hectares", 0),
+                        index=idx,
+                        is_compartment=False,
+                        area_sqm=block_data.get("area_hectares", 0) * 10000 if block_data.get("area_hectares") else None
+                    )
+                    db.add(forest_block)
+                    print(f"[create-forest-from-map] Saved block '{forest_block.name}' to ForestBlock table")
+                except Exception as block_err:
+                    print(f"[create-forest-from-map] Warning: Could not save block {idx}: {block_err}")
+        
+        db.commit()
+        print(f"[create-forest-from-map] Saved {len(blocks_for_analysis)} blocks to ForestBlock table")
+    except Exception as e:
+        print(f"[create-forest-from-map] Warning: Failed to save blocks to ForestBlock table: {e}")
+        db.rollback()
 
     # Status is set to PENDING (ready for analysis to be triggered separately from Analysis page)
     # The calculation is already created with PENDING status

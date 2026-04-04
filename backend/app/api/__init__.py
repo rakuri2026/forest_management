@@ -7,5 +7,6 @@ from .tree_models import router as tree_models_router
 from . import biodiversity
 from . import household_info
 from . import forest_committee
+from . import compartments
 
-__all__ = ["auth_router", "forests_router", "inventory_router", "species_router", "tree_models_router", "biodiversity", "household_info", "forest_committee"]
+__all__ = ["auth_router", "forests_router", "inventory_router", "species_router", "tree_models_router", "biodiversity", "household_info", "forest_committee", "compartments"]

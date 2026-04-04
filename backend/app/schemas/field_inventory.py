@@ -146,6 +146,12 @@ class FieldInventoryBlockSummaryResponse(BaseModel):
     carbon_stock_tc_per_ha: Optional[Decimal] = Field(None, description="Carbon stock (tonnes C/ha)")
     co2_equivalent_tco2_per_ha: Optional[Decimal] = Field(None, description="CO2 equivalent (tonnes CO2/ha)")
 
+    # NTFP and other forest products (kg per hectare per year)
+    firewood_kg_per_ha: Optional[Decimal] = Field(None, description="Firewood (kg/ha/year)")
+    grass_kg_per_ha: Optional[Decimal] = Field(None, description="Grass (kg/ha/year)")
+    bedding_material_kg_per_ha: Optional[Decimal] = Field(None, description="Bedding material (kg/ha/year)")
+    ntfp_kg_per_ha: Optional[Decimal] = Field(None, description="Non-timber forest products (kg/ha/year)")
+
     created_at: datetime
 
     class Config:

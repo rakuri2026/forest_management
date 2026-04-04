@@ -14,6 +14,7 @@ import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
 import { UserGroupMapTab } from '../components/UserGroupMapTab';
 import { TotalInventoryTab } from '../components/TotalInventoryTab';
 import { FieldInventoryTab } from '../components/FieldInventoryTab';
+import { CompartmentTab } from '../components/Compartment';
 import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
 import type { AnalysisOptions } from '../constants/analysisPresets';
 import { RasterLayerControl } from '../components/RasterLayerControl';
@@ -144,7 +145,7 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
   const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas'>('analysis');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments'>('analysis');
 
   // Re-analysis modal state
   const [showReanalysisModal, setShowReanalysisModal] = useState(false);
@@ -634,6 +635,16 @@ export default function CalculationDetail() {
               Sub-Areas
             </button>
             <button
+              onClick={() => setActiveTab('compartments')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'compartments'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Compartments
+            </button>
+            <button
               onClick={() => setActiveTab('fieldbook')}
               className={`px-6 py-3 border-b-2 font-medium text-sm ${
                 activeTab === 'fieldbook'
@@ -1051,6 +1062,12 @@ export default function CalculationDetail() {
                 </MapContainer>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'compartments' && (
+          <div className="p-6 h-full">
+            <CompartmentTab calculationId={calculation.id} />
           </div>
         )}
 

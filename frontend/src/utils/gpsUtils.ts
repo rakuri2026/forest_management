@@ -16,6 +16,16 @@ export interface GPSPoint {
   name?: string;
   elevation?: number;
   order?: number;
+  sn?: string | number; // Serial number (auto-detected)
+  description?: string; // Description field (auto-detected)
+  additionalFields?: Record<string, any>; // Other fields from CSV
+}
+
+export interface FieldDetectionResult {
+  snField?: string; // Name of detected SN field
+  descriptionField?: string; // Name of detected description field
+  additionalFields: string[]; // Other available fields
+  rawData: any[]; // Original CSV data
 }
 
 export interface CoordinateTransformOptions {
@@ -24,7 +34,232 @@ export interface CoordinateTransformOptions {
 }
 
 /**
- * Parse CSV file containing GPS coordinates
+ * Detect SN (serial number) field from CSV columns
+ * Priority: sn, serial_no, serial_number, point_no, point_number, no, number, id
+ * Returns field name if numeric values found, undefined otherwise
+ */
+export const detectSNField = (data: any[]): string | undefined => {
+  if (!data || data.length === 0) return undefined;
+
+  const firstRow = data[0];
+  const columns = Object.keys(firstRow);
+
+  // Priority order for SN field detection
+  const snFieldPatterns = [
+    /^sn$/i,
+    /^serial[_\s]?no$/i,
+    /^serial[_\s]?number$/i,
+    /^point[_\s]?no$/i,
+    /^point[_\s]?number$/i,
+    /^no$/i,
+    /^number$/i,
+    /^id$/i,
+  ];
+
+  // Try to find field matching patterns
+  for (const pattern of snFieldPatterns) {
+    const field = columns.find(col => pattern.test(col));
+    if (field) {
+      // Verify it contains numeric-like values
+      const value = firstRow[field];
+      if (value !== undefined && value !== null) {
+        const numValue = typeof value === 'number' ? value : parseFloat(String(value));
+        if (!isNaN(numValue)) {
+          return field;
+        }
+      }
+    }
+  }
+
+  // Look for any field that looks like a number in all rows
+  for (const col of columns) {
+    const allNumeric = data.slice(0, Math.min(5, data.length)).every(row => {
+      const value = row[col];
+      if (value === undefined || value === null || value === '') return false;
+      const numValue = typeof value === 'number' ? value : parseFloat(String(value));
+      return !isNaN(numValue);
+    });
+
+    if (allNumeric) {
+      return col;
+    }
+  }
+
+  return undefined;
+};
+
+/**
+ * Detect description field from CSV columns
+ * Priority: description, desc, name, label, remarks, note, comment
+ * Returns field name if text values found, undefined otherwise
+ */
+export const detectDescriptionField = (data: any[], snField?: string): string | undefined => {
+  if (!data || data.length === 0) return undefined;
+
+  const firstRow = data[0];
+  const columns = Object.keys(firstRow);
+
+  // Priority order for description field detection
+  const descFieldPatterns = [
+    /^description$/i,
+    /^desc$/i,
+    /^name$/i,
+    /^label$/i,
+    /^remarks?$/i,
+    /^notes?$/i,
+    /^comments?$/i,
+  ];
+
+  // Try to find field matching patterns (excluding SN field)
+  for (const pattern of descFieldPatterns) {
+    const field = columns.find(col => pattern.test(col) && col !== snField);
+    if (field) {
+      // Verify it contains text values
+      const value = String(firstRow[field] || '').trim();
+      if (value.length > 0) {
+        return field;
+      }
+    }
+  }
+
+  // Find first text column that's not lat/lon/elevation/sn
+  const excludedPatterns = [
+    /^(lat|latitude|lon|longitude|lng|x|y)$/i,
+    /^(elevation|elev|alt|altitude|z)$/i,
+  ];
+
+  for (const col of columns) {
+    if (col === snField) continue;
+    if (excludedPatterns.some(pattern => pattern.test(col))) continue;
+
+    const value = String(firstRow[col] || '').trim();
+    if (value.length > 0 && isNaN(parseFloat(value))) {
+      return col;
+    }
+  }
+
+  return undefined;
+};
+
+/**
+ * Detect additional fields (elevation, timestamp, etc.)
+ */
+export const detectAdditionalFields = (
+  data: any[],
+  excludeFields: string[]
+): string[] => {
+  if (!data || data.length === 0) return [];
+
+  const firstRow = data[0];
+  const columns = Object.keys(firstRow);
+
+  const standardFields = [
+    /^(lat|latitude|lon|longitude|lng|x|y)$/i,
+  ];
+
+  return columns.filter(col => {
+    // Exclude already detected fields
+    if (excludeFields.includes(col)) return false;
+
+    // Exclude standard coordinate fields
+    if (standardFields.some(pattern => pattern.test(col))) return false;
+
+    // Include if has value
+    const value = firstRow[col];
+    return value !== undefined && value !== null && String(value).trim() !== '';
+  });
+};
+
+/**
+ * Parse CSV file with field detection
+ * Returns GPS points and detected field information
+ */
+export const parseCSVWithFieldDetection = (
+  file: File
+): Promise<{ points: GPSPoint[]; fieldDetection: FieldDetectionResult }> => {
+  return new Promise((resolve, reject) => {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        try {
+          const rawData = results.data as any[];
+
+          // Detect fields
+          const snField = detectSNField(rawData);
+          const descriptionField = detectDescriptionField(rawData, snField);
+          const additionalFields = detectAdditionalFields(
+            rawData,
+            [snField, descriptionField, 'latitude', 'lat', 'longitude', 'lon', 'lng', 'x', 'y'].filter(Boolean) as string[]
+          );
+
+          const points: GPSPoint[] = rawData.map((row: any, index: number) => {
+            // Try different column name variations
+            const lat = parseFloat(
+              row.latitude || row.lat || row.Latitude || row.LAT || row.y || row.Y
+            );
+            const lon = parseFloat(
+              row.longitude || row.lon || row.lng || row.Longitude || row.LON || row.x || row.X
+            );
+
+            if (isNaN(lat) || isNaN(lon)) {
+              throw new Error(`Invalid coordinates in row ${index + 1}: lat=${lat}, lon=${lon}`);
+            }
+
+            // Get SN value (prefer detected field, fallback to index)
+            let snValue: string | number = index + 1;
+            if (snField && row[snField] !== undefined && row[snField] !== null) {
+              const parsed = parseFloat(String(row[snField]));
+              snValue = isNaN(parsed) ? String(row[snField]) : parsed;
+            }
+
+            // Get description value
+            const description = descriptionField ? String(row[descriptionField] || '') : undefined;
+
+            // Collect additional fields
+            const additionalFieldsData: Record<string, any> = {};
+            additionalFields.forEach(field => {
+              if (row[field] !== undefined && row[field] !== null) {
+                additionalFieldsData[field] = row[field];
+              }
+            });
+
+            return {
+              id: `gps-${index}`,
+              latitude: lat,
+              longitude: lon,
+              sn: snValue,
+              description: description,
+              name: row.name || row.Name || row.point_name || `Point ${index + 1}`,
+              elevation: row.elevation || row.elev || row.alt || row.altitude ?
+                parseFloat(row.elevation || row.elev || row.alt || row.altitude) : undefined,
+              order: index,
+              additionalFields: Object.keys(additionalFieldsData).length > 0 ? additionalFieldsData : undefined,
+            };
+          });
+
+          resolve({
+            points,
+            fieldDetection: {
+              snField,
+              descriptionField,
+              additionalFields,
+              rawData,
+            },
+          });
+        } catch (error) {
+          reject(error);
+        }
+      },
+      error: (error) => {
+        reject(new Error(`CSV parsing error: ${error.message}`));
+      },
+    });
+  });
+};
+
+/**
+ * Parse CSV file containing GPS coordinates (legacy function for backward compatibility)
  * Expected columns: latitude, longitude, name (optional), elevation (optional)
  */
 export const parseCSVCoordinates = (

@@ -82,6 +82,12 @@ class FieldInventorySamplePlot(Base):
     sample_plot_number = Column(Integer, nullable=False)
     location = Column(Geography('POINT', srid=4326), nullable=False)
 
+    # NTFP and other forest products (kg per 100 sqm per year)
+    firewood_kg_per_100sqm_per_year = Column(Numeric(15, 6), nullable=True)
+    grass_kg_per_100sqm_per_year = Column(Numeric(15, 6), nullable=True)
+    bedding_material_kg_per_100sqm_per_year = Column(Numeric(15, 6), nullable=True)
+    ntfp_kg_per_100sqm_per_year = Column(Numeric(15, 6), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
@@ -195,6 +201,12 @@ class FieldInventoryBlockSummary(Base):
     carbon_stock_tc_per_ha = Column(Numeric(15, 6), nullable=True)  # Carbon stock (tonnes C/ha)
     co2_equivalent_tco2_per_ha = Column(Numeric(15, 6), nullable=True)  # CO2 equivalent (tonnes CO2/ha)
     weighted_wood_density = Column(Numeric(5, 3), nullable=True)  # Volume-weighted wood density (t/m³)
+
+    # NTFP and other forest products (per hectare, extrapolated from 100 sqm plots)
+    firewood_kg_per_ha = Column(Numeric(15, 6), nullable=True)  # Firewood (kg/ha/year)
+    grass_kg_per_ha = Column(Numeric(15, 6), nullable=True)  # Grass (kg/ha/year)
+    bedding_material_kg_per_ha = Column(Numeric(15, 6), nullable=True)  # Bedding material (kg/ha/year)
+    ntfp_kg_per_ha = Column(Numeric(15, 6), nullable=True)  # Non-timber forest products (kg/ha/year)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)

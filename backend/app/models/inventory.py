@@ -101,6 +101,9 @@ class InventoryCalculation(Base):
     total_firewood_m3 = Column(Float, nullable=True)
     total_firewood_chatta = Column(Float, nullable=True)
 
+    # Compartment assignment flag (NEW)
+    needs_compartment_assignment = Column(Boolean, default=False, nullable=False)
+
     # Relationships
     user = relationship("User", back_populates="inventory_calculations")
     calculation = relationship("Calculation", foreign_keys=[calculation_id])
@@ -167,10 +170,16 @@ class InventoryTree(Base):
     original_x = Column(Float, nullable=True)  # Original longitude before correction
     original_y = Column(Float, nullable=True)  # Original latitude before correction
 
+    # Compartment assignment (NEW)
+    forest_block_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_blocks.id", ondelete="SET NULL"), nullable=True)
+    compartment_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_blocks.id", ondelete="SET NULL"), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     # Relationships
     inventory_calculation = relationship("InventoryCalculation", back_populates="trees")
+    forest_block = relationship("ForestBlock", foreign_keys=[forest_block_id])
+    compartment = relationship("ForestBlock", foreign_keys=[compartment_id])
 
     def __repr__(self):
         return f"<InventoryTree(id={self.id}, species='{self.species}', dbh={self.dia_cm})>"

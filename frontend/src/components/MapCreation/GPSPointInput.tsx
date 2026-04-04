@@ -4,6 +4,7 @@ import L from 'leaflet';
 import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import {
   parseCSVCoordinates,
+  parseCSVWithFieldDetection,
   parsePastedCoordinates,
   parseGPXFile,
   transformCoordinates,
@@ -11,6 +12,7 @@ import {
   gpsPointsToGeoJSON,
   detectEPSG,
   GPSPoint,
+  FieldDetectionResult,
 } from '../../utils/gpsUtils';
 
 // Fix Leaflet default marker icon
@@ -24,6 +26,7 @@ L.Icon.Default.mergeOptions({
 interface GPSPointInputProps {
   onPointsChange: (points: GPSPoint[]) => void;
   initialPoints?: GPSPoint[];
+  onFieldDetectionChange?: (fieldDetection: FieldDetectionResult | null) => void;
 }
 
 // Component to auto-fit map to markers
@@ -40,13 +43,14 @@ const FitBoundsToMarkers: React.FC<{ points: GPSPoint[] }> = ({ points }) => {
   return null;
 };
 
-const GPSPointInput: React.FC<GPSPointInputProps> = ({ onPointsChange, initialPoints = [] }) => {
+const GPSPointInput: React.FC<GPSPointInputProps> = ({ onPointsChange, initialPoints = [], onFieldDetectionChange }) => {
   const [points, setPoints] = useState<GPSPoint[]>(initialPoints);
   const [inputMethod, setInputMethod] = useState<'csv' | 'manual' | 'paste' | 'gpx'>('csv');
   const [epsgCode, setEpsgCode] = useState<string>('EPSG:4326');
   const [customEPSG, setCustomEPSG] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
+  const [fieldDetection, setFieldDetection] = useState<FieldDetectionResult | null>(null);
 
   // Manual entry form state
   const [manualLat, setManualLat] = useState<string>('');
@@ -75,11 +79,11 @@ const GPSPointInput: React.FC<GPSPointInputProps> = ({ onPointsChange, initialPo
     setSuccess('');
 
     try {
-      const parsedPoints = await parseCSVCoordinates(file);
+      const result = await parseCSVWithFieldDetection(file);
 
       // Transform if needed
       const actualEPSG = epsgCode === 'custom' ? customEPSG : epsgCode;
-      const transformedPoints = transformCoordinates(parsedPoints, {
+      const transformedPoints = transformCoordinates(result.points, {
         fromEPSG: actualEPSG,
         toEPSG: 'EPSG:4326',
       });
@@ -94,7 +98,17 @@ const GPSPointInput: React.FC<GPSPointInputProps> = ({ onPointsChange, initialPo
       }
 
       updatePoints(transformedPoints);
-      setSuccess(`Successfully loaded ${transformedPoints.length} GPS points from CSV`);
+      setFieldDetection(result.fieldDetection);
+
+      if (onFieldDetectionChange) {
+        onFieldDetectionChange(result.fieldDetection);
+      }
+
+      let successMsg = `Successfully loaded ${transformedPoints.length} GPS points from CSV`;
+      if (result.fieldDetection.snField) {
+        successMsg += ` (SN field: "${result.fieldDetection.snField}")`;
+      }
+      setSuccess(successMsg);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse CSV file');
     }

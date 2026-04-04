@@ -12,6 +12,7 @@ import {
   formatArea,
 } from '../../utils/geometryValidation';
 import BaseMapSelector from './BaseMapSelector';
+import GPSPointLayer, { LabelMode } from './GPSPointLayer';
 
 interface PolygonCreatorProps {
   gpsPoints?: GPSPoint[];
@@ -213,6 +214,13 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
   } | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showSaveIndicator, setShowSaveIndicator] = useState(false);
+
+  // GPS Point Layer Controls
+  const [gpsPointsVisible, setGpsPointsVisible] = useState(true);
+  const [gpsLabelMode, setGpsLabelMode] = useState<LabelMode>('sn');
+  const [gpsPointSize, setGpsPointSize] = useState(24);
+  const [gpsSnappingEnabled, setGpsSnappingEnabled] = useState(true);
+  const [showDescriptionField, setShowDescriptionField] = useState(false);
 
   // Refs for map control
   const mapRef = useRef<L.Map | null>(null);
@@ -544,6 +552,97 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
           </div>
         </div>
 
+        {/* GPS Point Display Controls */}
+        {gpsPoints && gpsPoints.length > 0 && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700">GPS Reference Points</h3>
+                <p className="text-xs text-gray-600 mt-1">
+                  {gpsPoints.length} points loaded. Use as reference for digitization and verification.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={gpsPointsVisible}
+                  onChange={(e) => setGpsPointsVisible(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span className="text-sm text-gray-700">Show Points</span>
+              </label>
+            </div>
+
+            {gpsPointsVisible && (
+              <div className="grid grid-cols-2 gap-4">
+                {/* Label Mode */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Label Mode
+                  </label>
+                  <select
+                    value={gpsLabelMode}
+                    onChange={(e) => setGpsLabelMode(e.target.value as LabelMode)}
+                    className="w-full text-sm border-gray-300 rounded-md"
+                  >
+                    <option value="sn">SN Only</option>
+                    <option value="description">Description</option>
+                    <option value="both">Both</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+
+                {/* Point Size */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Point Size: {gpsPointSize}px
+                  </label>
+                  <input
+                    type="range"
+                    min="20"
+                    max="32"
+                    value={gpsPointSize}
+                    onChange={(e) => setGpsPointSize(parseInt(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Show Description Field */}
+                {(gpsLabelMode === 'description' || gpsLabelMode === 'both') && (
+                  <div className="col-span-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showDescriptionField}
+                        onChange={(e) => setShowDescriptionField(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-xs text-gray-700">Show description field</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Snapping Control */}
+                {mode === 'manual' && (
+                  <div className="col-span-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={gpsSnappingEnabled}
+                        onChange={(e) => setGpsSnappingEnabled(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-xs text-gray-700">
+                        Snap to GPS points (optional - helps align digitization with reference points)
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Auto-create Mode */}
         {mode === 'auto' && (
           <div className="space-y-4">
@@ -759,21 +858,26 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
             <MapRefCapture onMapReady={handleMapReady} />
             <BaseMapSelector />
 
-            {/* Show GPS points if in auto mode */}
-            {mode === 'auto' && gpsPoints.length > 0 && (
+            {/* GPS Point Layer - visible in both auto and manual modes */}
+            {gpsPoints && gpsPoints.length > 0 && (
               <>
-                {/* GPS point markers */}
-                {gpsPoints.map((point) => (
-                  <Marker key={point.id} position={[point.latitude, point.longitude]} />
-                ))}
-
-                {/* Line connecting GPS points */}
-                <Polyline
-                  positions={gpsPoints.map((p) => [p.latitude, p.longitude])}
-                  color="blue"
-                  weight={2}
-                  dashArray="5, 5"
+                <GPSPointLayer
+                  points={gpsPoints}
+                  visible={gpsPointsVisible}
+                  labelMode={gpsLabelMode}
+                  pointSize={gpsPointSize}
+                  showDescriptionField={showDescriptionField}
                 />
+
+                {/* Line connecting GPS points in auto mode */}
+                {mode === 'auto' && (
+                  <Polyline
+                    positions={gpsPoints.map((p) => [p.latitude, p.longitude])}
+                    color="blue"
+                    weight={2}
+                    dashArray="5, 5"
+                  />
+                )}
               </>
             )}
 

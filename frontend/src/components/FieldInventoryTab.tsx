@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { fieldInventoryApi } from '../services/api';
 
 interface FieldInventoryTabProps {
@@ -277,6 +277,20 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
         // Count columns
         if (lowerCol === 'regencount') autoMapping['regen_count'] = col;
         if (lowerCol === 'saplingcount') autoMapping['sapling_count'] = col;
+
+        // NTFP columns (kg per 100 sqm per year)
+        if (lowerCol.includes('firewood') && lowerCol.includes('kg') && lowerCol.includes('100')) {
+          autoMapping['firewood_kg_per_100sqm_per_year'] = col;
+        }
+        if (lowerCol.includes('grass') && lowerCol.includes('kg') && lowerCol.includes('100')) {
+          autoMapping['grass_kg_per_100sqm_per_year'] = col;
+        }
+        if (lowerCol.includes('bedding') && lowerCol.includes('kg') && lowerCol.includes('100')) {
+          autoMapping['bedding_material_kg_per_100sqm_per_year'] = col;
+        }
+        if (lowerCol.includes('ntfp') && lowerCol.includes('kg') && lowerCol.includes('100')) {
+          autoMapping['ntfp_kg_per_100sqm_per_year'] = col;
+        }
       });
 
       // Step 2: Upload with mapping
@@ -1146,6 +1160,144 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
                     </table>
                   </div>
                 </div>
+
+                {/* NTFP Table (Nepali) */}
+                {summary && summary.blocks && Array.isArray(summary.blocks) && summary.blocks.length > 0 && (
+                  <div className="mt-8 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border-2 border-green-300 p-6 shadow-lg">
+                    <h4 className="text-lg font-bold text-green-800 mb-4 text-center">
+                      प्रति हेक्टर वार्षिक रूपमा उचित किसिमबाट प्राप्त हुन सक्ने झिँजा दाउरा, घाँस, सोतर तथा गैह्रकाष्ठ वन पैदावारको परिमाण
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm bg-white rounded-lg">
+                        <thead className="bg-green-100">
+                          <tr>
+                            <th rowSpan={2} className="px-4 py-3 text-left text-sm font-bold text-gray-700 border-r border-gray-300">
+                              बन खन्डको नाम
+                            </th>
+                            <th rowSpan={2} className="px-4 py-3 text-left text-sm font-bold text-gray-700 border-r border-gray-300">
+                              वन पैदावारको किसिम
+                            </th>
+                            <th colSpan={2} className="px-4 py-2 text-center text-sm font-bold text-gray-700">
+                              वार्षिक प्राप्त हुने परिमाण (के.जी/हे)
+                            </th>
+                          </tr>
+                          <tr>
+                            <th className="px-4 py-2 text-right text-sm font-medium text-gray-600 border-r border-gray-300">
+                              के.जी
+                            </th>
+                            <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">
+                              रूपान्तरण
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {summary.blocks.map((block: any, idx: number) => {
+                            // Check if this block has any NTFP data
+                            const hasNTFP = block.firewood_kg_per_ha || block.grass_kg_per_ha ||
+                                           block.bedding_material_kg_per_ha || block.ntfp_kg_per_ha;
+
+                            if (!hasNTFP) return null;
+
+                            const firewood = block.firewood_kg_per_ha ? Number(block.firewood_kg_per_ha) : 0;
+                            const grass = block.grass_kg_per_ha ? Number(block.grass_kg_per_ha) : 0;
+                            const bedding = block.bedding_material_kg_per_ha ? Number(block.bedding_material_kg_per_ha) : 0;
+                            const ntfp = block.ntfp_kg_per_ha ? Number(block.ntfp_kg_per_ha) : 0;
+
+                            // 25 kg = 1 भारी for firewood
+                            const firewood_bhari = firewood > 0 ? (firewood / 25).toFixed(2) : '0.00';
+                            const firewood_metric_ton = firewood > 0 ? (firewood / 1000).toFixed(3) : '0.000';
+                            const grass_metric_ton = grass > 0 ? (grass / 1000).toFixed(3) : '0.000';
+                            const bedding_metric_ton = bedding > 0 ? (bedding / 1000).toFixed(3) : '0.000';
+                            const ntfp_metric_ton = ntfp > 0 ? (ntfp / 1000).toFixed(3) : '0.000';
+
+                            return (
+                              <React.Fragment key={idx}>
+                                {/* Firewood row */}
+                                {firewood > 0 && (
+                                  <tr className="hover:bg-gray-50">
+                                    <td rowSpan={4} className="px-4 py-3 text-sm font-semibold text-gray-900 border-r border-gray-300 align-top">
+                                      {block.block_name}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300">
+                                      झिजा दाउरा (Fire wood)
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 border-r border-gray-300">
+                                      {firewood.toFixed(2)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-600">
+                                      {firewood_bhari} भारी / {firewood_metric_ton} मे.टन
+                                    </td>
+                                  </tr>
+                                )}
+                                {/* Grass row */}
+                                {grass > 0 && (
+                                  <tr className="hover:bg-gray-50">
+                                    {firewood === 0 && (
+                                      <td rowSpan={4} className="px-4 py-3 text-sm font-semibold text-gray-900 border-r border-gray-300 align-top">
+                                        {block.block_name}
+                                      </td>
+                                    )}
+                                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300">
+                                      भुइ घाँस (Ground Grass)
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 border-r border-gray-300">
+                                      {grass.toFixed(2)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-600">
+                                      {grass_metric_ton} मे.टन
+                                    </td>
+                                  </tr>
+                                )}
+                                {/* Bedding material row */}
+                                {bedding > 0 && (
+                                  <tr className="hover:bg-gray-50">
+                                    {firewood === 0 && grass === 0 && (
+                                      <td rowSpan={4} className="px-4 py-3 text-sm font-semibold text-gray-900 border-r border-gray-300 align-top">
+                                        {block.block_name}
+                                      </td>
+                                    )}
+                                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300">
+                                      सोतर (Bedding Material)
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 border-r border-gray-300">
+                                      {bedding.toFixed(2)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-600">
+                                      {bedding_metric_ton} मे.टन
+                                    </td>
+                                  </tr>
+                                )}
+                                {/* NTFP row */}
+                                {ntfp > 0 && (
+                                  <tr className="hover:bg-gray-50">
+                                    {firewood === 0 && grass === 0 && bedding === 0 && (
+                                      <td rowSpan={4} className="px-4 py-3 text-sm font-semibold text-gray-900 border-r border-gray-300 align-top">
+                                        {block.block_name}
+                                      </td>
+                                    )}
+                                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300">
+                                      गैह्रकाष्ठ वन पैदावार (NTFP)
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 border-r border-gray-300">
+                                      {ntfp.toFixed(2)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-600">
+                                      {ntfp_metric_ton} मे.टन
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-4 text-xs text-gray-600 italic">
+                      * झिजा दाउरा रूपान्तरण: 25 के.जी = 1 भारी<br />
+                      * मे.टन = मेट्रिक टन (1,000 के.जी = 1 मे.टन)
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1348,11 +1500,11 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              CSV File (22 columns)
+              CSV or Excel File
             </label>
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx,.xls"
               onChange={handleFileChange}
               className="block w-full text-sm text-gray-500
                 file:mr-4 file:py-2 file:px-4
@@ -1361,6 +1513,11 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
                 file:bg-green-50 file:text-green-700
                 hover:file:bg-green-100"
             />
+            <p className="mt-1 text-xs text-gray-500">
+              Supported formats: CSV (.csv) or Excel (.xlsx, .xls)
+              <br />
+              <span className="font-medium text-green-600">✓ Excel: System auto-detects the correct sheet</span>
+            </p>
           </div>
 
           <button
@@ -1374,7 +1531,21 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
 
         {/* Information */}
         <div className="mt-6 p-4 bg-gray-50 rounded-md">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Required CSV Columns:</h4>
+          <h4 className="text-sm font-semibold text-gray-700 mb-3">File Requirements:</h4>
+
+          {/* Excel-specific requirements */}
+          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded">
+            <h5 className="text-sm font-semibold text-blue-900 mb-1">For Excel Files (.xlsx, .xls):</h5>
+            <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside ml-2">
+              <li className="font-medium">System automatically detects the correct sheet based on column names</li>
+              <li>Preferred sheet name: "Data Template" (but not required)</li>
+              <li>Extra columns will be ignored (only required columns are processed)</li>
+              <li>Supports Unicode filenames (e.g., Nepali characters)</li>
+            </ul>
+          </div>
+
+          {/* Common requirements */}
+          <h5 className="text-sm font-semibold text-gray-700 mb-2">Required Columns (CSV & Excel):</h5>
           <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
             <li>Block Name, Sample Plot Number</li>
             <li>Latitude, Longitude</li>

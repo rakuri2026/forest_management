@@ -169,6 +169,12 @@ class FieldInventoryService:
         lon_col = column_mapping.get('longitude')
         lat_col = column_mapping.get('latitude')
 
+        # NTFP column mappings (optional)
+        firewood_col = column_mapping.get('firewood_kg_per_100sqm_per_year')
+        grass_col = column_mapping.get('grass_kg_per_100sqm_per_year')
+        bedding_col = column_mapping.get('bedding_material_kg_per_100sqm_per_year')
+        ntfp_col = column_mapping.get('ntfp_kg_per_100sqm_per_year')
+
         for idx, row in df.iterrows():
             try:
                 block_name = str(row[block_col])
@@ -186,11 +192,53 @@ class FieldInventoryService:
             # If multiple rows have different coordinates for same plot (common when GPS recorded per tree),
             # we use the FIRST coordinate encountered as the plot center
             if key not in sample_plots_dict:
+                # Extract NTFP values (optional, default to None)
+                firewood = None
+                grass = None
+                bedding = None
+                ntfp = None
+
+                try:
+                    if firewood_col and firewood_col in df.columns:
+                        val = row[firewood_col]
+                        if pd.notna(val) and val != '':
+                            firewood = float(val)
+                except (ValueError, TypeError):
+                    pass
+
+                try:
+                    if grass_col and grass_col in df.columns:
+                        val = row[grass_col]
+                        if pd.notna(val) and val != '':
+                            grass = float(val)
+                except (ValueError, TypeError):
+                    pass
+
+                try:
+                    if bedding_col and bedding_col in df.columns:
+                        val = row[bedding_col]
+                        if pd.notna(val) and val != '':
+                            bedding = float(val)
+                except (ValueError, TypeError):
+                    pass
+
+                try:
+                    if ntfp_col and ntfp_col in df.columns:
+                        val = row[ntfp_col]
+                        if pd.notna(val) and val != '':
+                            ntfp = float(val)
+                except (ValueError, TypeError):
+                    pass
+
                 sample_plot = FieldInventorySamplePlot(
                     field_inventory_calculation_id=field_inventory_id,
                     block_name=block_name,
                     sample_plot_number=plot_number,
-                    location=f'SRID=4326;POINT({lon} {lat})'
+                    location=f'SRID=4326;POINT({lon} {lat})',
+                    firewood_kg_per_100sqm_per_year=firewood,
+                    grass_kg_per_100sqm_per_year=grass,
+                    bedding_material_kg_per_100sqm_per_year=bedding,
+                    ntfp_kg_per_100sqm_per_year=ntfp
                 )
                 self.db.add(sample_plot)
                 sample_plots_dict[key] = sample_plot
@@ -702,6 +750,37 @@ class FieldInventoryService:
                     block_name=block_name
                 )
 
+            # Calculate NTFP averages and per-hectare values
+            # Average NTFP values across all plots in the block, then convert from 100 sqm to per hectare
+            ntfp_firewood = 0.0
+            ntfp_grass = 0.0
+            ntfp_bedding = 0.0
+            ntfp_ntfp = 0.0
+
+            for plot in plots:
+                if plot.firewood_kg_per_100sqm_per_year:
+                    ntfp_firewood += float(plot.firewood_kg_per_100sqm_per_year)
+                if plot.grass_kg_per_100sqm_per_year:
+                    ntfp_grass += float(plot.grass_kg_per_100sqm_per_year)
+                if plot.bedding_material_kg_per_100sqm_per_year:
+                    ntfp_bedding += float(plot.bedding_material_kg_per_100sqm_per_year)
+                if plot.ntfp_kg_per_100sqm_per_year:
+                    ntfp_ntfp += float(plot.ntfp_kg_per_100sqm_per_year)
+
+            # Calculate plot average (sum / number of plots)
+            if total_sample_plots > 0:
+                ntfp_firewood = ntfp_firewood / total_sample_plots
+                ntfp_grass = ntfp_grass / total_sample_plots
+                ntfp_bedding = ntfp_bedding / total_sample_plots
+                ntfp_ntfp = ntfp_ntfp / total_sample_plots
+
+            # Convert from per 100 sqm to per hectare (multiply by 100)
+            # 1 hectare = 10,000 sqm = 100 × 100 sqm
+            ntfp_firewood_per_ha = ntfp_firewood * 100
+            ntfp_grass_per_ha = ntfp_grass * 100
+            ntfp_bedding_per_ha = ntfp_bedding * 100
+            ntfp_ntfp_per_ha = ntfp_ntfp * 100
+
             # Create block summary
             block_summary = FieldInventoryBlockSummary(
                 field_inventory_calculation_id=field_inventory_id,
@@ -723,7 +802,12 @@ class FieldInventoryService:
                 bgb_t_per_ha=carbon_metrics['bgb_t_per_ha'],
                 total_biomass_t_per_ha=carbon_metrics['total_biomass_t_per_ha'],
                 carbon_stock_tc_per_ha=carbon_metrics['carbon_stock_tc_per_ha'],
-                co2_equivalent_tco2_per_ha=carbon_metrics['co2_equivalent_tco2_per_ha']
+                co2_equivalent_tco2_per_ha=carbon_metrics['co2_equivalent_tco2_per_ha'],
+                # NTFP metrics (kg per hectare per year)
+                firewood_kg_per_ha=round(ntfp_firewood_per_ha, 6) if ntfp_firewood_per_ha > 0 else None,
+                grass_kg_per_ha=round(ntfp_grass_per_ha, 6) if ntfp_grass_per_ha > 0 else None,
+                bedding_material_kg_per_ha=round(ntfp_bedding_per_ha, 6) if ntfp_bedding_per_ha > 0 else None,
+                ntfp_kg_per_ha=round(ntfp_ntfp_per_ha, 6) if ntfp_ntfp_per_ha > 0 else None
             )
 
             self.db.add(block_summary)
