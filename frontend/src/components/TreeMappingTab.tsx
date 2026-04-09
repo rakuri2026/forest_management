@@ -1410,6 +1410,57 @@ function TreeMappingMap({ inventoryId, trees, calculationId }: TreeMappingMapPro
           >
             {measureMode ? 'Measure ON' : 'Measure'}
           </button>
+          <div className="flex items-center gap-1 ml-2 border-l pl-2">
+            <span className="text-xs text-gray-500">Grid:</span>
+            <button
+              onClick={async () => {
+                try {
+                  const response = await fetch(`/api/inventory/${inventoryId}/export-grid?format=geojson`, {
+                    headers: {
+                      'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                    }
+                  });
+                  if (!response.ok) {
+                    const err = await response.json().catch(() => ({ detail: 'Export failed' }));
+                    throw new Error(err.detail || 'Export failed');
+                  }
+                  const blob = await response.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `grid_${inventoryId}.geojson`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (err: any) {
+                  console.error('GeoJSON export failed:', err);
+                  alert(err.message || 'Failed to export grid');
+                }
+              }}
+              className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              GeoJSON
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const blob = await inventoryApi.exportGrid(inventoryId, 'kml');
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `grid_${inventoryId}.kml`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (err: any) {
+                  console.error('KML export failed:', err);
+                  const msg = err?.response?.data?.detail || 'Failed to export KML';
+                  alert(msg);
+                }
+              }}
+              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              KML
+            </button>
+          </div>
         </div>
       </div>
 

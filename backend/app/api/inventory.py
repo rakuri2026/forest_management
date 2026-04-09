@@ -156,7 +156,6 @@ async def get_grid_cells(
     """), {"inv_id": str(inventory_id)}).scalar()
 
     if existing_cells and existing_cells > 0:
-        # Use grid cells from persistent storage - these match tree grid_cell_ids
         logger.info(f"[get_grid_cells] Using {existing_cells} grid cells from database")
         grid_cells_result = db.execute(text("""
             SELECT 
@@ -182,7 +181,6 @@ async def get_grid_cells(
                     "geometry": geom_wgs84
                 })
     else:
-        # Fallback: generate grid cells (should not happen after re-processing)
         logger.warning(f"[get_grid_cells] No stored grid cells found, generating from scratch")
         
         features = []
@@ -203,7 +201,6 @@ async def get_grid_cells(
                 """), {"xmin": cell_xmin, "ymin": cell_ymin, "xmax": cell_xmax, "ymax": cell_ymax, "epsg": projection_epsg}).scalar()
                 
                 if result:
-                    import json
                     geom = json.loads(result)
                     features.append({
                         "type": "Feature",
@@ -225,6 +222,203 @@ async def get_grid_cells(
         "features": features,
         "metadata": grid_metadata
     }
+
+
+@router.get("/{inventory_id}/export-grid")
+async def export_grid(
+    inventory_id: UUID,
+    format: str = Query("geojson", regex="^(geojson|kml)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Export grid cells as GeoJSON or KML file
+    """
+    from fastapi.responses import StreamingResponse
+    from datetime import datetime
+    
+    logger.info(f"[export_grid] Exporting grid for inventory {inventory_id} as {format}")
+    
+    try:
+        inventory = db.query(InventoryCalculation).filter(
+            InventoryCalculation.id == inventory_id,
+            InventoryCalculation.user_id == current_user.id
+        ).first()
+        
+        if not inventory:
+            raise HTTPException(status_code=404, detail="Inventory not found")
+        
+        logger.info(f"[export_grid] Inventory status: {inventory.status}")
+        
+        grid_cells_result = db.execute(text("""
+            SELECT 
+                gc.cell_id,
+                ST_AsGeoJSON(gc.geom) as geom_wgs84,
+                COUNT(t.id) as tree_count,
+                COUNT(CASE WHEN t.remark = 'Mother Tree' THEN 1 END) as mother_count,
+                COUNT(CASE WHEN t.remark = 'Felling Tree' THEN 1 END) as felling_count,
+                COUNT(CASE WHEN t.remark = 'Pole' THEN 1 END) as pole_count,
+                COUNT(CASE WHEN t.remark = 'Seedling' THEN 1 END) as seedling_count,
+                COALESCE(SUM(t.net_volume), 0) as total_net_volume
+            FROM inventory_grid_cells gc
+            LEFT JOIN inventory_trees t ON t.grid_cell_id = gc.cell_id 
+                AND t.inventory_calculation_id = gc.inventory_calculation_id
+            WHERE gc.inventory_calculation_id = :inv_id
+            GROUP BY gc.cell_id, gc.geom
+            ORDER BY gc.cell_id
+        """), {"inv_id": str(inventory_id)}).fetchall()
+        
+        logger.info(f"[export_grid] Found {len(grid_cells_result) if grid_cells_result else 0} grid cells")
+        
+        if not grid_cells_result:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No grid cells found. Inventory status: {inventory.status}. Please re-process the inventory."
+            )
+        
+        forest_name = "inventory"
+        if inventory.calculation_id:
+            calc = db.execute(text("""
+                SELECT forest_name FROM calculations WHERE id = :calc_id
+            """), {"calc_id": str(inventory.calculation_id)}).scalar()
+            if calc:
+                import unicodedata
+                forest_name = unicodedata.normalize('NFKD', str(calc)).encode('ascii', 'ignore').decode('ascii').replace(' ', '_')
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if format == "kml":
+            import tempfile
+            import os
+            
+            kml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Grid Cells - {forest_name}</name>
+    <description>Grid cells from tree inventory</description>
+    <Style id="gridCell">
+      <LineStyle>
+        <color>ff3b82f6</color>
+        <width>2</width>
+      </LineStyle>
+      <PolyStyle>
+        <color>1a3b82f6</color>
+        <fill>1</fill>
+        <outline>1</outline>
+      </PolyStyle>
+    </Style>
+'''.format(forest_name=forest_name)
+            
+            for row in grid_cells_result:
+                cell_id = row[0]
+                geom_dict = json.loads(row[1]) if row[1] else None
+                
+                if geom_dict and geom_dict.get('type') == 'Polygon':
+                    coords = geom_dict['coordinates'][0]
+                    coord_str = ' '.join([f"{c[0]},{c[1]},0" for c in coords])
+                    
+                    kml_content += f'''    <Placemark>
+      <name>Cell {cell_id}</name>
+      <styleUrl>#gridCell</styleUrl>
+      <ExtendedData>
+        <Data name="cell_id"><value>{cell_id}</value></Data>
+        <Data name="tree_count"><value>{row[2] or 0}</value></Data>
+        <Data name="mother_count"><value>{row[3] or 0}</value></Data>
+        <Data name="felling_count"><value>{row[4] or 0}</value></Data>
+        <Data name="pole_count"><value>{row[5] or 0}</value></Data>
+        <Data name="seedling_count"><value>{row[6] or 0}</value></Data>
+        <Data name="net_vol_m3"><value>{float(row[7]) if row[7] else 0.0:.3f}</value></Data>
+      </ExtendedData>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>{coord_str}</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+'''
+            
+            kml_content += '''  </Document>
+</kml>'''
+            
+            logger.info(f"[export_grid] KML exported successfully")
+            
+            return StreamingResponse(
+                iter([kml_content]),
+                media_type='application/vnd.google-earth.kml+xml',
+                headers={'Content-Disposition': f'attachment; filename="{forest_name}_grid_{timestamp}.kml"'}
+            )
+        
+        else:  # GeoJSON format
+            features = []
+            for row in grid_cells_result:
+                try:
+                    cell_id = int(row[0])
+                    geom_json = row[1]
+                    
+                    if geom_json:
+                        geom_dict = json.loads(geom_json) if isinstance(geom_json, str) else geom_json
+                        
+                        def to_int(val):
+                            if val is None:
+                                return 0
+                            if isinstance(val, (int, np.integer)):
+                                return int(val)
+                            return int(val) if val else 0
+                        
+                        def to_float(val):
+                            if val is None:
+                                return 0.0
+                            if isinstance(val, (float, np.floating)):
+                                return round(float(val), 3)
+                            try:
+                                return round(float(val), 3)
+                            except:
+                                return 0.0
+                        
+                        features.append({
+                            "type": "Feature",
+                            "id": cell_id,
+                            "geometry": geom_dict,
+                            "properties": {
+                                "cell_id": cell_id,
+                                "tree_count": to_int(row[2]),
+                                "mother_count": to_int(row[3]),
+                                "felling_count": to_int(row[4]),
+                                "pole_count": to_int(row[5]),
+                                "seedling_count": to_int(row[6]),
+                                "net_vol_m3": to_float(row[7])
+                            }
+                        })
+                except Exception as feat_err:
+                    logger.error(f"[export_grid] Error processing cell {row[0]}: {feat_err}")
+                    continue
+            
+            logger.info(f"[export_grid] GeoJSON: {len(features)} features processed")
+            
+            geojson_data = {
+                "type": "FeatureCollection",
+                "features": features
+            }
+            
+            geojson_str = json.dumps(geojson_data, ensure_ascii=False)
+            
+            logger.info(f"[export_grid] GeoJSON exported with {len(features)} features, size: {len(geojson_str)} bytes")
+            
+            return StreamingResponse(
+                iter([geojson_str]),
+                media_type='application/json',
+                headers={'Content-Disposition': f'attachment; filename="{forest_name}_grid_{timestamp}.geojson"'}
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[export_grid] Export failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 
 def convert_numpy_types(obj: Any) -> Any:

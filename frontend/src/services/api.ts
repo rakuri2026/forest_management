@@ -694,6 +694,15 @@ export const inventoryApi = {
     const response = await api.get(`/api/inventory/${inventoryId}/grid-cells`);
     return response.data;
   },
+
+  // Export grid cells as GeoJSON or KML
+  exportGrid: async (inventoryId: string, format: 'geojson' | 'kml'): Promise<Blob> => {
+    const response = await api.get(`/api/inventory/${inventoryId}/export-grid`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    return response.data;
+  },
 };
 
 // Field Inventory endpoints
