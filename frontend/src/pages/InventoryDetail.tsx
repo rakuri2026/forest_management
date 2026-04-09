@@ -118,7 +118,7 @@ export default function InventoryDetail() {
       {summary && (
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">Summary Statistics</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
             <div>
               <p className="text-sm text-gray-500">Total Trees</p>
               <p className="mt-1 text-3xl font-bold text-gray-900">{summary.total_trees || 0}</p>
@@ -130,6 +130,10 @@ export default function InventoryDetail() {
             <div>
               <p className="text-sm text-gray-500">Felling Trees</p>
               <p className="mt-1 text-3xl font-bold text-orange-600">{summary.felling_trees_count || 0}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Poles</p>
+              <p className="mt-1 text-3xl font-bold text-yellow-600">{summary.pole_count || 0}</p>
             </div>
             <div>
               <p className="text-sm text-gray-500">Seedlings</p>

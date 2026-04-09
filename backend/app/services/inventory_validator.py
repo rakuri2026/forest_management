@@ -227,7 +227,7 @@ class InventoryValidator:
         if duplicate_check:
             report['warnings'].append(duplicate_check)
 
-        # 9. Normalize class column (A/B/C/D, I/II/III/IV, क/ख/ग/घ → 1/2/3/4)
+        # 9. Normalize class column (A/B/C/D, I/II/III/IV, क/ख/ग/घ -> 1/2/3/4)
         class_col = self._detect_class_column(df)
         if class_col:
             df, class_report = self.class_normalizer.normalize_dataframe(df, class_col)

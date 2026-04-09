@@ -646,6 +646,36 @@ async def preview_split(
         if not block:
             raise HTTPException(status_code=404, detail="Forest block not found")
 
+        # Check if THIS block already has compartments
+        existing_compartments = db.query(ForestBlock).filter(
+            ForestBlock.parent_block_id == block.id,
+            ForestBlock.is_compartment == True
+        ).count()
+
+        if existing_compartments > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="This block already has compartments. Please delete them first or select a different block."
+            )
+
+        # Check if ANY other block in this calculation already has compartments
+        other_blocks_with_compartments = db.query(ForestBlock).filter(
+            ForestBlock.calculation_id == block.calculation_id,
+            ForestBlock.id != block.id,
+            ForestBlock.is_compartment == False
+        ).all()
+
+        for other_block in other_blocks_with_compartments:
+            other_compartment_count = db.query(ForestBlock).filter(
+                ForestBlock.parent_block_id == other_block.id,
+                ForestBlock.is_compartment == True
+            ).count()
+            if other_compartment_count > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot create compartments: Block '{other_block.name}' already has {other_compartment_count} compartments. You must delete existing compartments before creating new ones."
+                )
+
         # Convert to Shapely polygon
         polygon = postgis_to_shapely(block.geometry)
 
@@ -746,7 +776,7 @@ async def execute_split(
         if not block:
             raise HTTPException(status_code=404, detail="Forest block not found")
 
-        # Check if block already has compartments
+        # Check if THIS block already has compartments
         existing_compartments = db.query(ForestBlock).filter(
             ForestBlock.parent_block_id == block.id,
             ForestBlock.is_compartment == True
@@ -755,8 +785,26 @@ async def execute_split(
         if existing_compartments > 0:
             raise HTTPException(
                 status_code=400,
-                detail="Block already has compartments. Please delete them first or select a different block."
+                detail="This block already has compartments. Please delete them first or select a different block."
             )
+
+        # Check if ANY other block in this calculation already has compartments
+        other_blocks_with_compartments = db.query(ForestBlock).filter(
+            ForestBlock.calculation_id == block.calculation_id,
+            ForestBlock.id != block.id,
+            ForestBlock.is_compartment == False
+        ).all()
+
+        for other_block in other_blocks_with_compartments:
+            other_compartment_count = db.query(ForestBlock).filter(
+                ForestBlock.parent_block_id == other_block.id,
+                ForestBlock.is_compartment == True
+            ).count()
+            if other_compartment_count > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot create compartments: Block '{other_block.name}' already has {other_compartment_count} compartments. You must delete existing compartments before creating new ones."
+                )
 
         # Convert to Shapely polygon
         polygon = postgis_to_shapely(block.geometry)
@@ -1100,6 +1148,26 @@ async def get_trees_for_map(
         for tree in inventory_trees:
             try:
                 location = to_shape(tree.location)
+                
+                # Calculate DBH class based on diameter
+                dbh = float(tree.dia_cm) if tree.dia_cm else 0
+                if dbh < 4:
+                    dbh_class = 'Regeneration (0.1-4)'
+                elif dbh < 10:
+                    dbh_class = 'Sapling (4-10)'
+                elif dbh < 20:
+                    dbh_class = 'Small pole (10-20)'
+                elif dbh < 30:
+                    dbh_class = 'Large pole (20-30)'
+                elif dbh < 40:
+                    dbh_class = 'Small tree (30-40)'
+                elif dbh < 50:
+                    dbh_class = 'Medium tree (40-50)'
+                elif dbh < 60:
+                    dbh_class = 'Large tree (50-60)'
+                else:
+                    dbh_class = 'Very large tree (>60)'
+                
                 tree_features.append({
                     "id": str(tree.id),
                     "latitude": location.y,
@@ -1108,8 +1176,11 @@ async def get_trees_for_map(
                     "dbh_cm": float(tree.dia_cm) if tree.dia_cm else 0,
                     "height_m": float(tree.height_m) if tree.height_m else 0,
                     "volume_m3": float(tree.tree_volume) if tree.tree_volume else 0,
+                    "dbh_class": dbh_class,
                     "compartment_id": str(tree.compartment_id) if tree.compartment_id else None,
                     "block_id": str(tree.forest_block_id) if tree.forest_block_id else None,
+                    "remark": tree.remark,
+                    "grid_cell_id": tree.grid_cell_id,
                     "source": "inventory"
                 })
             except Exception as tree_err:
@@ -1136,6 +1207,26 @@ async def get_trees_for_map(
                     plot = tree.sample_plot
                     if plot and plot.location:
                         plot_location = to_shape(plot.location)
+                        
+                        # Calculate DBH class
+                        dbh = float(tree.dbh_cm) if tree.dbh_cm else 0
+                        if dbh < 4:
+                            dbh_class = 'Regeneration (0.1-4)'
+                        elif dbh < 10:
+                            dbh_class = 'Sapling (4-10)'
+                        elif dbh < 20:
+                            dbh_class = 'Small pole (10-20)'
+                        elif dbh < 30:
+                            dbh_class = 'Large pole (20-30)'
+                        elif dbh < 40:
+                            dbh_class = 'Small tree (30-40)'
+                        elif dbh < 50:
+                            dbh_class = 'Medium tree (40-50)'
+                        elif dbh < 60:
+                            dbh_class = 'Large tree (50-60)'
+                        else:
+                            dbh_class = 'Very large tree (>60)'
+                        
                         tree_features.append({
                             "id": str(tree.id),
                             "latitude": plot_location.y,
@@ -1144,8 +1235,10 @@ async def get_trees_for_map(
                             "dbh_cm": float(tree.dbh_cm) if tree.dbh_cm else 0,
                             "height_m": float(tree.height_m) if tree.height_m else 0,
                             "volume_m3": float(tree.tree_volume) if tree.tree_volume else 0,
+                            "dbh_class": dbh_class,
                             "compartment_id": None,
                             "block_id": None,
+                            "remark": None,
                             "source": "field_inventory"
                         })
                 except Exception as tree_err:
@@ -1153,9 +1246,19 @@ async def get_trees_for_map(
         
         logger.info(f"[get_trees_for_map] Total trees: {len(tree_features)}")
         
+        # Get grid spacing from inventory calculations if available
+        grid_spacing = None
+        inventory_id = None
+        if inventory_calcs:
+            ic = inventory_calcs[0]
+            grid_spacing = float(ic.grid_spacing_meters) if ic.grid_spacing_meters else None
+            inventory_id = str(ic.id)
+        
         return {
             "count": len(tree_features),
-            "trees": tree_features
+            "trees": tree_features,
+            "grid_spacing_meters": grid_spacing,
+            "inventory_id": inventory_id
         }
         
     except Exception as e:

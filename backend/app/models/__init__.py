@@ -28,6 +28,7 @@ from .user_group import UserGroupExtent, UserGroupBuilding
 from .household_information import HouseholdInformation
 from .caste_classification import CasteClassification
 from .forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialCommittee
+from .yearly_activities import PotentialActivity, ProposedYearlyActivity, ActivityYearDetail
 
 __all__ = [
     "User",
@@ -63,4 +64,7 @@ __all__ = [
     "ForestUserCommittee",
     "AdvisoryCommittee",
     "FinancialCommittee",
+    "PotentialActivity",
+    "ProposedYearlyActivity",
+    "ActivityYearDetail",
 ]

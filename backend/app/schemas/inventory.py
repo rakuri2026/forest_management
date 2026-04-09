@@ -102,6 +102,10 @@ class InventoryTreeResponse(BaseModel):
     remark: Optional[str]
     grid_cell_id: Optional[int]
 
+    # Compartment assignment
+    compartment_id: Optional[UUID]
+    compartment_name: Optional[str]
+
     # Coordinates (returned as lon, lat)
     longitude: Optional[float]
     latitude: Optional[float]
@@ -121,7 +125,7 @@ class InventoryTreesListResponse(BaseModel):
 
 class InventoryUpdateTreeRequest(BaseModel):
     """Schema for updating tree remark"""
-    remark: str = Field(..., pattern="^(Mother Tree|Felling Tree|Seedling)$")
+    remark: str = Field(..., pattern="^(Mother Tree|Felling Tree|Seedling|Pole)$")
 
 
 class InventorySummaryResponse(BaseModel):
@@ -131,6 +135,7 @@ class InventorySummaryResponse(BaseModel):
     mother_trees_count: int
     felling_trees_count: int
     seedling_count: int
+    pole_count: int
 
     # Volume summary
     total_volume_m3: float
@@ -138,6 +143,27 @@ class InventorySummaryResponse(BaseModel):
     total_net_volume_cft: float
     total_firewood_m3: float
     total_firewood_chatta: float
+
+    # Stand type counts
+    regeneration_count: Optional[int] = 0
+    sapling_count: Optional[int] = 0
+    stand_pole_count: Optional[int] = 0
+    tree_count: Optional[int] = 0
+
+    # Volume by category
+    felling_volume_m3: Optional[float] = 0
+    mother_volume_m3: Optional[float] = 0
+    pole_volume_m3: Optional[float] = 0
+
+    # Timber volume (net volume from felling + mother trees)
+    timber_volume_m3: Optional[float] = 0
+    timber_volume_cft: Optional[float] = 0
+
+    # Compartment breakdown with tree categories
+    compartment_breakdown: Optional[Any] = None
+
+    # Species breakdown with volumes
+    species_breakdown: Optional[Any] = None
 
     # Species distribution
     species_distribution: Dict[str, int]

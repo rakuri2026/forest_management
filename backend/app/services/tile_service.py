@@ -766,7 +766,7 @@ class TileService:
                 draw.rectangle([x1, y1, x2, y2], fill=color)
 
         elif layer_name == 'soil_carbon':
-            # For Soil Organic Carbon, use low→high gradient
+            # For Soil Organic Carbon, use low->high gradient
             for sample in raster_data:
                 val = sample['val']
                 if val is None:
@@ -785,7 +785,7 @@ class TileService:
                 draw.rectangle([x1, y1, x2, y2], fill=color)
 
         elif layer_name == 'soil_fertility':
-            # For Soil Fertility Index, use poor→excellent gradient
+            # For Soil Fertility Index, use poor->excellent gradient
             for sample in raster_data:
                 val = sample['val']
                 if val is None:
@@ -852,7 +852,7 @@ class TileService:
         """
         Get RGBA color for elevation value using dynamic classification
 
-        Colors follow temperature gradient (warmer low → cooler high):
+        Colors follow temperature gradient (warmer low -> cooler high):
         - Low: Brown (warm, low elevation)
         - Medium-Low: Orange
         - Medium-High: Chartreuse green
@@ -931,12 +931,12 @@ class TileService:
         Get RGBA color for biomass (AGB) value
 
         Biomass raster contains actual values in Mg/ha:
-        Color gradient: Red (low) → Yellow → Light Green → Green → Blue (very high)
-        - 0-50: Very Low → Red
-        - 50-100: Low → Yellow
-        - 100-200: Medium → Light Green
-        - 200-300: High → Green
-        - >300: Very High → Blue
+        Color gradient: Red (low) -> Yellow -> Light Green -> Green -> Blue (very high)
+        - 0-50: Very Low -> Red
+        - 50-100: Low -> Yellow
+        - 100-200: Medium -> Light Green
+        - 200-300: High -> Green
+        - >300: Very High -> Blue
         """
         if biomass_mg_ha < 50:
             # Very Low: Crimson Red
@@ -959,11 +959,11 @@ class TileService:
         Get RGBA color for temperature value
 
         Temperature raster contains mean annual temperature in °C:
-        - <0: Very Cold → Blue
-        - 0-10: Cold → Light Blue
-        - 10-20: Moderate → Light Green
-        - 20-25: Warm → Gold
-        - >25: Hot → Orange Red
+        - <0: Very Cold -> Blue
+        - 0-10: Cold -> Light Blue
+        - 10-20: Moderate -> Light Green
+        - 20-25: Warm -> Gold
+        - >25: Hot -> Orange Red
         """
         if temp_celsius < 0:
             # Very Cold: Blue
@@ -986,11 +986,11 @@ class TileService:
         Get RGBA color for precipitation value
 
         Precipitation raster contains annual precipitation in mm:
-        - <500: Very Dry → Brown
-        - 500-1000: Dry → Tan
-        - 1000-2000: Moderate → Light Green
-        - 2000-3000: Wet → Royal Blue
-        - >3000: Very Wet → Dark Blue
+        - <500: Very Dry -> Brown
+        - 500-1000: Dry -> Tan
+        - 1000-2000: Moderate -> Light Green
+        - 2000-3000: Wet -> Royal Blue
+        - >3000: Very Wet -> Dark Blue
         """
         if precip_mm < 500:
             # Very Dry: Saddle Brown
@@ -1014,10 +1014,10 @@ class TileService:
 
         Slope raster contains CATEGORICAL CODES (not degrees):
         0 = No data / Water (excluded)
-        1 = <10° (Gentle/Flat) → GREEN
-        2 = 10-20° (Moderate) → YELLOW
-        3 = 20-30° (Steep) → ORANGE
-        4 = >30° (Very Steep) → RED
+        1 = <10° (Gentle/Flat) -> GREEN
+        2 = 10-20° (Moderate) -> YELLOW
+        3 = 20-30° (Steep) -> ORANGE
+        4 = >30° (Very Steep) -> RED
         """
         # Map categorical codes to colors
         slope_code = int(slope_value)
@@ -1043,11 +1043,11 @@ class TileService:
         Get RGBA color for forest health value (based on NDVI)
 
         Forest health categorical codes (from rasters.nepal_forest_health):
-        1 = Stressed (NDVI < 0.2) → RED (worst)
-        2 = Poor (NDVI 0.2-0.4) → ORANGE
-        3 = Moderate (NDVI 0.4-0.6) → GOLD/YELLOW
-        4 = Healthy (NDVI 0.6-0.8) → LIGHT GREEN
-        5 = Excellent (NDVI > 0.8) → DARK GREEN (best)
+        1 = Stressed (NDVI < 0.2) -> RED (worst)
+        2 = Poor (NDVI 0.2-0.4) -> ORANGE
+        3 = Moderate (NDVI 0.4-0.6) -> GOLD/YELLOW
+        4 = Healthy (NDVI 0.6-0.8) -> LIGHT GREEN
+        5 = Excellent (NDVI > 0.8) -> DARK GREEN (best)
         """
         health_code = int(health_value)
 
@@ -1075,12 +1075,12 @@ class TileService:
         Get RGBA color for minimum temperature (coldest month)
 
         Temperature ranges in °C:
-        < -10: Extreme Cold → Dark Blue
-        -10 to 0: Very Cold → Royal Blue
-        0 to 5: Cold → Sky Blue
-        5 to 10: Cool → Light Green
-        10 to 15: Mild → Gold
-        > 15: Warm → Orange
+        < -10: Extreme Cold -> Dark Blue
+        -10 to 0: Very Cold -> Royal Blue
+        0 to 5: Cold -> Sky Blue
+        5 to 10: Cool -> Light Green
+        10 to 15: Mild -> Gold
+        > 15: Warm -> Orange
         """
         if temp_celsius < -10:
             # Extreme Cold: Medium Blue
@@ -1107,9 +1107,9 @@ class TileService:
 
         Official NASA/ORNL DAAC color scheme for IPCC Tier 1 forest quality:
         0 = Non-forest (transparent/skip)
-        1 = Primary Forest → Bright Green #00FF00 (old-growth, highest biomass)
-        2 = Young Secondary Forest → Red #FF0000 (recently regenerated, low biomass)
-        3 = Old Secondary Forest → Blue-Purple #6666FF (mature regrowth, medium-high biomass)
+        1 = Primary Forest -> Bright Green #00FF00 (old-growth, highest biomass)
+        2 = Young Secondary Forest -> Red #FF0000 (recently regenerated, low biomass)
+        3 = Old Secondary Forest -> Blue-Purple #6666FF (mature regrowth, medium-high biomass)
 
         Primary forests have 2-3x higher carbon stocks than secondary forests.
         Critical for IPCC reporting and conservation prioritization.
@@ -1212,12 +1212,12 @@ class TileService:
         Get RGBA color for Forest Loss year (Hansen GFC)
 
         Temporal gradient from 2001-2024 (codes 1-24):
-        - 2001-2004 (codes 1-4): Light Yellow → Yellow (old loss)
-        - 2005-2008 (codes 5-8): Yellow → Orange
-        - 2009-2012 (codes 9-12): Orange → Orange-Red
-        - 2013-2016 (codes 13-16): Orange-Red → Red
-        - 2017-2020 (codes 17-20): Red → Dark Red
-        - 2021-2024 (codes 21-24): Dark Red → Very Dark Red (recent loss)
+        - 2001-2004 (codes 1-4): Light Yellow -> Yellow (old loss)
+        - 2005-2008 (codes 5-8): Yellow -> Orange
+        - 2009-2012 (codes 9-12): Orange -> Orange-Red
+        - 2013-2016 (codes 13-16): Orange-Red -> Red
+        - 2017-2020 (codes 17-20): Red -> Dark Red
+        - 2021-2024 (codes 21-24): Dark Red -> Very Dark Red (recent loss)
 
         Gradient: Older loss = lighter/yellower, Recent loss = darker/redder
         """
@@ -1227,52 +1227,52 @@ class TileService:
         # Then create gradient based on age of loss
 
         if 1 <= year_code <= 4:
-            # 2001-2004: Light Yellow → Yellow
+            # 2001-2004: Light Yellow -> Yellow
             position = (year_code - 1) / 3.0
             r = 255
-            g = int(250 - (35 * position))  # 250 → 215
-            b = int(205 - (205 * position))  # 205 → 0
-            return (r, g, b, alpha)  # #FFFACD → #FFD700
+            g = int(250 - (35 * position))  # 250 -> 215
+            b = int(205 - (205 * position))  # 205 -> 0
+            return (r, g, b, alpha)  # #FFFACD -> #FFD700
 
         elif 5 <= year_code <= 8:
-            # 2005-2008: Yellow → Orange
+            # 2005-2008: Yellow -> Orange
             position = (year_code - 5) / 3.0
             r = 255
-            g = int(215 - (75 * position))  # 215 → 140
+            g = int(215 - (75 * position))  # 215 -> 140
             b = 0
-            return (r, g, b, alpha)  # #FFD700 → #FF8C00
+            return (r, g, b, alpha)  # #FFD700 -> #FF8C00
 
         elif 9 <= year_code <= 12:
-            # 2009-2012: Orange → Orange-Red
+            # 2009-2012: Orange -> Orange-Red
             position = (year_code - 9) / 3.0
             r = 255
-            g = int(140 - (41 * position))  # 140 → 99
-            b = int(0 + (71 * position))  # 0 → 71
-            return (r, g, b, alpha)  # #FF8C00 → #FF6347
+            g = int(140 - (41 * position))  # 140 -> 99
+            b = int(0 + (71 * position))  # 0 -> 71
+            return (r, g, b, alpha)  # #FF8C00 -> #FF6347
 
         elif 13 <= year_code <= 16:
-            # 2013-2016: Orange-Red → Red
+            # 2013-2016: Orange-Red -> Red
             position = (year_code - 13) / 3.0
-            r = int(255 - (35 * position))  # 255 → 220
-            g = int(99 - (79 * position))  # 99 → 20
-            b = int(71 - (11 * position))  # 71 → 60
-            return (r, g, b, alpha)  # #FF6347 → #DC143C
+            r = int(255 - (35 * position))  # 255 -> 220
+            g = int(99 - (79 * position))  # 99 -> 20
+            b = int(71 - (11 * position))  # 71 -> 60
+            return (r, g, b, alpha)  # #FF6347 -> #DC143C
 
         elif 17 <= year_code <= 20:
-            # 2017-2020: Red → Dark Red
+            # 2017-2020: Red -> Dark Red
             position = (year_code - 17) / 3.0
-            r = int(220 - (42 * position))  # 220 → 178
-            g = int(20 - (10 * position))  # 20 → 10 (actually goes to 34 in #B22222)
-            b = int(60 - (26 * position))  # 60 → 34
-            return (r, g, b, alpha)  # #DC143C → #B22222
+            r = int(220 - (42 * position))  # 220 -> 178
+            g = int(20 - (10 * position))  # 20 -> 10 (actually goes to 34 in #B22222)
+            b = int(60 - (26 * position))  # 60 -> 34
+            return (r, g, b, alpha)  # #DC143C -> #B22222
 
         elif 21 <= year_code <= 24:
-            # 2021-2024: Dark Red → Very Dark Red (most recent)
+            # 2021-2024: Dark Red -> Very Dark Red (most recent)
             position = (year_code - 21) / 3.0
-            r = int(178 - (39 * position))  # 178 → 139
-            g = int(34 - (34 * position))  # 34 → 0
-            b = int(34 - (34 * position))  # 34 → 0
-            return (r, g, b, alpha)  # #B22222 → #8B0000
+            r = int(178 - (39 * position))  # 178 -> 139
+            g = int(34 - (34 * position))  # 34 -> 0
+            b = int(34 - (34 * position))  # 34 -> 0
+            return (r, g, b, alpha)  # #B22222 -> #8B0000
 
         else:
             # No loss or invalid: Transparent
@@ -1283,17 +1283,17 @@ class TileService:
         Get RGBA color for ESA WorldCover 2021 classification
 
         Official ESA WorldCover color scheme (11 classes):
-        10 = Tree Cover → #006400 (Dark Green)
-        20 = Shrubland → #FFBB22 (Yellow-Orange)
-        30 = Grassland → #FFFF4C (Yellow)
-        40 = Cropland → #F096FF (Pink-Purple)
-        50 = Built-up → #FA0000 (Red)
-        60 = Bare/Sparse Vegetation → #B4B4B4 (Gray)
-        70 = Snow and Ice → #F0F0F0 (Light Gray)
-        80 = Water Bodies → #0064C8 (Blue)
-        90 = Herbaceous Wetland → #0096A0 (Cyan)
-        95 = Mangroves → #00CF75 (Teal-Green)
-        100 = Moss and Lichen → #FAE6A0 (Tan)
+        10 = Tree Cover -> #006400 (Dark Green)
+        20 = Shrubland -> #FFBB22 (Yellow-Orange)
+        30 = Grassland -> #FFFF4C (Yellow)
+        40 = Cropland -> #F096FF (Pink-Purple)
+        50 = Built-up -> #FA0000 (Red)
+        60 = Bare/Sparse Vegetation -> #B4B4B4 (Gray)
+        70 = Snow and Ice -> #F0F0F0 (Light Gray)
+        80 = Water Bodies -> #0064C8 (Blue)
+        90 = Herbaceous Wetland -> #0096A0 (Cyan)
+        95 = Mangroves -> #00CF75 (Teal-Green)
+        100 = Moss and Lichen -> #FAE6A0 (Tan)
 
         Colors are official ESA standard for global consistency
         """
@@ -1341,12 +1341,12 @@ class TileService:
         Get RGBA color for Soil pH (0-30cm depth)
 
         pH scale classification:
-        <4.5: Extremely Acidic → Dark Red
-        4.5-5.5: Strongly Acidic → Orange
-        5.5-6.5: Slightly Acidic → Yellow-Gold
-        6.5-7.5: Neutral (Optimal) → Green
-        7.5-8.5: Slightly Alkaline → Light Blue
-        >8.5: Strongly Alkaline → Purple
+        <4.5: Extremely Acidic -> Dark Red
+        4.5-5.5: Strongly Acidic -> Orange
+        5.5-6.5: Slightly Acidic -> Yellow-Gold
+        6.5-7.5: Neutral (Optimal) -> Green
+        7.5-8.5: Slightly Alkaline -> Light Blue
+        >8.5: Strongly Alkaline -> Purple
         """
         # SoilGrids pH is in pH units (0-14, but typically 3-9 for soils)
         ph = ph_value / 10.0 if ph_value > 14 else ph_value  # Handle scaled values
@@ -1402,11 +1402,11 @@ class TileService:
         Get RGBA color for Soil Organic Carbon (0-30cm)
 
         SOC classification (as percentage):
-        <0.5%: Very Low → Red
-        0.5-1.0%: Low → Orange
-        1.0-2.0%: Medium → Yellow
-        2.0-3.0%: High → Light Green
-        >3.0%: Very High (Forest soils) → Dark Green
+        <0.5%: Very Low -> Red
+        0.5-1.0%: Low -> Orange
+        1.0-2.0%: Medium -> Yellow
+        2.0-3.0%: High -> Light Green
+        >3.0%: Very High (Forest soils) -> Dark Green
         """
         # SoilGrids SOC is in dg/kg, convert to percentage (1 dg/kg = 0.1%)
         soc_percent = soc_value / 10.0 if soc_value > 10 else soc_value
@@ -1432,11 +1432,11 @@ class TileService:
         Get RGBA color for Soil Fertility Index (derived from pH + SOC + N + CEC)
 
         Fertility score (0-100):
-        0-20: Very Low → Red
-        20-40: Low → Orange
-        40-60: Medium → Yellow
-        60-80: High → Light Green
-        80-100: Very High → Dark Green
+        0-20: Very Low -> Red
+        20-40: Low -> Orange
+        40-60: Medium -> Yellow
+        60-80: High -> Light Green
+        80-100: Very High -> Dark Green
         """
         # Normalize score to 0-100 if needed
         score = min(max(fertility_score, 0), 100)
@@ -1462,10 +1462,10 @@ class TileService:
         Get RGBA color for Bulk Density (compaction risk)
 
         Bulk density in g/cm³ (SoilGrids in cg/cm³, divide by 100):
-        <1.2: Low (Good) → Green
-        1.2-1.4: Moderate → Yellow
-        1.4-1.6: Elevated → Orange
-        >1.6: High Risk → Red (restrictive for roots)
+        <1.2: Low (Good) -> Green
+        1.2-1.4: Moderate -> Yellow
+        1.4-1.6: Elevated -> Orange
+        >1.6: High Risk -> Red (restrictive for roots)
         """
         # SoilGrids bulk density is in cg/cm³, convert to g/cm³
         density_g_cm3 = bulk_density / 100.0 if bulk_density > 10 else bulk_density

@@ -17,9 +17,12 @@ timeout /t 2 /nobreak >nul
 echo Done.
 echo.
 
+REM Set Python encoding to UTF-8 to avoid charmap errors
+set PYTHONIOENCODING=utf-8
+
 REM Start Backend Server in new window (with debug logging)
 echo [1/2] Starting Backend Server (Port 8001)...
-start "Backend Server - Port 8001" cmd /k "set DEBUG_VOLUME_CALC=true && cd /d D:\forest_management\backend && ..\venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8001"
+start "Backend Server - Port 8001" cmd /k "set PYTHONIOENCODING=utf-8 && set DEBUG_VOLUME_CALC=true && cd /d D:\forest_management\backend && ..\venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8001"
 echo Backend server window opened
 echo.
 

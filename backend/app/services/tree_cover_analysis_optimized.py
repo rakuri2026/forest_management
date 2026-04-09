@@ -22,11 +22,11 @@ def extract_tree_cover_pixel_centers_FAST(
     OPTIMIZED: Extract tree cover pixel centers with slope filtering.
 
     OLD APPROACH (SLOW):
-    - For each tree pixel: ST_Slope(dem) → 5000 pixels × 100ms = 8 minutes
+    - For each tree pixel: ST_Slope(dem) -> 5000 pixels × 100ms = 8 minutes
 
     NEW APPROACH (FAST):
-    - Calculate slope once for boundary area → 1-2 seconds
-    - Sample pre-calculated slope at tree pixel centers → instant
+    - Calculate slope once for boundary area -> 1-2 seconds
+    - Sample pre-calculated slope at tree pixel centers -> instant
 
     Args:
         db: Database session
@@ -87,7 +87,7 @@ def extract_tree_cover_pixel_centers_FAST(
 
         else:
             # With slope filter: OPTIMIZED approach
-            logger.info(f"Extracting tree cover pixel centers with slope filter (≤{max_slope_degrees}°)...")
+            logger.info(f"Extracting tree cover pixel centers with slope filter (<={max_slope_degrees}°)...")
             logger.info("Using OPTIMIZED approach: pre-calculate slope for entire area")
 
             # OPTIMIZED: Calculate slope ONCE per DEM tile (not per pixel!)
@@ -169,12 +169,12 @@ def extract_tree_cover_pixel_centers_FAST(
 
             logger.info(
                 f"✓ Extracted {len(pixel_centers)} accessible tree pixel centers "
-                f"(slope ≤{max_slope_degrees}°)"
+                f"(slope <={max_slope_degrees}°)"
             )
 
             if len(pixel_centers) == 0:
                 logger.warning(
-                    f"⚠ No accessible tree pixels found with slope ≤{max_slope_degrees}°. "
+                    f"⚠ No accessible tree pixels found with slope <={max_slope_degrees}°. "
                     f"Possible reasons:"
                     f"\n  1. All tree areas have steep slopes (>{max_slope_degrees}°)"
                     f"\n  2. Try increasing max slope to 60° or 90°"
@@ -233,7 +233,7 @@ def calculate_accessible_forest_area_FAST(
 
         elif False:  # DISABLED: Old broken slope code
             # Both filters: tree cover + slope
-            logger.info(f"Calculating accessible forest area (tree cover + slope ≤{max_slope_degrees}°)...")
+            logger.info(f"Calculating accessible forest area (tree cover + slope <={max_slope_degrees}°)...")
 
             query = text("""
                 WITH boundary AS (

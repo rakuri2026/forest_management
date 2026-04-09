@@ -108,7 +108,8 @@ export function SplitPreviewMap({
               style={{
                 color: getCompartmentColor(index),
                 weight: 2,
-                fillOpacity: 0.3,
+                fillOpacity: 0.35,
+                fillColor: getCompartmentColor(index),
               }}
               eventHandlers={{
                 click: () => onCompartmentClick?.(comp),
@@ -127,21 +128,15 @@ export function SplitPreviewMap({
                 const icon = L.divIcon({
                   className: 'compartment-label',
                   html: `<div style="
-                    background: white;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-weight: bold;
                     font-size: 12px;
-                    border: 2px solid ${getCompartmentColor(index)};
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    font-weight: bold;
+                    color: white;
+                    text-shadow: 1px 1px 2px black, -1px -1px 2px black, 1px -1px 2px black, -1px 1px 2px black;
                     white-space: nowrap;
                   ">
-                    <div style="color: ${getCompartmentColor(index)}">${comp.name}</div>
-                    <div style="font-size: 10px; color: #666;">
-                      ${comp.area_hectares.toFixed(3)} ha
-                    </div>
+                    ${comp.name} (${comp.area_hectares.toFixed(1)} ha)
                   </div>`,
-                  iconAnchor: [50, 15],
+                  iconAnchor: [40, 10],
                 });
 
                 return <Marker position={center} icon={icon} key={`label-${comp.name}`} />;

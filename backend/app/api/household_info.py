@@ -519,7 +519,7 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
         #   - Auto-calculated columns (red background): LOCKED (read-only)
         #   - Manual entry columns (green background), rows 3-500: UNLOCKED (editable)
         #   - All cells beyond row 500: LOCKED
-        #   → Result: Only A3:Z500 (manual entry columns) are editable
+        #   -> Result: Only A3:Z500 (manual entry columns) are editable
         # ═══════════════════════════════════════════════════════════════════
 
         # Get manual entry columns (not auto-calculated)
@@ -646,14 +646,14 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
             "    पङ्क्ति 500 पछि र स्तम्भ Z पछि सुरक्षित छन्",
             "",
             "FOR MORE THAN 500 HOUSEHOLDS:",
-            "  1. Review tab → Unprotect Sheet (no password needed)",
-            "     Review ट्याब → Unprotect Sheet (पासवर्ड आवश्यक छैन)",
+            "  1. Review tab -> Unprotect Sheet (no password needed)",
+            "     Review ट्याब -> Unprotect Sheet (पासवर्ड आवश्यक छैन)",
             "",
             "  2. Enter data in additional rows (beyond row 500)",
             "     थप पङ्क्तिहरूमा डाटा प्रविष्ट गर्नुहोस् (पङ्क्ति 500 पछि)",
             "",
-            "  3. (Optional) Re-protect: Review → Protect Sheet",
-            "     (वैकल्पिक) पुन: सुरक्षित: Review → Protect Sheet",
+            "  3. (Optional) Re-protect: Review -> Protect Sheet",
+            "     (वैकल्पिक) पुन: सुरक्षित: Review -> Protect Sheet",
             "",
             "DATA VALIDATION (STRICTLY ENFORCED):",
             "  • Number fields ONLY accept numeric input (0-9)",
@@ -690,9 +690,9 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
             "",
             "1. ADJUST PARAMETERS (Optional - if your area differs from defaults)",
             "   मापदण्ड समायोजन (वैकल्पिक - यदि तपाईंको क्षेत्र पूर्वनिर्धारितबाट फरक छ)",
-            "   → Go to 'Parameters' sheet",
-            "   → Change values in column B based on your local conditions",
-            "   → Calculations will update automatically",
+            "   -> Go to 'Parameters' sheet",
+            "   -> Change values in column B based on your local conditions",
+            "   -> Calculations will update automatically",
             "",
             "2. FILL HOUSEHOLD DATA (Starting from Row 3)",
             "   घरधुरी डाटा भर्नुहोस् (पङ्क्ति ३ देखि)",
@@ -735,11 +735,11 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
             "",
             "3. DATA VALIDATION:",
             "   • Dropdown fields: छ/छैन (for occupation and group membership)",
-            "   • Number fields: Only accept whole numbers ≥ 0",
-            "   • Decimal fields: Only accept decimal numbers ≥ 0 (land, timber)",
+            "   • Number fields: Only accept whole numbers >= 0",
+            "   • Decimal fields: Only accept decimal numbers >= 0 (land, timber)",
             "",
             "4. AFTER FILLING:",
-            "   • Save the file (Ctrl+S or File → Save)",
+            "   • Save the file (Ctrl+S or File -> Save)",
             "   • Return to the system and upload",
             "   • System will validate and import all data",
             "",
@@ -758,7 +758,7 @@ IF(OR({land_col}{row}<=Parameters!$B$40,{cow_ox_col}{row}+{buffalo_col}{row}<=Pa
             "• Formulas are pre-filled up to row 500",
             "  सूत्रहरू पङ्क्ति 500 सम्म पूर्व-भरिएका छन्",
             "",
-            "• Use Excel's filter feature (Data → Filter) to sort/search",
+            "• Use Excel's filter feature (Data -> Filter) to sort/search",
             "  क्रमबद्ध/खोजी गर्न Excel को फिल्टर सुविधा प्रयोग गर्नुहोस्",
             "",
             "• Hidden sheet 'CasteDB' contains surname-caste mappings",

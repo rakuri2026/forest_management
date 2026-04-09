@@ -4,22 +4,54 @@ Based on allometric equations for Nepal tree species
 """
 import math
 import pandas as pd
-# import geopandas as gpd  # Temporarily disabled - requires GDAL
-# from shapely.geometry import Point, Polygon, box  # Temporarily disabled
-# from shapely.ops import nearest_points  # Temporarily disabled
-# import pyproj  # Temporarily disabled
 from typing import Dict, Any, Tuple, List
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import time
 from datetime import datetime
+import sys
+import io
+import logging
+
+# Set stdout to UTF-8 immediately
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+
+# Create a silent logger
+class SilentHandler(logging.Handler):
+    def emit(self, record):
+        pass
+
+logging.basicConfig(level=logging.WARNING, handlers=[SilentHandler()])
+logger = logging.getLogger('inventory')
+
+# Override print to handle encoding issues gracefully
+import builtins
+_original_print = builtins.print
+
+def _safe_print(*args, **kwargs):
+    try:
+        _original_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # Convert all args to safe strings
+        safe_args = []
+        for arg in args:
+            if isinstance(arg, str):
+                # Encode to bytes then decode to replace invalid chars
+                safe_args.append(arg.encode('utf-8', errors='replace').decode('utf-8'))
+            else:
+                safe_args.append(str(arg))
+        _original_print(*safe_args, **kwargs)
+
+builtins.print = _safe_print
 
 from ..models.inventory import (
     InventoryCalculation,
     InventoryTree,
     TreeSpeciesCoefficient
 )
+from ..models.forest_block import ForestBlock
 from ..utils.diameter_classifier import DiameterClassifier
 
 
@@ -151,10 +183,23 @@ class InventoryService:
 
             return summary
 
-        except Exception as e:
-            # Update status to failed
+        except UnicodeEncodeError as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[UNICODE_ERROR] {str(e)}")
+            print(f"[UNICODE_TRACE] {tb}")
             inventory.status = 'failed'
-            inventory.error_message = str(e)
+            inventory.error_message = "Unicode encoding error during processing"
+            self.db.commit()
+            raise Exception(f"Unicode encoding error: {str(e)}")
+        except Exception as e:
+            inventory.status = 'failed'
+            error_msg = str(e)
+            try:
+                error_msg.encode('utf-8')
+            except UnicodeEncodeError:
+                error_msg = "Processing error (Unicode characters in data)"
+            inventory.error_message = error_msg
             self.db.commit()
             raise
 
@@ -202,7 +247,7 @@ class InventoryService:
             if scientific_name != original_species:
                 df.at[idx, species_col] = scientific_name
                 converted_count += 1
-                print(f"[SPECIES] Row {idx+1}: '{original_species}' → '{scientific_name}' (method: {method})")
+                print(f"[SPECIES] Row {idx+1}: '{original_species}' -> '{scientific_name}' (method: {method})")
 
             # Get local name from species_by_code
             local_name = None
@@ -415,16 +460,34 @@ class InventoryService:
         Returns:
             GeoDataFrame with 'remark' column added
         """
-        # Initialize remark column
-        trees_gdf['remark'] = 'Felling Tree'
+        # First classify stand types
+        if 'dia_cm' in trees_gdf.columns:
+            trees_gdf['stand_type'] = trees_gdf['dia_cm'].apply(DiameterClassifier.classify_simple)
+
+        # Initialize remark based on stand_type
+        # - Regeneration/Sapling: 'Seedling'
+        # - Pole: 'Pole' (cannot be felling or mother tree)
+        # - Tree: 'Felling Tree' (default), will be updated to 'Mother Tree' by grid
+        trees_gdf['remark'] = None
         trees_gdf['grid_cell_id'] = None
 
-        # Filter out seedlings (DBH < 10 cm) - they cannot be mother trees
-        eligible_trees = trees_gdf[trees_gdf['dia_cm'] >= 10].copy()
+        # Mark based on stand_type
+        stand_type = trees_gdf.get('stand_type')
+        
+        # Regeneration and Sapling: remark = 'Seedling'
+        trees_gdf.loc[stand_type.isin(['Regeneration', 'Sapling']), 'remark'] = 'Seedling'
+        
+        # Pole: remark = 'Pole' (not for felling or mother tree)
+        trees_gdf.loc[stand_type == 'Pole', 'remark'] = 'Pole'
+        
+        # Tree: can be 'Felling Tree' or 'Mother Tree' (default to Felling Tree)
+        trees_gdf.loc[stand_type == 'Tree', 'remark'] = 'Felling Tree'
+
+        # Filter to only Tree (DBH >= 30) for mother tree selection
+        eligible_trees = trees_gdf[trees_gdf['dia_cm'] >= 30].copy()
 
         if len(eligible_trees) == 0:
-            # All trees are seedlings
-            trees_gdf.loc[trees_gdf['dia_cm'] < 10, 'remark'] = 'Seedling'
+            # No eligible trees (all are seedlings/saplings)
             return trees_gdf
 
         # Create bounding box
@@ -481,11 +544,8 @@ class InventoryService:
             # Mark grid cell ID
             trees_gdf.at[nearest_idx, 'grid_cell_id'] = int(cell_id)
 
-        # Mark mother trees
+        # Mark mother trees (only for eligible trees - DBH >= 10)
         trees_gdf.loc[mother_tree_indices, 'remark'] = 'Mother Tree'
-
-        # Mark seedlings
-        trees_gdf.loc[trees_gdf['dia_cm'] < 10, 'remark'] = 'Seedling'
 
         return trees_gdf
 
@@ -568,6 +628,7 @@ class InventoryService:
         mother_trees = len(trees_gdf[trees_gdf['remark'] == 'Mother Tree'])
         felling_trees = len(trees_gdf[trees_gdf['remark'] == 'Felling Tree'])
         seedlings = len(trees_gdf[trees_gdf['remark'] == 'Seedling'])
+        poles = len(trees_gdf[trees_gdf['remark'] == 'Pole'])
 
         # Sum volumes
         total_volume_m3 = trees_gdf['tree_volume'].sum()
@@ -581,6 +642,7 @@ class InventoryService:
             'mother_trees_count': mother_trees,
             'felling_trees_count': felling_trees,
             'seedling_count': seedlings,
+            'pole_count': poles,
             'total_volume_m3': round(total_volume_m3, 3),
             'total_net_volume_m3': round(total_net_volume_m3, 3),
             'total_net_volume_cft': round(total_net_volume_cft, 3),
@@ -608,6 +670,36 @@ class InventoryService:
         Returns:
             Processing summary dict
         """
+        import time
+        
+        # Wrap everything in a Unicode-safe try-catch
+        try:
+            return await self._process_inventory_internal(inventory_id, df, grid_spacing_meters)
+        except UnicodeEncodeError as e:
+            # This is the charmap error - get details from traceback
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[UNICODE_ERROR] {str(e)}")
+            print(f"[UNICODE_TRACE] {tb}")
+            # Get the original traceback to find where it happened
+            raise Exception(f"Unicode encoding error: character at position {e.start} in '{e.object[e.start-10:e.end+10] if e.start > 0 else e.object[:e.end+10]}'")
+        except Exception as e:
+            # Try to sanitize error message for response
+            error_msg = str(e)
+            try:
+                # Test if message can be encoded/decoded
+                error_msg = error_msg.encode('utf-8').decode('utf-8')
+            except:
+                # If encoding fails, create a generic message
+                error_msg = f"Processing error (original error type: {type(e).__name__})"
+            raise Exception(error_msg)
+
+    async def _process_inventory_internal(
+        self,
+        inventory_id: UUID,
+        df: pd.DataFrame,
+        grid_spacing_meters: float = 20.0
+    ) -> Dict[str, Any]:
         import time
         start_time = time.time()
 
@@ -649,14 +741,17 @@ class InventoryService:
             df = self.calculate_tree_volumes(df, species_col, diameter_col, height_col, class_col)
             print(f"[INVENTORY] Step 2/6: Volumes calculated successfully")
 
-            # 3. Initially mark all trees
-            print(f"[INVENTORY] Step 3/7: Marking seedlings vs felling trees...")
-            df['remark'] = df.apply(
-                lambda row: 'Seedling' if row[diameter_col] < 10 else 'Felling Tree',
-                axis=1
+            # 3. Initially mark all trees based on stand_type
+            print(f"[INVENTORY] Step 3/7: Marking trees by stand type...")
+            df['stand_type'] = df[diameter_col].apply(DiameterClassifier.classify_simple)
+            df['remark'] = df['stand_type'].apply(
+                lambda st: 'Seedling' if st in ['Regeneration', 'Sapling'] else ('Pole' if st == 'Pole' else 'Felling Tree')
             )
             df['grid_cell_id'] = None
-            print(f"[INVENTORY] Step 3/7: Marked {len(df[df['remark'] == 'Seedling'])} seedlings, {len(df[df['remark'] == 'Felling Tree'])} felling trees")
+            seedling_count = len(df[df['remark'] == 'Seedling'])
+            pole_count = len(df[df['remark'] == 'Pole'])
+            felling_count = len(df[df['remark'] == 'Felling Tree'])
+            print(f"[INVENTORY] Step 3/7: Marked {seedling_count} seedlings, {pole_count} poles, {felling_count} felling trees")
 
             # 4. Add diameter classification (stand_type and dbh_class)
             print(f"[INVENTORY] Step 4/7: Classifying trees by diameter...")
@@ -665,7 +760,7 @@ class InventoryService:
 
             # Count trees by classification
             stand_type_counts = df['stand_type'].value_counts().to_dict()
-            print(f"[INVENTORY] Step 4/7: Classified trees - Regeneration: {stand_type_counts.get('Regeneration', 0)}, Pole: {stand_type_counts.get('Pole', 0)}, Tree: {stand_type_counts.get('Tree', 0)}")
+            print(f"[INVENTORY] Step 4/7: Classified trees - Regeneration: {stand_type_counts.get('Regeneration', 0)}, Sapling: {stand_type_counts.get('Sapling', 0)}, Pole: {stand_type_counts.get('Pole', 0)}, Tree: {stand_type_counts.get('Tree', 0)}")
 
             # 5. Assign polygon boundary name to each tree
             print(f"[INVENTORY] Step 5/7: Assigning polygon boundaries...")
@@ -706,6 +801,7 @@ class InventoryService:
             inventory.mother_trees_count = int(summary['mother_trees_count'])
             inventory.felling_trees_count = int(summary['felling_trees_count'])
             inventory.seedling_count = int(summary['seedling_count'])
+            inventory.pole_count = int(summary.get('pole_count', 0))
             inventory.total_volume_m3 = float(summary['total_volume_m3'])
             inventory.total_net_volume_m3 = float(summary['total_net_volume_m3'])
             inventory.total_net_volume_cft = float(summary['total_net_volume_cft'])
@@ -718,10 +814,23 @@ class InventoryService:
 
             return summary
 
-        except Exception as e:
-            # Update status to failed
+        except UnicodeEncodeError as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[UNICODE_ERROR] {str(e)}")
+            print(f"[UNICODE_TRACE] {tb}")
             inventory.status = 'failed'
-            inventory.error_message = str(e)
+            inventory.error_message = "Unicode encoding error during processing"
+            self.db.commit()
+            raise Exception(f"Unicode encoding error: {str(e)}")
+        except Exception as e:
+            inventory.status = 'failed'
+            error_msg = str(e)
+            try:
+                error_msg.encode('utf-8')
+            except UnicodeEncodeError:
+                error_msg = "Processing error (Unicode characters in data)"
+            inventory.error_message = error_msg
             self.db.commit()
             raise
 
@@ -880,6 +989,7 @@ class InventoryService:
         mother_trees = len(df[df['remark'] == 'Mother Tree'])
         felling_trees = len(df[df['remark'] == 'Felling Tree'])
         seedlings = len(df[df['remark'] == 'Seedling'])
+        poles = len(df[df['remark'] == 'Pole'])
 
         # Sum volumes
         total_volume_m3 = df['tree_volume'].sum()
@@ -893,6 +1003,7 @@ class InventoryService:
             'mother_trees_count': mother_trees,
             'felling_trees_count': felling_trees,
             'seedling_count': seedlings,
+            'pole_count': poles,
             'total_volume_m3': round(total_volume_m3, 3),
             'total_net_volume_m3': round(total_net_volume_m3, 3),
             'total_net_volume_cft': round(total_net_volume_cft, 3),
@@ -909,10 +1020,12 @@ class InventoryService:
         """
         Identify mother trees using PostGIS (no GDAL/GeoPandas required)
 
-        Uses grid-based selection algorithm:
-        1. Create spatial grid over tree area
-        2. Find centroid of each grid cell
-        3. Select tree nearest to each centroid as mother tree
+        NEW ALGORITHM (v1.7.0):
+        1. Find forest block based on majority of mapped trees falling inside it
+        2. Create bounding box from forest block geometry
+        3. Create fishnet grid based on user-specified grid size
+        4. Join grid_id to trees (DBH > 30cm) based on intersection
+        5. If grid has multiple trees, select the one with lowest diameter
 
         Args:
             inventory_id: UUID of inventory calculation
@@ -923,171 +1036,435 @@ class InventoryService:
             Number of mother trees identified
         """
         try:
-            # Step 1: Create temporary table with eligible trees (DBH > 30 cm)
-            # and transform to projected CRS
+            # Step 1: Get inventory and find the forest block with majority of trees
+            inventory = self.db.query(InventoryCalculation).filter(
+                InventoryCalculation.id == inventory_id
+            ).first()
+            
+            if not inventory or not inventory.calculation_id:
+                print("No calculation linked to this inventory")
+                return 0
+            
+            # Find which block has the majority of trees
+            block_vote_query = text("""
+                SELECT fb.id, fb.name, COUNT(t.id) as tree_count
+                FROM forest_blocks fb
+                JOIN inventory_trees t ON ST_Contains(fb.geometry, t.location::geometry)
+                WHERE t.inventory_calculation_id = :inventory_id
+                  AND fb.calculation_id = :calc_id
+                  AND fb.parent_block_id IS NULL
+                GROUP BY fb.id, fb.name
+                ORDER BY tree_count DESC
+                LIMIT 1
+            """)
+            block_result = self.db.execute(block_vote_query, {
+                "inventory_id": str(inventory_id),
+                "calc_id": str(inventory.calculation_id)
+            }).first()
+            
+            if not block_result:
+                print("No blocks found for tree assignment - falling back to tree bounds")
+                # Fallback: Use bounding box of all trees
+                block_id = None
+                block_name = "Default Block"
+            else:
+                block_id = block_result[0]
+                block_name = block_result[1]
+                print(f"Selected block '{block_name}' with majority trees")
+            
+            # Step 2: Create bounding box from trees in WGS84
+            # Tree locations are already in WGS84 (lat/lon degrees)
+            xmin, ymin, xmax, ymax = None, None, None, None
+            
+            bounds_result = self.db.execute(text("""
+                SELECT 
+                    ST_XMin(ST_Extent(location::geometry)) AS xmin,
+                    ST_YMin(ST_Extent(location::geometry)) AS ymin,
+                    ST_XMax(ST_Extent(location::geometry)) AS xmax,
+                    ST_YMax(ST_Extent(location::geometry)) AS ymax
+                FROM inventory_trees
+                WHERE inventory_calculation_id = :inventory_id
+            """), {"inventory_id": str(inventory_id)}).first()
+            
+            if not bounds_result or bounds_result[0] is None:
+                print("No trees found for mother tree selection")
+                return 0
+                
+            xmin, ymin, xmax, ymax = bounds_result
+            print(f"[BOUNDS] Tree bounds in WGS84: X({xmin:.6f} to {xmax:.6f}), Y({ymin:.6f} to {ymax:.6f})")
+            
+            # Validate bounds
+            if xmax <= xmin or ymax <= ymin:
+                raise Exception(f"Invalid tree bounds: X({xmin}, {xmax}), Y({ymin}, {ymax})")
+            
+            # Get UTM zone from inventory settings
+            utm_epsg = projection_epsg  # Already stored: 32644 or 32645
+            print(f"[GRID] Using UTM projection: EPSG:{utm_epsg}")
+            
+            # Transform bounds to UTM for accurate grid generation
+            utm_bounds = self.db.execute(text("""
+                SELECT 
+                    ST_XMin(ST_Extent(ST_Transform(location::geometry, :epsg))) AS xmin_utm,
+                    ST_YMin(ST_Extent(ST_Transform(location::geometry, :epsg))) AS ymin_utm,
+                    ST_XMax(ST_Extent(ST_Transform(location::geometry, :epsg))) AS xmax_utm,
+                    ST_YMax(ST_Extent(ST_Transform(location::geometry, :epsg))) AS ymax_utm
+                FROM inventory_trees
+                WHERE inventory_calculation_id = :inventory_id
+            """), {"inventory_id": str(inventory_id), "epsg": utm_epsg}).first()
+            
+            if not utm_bounds or utm_bounds[0] is None:
+                raise Exception("Failed to transform bounds to UTM")
+            
+            xmin_utm, ymin_utm, xmax_utm, ymax_utm = utm_bounds
+            print(f"[BOUNDS] Tree bounds in UTM: X({xmin_utm:.2f} to {xmax_utm:.2f}), Y({ymin_utm:.2f} to {ymax_utm:.2f})")
+            
+            # Calculate grid dimensions in UTM (accurate meters)
+            width_utm = xmax_utm - xmin_utm
+            height_utm = ymax_utm - ymin_utm
+            print(f"[BOUNDS] Approximate area in UTM: {width_utm:.1f}m x {height_utm:.1f}m")
+            
+            # Validate bounds before proceeding
+            if xmin is None or ymin is None or xmax is None or ymax is None:
+                raise Exception(f"Invalid bounds for grid generation: xmin={xmin}, ymin={ymin}, xmax={xmax}, ymax={ymax}")
+            if xmax <= xmin or ymax <= ymin:
+                raise Exception(f"Invalid bounds dimensions: X({xmin}, {xmax}), Y({ymin}, {ymax})")
+
+            # Step 3: Create eligible trees table (DBH > 30 cm) - BEFORE generating grid
             self.db.execute(text("""
                 DROP TABLE IF EXISTS temp_eligible_trees;
                 CREATE TEMP TABLE temp_eligible_trees AS
                 SELECT
                     id,
-                    ST_Transform(location::geometry, :projection_epsg) AS geom_proj,
+                    dia_cm,
                     location::geometry AS geom_wgs84
                 FROM public.inventory_trees
                 WHERE inventory_calculation_id = :inventory_id
                   AND dia_cm > 30
-                  AND remark != 'Seedling';
+                  AND (remark IS NULL OR remark != 'Seedling');
             """), {
-                "inventory_id": str(inventory_id),
-                "projection_epsg": projection_epsg
+                "inventory_id": str(inventory_id)
             })
+            
+            # Count eligible trees
+            eligible_count = self.db.execute(text("SELECT COUNT(*) FROM temp_eligible_trees")).scalar()
+            print(f"Found {eligible_count} eligible trees (DBH > 30cm)")
 
-            # Step 2: Get bounding box in projected CRS
-            bounds_result = self.db.execute(text("""
-                SELECT
-                    ST_XMin(ST_Extent(geom_proj)) AS xmin,
-                    ST_YMin(ST_Extent(geom_proj)) AS ymin,
-                    ST_XMax(ST_Extent(geom_proj)) AS xmax,
-                    ST_YMax(ST_Extent(geom_proj)) AS ymax
-                FROM temp_eligible_trees;
-            """)).first()
-
-            if not bounds_result or bounds_result[0] is None:
-                print("No eligible trees found for mother tree selection")
-                return 0
-
-            xmin, ymin, xmax, ymax = bounds_result
-            print(f"Bounds in EPSG:{projection_epsg}: X({xmin:.2f}, {xmax:.2f}), Y({ymin:.2f}, {ymax:.2f})")
-
-            # Step 3: Generate grid cells using PostGIS
-            # ST_SquareGrid is available in PostGIS 3.1+
-            # If not available, we'll use manual grid generation
+            # Step 4: Generate fishnet grid - SIMPLIFIED APPROACH
+            # Use the same logic as reference: create grid from tree bounds, clip to tree extent
+            grid_created = False
+            
+            # Calculate grid dimensions
+            grid_width_m = grid_spacing_meters
+            grid_height_m = grid_spacing_meters
+            
+            print(f"[GRID] Creating grid with spacing: {grid_spacing_meters}m in UTM EPSG:{utm_epsg}")
+            print(f"[GRID] Bounds (UTM): X({xmin_utm:.2f} to {xmax_utm:.2f}), Y({ymin_utm:.2f} to {ymax_utm:.2f})")
+            
+            # Calculate how many cells in each direction using UTM (exact meters)
+            num_cols = max(1, int((xmax_utm - xmin_utm) / grid_spacing_meters) + 1)
+            num_rows = max(1, int((ymax_utm - ymin_utm) / grid_spacing_meters) + 1)
+            total_cells = num_cols * num_rows
+            
+            print(f"[GRID] Grid dimensions: {num_cols} cols x {num_rows} rows = {total_cells} cells")
+            
+            # Sanity check - limit grid size to prevent browser/server crashes
+            MAX_CELLS = 10000
+            
+            # If too many cells, adjust grid size
+            if total_cells > MAX_CELLS:
+                area_utm = (xmax_utm - xmin_utm) * (ymax_utm - ymin_utm)
+                new_cell_size = math.sqrt(area_utm / MAX_CELLS)
+                grid_spacing_meters = new_cell_size
+                num_cols = max(1, int((xmax_utm - xmin_utm) / grid_spacing_meters) + 1)
+                num_rows = max(1, int((ymax_utm - ymin_utm) / grid_spacing_meters) + 1)
+                total_cells = num_cols * num_rows
+                print(f"[GRID] Reduced grid to fit limits: {num_cols}x{num_rows} cells (cell size: {grid_spacing_meters:.2f}m)")
+            
+            # Create grid in UTM, then transform to WGS84 for storage
             try:
-                # Try using ST_SquareGrid (PostGIS 3.1+)
-                grid_query = text("""
-                    DROP TABLE IF EXISTS temp_grid_cells;
-                    CREATE TEMP TABLE temp_grid_cells AS
-                    WITH bounds AS (
-                        SELECT ST_SetSRID(ST_MakeEnvelope(:xmin, :ymin, :xmax, :ymax), :projection_epsg) AS geom
-                    ),
-                    grid AS (
-                        SELECT (ST_SquareGrid(:grid_size, geom)).*
-                        FROM bounds
-                    )
-                    SELECT
-                        row_number() OVER () AS cell_id,
-                        geom,
-                        ST_Centroid(geom) AS centroid
-                    FROM grid;
-                """)
-
-                self.db.execute(grid_query, {
-                    "xmin": xmin,
-                    "ymin": ymin,
-                    "xmax": xmax,
-                    "ymax": ymax,
-                    "projection_epsg": projection_epsg,
-                    "grid_size": grid_spacing_meters
-                })
-                print(f"Generated grid using ST_SquareGrid")
-
-            except Exception as e:
-                print(f"ST_SquareGrid not available, using manual grid generation: {e}")
-
-                # Fallback: Manual grid generation
                 self.db.execute(text("""
                     DROP TABLE IF EXISTS temp_grid_cells;
                     CREATE TEMP TABLE temp_grid_cells AS
-                    WITH RECURSIVE
-                    x_series AS (
-                        SELECT :xmin + generate_series(0, CAST((:xmax - :xmin) / :grid_size AS INTEGER)) * :grid_size AS x
-                    ),
-                    y_series AS (
-                        SELECT :ymin + generate_series(0, CAST((:ymax - :ymin) / :grid_size AS INTEGER)) * :grid_size AS y
-                    ),
-                    grid AS (
-                        SELECT
-                            row_number() OVER () AS cell_id,
+                    SELECT 
+                        ROW_NUMBER() OVER () AS cell_id,
+                        ST_Transform(
                             ST_SetSRID(
                                 ST_MakeEnvelope(
-                                    x, y,
-                                    x + :grid_size, y + :grid_size
+                                    :xmin + (col_idx - 1) * :cell_size,
+                                    :ymin + (row_idx - 1) * :cell_size,
+                                    :xmin + col_idx * :cell_size,
+                                    :ymin + row_idx * :cell_size
                                 ),
-                                :projection_epsg
-                            ) AS geom
-                        FROM x_series, y_series
-                    )
-                    SELECT
-                        cell_id,
-                        geom,
-                        ST_Centroid(geom) AS centroid
-                    FROM grid;
+                                :epsg
+                            ),
+                            4326
+                        ) AS geom
+                    FROM generate_series(1, :num_cols) AS col_idx,
+                         generate_series(1, :num_rows) AS row_idx;
                 """), {
-                    "xmin": xmin,
-                    "ymin": ymin,
-                    "xmax": xmax,
-                    "ymax": ymax,
-                    "projection_epsg": projection_epsg,
-                    "grid_size": grid_spacing_meters
+                    "xmin": xmin_utm,
+                    "ymin": ymin_utm,
+                    "cell_size": grid_spacing_meters,
+                    "epsg": utm_epsg,
+                    "num_cols": num_cols,
+                    "num_rows": num_rows
                 })
-                print(f"Generated grid manually")
+                
+                grid_check = self.db.execute(text("SELECT COUNT(*) FROM temp_grid_cells")).scalar()
+                print(f"[GRID] Generated {grid_check} grid cells")
+                
+                if grid_check and grid_check > 0:
+                    grid_created = True
+                else:
+                    print("[GRID] ERROR: No cells generated")
+                    
+            except Exception as e:
+                print(f"[GRID] Error creating grid: {e}")
+                grid_created = False
+            
+            if not grid_created:
+                raise Exception(f"FAILED TO CREATE GRID: Could not generate {num_cols}x{num_rows} grid. Error: bounds may be invalid or too small")
+            
+            # NOTE: Do NOT commit here! Temp tables persist only within the transaction.
+            # Committing would cause temp tables to be lost in some database configurations.
+            
+            # Save grid cells to persistent table for visualization
+            # We need to use a separate transaction - commit grid, then start fresh transaction
+            grid_saved = False
+            try:
+                print(f"[GRID] Saving {grid_check} grid cells to inventory_grid_cells table")
+                # This commit will drop temp tables, so we need to recreate them
+                self.db.execute(text("""
+                    INSERT INTO inventory_grid_cells (id, inventory_calculation_id, cell_id, geom)
+                    SELECT gen_random_uuid(), :inv_id, cell_id, geom
+                    FROM temp_grid_cells
+                    ON CONFLICT (inventory_calculation_id, cell_id) DO UPDATE SET geom = EXCLUDED.geom
+                """), {"inv_id": str(inventory_id)})
+                self.db.commit()
+                print("[GRID] Grid cells saved to database")
+                grid_saved = True
+                print("[GRID] Temp tables will be recreated due to commit - this is expected")
+            except Exception as e:
+                print(f"[GRID] Warning: Could not save grid cells: {e}")
+                # Don't rollback - just continue without the grid
+                try:
+                    self.db.rollback()
+                except:
+                    pass
 
-            # Step 4: Find grid cells that contain trees
+            # Step 5: Join grid_id to all eligible trees based on intersection
+            # Both tree and grid are in WGS84
+            # The previous commit() destroyed our temp tables - need to recreate them
+            
+            # Recreate temp_eligible_trees (destroyed by previous commit)
+            print("[RECOVERY] Recreating temp_eligible_trees table after commit")
+            try:
+                self.db.execute(text("""
+                    CREATE TEMP TABLE temp_eligible_trees AS
+                    SELECT
+                        id,
+                        dia_cm,
+                        location::geometry AS geom_wgs84
+                    FROM public.inventory_trees
+                    WHERE inventory_calculation_id = :inventory_id
+                      AND dia_cm > 30
+                      AND (remark IS NULL OR remark != 'Seedling');
+                """), {"inventory_id": str(inventory_id)})
+                print("[RECOVERY] temp_eligible_trees recreated successfully")
+            except Exception as e:
+                print(f"[RECOVERY] Failed to recreate temp_eligible_trees: {e}")
+                raise Exception(f"Could not recreate temp_eligible_trees: {e}")
+
+            # Recreate temp_grid_cells (destroyed by previous commit)
+            print("[RECOVERY] Recreating temp_grid_cells table after commit")
+            try:
+                self.db.execute(text("""
+                    CREATE TEMP TABLE temp_grid_cells AS
+                    SELECT 
+                        ROW_NUMBER() OVER () AS cell_id,
+                        ST_Transform(
+                            ST_SetSRID(
+                                ST_MakeEnvelope(
+                                    :xmin + (col_idx - 1) * :cell_size,
+                                    :ymin + (row_idx - 1) * :cell_size,
+                                    :xmin + col_idx * :cell_size,
+                                    :ymin + row_idx * :cell_size
+                                ),
+                                :epsg
+                            ),
+                            4326
+                        ) AS geom
+                    FROM generate_series(1, :num_cols) AS col_idx,
+                         generate_series(1, :num_rows) AS row_idx;
+                """), {
+                    "xmin": xmin_utm,
+                    "ymin": ymin_utm,
+                    "cell_size": grid_spacing_meters,
+                    "epsg": utm_epsg,
+                    "num_cols": num_cols,
+                    "num_rows": num_rows
+                })
+                print("[RECOVERY] temp_grid_cells recreated successfully")
+            except Exception as e:
+                print(f"[RECOVERY] Failed to recreate temp_grid_cells: {e}")
+                raise Exception(f"Could not recreate temp_grid_cells: {e}")
+
+            # Step 5: Join grid_id to all eligible trees based on intersection
             self.db.execute(text("""
-                DROP TABLE IF EXISTS temp_cells_with_trees;
-                CREATE TEMP TABLE temp_cells_with_trees AS
-                SELECT DISTINCT g.cell_id, g.centroid
+                ALTER TABLE temp_eligible_trees ADD COLUMN IF NOT EXISTS grid_cell_id INTEGER;
+                
+                UPDATE temp_eligible_trees t
+                SET grid_cell_id = g.cell_id
                 FROM temp_grid_cells g
-                JOIN temp_eligible_trees t ON ST_Intersects(g.geom, t.geom_proj);
+                WHERE ST_Intersects(g.geom, t.geom_wgs84);
             """))
+            
+            trees_with_grid = self.db.execute(text("SELECT COUNT(*) FROM temp_eligible_trees WHERE grid_cell_id IS NOT NULL")).scalar()
+            print(f"[JOIN] Joined {trees_with_grid} trees to grid cells")
 
-            cell_count = self.db.execute(text("SELECT COUNT(*) FROM temp_cells_with_trees")).scalar()
-            print(f"Found {cell_count} grid cells containing trees")
-
-            # Step 5: For each cell, find the tree nearest to its centroid
-            # and mark it as Mother Tree
+            # Step 6: For each grid cell, select the tree with LOWEST diameter (DBH)
+            # This is the new algorithm: lower diameter = mother tree
             self.db.execute(text("""
-                WITH nearest_trees AS (
-                    SELECT DISTINCT ON (c.cell_id)
-                        c.cell_id,
-                        t.id AS tree_id
-                    FROM temp_cells_with_trees c
-                    CROSS JOIN LATERAL (
-                        SELECT id, ST_Distance(c.centroid, geom_proj) AS distance
-                        FROM temp_eligible_trees
-                        ORDER BY ST_Distance(c.centroid, geom_proj)
-                        LIMIT 1
-                    ) t
-                )
+                DROP TABLE IF EXISTS temp_mother_trees;
+                CREATE TEMP TABLE temp_mother_trees AS
+                SELECT DISTINCT ON (grid_cell_id)
+                    grid_cell_id,
+                    id AS tree_id,
+                    dia_cm
+                FROM temp_eligible_trees
+                WHERE grid_cell_id IS NOT NULL
+                ORDER BY grid_cell_id, dia_cm ASC;  -- LOWEST diameter first
+            """))
+            
+            mother_candidates = self.db.execute(text("SELECT COUNT(*) FROM temp_mother_trees")).scalar()
+            print(f"Found {mother_candidates} grid cells with trees (candidates for mother trees)")
+
+            # Step 7: Update inventory_trees to mark mother trees
+            self.db.execute(text("""
                 UPDATE public.inventory_trees
                 SET
                     remark = 'Mother Tree',
-                    grid_cell_id = nt.cell_id
-                FROM nearest_trees nt
-                WHERE inventory_trees.id = nt.tree_id;
+                    grid_cell_id = mt.grid_cell_id
+                FROM temp_mother_trees mt
+                WHERE inventory_trees.id = mt.tree_id;
             """))
-
-            self.db.commit()
-
-            # Step 6: Get count of mother trees
-            mother_tree_count = self.db.execute(text("""
-                SELECT COUNT(*)
-                FROM public.inventory_trees
+            
+            # Step 7b: Mark other trees in grid (>=30cm DBH that are not mother trees) as Felling Trees
+            # These are trees in the same grid but with larger diameter
+            self.db.execute(text("""
+                UPDATE public.inventory_trees
+                SET remark = 'Felling Tree'
                 WHERE inventory_calculation_id = :inventory_id
-                  AND remark = 'Mother Tree'
-            """), {"inventory_id": str(inventory_id)}).scalar()
+                  AND remark != 'Mother Tree'
+                  AND remark != 'Seedling'
+                  AND remark != 'Pole'
+                  AND grid_cell_id IS NOT NULL
+            """), {"inventory_id": str(inventory_id)})
+            
+            # Step 8: Store grid metadata for frontend display
+            # First verify the grid table still exists
+            grid_bounds = None
+            try:
+                grid_check = self.db.execute(text("SELECT COUNT(*) FROM temp_grid_cells")).scalar()
+                print(f"[GRID_META] Grid table exists with {grid_check} cells")
+                if not grid_check or grid_check == 0:
+                    print("[GRID_META] Warning - grid table empty, skipping metadata storage")
+                else:
+                    grid_bounds = self.db.execute(text("""
+                        SELECT 
+                            ST_XMin(ST_Extent(geom)) AS xmin,
+                            ST_YMin(ST_Extent(geom)) AS ymin,
+                            ST_XMax(ST_Extent(geom)) AS xmax,
+                            ST_YMax(ST_Extent(geom)) AS ymax
+                        FROM temp_grid_cells
+                    """)).first()
+            except Exception as e:
+                print(f"[GRID_META] Error accessing grid table: {e}")
+                # Rollback to recover from any transaction errors
+                try:
+                    self.db.rollback()
+                except:
+                    pass
+                grid_bounds = None
 
-            # Clean up temp tables
-            self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees, temp_grid_cells, temp_cells_with_trees"))
+            if grid_bounds and grid_bounds[0] is not None:
+                gxmin, gymin, gxmax, gymax = grid_bounds
+                
+                # Convert bounds to UTM to calculate proper grid dimensions
+                grid_bounds_utm = self.db.execute(text("""
+                    SELECT 
+                        ST_XMin(ST_Extent(ST_Transform(geom, :epsg))) AS xmin_utm,
+                        ST_YMin(ST_Extent(ST_Transform(geom, :epsg))) AS ymin_utm,
+                        ST_XMax(ST_Extent(ST_Transform(geom, :epsg))) AS xmax_utm,
+                        ST_YMax(ST_Extent(ST_Transform(geom, :epsg))) AS ymax_utm
+                    FROM temp_grid_cells
+                """), {"epsg": utm_epsg}).first()
+                
+                if grid_bounds_utm and grid_bounds_utm[0] is not None:
+                    xmin_u, ymin_u, xmax_u, ymax_u = grid_bounds_utm
+                    num_cols = int(round((xmax_u - xmin_u) / grid_spacing_meters)) + 1
+                    num_rows = int(round((ymax_u - ymin_u) / grid_spacing_meters)) + 1
+                    print(f"[GRID_META] Grid in UTM: {xmin_u:.2f}x{ymin_u:.2f} to {xmax_u:.2f}x{ymax_u:.2f}, cols={num_cols}, rows={num_rows}")
+                else:
+                    num_cols = int(round((gxmax - gxmin) / grid_spacing_meters)) + 1
+                    num_rows = int(round((gymax - gymin) / grid_spacing_meters)) + 1
+                
+                # Store WGS84 bounds for frontend display
+                self.db.execute(text("""
+                    UPDATE public.inventory_calculations
+                    SET grid_origin_x = :gxmin,
+                        grid_origin_y = :gymin,
+                        grid_num_cols = :num_cols,
+                        grid_num_rows = :num_rows
+                    WHERE id = :inv_calc_id
+                """), {
+                    "gxmin": gxmin,
+                    "gymin": gymin,
+                    "num_cols": num_cols,
+                    "num_rows": num_rows,
+                    "inv_calc_id": str(inventory_id)
+                })
+                print(f"Stored grid metadata: origin=({gxmin:.2f}, {gymin:.2f}), cols={num_cols}, rows={num_rows}")
+
+            # Step 9: Get count of mother trees
+            # We already committed the grid save, so just query now
+            try:
+                mother_tree_count = self.db.execute(text("""
+                    SELECT COUNT(*)
+                    FROM public.inventory_trees
+                    WHERE inventory_calculation_id = :inventory_id
+                      AND remark = 'Mother Tree'
+                """), {"inventory_id": str(inventory_id)}).scalar()
+            except Exception as e:
+                print(f"[MOTHER] Error counting mother trees: {e}")
+                try:
+                    self.db.rollback()
+                except:
+                    pass
+                mother_tree_count = 0
+
+            # Clean up temp tables (they should already be gone due to earlier commit)
+            try:
+                self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees, temp_grid_cells, temp_mother_trees"))
+                self.db.commit()
+            except:
+                try:
+                    self.db.rollback()
+                except:
+                    pass
 
             return mother_tree_count
 
         except Exception as e:
             print(f"Error in mother tree identification: {str(e)}")
-            # Rollback any changes
-            self.db.rollback()
-            # Clean up temp tables
+            # Rollback and try to recover transaction
             try:
-                self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees, temp_grid_cells, temp_cells_with_trees"))
+                self.db.rollback()
+            except:
+                pass
+            try:
+                self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees, temp_grid_cells, temp_mother_trees"))
+                self.db.commit()
             except:
                 pass
             raise Exception(f"Mother tree identification failed: {str(e)}")
@@ -1107,12 +1484,25 @@ class InventoryService:
                 COUNT(*) AS total_trees,
                 COUNT(*) FILTER (WHERE remark = 'Mother Tree') AS mother_trees,
                 COUNT(*) FILTER (WHERE remark = 'Felling Tree') AS felling_trees,
+                COUNT(*) FILTER (WHERE remark = 'Pole') AS poles,
                 COUNT(*) FILTER (WHERE remark = 'Seedling') AS seedlings,
                 COALESCE(SUM(tree_volume), 0) AS total_volume_m3,
                 COALESCE(SUM(net_volume), 0) AS total_net_volume_m3,
                 COALESCE(SUM(net_volume_cft), 0) AS total_net_volume_cft,
                 COALESCE(SUM(firewood_m3), 0) AS total_firewood_m3,
-                COALESCE(SUM(firewood_chatta), 0) AS total_firewood_chatta
+                COALESCE(SUM(firewood_chatta), 0) AS total_firewood_chatta,
+                -- Stand type counts
+                COUNT(*) FILTER (WHERE stand_type = 'Regeneration') AS regeneration_count,
+                COUNT(*) FILTER (WHERE stand_type = 'Sapling') AS sapling_count,
+                COUNT(*) FILTER (WHERE stand_type = 'Pole') AS stand_pole_count,
+                COUNT(*) FILTER (WHERE stand_type = 'Tree') AS tree_count,
+                -- Volume by tree category
+                COALESCE(SUM(tree_volume) FILTER (WHERE remark = 'Felling Tree'), 0) AS felling_volume_m3,
+                COALESCE(SUM(tree_volume) FILTER (WHERE remark = 'Mother Tree'), 0) AS mother_volume_m3,
+                COALESCE(SUM(tree_volume) FILTER (WHERE remark = 'Pole'), 0) AS pole_volume_m3,
+                -- Net timber volume (trees that can be used for timber)
+                COALESCE(SUM(net_volume) FILTER (WHERE remark IN ('Felling Tree', 'Mother Tree')), 0) AS timber_volume_m3,
+                COALESCE(SUM(net_volume_cft) FILTER (WHERE remark IN ('Felling Tree', 'Mother Tree')), 0) AS timber_volume_cft
             FROM public.inventory_trees
             WHERE inventory_calculation_id = :inventory_id
         """)
@@ -1124,12 +1514,25 @@ class InventoryService:
             'total_trees': int(result[0]) if result[0] is not None else 0,
             'mother_trees_count': int(result[1]) if result[1] is not None else 0,
             'felling_trees_count': int(result[2]) if result[2] is not None else 0,
-            'seedling_count': int(result[3]) if result[3] is not None else 0,
-            'total_volume_m3': round(float(result[4]), 3) if result[4] is not None else 0.0,
-            'total_net_volume_m3': round(float(result[5]), 3) if result[5] is not None else 0.0,
-            'total_net_volume_cft': round(float(result[6]), 3) if result[6] is not None else 0.0,
-            'total_firewood_m3': round(float(result[7]), 3) if result[7] is not None else 0.0,
-            'total_firewood_chatta': round(float(result[8]), 3) if result[8] is not None else 0.0
+            'pole_count': int(result[3]) if result[3] is not None else 0,
+            'seedling_count': int(result[4]) if result[4] is not None else 0,
+            'total_volume_m3': round(float(result[5]), 3) if result[5] is not None else 0.0,
+            'total_net_volume_m3': round(float(result[6]), 3) if result[6] is not None else 0.0,
+            'total_net_volume_cft': round(float(result[7]), 3) if result[7] is not None else 0.0,
+            'total_firewood_m3': round(float(result[8]), 3) if result[8] is not None else 0.0,
+            'total_firewood_chatta': round(float(result[9]), 3) if result[9] is not None else 0.0,
+            # Stand type counts
+            'regeneration_count': int(result[10]) if result[10] is not None else 0,
+            'sapling_count': int(result[11]) if result[11] is not None else 0,
+            'stand_pole_count': int(result[12]) if result[12] is not None else 0,
+            'tree_count': int(result[13]) if result[13] is not None else 0,
+            # Volumes by category
+            'felling_volume_m3': round(float(result[14]), 3) if result[14] is not None else 0.0,
+            'mother_volume_m3': round(float(result[15]), 3) if result[15] is not None else 0.0,
+            'pole_volume_m3': round(float(result[16]), 3) if result[16] is not None else 0.0,
+            # Timber volume
+            'timber_volume_m3': round(float(result[17]), 3) if result[17] is not None else 0.0,
+            'timber_volume_cft': round(float(result[18]), 3) if result[18] is not None else 0.0
         }
 
     async def export_inventory(
@@ -1147,6 +1550,9 @@ class InventoryService:
         Returns:
             Tuple of (file_content, filename)
         """
+        # Clear any pending transaction state
+        self.db.rollback()
+        
         # Get trees from database
         trees = self.db.query(InventoryTree).filter(
             InventoryTree.inventory_calculation_id == inventory_id
@@ -1155,17 +1561,91 @@ class InventoryService:
         if not trees:
             raise ValueError("No trees found for this inventory")
 
+        # Get tree IDs for batch coordinate query
+        tree_ids = [tree.id for tree in trees]
+        
+        # Batch query all coordinates at once
+        tree_coords = {}
+        try:
+            coords_result = self.db.execute(
+                text("""
+                    SELECT id, ST_X(location::geometry) as lon, ST_Y(location::geometry) as lat 
+                    FROM public.inventory_trees 
+                    WHERE id = ANY(:ids)
+                """),
+                {"ids": tree_ids}
+            ).fetchall()
+            tree_coords = {row[0]: (row[1], row[2]) for row in coords_result}
+        except Exception as e:
+            print(f"[EXPORT] Failed to batch get coordinates: {e}")
+            tree_coords = {}
+
+        # Get inventory to find calculation_id
+        inventory = self.db.query(InventoryCalculation).filter(
+            InventoryCalculation.id == inventory_id
+        ).first()
+
+        # Get compartments and build lookup using a single efficient query
+        # Get all child blocks under this calculation (compartments)
+        comp_lookup = {}
+        if inventory and inventory.calculation_id:
+            from ..models.forest_block import ForestBlock
+            # Get all child blocks under the calculation's blocks
+            comps = self.db.execute(
+                text("""
+                    SELECT fb.id, COALESCE(fb.compartment_code, fb.name) as comp_name
+                    FROM forest_blocks fb
+                    WHERE fb.parent_block_id IN (
+                        SELECT id FROM forest_blocks WHERE calculation_id = :calc_id
+                    )
+                """),
+                {"calc_id": inventory.calculation_id}
+            ).fetchall()
+            
+            for comp in comps:
+                comp_lookup[comp[0]] = comp[1]
+
         # Create DataFrame
         data = []
         extra_cols_found = 0
+        
+        # If we have compartments, do a spatial join for all trees at once
+        tree_comp_map = {}
+        if comp_lookup and inventory and inventory.calculation_id:
+            try:
+                # Query to find which compartment each tree belongs to
+                # Cast location from geography to geometry for ST_Contains
+                query = text("""
+                    SELECT t.id as tree_id, fb.id as comp_id, COALESCE(fb.compartment_code, fb.name) as comp_name
+                    FROM inventory_trees t
+                    JOIN forest_blocks fb ON ST_Contains(fb.geometry, t.location::geometry)
+                    WHERE fb.parent_block_id IN (
+                        SELECT id FROM forest_blocks WHERE calculation_id = :calc_id
+                    )
+                    AND t.inventory_calculation_id = :inv_id
+                """)
+                print(f"[EXPORT] Running spatial join query with calc_id={inventory.calculation_id}, inv_id={inventory_id}")
+                tree_compartments = self.db.execute(query, {"calc_id": inventory.calculation_id, "inv_id": inventory_id}).fetchall()
+                print(f"[EXPORT] Spatial join returned {len(tree_compartments)} results")
+                
+                # Build tree -> compartment mapping
+                tree_comp_map = {row[0]: {'id': row[1], 'name': row[2]} for row in tree_compartments}
+                print(f"[EXPORT] Built tree_comp_map with {len(tree_comp_map)} entries")
+            except Exception as e:
+                import traceback
+                print(f"[EXPORT] Spatial join failed: {e}")
+                print(f"[EXPORT] Traceback: {traceback.format_exc()}")
+                tree_comp_map = {}
+                self.db.rollback()  # Reset transaction state after error
+        
         for tree in trees:
-            # Extract lon, lat from geography
-            result = self.db.execute(
-                text("SELECT ST_X(location::geometry), ST_Y(location::geometry) FROM public.inventory_trees WHERE id = :id"),
-                {"id": tree.id}
-            ).first()
+            # Get coordinates from batch result
+            lon, lat = tree_coords.get(tree.id, (None, None))
 
-            lon, lat = result[0], result[1]
+            # Get compartment from mapping
+            comp_info = tree_comp_map.get(tree.id, {})
+            comp_id = str(comp_info.get('id')) if comp_info.get('id') else None
+            comp_name = comp_info.get('name')
 
             row_data = {
                 'species': tree.species,
@@ -1173,8 +1653,8 @@ class InventoryService:
                 'dia_cm': tree.dia_cm,
                 'height_m': tree.height_m,
                 'tree_class': tree.tree_class,
-                'stand_type': tree.stand_type,      # NEW: Simple classification
-                'dbh_class': tree.dbh_class,        # NEW: Detailed classification
+                'stand_type': tree.stand_type,
+                'dbh_class': tree.dbh_class,
                 'longitude': lon,
                 'latitude': lat,
                 'stem_volume': tree.stem_volume,
@@ -1186,7 +1666,9 @@ class InventoryService:
                 'firewood_m3': tree.firewood_m3,
                 'firewood_chatta': tree.firewood_chatta,
                 'remark': tree.remark,
-                'grid_cell_id': tree.grid_cell_id
+                'grid_cell_id': tree.grid_cell_id,
+                'compartment_id': comp_id or (str(tree.compartment_id) if tree.compartment_id else None),
+                'compartment_name': comp_name or (tree.compartment.name if tree.compartment_id and tree.compartment else None)
             }
 
             # Add extra columns if they exist
@@ -1206,9 +1688,82 @@ class InventoryService:
         df = pd.DataFrame(data)
         print(f"[EXPORT] DataFrame columns: {list(df.columns)}")
 
+        # Get forest name for filename
+        forest_name = 'inventory'
+        try:
+            if inventory and inventory.calculation:
+                forest_name = inventory.calculation.forest_name or inventory.calculation.block_name or 'inventory'
+            elif inventory and inventory.calculation_id:
+                # Fetch calculation separately if relationship not loaded
+                from ..models.calculation import Calculation
+                calc = self.db.query(Calculation).filter(Calculation.id == inventory.calculation_id).first()
+                if calc:
+                    forest_name = calc.forest_name or calc.block_name or 'inventory'
+        except Exception as e:
+            print(f"[EXPORT] Error getting forest name: {e}")
+            forest_name = 'inventory'
+        
+        # Clean up forest name for filename - use ASCII-safe transliteration
+        import re
+        import unicodedata
+        
+        # Normalize unicode and convert to ASCII
+        forest_name_normalized = unicodedata.normalize('NFKD', str(forest_name))
+        forest_name_ascii = forest_name_normalized.encode('ascii', 'ignore').decode('ascii')
+        forest_name = re.sub(r'[^\w_-]', '', forest_name_ascii)  # Keep only word chars, underscores, hyphens
+        forest_name = re.sub(r'\s+', '_', forest_name)  # Replace spaces with underscores
+        forest_name = forest_name.strip('_')
+        
+        # Fallback if empty
+        if not forest_name:
+            forest_name = 'inventory'
+        
+        # Add date to filename
+        from datetime import datetime
+        date_str = datetime.now().strftime('%Y%m%d')
+        
+        filename_base = f"{forest_name}_Tree_Mapping_Summary_{date_str}"
+
         if export_format == 'csv':
             csv_content = df.to_csv(index=False)
-            return csv_content.encode('utf-8'), f'inventory_{inventory_id}.csv'
+            # Ensure UTF-8 encoding
+            return csv_content.encode('utf-8'), f'{filename_base}.csv'
+
+        elif export_format == 'excel':
+            # Create Excel file with pandas
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # Main tree data sheet
+                df.to_excel(writer, sheet_name='Tree Data', index=False)
+                
+                # Summary by compartment and remark
+                summary_data = []
+                for (comp_name, remark), group in df.groupby(['compartment_name', 'remark']):
+                    summary_data.append({
+                        'compartment_name': comp_name,
+                        'remark': remark,
+                        'tree_count': len(group),
+                        'net_volume_m3': group['net_volume'].sum(),
+                        'net_volume_cft': group['net_volume_cft'].sum(),
+                        'firewood_m3': group['firewood_m3'].sum(),
+                        'firewood_chatta': group['firewood_chatta'].sum()
+                    })
+                
+                if summary_data:
+                    summary_df = pd.DataFrame(summary_data)
+                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                
+                # Species distribution
+                species_data = df.groupby('species').agg({
+                    'compartment_name': 'count',
+                    'net_volume': 'sum'
+                }).reset_index()
+                species_data.columns = ['species', 'count', 'total_volume_m3']
+                species_data.to_excel(writer, sheet_name='Species', index=False)
+            
+            output.seek(0)
+            return output.getvalue(), f'{filename_base}.xlsx'
 
         elif export_format == 'geojson':
             # Create GeoJSON manually without GeoPandas
@@ -1239,7 +1794,9 @@ class InventoryService:
                         'firewood_m3': float(row['firewood_m3']) if pd.notna(row['firewood_m3']) else None,
                         'firewood_chatta': float(row['firewood_chatta']) if pd.notna(row['firewood_chatta']) else None,
                         'remark': row['remark'],
-                        'grid_cell_id': int(row['grid_cell_id']) if pd.notna(row['grid_cell_id']) else None
+                        'grid_cell_id': int(row['grid_cell_id']) if pd.notna(row['grid_cell_id']) else None,
+                        'compartment_id': row['compartment_id'],
+                        'compartment_name': row['compartment_name']
                     }
                 }
                 features.append(feature)
@@ -1254,7 +1811,7 @@ class InventoryService:
             }
 
             geojson_content = json.dumps(geojson, indent=2)
-            return geojson_content.encode('utf-8'), f'inventory_{inventory_id}.geojson'
+            return geojson_content.encode('utf-8'), f'{filename_base}.geojson'
 
         elif export_format == 'shapefile':
             # For shapefile, would need to create zip with .shp, .shx, .dbf, .prj

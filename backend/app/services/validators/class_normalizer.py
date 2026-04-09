@@ -2,9 +2,9 @@
 Tree Class Normalizer
 
 Converts various tree class formats to standard numeric format (1/2/3/4):
-- Letters: A/a → 1, B/b → 2, C/c → 3, D/d → 4
-- Roman numerals: I/i → 1, II/ii → 2, III/iii → 3, IV/iv → 4
-- Nepali characters: क → 1, ख → 2, ग → 3, घ → 4
+- Letters: A/a -> 1, B/b -> 2, C/c -> 3, D/d -> 4
+- Roman numerals: I/i -> 1, II/ii -> 2, III/iii -> 3, IV/iv -> 4
+- Nepali characters: क -> 1, ख -> 2, ग -> 3, घ -> 4
 - Numbers: 1, 2, 3, 4 (kept as-is)
 
 Author: Forest Management System
@@ -76,17 +76,17 @@ class ClassNormalizer:
         # Check letter format (A/B/C/D)
         if value_str in self.LETTER_MAP:
             normalized = self.LETTER_MAP[value_str]
-            return normalized, 'letter', f'Converted letter "{value_str}" → {normalized}'
+            return normalized, 'letter', f'Converted letter "{value_str}" -> {normalized}'
 
         # Check Roman numerals (I/II/III/IV)
         if value_str in self.ROMAN_MAP:
             normalized = self.ROMAN_MAP[value_str]
-            return normalized, 'roman', f'Converted Roman "{value_str}" → {normalized}'
+            return normalized, 'roman', f'Converted Roman "{value_str}" -> {normalized}'
 
         # Check Nepali characters (क/ख/ग/घ)
         if value_str in self.NEPALI_MAP:
             normalized = self.NEPALI_MAP[value_str]
-            return normalized, 'nepali', f'Converted Nepali "{value_str}" → {normalized}'
+            return normalized, 'nepali', f'Converted Nepali "{value_str}" -> {normalized}'
 
         # Invalid value
         return None, 'invalid', f'Invalid class value: "{value_str}" (expected: 1-4, A-D, I-IV, or क-घ)'

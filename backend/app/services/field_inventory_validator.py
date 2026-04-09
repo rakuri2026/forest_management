@@ -52,9 +52,9 @@ class FieldInventoryValidator:
 
     # DBH thresholds (in cm)
     DBH_THRESHOLDS = {
-        'regeneration': {'min': 0, 'max': 4, 'strict': True},
-        'sapling': {'min': 4, 'max': 10, 'strict': True},
-        'pole': {'min': 10, 'max': 30, 'strict': False},
+        'regeneration': {'min': 0.1, 'max': 3.99, 'strict': True},
+        'sapling': {'min': 4, 'max': 9.99, 'strict': True},
+        'pole': {'min': 10, 'max': 29.99, 'strict': False},
         'tree': {'min': 30, 'max': 200, 'strict': False}
     }
 

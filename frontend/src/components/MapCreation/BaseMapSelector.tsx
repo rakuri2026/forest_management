@@ -1,39 +1,54 @@
 import React from 'react';
-import { TileLayer, LayersControl } from 'react-leaflet';
+import { TileLayer } from 'react-leaflet';
 
-const { BaseLayer } = LayersControl;
+interface BaseMapSelectorProps {
+  baseMap: string;
+}
 
 /**
- * BaseMapSelector provides base layer tiles with a switcher control
+ * BaseMapSelector provides base layer tiles with switchable basemaps
  * Usage: Add this component inside MapContainer alongside other map elements
  */
-export const BaseMapSelector: React.FC = () => {
+export const BaseMapSelector: React.FC<BaseMapSelectorProps> = ({ baseMap = 'osm' }) => {
+  const getTileUrl = () => {
+    switch (baseMap) {
+      case 'satellite':
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      case 'terrain':
+        return 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+      case 'osm':
+      default:
+        return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    }
+  };
+
+  const getAttribution = () => {
+    switch (baseMap) {
+      case 'satellite':
+        return '&copy; Esri';
+      case 'terrain':
+        return '&copy; OpenStreetMap contributors';
+      case 'osm':
+      default:
+        return '&copy; OpenStreetMap contributors';
+    }
+  };
+
+  const getMaxZoom = () => {
+    switch (baseMap) {
+      case 'terrain':
+        return 17;
+      default:
+        return 19;
+    }
+  };
+
   return (
-    <>
-      <LayersControl position="topright">
-        <BaseLayer name="Satellite Imagery" checked>
-          <TileLayer
-            attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxZoom={19}
-          />
-        </BaseLayer>
-        <BaseLayer name="Street Map">
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            maxZoom={19}
-          />
-        </BaseLayer>
-        <BaseLayer name="Topographic Map">
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-            maxZoom={17}
-          />
-        </BaseLayer>
-      </LayersControl>
-    </>
+    <TileLayer
+      attribution={getAttribution()}
+      url={getTileUrl()}
+      maxZoom={getMaxZoom()}
+    />
   );
 };
 

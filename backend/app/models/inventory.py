@@ -95,6 +95,7 @@ class InventoryCalculation(Base):
     mother_trees_count = Column(Integer, nullable=True)
     felling_trees_count = Column(Integer, nullable=True)
     seedling_count = Column(Integer, nullable=True)
+    pole_count = Column(Integer, nullable=True)
     total_volume_m3 = Column(Float, nullable=True)
     total_net_volume_m3 = Column(Float, nullable=True)
     total_net_volume_cft = Column(Float, nullable=True)
@@ -103,6 +104,12 @@ class InventoryCalculation(Base):
 
     # Compartment assignment flag (NEW)
     needs_compartment_assignment = Column(Boolean, default=False, nullable=False)
+
+    # Grid metadata for frontend rendering (filled when mother trees are identified)
+    grid_origin_x = Column(Float, nullable=True)
+    grid_origin_y = Column(Float, nullable=True)
+    grid_num_cols = Column(Integer, nullable=True)
+    grid_num_rows = Column(Integer, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="inventory_calculations")
@@ -155,7 +162,7 @@ class InventoryTree(Base):
     grid_cell_id = Column(Integer, nullable=True)
 
     # Diameter classification
-    stand_type = Column(String(20), nullable=True)  # 'Regeneration', 'Pole', 'Tree'
+    stand_type = Column(String(20), nullable=True)  # 'Regeneration', 'Sapling', 'Pole', 'Tree'
     dbh_class = Column(String(50), nullable=True)   # 'Small pole (10-20)', etc.
 
     # Metadata

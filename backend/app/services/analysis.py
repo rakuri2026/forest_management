@@ -3197,10 +3197,10 @@ def analyze_soil_geometry(wkt: str, db: Session) -> Dict[str, Any]:
 
             # FIX: Scale other parameters to match expected units
             # Based on actual raster values analysis:
-            ph_scaled = (ph_mean * 10) if ph_mean else None  # 0.57 → 5.7
+            ph_scaled = (ph_mean * 10) if ph_mean else None  # 0.57 -> 5.7
             soc_scaled = (soc_mean / 10) if soc_mean else None  # Treat as dg/kg but scaled 10x
-            bdod_scaled = (bdod_mean * 10) if bdod_mean else None  # 12.6 → 126 cg/cm³
-            cec_scaled = (cec_mean * 10) if cec_mean else None  # 15.9 → 159 mmol/kg
+            bdod_scaled = (bdod_mean * 10) if bdod_mean else None  # 12.6 -> 126 cg/cm³
+            cec_scaled = (cec_mean * 10) if cec_mean else None  # 15.9 -> 159 mmol/kg
 
             # Calculate carbon stock
             carbon_stock = calculate_carbon_stock(soc_scaled, bdod_scaled)
@@ -3628,7 +3628,7 @@ def analyze_potential_tree_species(forest_type_percentages: Dict[str, float], db
     """
     Analyze potential tree species based on forest type distribution
 
-    Uses forest_type → species associations to suggest likely species for a block/forest
+    Uses forest_type -> species associations to suggest likely species for a block/forest
     Orders species by:
     1. Availability rank (Dominant > Co-dominant > Associate > Occasional)
     2. Economic value (high-value timber species prioritized)

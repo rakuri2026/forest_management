@@ -7,11 +7,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from uuid import UUID
+import uuid
+import json
 import pandas as pd
 import numpy as np
 import io
 
 from ..core.database import get_db
+from sqlalchemy import text
 from ..models.user import User
 from ..models.inventory import (
     InventoryCalculation,
@@ -43,6 +46,185 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
+
+
+@router.get("/{inventory_id}/grid-cells")
+async def get_grid_cells(
+    inventory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get grid cells as GeoJSON for visualization on map
+    
+    Uses the forest block bounds for consistent grid with mother tree identification:
+    1. Find forest block with majority of trees
+    2. Use block geometry bounds for grid
+    3. If no block found, fallback to tree bounds
+    """
+    logger.info(f"[get_grid_cells] Getting grid cells for inventory {inventory_id}")
+    
+    # Verify ownership
+    inventory = db.query(InventoryCalculation).filter(
+        InventoryCalculation.id == inventory_id,
+        InventoryCalculation.user_id == current_user.id
+    ).first()
+    
+    if not inventory:
+        logger.error(f"Inventory {inventory_id} not found for user {current_user.id}")
+        raise HTTPException(status_code=404, detail="Inventory not found")
+    
+    # Get projection and grid settings
+    projection_epsg = inventory.projection_epsg or 32644
+    grid_size = inventory.grid_spacing_meters or 20.0
+    
+    # Use TREE bounds (same as service that creates the grid)
+    # This ensures fishnet cell IDs match tree grid_cell_ids
+    result = db.execute(text("""
+        SELECT 
+            ST_XMin(ST_Extent(ST_Transform(location::geometry, :epsg))) AS xmin,
+            ST_YMin(ST_Extent(ST_Transform(location::geometry, :epsg))) AS ymin,
+            ST_XMax(ST_Extent(ST_Transform(location::geometry, :epsg))) AS xmax,
+            ST_YMax(ST_Extent(ST_Transform(location::geometry, :epsg))) AS ymax
+        FROM public.inventory_trees
+        WHERE inventory_calculation_id = :inv_id
+    """), {"epsg": projection_epsg, "inv_id": str(inventory_id)}).first()
+    
+    block_geom_wkt = None
+    block_result = None
+    
+    # Get block for clipping only (not for bounds)
+    if inventory.calculation_id:
+        block_vote_query = text("""
+            SELECT fb.id, fb.name
+            FROM forest_blocks fb
+            JOIN inventory_trees t ON ST_Contains(fb.geometry, t.location::geometry)
+            WHERE t.inventory_calculation_id = :inventory_id
+              AND fb.calculation_id = :calc_id
+              AND fb.parent_block_id IS NULL
+            GROUP BY fb.id, fb.name
+            ORDER BY COUNT(t.id) DESC
+            LIMIT 1
+        """)
+        block_result = db.execute(block_vote_query, {
+            "inventory_id": str(inventory_id),
+            "calc_id": str(inventory.calculation_id)
+        }).first()
+        
+        if block_result:
+            # Get block geometry for clipping
+            block_geom_result = db.execute(text("""
+                SELECT ST_AsText(ST_Transform(geometry, :epsg))
+                FROM forest_blocks
+                WHERE id = :block_id
+            """), {"epsg": projection_epsg, "block_id": str(block_result[0])}).first()
+            if block_geom_result:
+                block_geom_wkt = block_geom_result[0]
+    
+    xmin, ymin = None, None
+    num_cols, num_rows = None, None
+    
+    if result and result[0]:
+        xmin, ymin, xmax, ymax = result
+        num_cols = int(round((xmax - xmin) / grid_size)) + 1
+        num_rows = int(round((ymax - ymin) / grid_size)) + 1
+        logger.info(f"[get_grid_cells] Grid from block: origin=({xmin}, {ymin}), size=({xmax-xmin}, {ymax-ymin}), cols={num_cols}, rows={num_rows}")
+    else:
+        logger.warning(f"[get_grid_cells] No bounds found for inventory {inventory_id}")
+    
+    if xmin is None:
+        return {
+            "type": "FeatureCollection", 
+            "features": [],
+            "metadata": {}
+        }
+    
+    # Get grid metadata
+    grid_metadata = {
+        "origin_x": xmin,
+        "origin_y": ymin,
+        "num_cols": num_cols,
+        "num_rows": num_rows,
+        "spacing_meters": grid_size,
+        "projection_epsg": projection_epsg
+    }
+    
+    # Get grid cells from persistent storage (same cells used for tree assignment)
+    existing_cells = db.execute(text("""
+        SELECT COUNT(*) FROM inventory_grid_cells 
+        WHERE inventory_calculation_id = :inv_id
+    """), {"inv_id": str(inventory_id)}).scalar()
+
+    if existing_cells and existing_cells > 0:
+        # Use grid cells from persistent storage - these match tree grid_cell_ids
+        logger.info(f"[get_grid_cells] Using {existing_cells} grid cells from database")
+        grid_cells_result = db.execute(text("""
+            SELECT 
+                cell_id,
+                ST_AsGeoJSON(geom) as geom_wgs84
+            FROM inventory_grid_cells
+            WHERE inventory_calculation_id = :inv_id
+            ORDER BY cell_id
+        """), {"inv_id": str(inventory_id)}).fetchall()
+        
+        features = []
+        for row in grid_cells_result:
+            cell_id = row[0]
+            geom_wgs84 = json.loads(row[1]) if row[1] else None
+            
+            if geom_wgs84:
+                features.append({
+                    "type": "Feature",
+                    "id": cell_id,
+                    "properties": {
+                        "cell_id": cell_id
+                    },
+                    "geometry": geom_wgs84
+                })
+    else:
+        # Fallback: generate grid cells (should not happen after re-processing)
+        logger.warning(f"[get_grid_cells] No stored grid cells found, generating from scratch")
+        
+        features = []
+        for row_idx in range(num_rows):
+            for col_idx in range(num_cols):
+                cell_id = row_idx * num_cols + col_idx + 1
+                
+                cell_xmin = xmin + col_idx * grid_size
+                cell_ymin = ymin + row_idx * grid_size
+                cell_xmax = cell_xmin + grid_size
+                cell_ymax = cell_ymin + grid_size
+                
+                result = db.execute(text("""
+                    SELECT ST_AsGeoJSON(ST_Transform(
+                        ST_SetSRID(ST_MakeEnvelope(:xmin, :ymin, :xmax, :ymax), :epsg),
+                        4326
+                    ))
+                """), {"xmin": cell_xmin, "ymin": cell_ymin, "xmax": cell_xmax, "ymax": cell_ymax, "epsg": projection_epsg}).scalar()
+                
+                if result:
+                    import json
+                    geom = json.loads(result)
+                    features.append({
+                        "type": "Feature",
+                        "id": cell_id,
+                        "properties": {
+                            "cell_id": cell_id,
+                            "row": row_idx + 1,
+                            "col": col_idx + 1
+                        },
+                        "geometry": geom
+                    })
+    
+    logger.info(f"[get_grid_cells] First 5 cell IDs: {[f['properties']['cell_id'] for f in features[:5]]}")
+    logger.info(f"[get_grid_cells] Last 5 cell IDs: {[f['properties']['cell_id'] for f in features[-5:]]}")
+    logger.info(f"[get_grid_cells] Returning {len(features)} grid cells")
+    
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": grid_metadata
+    }
 
 
 def convert_numpy_types(obj: Any) -> Any:
@@ -98,7 +280,7 @@ async def download_template(
     if not os.path.exists(template_path):
         raise HTTPException(status_code=404, detail="Template file not found")
 
-    with open(template_path, 'r') as f:
+    with open(template_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
     return StreamingResponse(
@@ -487,7 +669,7 @@ async def confirm_and_upload_with_mapping(
                     validation_report['info'] = validation_report.get('info', [])
                     validation_report['info'].append({
                         'type': 'auto_utm_detection',
-                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E (≥ 84°E)'
+                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E (>= 84°E)'
                     })
             else:
                 final_projection_epsg = 32645
@@ -690,7 +872,7 @@ async def upload_inventory(
                     validation_report['info'] = validation_report.get('info', [])
                     validation_report['info'].append({
                         'type': 'auto_utm_detection',
-                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E (≥ 84°E)'
+                        'message': f'Auto-detected UTM Zone 45N (EPSG:32645) based on longitude {mean_lon:.2f}°E (>= 84°E)'
                     })
             else:
                 # Default to UTM 45N for Nepal
@@ -844,10 +1026,27 @@ async def process_inventory(
         return inventory
 
     except Exception as e:
+        import traceback
+        # Safely get error message
+        try:
+            error_detail = f"Processing failed: {str(e)}"
+        except UnicodeEncodeError:
+            error_detail = "Processing failed: Unicode encoding error"
+        
+        # Try to get traceback safely
+        try:
+            tb = traceback.format_exc()
+            print(f"[PROCESS_ERROR] {error_detail}")
+            print(f"[PROCESS_TRACE] {tb}")
+        except:
+            pass
+            
         inventory.status = 'failed'
-        inventory.error_message = str(e)
+        inventory.error_message = error_detail
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        
+        # Return safe error to client
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @router.get("/{inventory_id}/status", response_model=InventoryCalculationResponse)
@@ -887,7 +1086,37 @@ async def get_inventory_summary(
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
-    # Get species distribution
+    # Get enhanced summary statistics from database
+    try:
+        service = InventoryService(db)
+        summary_stats = await service._calculate_summary_from_db(inventory_id)
+    except Exception as e:
+        import traceback
+        print(f"[SUMMARY] Error calculating summary: {e}")
+        print(f"[SUMMARY] Traceback: {traceback.format_exc()}")
+        # Fall back to inventory table values
+        summary_stats = {
+            'total_trees': inventory.total_trees or 0,
+            'mother_trees_count': inventory.mother_trees_count or 0,
+            'felling_trees_count': inventory.felling_trees_count or 0,
+            'pole_count': 0,
+            'seedling_count': inventory.seedling_count or 0,
+            'total_volume_m3': inventory.total_volume_m3 or 0,
+            'total_net_volume_m3': inventory.total_net_volume_m3 or 0,
+            'total_net_volume_cft': inventory.total_net_volume_cft or 0,
+            'total_firewood_m3': inventory.total_firewood_m3 or 0,
+            'total_firewood_chatta': inventory.total_firewood_chatta or 0,
+            'regeneration_count': 0,
+            'sapling_count': 0,
+            'stand_pole_count': 0,
+            'tree_count': 0,
+            'felling_volume_m3': 0,
+            'mother_volume_m3': 0,
+            'pole_volume_m3': 0,
+            'timber_volume_m3': 0,
+            'timber_volume_cft': 0
+        }
+    
     from sqlalchemy import text
     species_query = db.execute(
         text("""
@@ -906,33 +1135,163 @@ async def get_inventory_summary(
         text("""
         SELECT
             CASE
-                WHEN dia_cm < 10 THEN 'Seedling (<10cm)'
-                WHEN dia_cm < 20 THEN 'Sapling (10-20cm)'
-                WHEN dia_cm < 40 THEN 'Pole (20-40cm)'
-                ELSE 'Mature (>40cm)'
+                WHEN dia_cm < 4 THEN 'Regeneration (0.1-4)'
+                WHEN dia_cm < 10 THEN 'Sapling (4-10)'
+                WHEN dia_cm < 30 THEN 'Pole (10-30)'
+                ELSE 'Tree (>30)'
             END as dbh_class,
             COUNT(*) as count
         FROM public.inventory_trees
         WHERE inventory_calculation_id = :inventory_id
-        GROUP BY dbh_class
+        GROUP BY CASE
+                WHEN dia_cm < 4 THEN 'Regeneration (0.1-4)'
+                WHEN dia_cm < 10 THEN 'Sapling (4-10)'
+                WHEN dia_cm < 30 THEN 'Pole (10-30)'
+                ELSE 'Tree (>30)'
+            END
         """),
         {"inventory_id": str(inventory_id)}
     )
     dbh_classes = {row[0]: row[1] for row in dbh_query.fetchall()}
 
+    # Get compartment-wise breakdown with tree category counts and volumes
+    # Also get forest name and block name from the calculation
+    try:
+        calc_id = inventory.calculation_id if inventory else None
+        print(f"[SUMMARY] Inventory ID: {inventory_id}, calculation_id: {calc_id}")
+        
+        # First get forest and block info from calculation
+        forest_name = None
+        block_name = None
+        if calc_id:
+            calc_query = db.execute(
+                text("""
+                    SELECT c.forest_name, c.block_name 
+                    FROM calculations c 
+                    WHERE c.id = :calc_id
+                """),
+                {"calc_id": str(calc_id)}
+            ).first()
+            if calc_query:
+                forest_name = calc_query[0]
+                block_name = calc_query[1]
+                print(f"[SUMMARY] Forest: {forest_name}, Block: {block_name}")
+        
+        # Get compartment breakdown using spatial join
+        # Get all child blocks (compartments) under this calculation
+        if calc_id:
+            compartment_query = db.execute(
+                text("""
+                    SELECT 
+                        COALESCE(fb.compartment_code, fb.name) as comp_name,
+                        it.remark,
+                        COUNT(*) as tree_count,
+                        COALESCE(SUM(it.net_volume), 0) as net_volume_m3,
+                        COALESCE(SUM(it.net_volume_cft), 0) as net_volume_cft,
+                        COALESCE(SUM(it.firewood_m3), 0) as firewood_m3,
+                        COALESCE(SUM(it.firewood_chatta), 0) as firewood_chatta
+                    FROM public.inventory_trees it
+                    LEFT JOIN LATERAL (
+                        SELECT fb.id, fb.compartment_code, fb.name
+                        FROM public.forest_blocks fb
+                        WHERE fb.parent_block_id IN (
+                            SELECT id FROM public.forest_blocks WHERE calculation_id = :calc_id
+                        )
+                        AND ST_Contains(fb.geometry, it.location::geometry)
+                        LIMIT 1
+                    ) fb ON true
+                    WHERE it.inventory_calculation_id = :inventory_id
+                    GROUP BY COALESCE(fb.compartment_code, fb.name), it.remark
+                    ORDER BY COALESCE(fb.compartment_code, fb.name), 
+                        CASE it.remark 
+                            WHEN 'Seedling' THEN 1 
+                            WHEN 'Pole' THEN 2 
+                            WHEN 'Felling Tree' THEN 3 
+                            WHEN 'Mother Tree' THEN 4 
+                        END
+                """),
+                {"inventory_id": str(inventory_id), "calc_id": str(calc_id)}
+            )
+            
+            compartment_breakdown = []
+            for row in compartment_query.fetchall():
+                compartment_breakdown.append({
+                    'forest_name': forest_name or 'Unknown',
+                    'block_name': block_name or 'Unknown',
+                    'compartment_name': row[0] or 'Unassigned',
+                    'remark': row[1],
+                    'tree_count': row[2],
+                    'net_volume_m3': round(float(row[3]), 3) if row[3] else 0,
+                    'net_volume_cft': round(float(row[4]), 3) if row[4] else 0,
+                    'firewood_m3': round(float(row[5]), 3) if row[5] else 0,
+                    'firewood_chatta': round(float(row[6]), 3) if row[6] else 0
+                })
+            
+            print(f"[SUMMARY] Compartment breakdown rows: {len(compartment_breakdown)}")
+        else:
+            compartment_breakdown = []
+        
+        # Get species breakdown with volumes
+        try:
+            species_query = db.execute(
+                text("""
+                    SELECT 
+                        it.species,
+                        it.local_name,
+                        it.remark,
+                        COUNT(*) as tree_count,
+                        COALESCE(SUM(it.net_volume), 0) as net_volume_m3,
+                        COALESCE(SUM(it.net_volume_cft), 0) as net_volume_cft,
+                        COALESCE(SUM(it.firewood_m3), 0) as firewood_m3,
+                        COALESCE(SUM(it.firewood_chatta), 0) as firewood_chatta
+                    FROM public.inventory_trees it
+                    WHERE it.inventory_calculation_id = :inventory_id
+                    GROUP BY it.species, it.local_name, it.remark
+                    ORDER BY it.species, 
+                        CASE it.remark 
+                            WHEN 'Seedling' THEN 1 
+                            WHEN 'Pole' THEN 2 
+                            WHEN 'Felling Tree' THEN 3 
+                            WHEN 'Mother Tree' THEN 4 
+                        END
+                """),
+                {"inventory_id": str(inventory_id)}
+            )
+            
+            species_breakdown = []
+            for row in species_query.fetchall():
+                species_breakdown.append({
+                    'species': row[0],
+                    'local_name': row[1],
+                    'remark': row[2],
+                    'tree_count': row[3],
+                    'net_volume_m3': round(float(row[4]), 3) if row[4] else 0,
+                    'net_volume_cft': round(float(row[5]), 3) if row[5] else 0,
+                    'firewood_m3': round(float(row[6]), 3) if row[6] else 0,
+                    'firewood_chatta': round(float(row[7]), 3) if row[7] else 0
+                })
+            
+            print(f"[SUMMARY] Species breakdown rows: {len(species_breakdown)}")
+        except Exception as e:
+            import traceback
+            print(f"[SUMMARY] Species query error: {e}")
+            print(f"[SUMMARY] Traceback: {traceback.format_exc()}")
+            species_breakdown = []
+        
+    except Exception as e:
+        import traceback
+        print(f"[SUMMARY] Compartment query error: {e}")
+        print(f"[SUMMARY] Traceback: {traceback.format_exc()}")
+        compartment_breakdown = []
+        species_breakdown = []
+
     return {
         'inventory_id': inventory.id,
-        'total_trees': inventory.total_trees or 0,
-        'mother_trees_count': inventory.mother_trees_count or 0,
-        'felling_trees_count': inventory.felling_trees_count or 0,
-        'seedling_count': inventory.seedling_count or 0,
-        'total_volume_m3': inventory.total_volume_m3 or 0,
-        'total_net_volume_m3': inventory.total_net_volume_m3 or 0,
-        'total_net_volume_cft': inventory.total_net_volume_cft or 0,
-        'total_firewood_m3': inventory.total_firewood_m3 or 0,
-        'total_firewood_chatta': inventory.total_firewood_chatta or 0,
+        **summary_stats,  # Include all enhanced stats from database query
         'species_distribution': species_distribution,
         'dbh_classes': dbh_classes,
+        'compartment_breakdown': compartment_breakdown,
+        'species_breakdown': species_breakdown,
         'status': inventory.status,
         'created_at': inventory.created_at,
         'completed_at': inventory.completed_at,
@@ -945,7 +1304,7 @@ async def list_inventory_trees(
     inventory_id: UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    remark: Optional[str] = Query(None, description="Filter by remark (Mother Tree, Felling Tree, Seedling)"),
+    remark: Optional[str] = Query(None, description="Filter by remark (Mother Tree, Felling Tree, Seedling, Pole)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -960,6 +1319,8 @@ async def list_inventory_trees(
 
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventory not found")
+
+    calculation_id = inventory.calculation_id
 
     # Build query
     query = db.query(InventoryTree).filter(
@@ -989,6 +1350,29 @@ async def list_inventory_trees(
 
         lon, lat = result[0], result[1]
 
+        # Auto-assign compartment based on spatial intersection if not already assigned
+        compartment_name = None
+        if not tree.compartment_id and calculation_id:
+            # Find compartments for this calculation
+            comp_result = db.execute(
+                text("""
+                    SELECT fb.id, COALESCE(fb.compartment_code, fb.name) as comp_name
+                    FROM forest_blocks fb
+                    JOIN forest_blocks parent ON fb.parent_block_id = parent.id
+                    WHERE parent.calculation_id = :calc_id AND fb.is_compartment = true
+                    AND ST_Contains(fb.geometry, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326))
+                    LIMIT 1
+                """),
+                {"calc_id": calculation_id, "lon": lon, "lat": lat}
+            ).first()
+            if comp_result:
+                compartment_name = comp_result[1]  # comp_name column
+        elif tree.compartment_id:
+            from ..models.forest_block import ForestBlock
+            comp = db.query(ForestBlock).filter(ForestBlock.id == tree.compartment_id).first()
+            if comp:
+                compartment_name = comp.compartment_code or comp.name
+
         tree_responses.append(InventoryTreeResponse(
             id=tree.id,
             species=tree.species,
@@ -1006,6 +1390,8 @@ async def list_inventory_trees(
             firewood_chatta=tree.firewood_chatta,
             remark=tree.remark,
             grid_cell_id=tree.grid_cell_id,
+            compartment_id=tree.compartment_id,
+            compartment_name=compartment_name,
             longitude=lon,
             latitude=lat
         ))
@@ -1024,12 +1410,12 @@ async def list_inventory_trees(
 @router.get("/{inventory_id}/export")
 async def export_inventory(
     inventory_id: UUID,
-    format: str = Query('csv', regex="^(csv|geojson)$"),
+    format: str = Query('csv', regex="^(csv|geojson|excel)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Export inventory results (CSV or GeoJSON)
+    Export inventory results (CSV, GeoJSON, or Excel)
     """
     # Verify ownership
     inventory = db.query(InventoryCalculation).filter(
@@ -1046,17 +1432,30 @@ async def export_inventory(
     try:
         content, filename = await service.export_inventory(inventory_id, format)
 
-        media_type = "text/csv" if format == "csv" else "application/geo+json"
-
+        if format == 'csv':
+            media_type = "text/csv; charset=utf-8"
+        elif format == 'excel':
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        else:
+            media_type = "application/geo+json; charset=utf-8"
+        
+        # Ensure filename is ASCII-safe for Content-Disposition header
+        import unicodedata
+        ascii_filename = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
+        if not ascii_filename:
+            ascii_filename = "tree_mapping_export"
+        
         return StreamingResponse(
             io.BytesIO(content),
             media_type=media_type,
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": f"attachment; filename={ascii_filename}"
             }
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @router.get("/by-calculation/{calculation_id}", response_model=InventoryCalculationResponse)

@@ -5,6 +5,9 @@ Community Forest Management System
 import os
 import sys
 
+# Import site-wide UTF-8 fix
+import sitecustomize
+
 # Set PROJ_LIB environment variable for PROJ database
 # This must be set before importing any libraries that use PROJ (pyproj, rasterio, etc.)
 if not os.environ.get('PROJ_LIB'):
@@ -28,7 +31,7 @@ from .core.config import settings
 from .core.database import check_db_connection, Base, engine
 from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router
 from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
-from .api import location_search, tiles, user_group, household_info, forest_committee, compartments
+from .api import location_search, tiles, user_group, household_info, forest_committee, compartments, yearly_activities
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -234,6 +237,12 @@ app.include_router(
 app.include_router(
     compartments.router,
     tags=["Compartments"]
+)
+
+# Include yearly activities router
+app.include_router(
+    yearly_activities.router,
+    tags=["Yearly Activities"]
 )
 
 

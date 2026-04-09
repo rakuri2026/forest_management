@@ -238,7 +238,7 @@ async def get_species_by_code(code: int):
     Get species by numeric code
 
     Example:
-    - /api/species/18 → Returns Shorea robusta
+    - /api/species/18 -> Returns Shorea robusta
     """
     matcher = get_species_matcher()
     species = matcher.get_species_by_code(code)

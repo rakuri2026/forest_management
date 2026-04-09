@@ -10,9 +10,9 @@ def sanitize_for_json(obj: Any) -> Any:
     Recursively sanitize data structure to make it JSON-serializable.
 
     Handles:
-    - NaN → None
-    - Infinity → None
-    - -Infinity → None
+    - NaN -> None
+    - Infinity -> None
+    - -Infinity -> None
     - Nested dicts and lists
 
     Args:

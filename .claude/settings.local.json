@@ -95,7 +95,8 @@
       "Bash(../venv/Scripts/alembic merge:*)",
       "Bash(../venv/Scripts/alembic stamp:*)",
       "Bash(del ce0e6dfef354_add_ntfp_columns_to_field_inventory.py)",
-      "Bash(cmd /c \"dir /b /o-d backend\\exports\\*.xlsx 2>nul | findstr /n .\")"
+      "Bash(cmd /c \"dir /b /o-d backend\\exports\\*.xlsx 2>nul | findstr /n .\")",
+      "Bash(cmd /c \"taskkill /F /IM python.exe 2>&1\")"
     ],
     "deny": [],
     "ask": []

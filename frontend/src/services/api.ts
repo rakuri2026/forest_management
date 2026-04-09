@@ -607,12 +607,16 @@ export const inventoryApi = {
     return response.data;
   },
 
-  exportInventory: async (id: string, format: "csv" | "geojson"): Promise<Blob> => {
+  exportInventory: async (id: string, format: "csv" | "geojson" | "excel"): Promise<{blob: Blob, filename: string}> => {
     const response = await api.get(`/api/inventory/${id}/export`, {
       params: { format },
       responseType: "blob",
     });
-    return response.data;
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers?.['content-disposition'] || '';
+    const filenameMatch = contentDisposition.match(/filename=(.+)/);
+    const filename = filenameMatch ? filenameMatch[1] : `tree_mapping_${id}.${format === 'excel' ? 'xlsx' : format}`;
+    return { blob: response.data, filename };
   },
 
   deleteInventory: async (id: string): Promise<void> => {
@@ -682,6 +686,12 @@ export const inventoryApi = {
         "Content-Type": "multipart/form-data",
       },
     });
+    return response.data;
+  },
+
+  // Grid cells endpoint - get grid cell boundaries for visualization
+  getGridCells: async (inventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/${inventoryId}/grid-cells`);
     return response.data;
   },
 };
@@ -1555,6 +1565,124 @@ export const userGroupApi = {
    */
   deleteAllCommittees: async (calculationId: string): Promise<any> => {
     const response = await api.delete(`/api/forest-committee/user-groups/${calculationId}`);
+    return response.data;
+  },
+};
+
+/**
+ * Yearly Activities API - Manage yearly program activities with spatial integration
+ */
+export const yearlyActivitiesApi = {
+  /**
+   * List all potential activities from master list
+   */
+  listPotentialActivities: async (filters?: {
+    project_name?: string;
+    program?: string;
+    is_default?: string;
+    is_active?: boolean;
+  }): Promise<any[]> => {
+    const params = { is_active: true, ...filters };
+    const response = await api.get('/api/yearly-activities/potential-activities', { params });
+    return response.data;
+  },
+
+  /**
+   * List proposed activities for a calculation with spatial filtering
+   */
+  listProposedActivities: async (
+    calculationId: string,
+    filters?: {
+      block_id?: string;
+      sub_area_id?: string;
+      sub_area_category?: string;
+      status?: string;
+    }
+  ): Promise<any[]> => {
+    const params = filters || {};
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities`,
+      { params }
+    );
+    return response.data;
+  },
+
+  /**
+   * Create a new proposed activity
+   */
+  createProposedActivity: async (
+    calculationId: string,
+    data: {
+      potential_activity_id: number;
+      block_id?: string;
+      sub_area_id?: string;
+      default_quantity: number;
+      default_yearly_budget: number;
+      notes?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Update a proposed activity (including spatial assignment)
+   */
+  updateProposedActivity: async (
+    proposedActivityId: string,
+    data: {
+      block_id?: string;
+      sub_area_id?: string;
+      default_quantity?: number;
+      default_yearly_budget?: number;
+      notes?: string;
+      status?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/yearly-activities/proposed-activities/${proposedActivityId}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete a proposed activity
+   */
+  deleteProposedActivity: async (proposedActivityId: string): Promise<void> => {
+    await api.delete(`/api/yearly-activities/proposed-activities/${proposedActivityId}`);
+  },
+
+  /**
+   * Get activities with geometry for map visualization
+   */
+  getActivitiesWithGeometry: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities/spatial`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get location summary (activities by block/sub-area)
+   */
+  getLocationSummary: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/location-summary`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get activity summary statistics
+   */
+  getSummary: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/summary`
+    );
     return response.data;
   },
 };

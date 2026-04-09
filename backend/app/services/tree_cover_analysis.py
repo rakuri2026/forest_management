@@ -44,10 +44,10 @@ def calculate_accessible_forest_area(
     """
     try:
         if filter_tree_cover and filter_slope:
-            # Full filtering: tree cover (ESA = 10) + slope ≤ threshold (from DEM)
+            # Full filtering: tree cover (ESA = 10) + slope <= threshold (from DEM)
             logger.info(
                 f"Calculating accessible forest area: "
-                f"tree cover + slope ≤{max_slope_degrees}°"
+                f"tree cover + slope <={max_slope_degrees}°"
             )
 
             query = text("""
@@ -320,7 +320,7 @@ def extract_accessible_forest_mask(
 
         else:
             # With slope filter: tree cover + slope calculated from DEM
-            logger.info(f"Extracting accessible forest mask (tree cover + slope ≤{max_slope_degrees}°)...")
+            logger.info(f"Extracting accessible forest mask (tree cover + slope <={max_slope_degrees}°)...")
 
             query = text("""
                 WITH tree_pixels AS (
@@ -372,12 +372,12 @@ def extract_accessible_forest_mask(
             }).first()
 
             if not result or not result.accessible_wkt:
-                logger.warning(f"No accessible forest found (slope ≤{max_slope_degrees}°)")
+                logger.warning(f"No accessible forest found (slope <={max_slope_degrees}°)")
                 return None
 
             logger.info(
                 f"Accessible forest mask extracted: {result.pixel_count} pixels "
-                f"(tree cover + slope ≤{max_slope_degrees}°)"
+                f"(tree cover + slope <={max_slope_degrees}°)"
             )
 
             return result.accessible_wkt
@@ -444,7 +444,7 @@ def extract_tree_cover_pixel_centers(
 
         else:
             # With slope filter: tree cover + slope check
-            logger.info(f"Extracting tree cover pixel centers (slope ≤{max_slope_degrees}°)...")
+            logger.info(f"Extracting tree cover pixel centers (slope <={max_slope_degrees}°)...")
 
             query = text("""
                 WITH tree_pixels AS (
@@ -492,7 +492,7 @@ def extract_tree_cover_pixel_centers(
             pixel_centers = [(row.lon, row.lat, row.slope_degrees) for row in results]
             logger.info(
                 f"Extracted {len(pixel_centers)} accessible tree pixel centers "
-                f"(slope ≤{max_slope_degrees}°)"
+                f"(slope <={max_slope_degrees}°)"
             )
             return pixel_centers
 

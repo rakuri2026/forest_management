@@ -620,7 +620,7 @@ class FieldInventoryService:
             # Convert class value to string, handling float format from Excel CSV
             tree_class_raw = measurement.tree_class or '2'
             try:
-                # Try to convert to float then int to handle "1.0" → 1
+                # Try to convert to float then int to handle "1.0" -> 1
                 tree_class = str(int(float(tree_class_raw)))
             except (ValueError, TypeError):
                 # If conversion fails, use as string (for 'i', 'ii', 'a', 'b', etc.)

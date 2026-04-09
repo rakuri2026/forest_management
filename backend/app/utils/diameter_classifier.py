@@ -23,15 +23,16 @@ class DiameterClassifier:
     @staticmethod
     def classify_simple(dbh: float) -> Optional[str]:
         """
-        Classify tree using simplified 3-category system
+        Classify tree using simplified 4-category system
 
         Args:
             dbh: Diameter at breast height in cm
 
         Returns:
-            - 'Regeneration' for 1-10 cm
-            - 'Pole' for 10-30 cm
-            - 'Tree' for >30 cm
+            - 'Regeneration' for 0.1-3.99 cm
+            - 'Sapling' for 4-9.99 cm
+            - 'Pole' for 10-29.99 cm
+            - 'Tree' for >=30 cm
             - None for invalid/null values
         """
         if pd.isna(dbh):
@@ -42,11 +43,13 @@ class DiameterClassifier:
         except (ValueError, TypeError):
             return None
 
-        if dbh_value < 1:
+        if dbh_value < 0.1:
             return None
-        elif 1 <= dbh_value < 10:
+        elif dbh_value < 4:
             return "Regeneration"
-        elif 10 <= dbh_value < 30:
+        elif dbh_value < 10:
+            return "Sapling"
+        elif dbh_value < 30:
             return "Pole"
         elif dbh_value >= 30:
             return "Tree"
@@ -56,7 +59,7 @@ class DiameterClassifier:
     @staticmethod
     def classify_detailed(dbh: float) -> Optional[str]:
         """
-        Classify tree using detailed 7-category system
+        Classify tree using detailed 9-category system
 
         Args:
             dbh: Diameter at breast height in cm
@@ -73,19 +76,21 @@ class DiameterClassifier:
         except (ValueError, TypeError):
             return None
 
-        if dbh_value < 1:
+        if dbh_value < 0.1:
             return None
-        elif 1 <= dbh_value < 10:
-            return "Regeneration"
-        elif 10 <= dbh_value < 20:
+        elif dbh_value < 4:
+            return "Regeneration (0.1-4)"
+        elif dbh_value < 10:
+            return "Sapling (4-10)"
+        elif dbh_value < 20:
             return "Small pole (10-20)"
-        elif 20 <= dbh_value < 30:
+        elif dbh_value < 30:
             return "Large pole (20-30)"
-        elif 30 <= dbh_value < 40:
+        elif dbh_value < 40:
             return "Small tree (30-40)"
-        elif 40 <= dbh_value < 50:
+        elif dbh_value < 50:
             return "Medium tree (40-50)"
-        elif 50 <= dbh_value < 60:
+        elif dbh_value < 60:
             return "Large tree (50-60)"
         elif dbh_value >= 60:
             return "Very large tree (>60)"
@@ -125,7 +130,7 @@ class DiameterClassifier:
 
         # Calculate percentages for simplified classification
         simple_stats = {}
-        for category in ['Regeneration', 'Pole', 'Tree']:
+        for category in ['Regeneration', 'Sapling', 'Pole', 'Tree']:
             count = simple_counts.get(category, 0)
             percentage = (count / total_classified * 100) if total_classified > 0 else 0
             simple_stats[category] = {
@@ -136,7 +141,8 @@ class DiameterClassifier:
         # Calculate percentages for detailed classification
         detailed_stats = {}
         for category in [
-            'Regeneration',
+            'Regeneration (0.1-4)',
+            'Sapling (4-10)',
             'Small pole (10-20)',
             'Large pole (20-30)',
             'Small tree (30-40)',
@@ -183,7 +189,7 @@ class DiameterClassifier:
         ]
 
         # Simplified distribution
-        for category in ['Regeneration', 'Pole', 'Tree']:
+        for category in ['Regeneration', 'Sapling', 'Pole', 'Tree']:
             stats = report['simple_distribution'].get(category, {'count': 0, 'percentage': 0})
             lines.append(f"  {category:15} {stats['count']:5} trees ({stats['percentage']:5.1f}%)")
 
@@ -192,7 +198,8 @@ class DiameterClassifier:
 
         # Detailed distribution
         for category in [
-            'Regeneration',
+            'Regeneration (0.1-4)',
+            'Sapling (4-10)',
             'Small pole (10-20)',
             'Large pole (20-30)',
             'Small tree (30-40)',

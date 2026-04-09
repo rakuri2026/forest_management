@@ -654,7 +654,7 @@ def create_sampling_design(
         if filter_tree_cover:
             filter_desc.append("tree cover only")
         if filter_slope:
-            filter_desc.append(f"slope ≤{max_slope_degrees}°")
+            filter_desc.append(f"slope <={max_slope_degrees}°")
         logger.info(f"  Accessible forest filtering: {', '.join(filter_desc)}")
 
     # Build default parameters dictionary
@@ -725,7 +725,7 @@ def create_sampling_design(
             effective_block_area = accessible_area_info.get("accessible_forest_area_ha", block_area_ha)
 
             logger.info(
-                f"  {block_name}: Total {block_area_ha:.2f} ha → "
+                f"  {block_name}: Total {block_area_ha:.2f} ha -> "
                 f"Accessible {effective_block_area:.2f} ha "
                 f"({accessible_area_info.get('accessible_forest_percentage', 100):.1f}%)"
             )
@@ -756,7 +756,7 @@ def create_sampling_design(
 
         logger.info(
             f"  {block_name} ({block_area_ha:.2f} ha, {effective_block_area:.2f} ha accessible): "
-            f"{samples_from_intensity} from intensity → {samples_for_block} samples "
+            f"{samples_from_intensity} from intensity -> {samples_for_block} samples "
             f"(minimum {'enforced' if minimum_enforced else 'not needed'})"
         )
 
@@ -984,7 +984,7 @@ def create_sampling_design(
             if filter_tree_cover:
                 filter_description.append("tree cover pixels")
             if filter_slope:
-                filter_description.append(f"slope ≤ {max_slope_degrees}°")
+                filter_description.append(f"slope <= {max_slope_degrees}°")
 
             raise ValueError(
                 f"No accessible forest pixels found with filters: {' AND '.join(filter_description)}. "

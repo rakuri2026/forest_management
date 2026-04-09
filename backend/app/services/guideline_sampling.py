@@ -123,7 +123,7 @@ def get_sample_count_from_guideline(
 
     logger.info(
         f"Guideline-2061 lookup: {block_area_hectares} ha @ {intensity_percent}% "
-        f"with {plot_size_sqm} sqm plots → {result.sample_count} samples"
+        f"with {plot_size_sqm} sqm plots -> {result.sample_count} samples"
     )
 
     return result.sample_count
@@ -137,8 +137,8 @@ def classify_block_by_majority_area(
     Determine if a block is majority protected area using >50% rule.
 
     Decision Rule (APPROVED):
-    - If >50% of block area overlaps with protected sub-areas → Protected (0.1%)
-    - If ≤50% of block area overlaps with protected sub-areas → Productive (0.5% or 1%)
+    - If >50% of block area overlaps with protected sub-areas -> Protected (0.1%)
+    - If <=50% of block area overlaps with protected sub-areas -> Productive (0.5% or 1%)
 
     This handles blocks that span both productive and protected zones by
     classifying the entire block based on which category is dominant.
@@ -239,7 +239,7 @@ def classify_block_by_majority_area(
     logger.info(
         f"Block classification: area={block_area:.6f} sq degrees, "
         f"protected_overlap={protected_overlap_area:.6f} sq degrees "
-        f"({protected_percentage:.1f}%) → {'PROTECTED' if is_protected else 'PRODUCTIVE'}"
+        f"({protected_percentage:.1f}%) -> {'PROTECTED' if is_protected else 'PRODUCTIVE'}"
     )
 
     return is_protected
