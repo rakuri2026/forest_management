@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Image as ImageIcon, X, Download, Grid3X3 } from 'lucide-react';
 import L from 'leaflet';
 import html2canvas from 'html2canvas';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../../utils/fileNaming';
 
 interface MapExportPanelProps {
   forestBoundary: any;
@@ -453,9 +454,10 @@ export function MapExportPanel({
   const downloadImage = () => {
     if (!exportedImage) return;
 
+    const filename = generateExportFileName(forestName || 'UnknownForest', CONTENT_TYPES.USER_GROUP_MAP, 'png');
     const link = document.createElement('a');
     link.href = exportedImage;
-    link.download = `user_group_map_${Date.now()}.png`;
+    link.download = getDownloadAttribute(filename);
     link.click();
   };
 

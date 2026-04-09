@@ -20,19 +20,34 @@ import FileUploadSection from './FileUploadSection';
 import HouseholdDataTable from './HouseholdDataTable';
 import HouseholdSummaryDashboard from './HouseholdSummary';
 import CommitteeManagement from './CommitteeManagement';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../../utils/fileNaming';
 
 interface HouseholdInfoTabProps {
   calculationId: string;
+  forestName?: string;
 }
 
 const HouseholdInfoTab: React.FC<HouseholdInfoTabProps> = ({
   calculationId,
+  forestName: propForestName,
 }) => {
   const [households, setHouseholds] = useState<HouseholdInfo[]>([]);
   const [summary, setSummary] = useState<HouseholdSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState('1');
+  const [forestName, setForestName] = useState<string>(propForestName || 'UnknownForest');
+
+  // Set forest name from prop or fetch
+  useEffect(() => {
+    if (propForestName) {
+      setForestName(propForestName);
+    } else {
+      api.forestApi.getCalculation(calculationId).then(data => {
+        setForestName(data.forest_name || 'UnknownForest');
+      }).catch(() => {});
+    }
+  }, [calculationId, propForestName]);
 
   // Load household data
   const loadHouseholds = async () => {
@@ -97,12 +112,13 @@ const HouseholdInfoTab: React.FC<HouseholdInfoTabProps> = ({
 
   // Handle export
   const handleExport = async () => {
+    const filename = generateExportFileName(forestName, CONTENT_TYPES.HOUSEHOLD_ANALYSIS, 'xlsx');
     try {
       const blob = await api.userGroupApi.exportHouseholdAnalysis(calculationId);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `household_analysis_${new Date().toISOString().split('T')[0]}.xlsx`;
+      link.download = getDownloadAttribute(filename);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

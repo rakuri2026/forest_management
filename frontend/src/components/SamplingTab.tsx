@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { samplingApi, forestApi } from '../services/api';
 import { SamplingMapView } from './SamplingMapView';
 import { AccessibleForestPreview } from './AccessibleForestPreview';
+import { generateExportFileName, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface SamplingTabProps {
   calculationId: string;
@@ -47,7 +48,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   const [samplingMethod, setSamplingMethod] = useState<'guideline_2061' | 'manual'>('guideline_2061');
   const [samplingType, setSamplingType] = useState<'systematic' | 'random'>('systematic');
   const [samplingIntensity, setSamplingIntensity] = useState(0.5); // percentage of block area
-  const [productiveIntensity, setProductiveIntensity] = useState<'0.5' | '1.0'>('0.5');
+  const [productiveIntensity, setProductiveIntensity] = useState<'0.5' | '1.0' | '2.0'>('0.5');
   const [sampleProtectedZone, setSampleProtectedZone] = useState(false);
   const [plotSizeSqm, setPlotSizeSqm] = useState(500);
   const [protectedZoneInfo, setProtectedZoneInfo] = useState<any>(null);
@@ -294,12 +295,14 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   };
 
   const handleExport = async (designId: string, format: 'csv' | 'gpx' | 'geojson' | 'kml') => {
+    const forestName = calculation?.forest_name || 'UnknownForest';
+    const filename = generateExportFileName(forestName, CONTENT_TYPES.SAMPLING, format);
     try {
       const blob = await samplingApi.export(designId, format);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sampling_${designId.substring(0, 8)}.${format}`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -426,11 +429,12 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                   </label>
                   <select
                     value={productiveIntensity}
-                    onChange={(e) => setProductiveIntensity(e.target.value as '0.5' | '1.0')}
+                    onChange={(e) => setProductiveIntensity(e.target.value as '0.5' | '1.0' | '2.0')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
                   >
                     <option value="0.5">0.5% - Standard intensity (Recommended)</option>
                     <option value="1.0">1.0% - Detailed inventory (More samples)</option>
+                    <option value="2.0">2.0% - Sustainable production (High density)</option>
                   </select>
                   <p className="mt-1 text-xs text-gray-500">
                     Sample count per block will be determined from Guideline-2061 lookup tables based on block size

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../services/api';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface MapsTabProps {
   calculationId: string;
@@ -11,11 +12,12 @@ interface MapCardProps {
   description: string;
   mapType: 'boundary' | 'slope' | 'aspect' | 'landcover' | 'topographic' | 'forest_type' | 'canopy_height' | 'soil' | 'forest_health';
   calculationId: string;
+  forestName?: string;
   onGenerate?: () => Promise<void>;
   triggerGenerate?: boolean;
 }
 
-const MapCard: React.FC<MapCardProps> = ({ title, description, mapType, calculationId, onGenerate, triggerGenerate }) => {
+const MapCard: React.FC<MapCardProps> = ({ title, description, mapType, calculationId, forestName, onGenerate, triggerGenerate }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -93,7 +95,9 @@ const MapCard: React.FC<MapCardProps> = ({ title, description, mapType, calculat
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${mapType}_map_${calculationId}.png`;
+      const activeForestName = forestName || 'Forest';
+      const filename = generateExportFileName(activeForestName, `${mapType}Map`, 'png');
+      link.download = getDownloadAttribute(filename);
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -329,6 +333,7 @@ const MapsTab: React.FC<MapsTabProps> = ({ calculationId, forestName }) => {
             description={map.description}
             mapType={map.mapType}
             calculationId={calculationId}
+            forestName={forestName}
             onGenerate={async () => handleMapGenerated(index)}
             triggerGenerate={isGeneratingAll && currentGeneratingIndex === index}
           />

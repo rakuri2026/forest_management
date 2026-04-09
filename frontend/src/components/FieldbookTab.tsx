@@ -1,15 +1,27 @@
 import { useState, useEffect } from 'react';
-import { fieldbookApi } from '../services/api';
+import { fieldbookApi, forestApi } from '../services/api';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface FieldbookTabProps {
   calculationId: string;
+  forestName?: string;
 }
 
-export function FieldbookTab({ calculationId }: FieldbookTabProps) {
+export function FieldbookTab({ calculationId, forestName: propForestName }: FieldbookTabProps) {
   const [fieldbook, setFieldbook] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [forestName, setForestName] = useState<string>(propForestName || 'UnknownForest');
+
+  // Load forest name if not provided
+  useEffect(() => {
+    if (!propForestName) {
+      forestApi.getCalculation(calculationId).then(data => {
+        setForestName(data.forest_name || 'UnknownForest');
+      }).catch(() => {});
+    }
+  }, [calculationId, propForestName]);
 
   // Generation settings
   const [interpolationDistance, setInterpolationDistance] = useState(50);
@@ -119,7 +131,8 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       if (format === 'excel') extension = 'xlsx';
       else if (format === 'geojson') extension = 'geojson';
 
-      a.download = `fieldbook_${calculationId}.${extension}`;
+      const filename = generateExportFileName(forestName, CONTENT_TYPES.INVENTORY, extension);
+      a.download = getDownloadAttribute(filename);
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

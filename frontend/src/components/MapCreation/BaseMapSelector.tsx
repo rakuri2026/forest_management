@@ -9,11 +9,12 @@ interface BaseMapSelectorProps {
  * BaseMapSelector provides base layer tiles with switchable basemaps
  * Usage: Add this component inside MapContainer alongside other map elements
  */
-export const BaseMapSelector: React.FC<BaseMapSelectorProps> = ({ baseMap = 'osm' }) => {
+export const BaseMapSelector: React.FC<BaseMapSelectorProps> = ({ baseMap = 'satellite' }) => {
   const getTileUrl = () => {
     switch (baseMap) {
       case 'satellite':
         return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      case 'topographic':
       case 'terrain':
         return 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
       case 'osm':
@@ -26,6 +27,7 @@ export const BaseMapSelector: React.FC<BaseMapSelectorProps> = ({ baseMap = 'osm
     switch (baseMap) {
       case 'satellite':
         return '&copy; Esri';
+      case 'topographic':
       case 'terrain':
         return '&copy; OpenStreetMap contributors';
       case 'osm':
@@ -36,6 +38,7 @@ export const BaseMapSelector: React.FC<BaseMapSelectorProps> = ({ baseMap = 'osm
 
   const getMaxZoom = () => {
     switch (baseMap) {
+      case 'topographic':
       case 'terrain':
         return 17;
       default:

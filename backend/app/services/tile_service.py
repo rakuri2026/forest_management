@@ -23,7 +23,7 @@ class TileService:
     # Raster table mapping
     RASTER_TABLES = {
         'dem': 'rasters.dem',
-        'slope': 'rasters.slope',
+        'slope': 'rasters.slope_regulation',
         'aspect': 'rasters.aspect',
         'canopy': 'rasters.canopy_height',
         'biomass': 'rasters.agb_2022_nepal',
@@ -90,15 +90,16 @@ class TileService:
         z: int,
         x: int,
         y: int,
-        alpha: int = 128
+        alpha: int = 128,
+        filter_classes: Optional[List[int]] = None
     ) -> bytes:
         """
         Cached version of get_tile - uses LRU cache for fast repeated access
 
-        Cache key: (calculation_id, layer_name, z, x, y, alpha)
+        Cache key: (calculation_id, layer_name, z, x, y, alpha, filter_classes)
         Cache size: 1000 tiles (~30-50MB memory)
         """
-        return self.get_tile(calculation_id, layer_name, z, x, y, alpha=alpha)
+        return self.get_tile(calculation_id, layer_name, z, x, y, alpha=alpha, filter_classes=filter_classes)
 
     def get_tile(
         self,
@@ -108,7 +109,8 @@ class TileService:
         x: int,
         y: int,
         tile_size: int = 256,
-        alpha: int = 128  # 50% transparency (0-255)
+        alpha: int = 128,  # 50% transparency (0-255)
+        filter_classes: Optional[List[int]] = None
     ) -> bytes:
         """
         Generate a tile for the given layer and coordinates
@@ -121,11 +123,14 @@ class TileService:
             y: Tile Y coordinate
             tile_size: Output image size (default 256×256)
             alpha: Transparency (0=transparent, 255=opaque, default 128=50%)
+            filter_classes: List of class codes to show (e.g., [1,2] for slope classes 1 and 2)
 
         Returns:
             PNG image bytes
         """
         print(f"[TILE] Generating tile: layer={layer_name}, z={z}, x={x}, y={y}, calc_id={calculation_id[:8]}...")
+        if filter_classes:
+            print(f"[TILE] Filter classes: {filter_classes}")
 
         # 1. Get tile bounds in lat/lon
         bounds = self.xyz_to_bounds(x, y, z)
@@ -176,7 +181,12 @@ class TileService:
             print(f"[TILE] No raster data found - returning empty tile")
 
         # 5. Apply colormap
-        colored_tile = self._apply_colormap(raster_data, layer_name, alpha, elevation_range=elevation_range, canopy_range=canopy_range)
+        colored_tile = self._apply_colormap(
+            raster_data, layer_name, alpha,
+            elevation_range=elevation_range,
+            canopy_range=canopy_range,
+            filter_classes=filter_classes
+        )
 
         # 6. Render as PNG
         png_bytes = self._render_png(colored_tile)
@@ -400,10 +410,14 @@ class TileService:
         layer_name: str,
         alpha: int,
         elevation_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
-        canopy_range: Optional[Tuple[Optional[float], Optional[float]]] = None
+        canopy_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        filter_classes: Optional[List[int]] = None
     ) -> Image.Image:
         """
         Apply color mapping to raster data
+        
+        Args:
+            filter_classes: For slope layer, only show these class codes (e.g., [1,2] shows only gentle and moderate)
 
         Returns:
             PIL Image (RGBA)
@@ -425,30 +439,23 @@ class TileService:
 
         if layer_name == 'slope':
             colored_count = 0
-            # Track slope ranges for debugging
-            range_counts = {'0-5': 0, '5-15': 0, '15-30': 0, '30-45': 0, '45+': 0}
-
+            filtered_count = 0
+            
             for sample in raster_data:
                 val = sample['val']
                 if val is None:
                     continue
-
-                # Get color for this slope value
+                
+                slope_code = int(val)
+                
+                # Filter by class codes if filter_classes is specified
+                if filter_classes is not None:
+                    if slope_code not in filter_classes:
+                        filtered_count += 1
+                        continue  # Skip this pixel - make it transparent
+                
                 color = self._get_slope_color(val, alpha)
 
-                # Count by range
-                if val < 5:
-                    range_counts['0-5'] += 1
-                elif val < 15:
-                    range_counts['5-15'] += 1
-                elif val < 30:
-                    range_counts['15-30'] += 1
-                elif val < 45:
-                    range_counts['30-45'] += 1
-                else:
-                    range_counts['45+'] += 1
-
-                # Draw rectangle for this grid cell
                 i, j = sample['i'], sample['j']
                 x1 = i * cell_size
                 y1 = (sample_size - 1 - j) * cell_size  # Flip Y axis
@@ -458,8 +465,7 @@ class TileService:
                 draw.rectangle([x1, y1, x2, y2], fill=color)
                 colored_count += 1
 
-            print(f"[COLORMAP] Applied colors to {colored_count}/{len(raster_data)} cells for slope")
-            print(f"[COLORMAP] Slope distribution: {range_counts}")
+            print(f"[COLORMAP] Slope: {colored_count} drawn, {filtered_count} filtered out")
 
         elif layer_name == 'aspect':
             for sample in raster_data:
@@ -1012,31 +1018,25 @@ class TileService:
         """
         Get RGBA color for slope value
 
-        Slope raster contains CATEGORICAL CODES (not degrees):
+        Slope raster (Forest Regulation 2079) contains CATEGORICAL CODES:
         0 = No data / Water (excluded)
-        1 = <10° (Gentle/Flat) -> GREEN
-        2 = 10-20° (Moderate) -> YELLOW
-        3 = 20-30° (Steep) -> ORANGE
-        4 = >30° (Very Steep) -> RED
+        1 = 0-19° (Gentle/Flat) -> GREEN
+        2 = 19-30° (Moderate/Steep) -> YELLOW
+        3 = 30-45° (Highly Steep/Sensitive) -> ORANGE
+        4 = >45° (Extreme/Cliffs) -> RED
         """
-        # Map categorical codes to colors
         slope_code = int(slope_value)
 
         if slope_code == 1:
-            # Gentle/Flat <10°: Green
-            return (46, 204, 113, alpha)  # #2ECC71
+            return (46, 204, 113, alpha)  # Green - Gentle (0-19°)
         elif slope_code == 2:
-            # Moderate 10-20°: Yellow
-            return (241, 196, 15, alpha)  # #F1C40F
+            return (241, 196, 15, alpha)  # Yellow - Moderate (19-30°)
         elif slope_code == 3:
-            # Steep 20-30°: Orange
-            return (230, 126, 34, alpha)  # #E67E22
+            return (230, 126, 34, alpha)  # Orange - Highly Steep (30-45°)
         elif slope_code == 4:
-            # Very Steep >30°: Red
-            return (231, 76, 60, alpha)  # #E74C3C
+            return (231, 76, 60, alpha)  # Red - Extreme (>45°)
         else:
-            # Fallback: Green (for code 0 or invalid)
-            return (46, 204, 113, alpha)
+            return (46, 204, 113, alpha)  # Fallback: Green
 
     def _get_forest_health_color(self, health_value: float, alpha: int) -> Tuple[int, int, int, int]:
         """

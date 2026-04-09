@@ -23,6 +23,7 @@ class GuidelineIntensity(str, Enum):
     """Forest Inventory Guideline-2061 sampling intensities"""
     HALF_PERCENT = "0.5"      # Standard production forest
     ONE_PERCENT = "1.0"        # Detailed inventory
+    TWO_PERCENT = "2.0"        # Sustainable production forest (calculated from area, no lookup table)
     POINT_ONE_PERCENT = "0.1"  # Protected zones only
 
 

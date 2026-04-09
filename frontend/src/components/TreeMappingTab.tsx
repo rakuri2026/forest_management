@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { inventoryApi } from '../services/api';
+import { inventoryApi, forestApi } from '../services/api';
 import { compartmentApi } from '../services/api';
 import { CorrectionPreviewDialog } from './CorrectionPreviewDialog';
 import ColumnMappingPreview from './ColumnMappingPreview';
@@ -11,14 +11,17 @@ import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import BaseMapSelector from './MapCreation/BaseMapSelector';
+import { generateExportFileName, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface TreeMappingTabProps {
   calculationId: string;
+  forestName?: string;
 }
 
 const COLORS = ['#22c55e', '#f97316', '#eab308', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
 
-export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
+export function TreeMappingTab(props: TreeMappingTabProps) {
+  const { calculationId, forestName } = props;
   const navigate = useNavigate();
   const [treeMapping, setTreeMapping] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
@@ -353,8 +356,10 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
   const handleExport = async (format: 'csv' | 'geojson' | 'excel') => {
     if (!treeMapping?.id) return;
 
+    const extension = format === 'excel' ? 'xlsx' : format;
+    const filename = generateExportFileName('Forest', CONTENT_TYPES.TREE_MAPPING, extension);
     try {
-      const { blob, filename } = await inventoryApi.exportInventory(treeMapping.id, format);
+      const { blob } = await inventoryApi.exportInventory(treeMapping.id, format);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1212,9 +1217,16 @@ function TreeMappingMap({ inventoryId, trees, calculationId }: TreeMappingMapPro
   const [gridCells, setGridCells] = useState<any[]>([]);
   const [gridMetadata, setGridMetadata] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [baseMap, setBaseMap] = useState('osm');
+  const [baseMap, setBaseMap] = useState<string>('satellite');
   const [forestBlocks, setForestBlocks] = useState<any[]>([]);
   const [blocksLoading, setBlocksLoading] = useState(false);
+  
+  // Base map options
+  const baseMapOptions = [
+    { value: 'satellite', label: 'Satellite', icon: '🛰️' },
+    { value: 'topographic', label: 'Topographic', icon: '🗻' },
+    { value: 'osm', label: 'Street Map', icon: '🗺️' },
+  ];
 
   // Layer toggles - Grid and Mother Trees ON by default
   const [showGrid, setShowGrid] = useState(true);
@@ -1391,15 +1403,24 @@ function TreeMappingMap({ inventoryId, trees, calculationId }: TreeMappingMapPro
             />
             <span className={showCompartments ? 'font-medium text-green-700' : 'text-gray-500'}>Compartments</span>
           </label>
-          <select
-            value={baseMap}
-            onChange={(e) => setBaseMap(e.target.value)}
-            className="border rounded px-2 py-1 text-sm ml-2"
-          >
-            <option value="osm">OSM</option>
-            <option value="satellite">Satellite</option>
-            <option value="terrain">Terrain</option>
-          </select>
+          <div className="flex items-center gap-1 ml-2 border-l pl-2">
+            <span className="text-xs text-gray-500">Base:</span>
+            <div className="flex rounded overflow-hidden border border-gray-300">
+              {baseMapOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setBaseMap(opt.value)}
+                  className={`px-2 py-0.5 text-xs transition-colors ${
+                    baseMap === opt.value
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {opt.icon}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             onClick={() => setMeasureMode(!measureMode)}
             className={`px-3 py-1 text-sm rounded ml-2 ${
@@ -1428,7 +1449,7 @@ function TreeMappingMap({ inventoryId, trees, calculationId }: TreeMappingMapPro
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `grid_${inventoryId}.geojson`;
+                  a.download = 'Forest_Grid_' + new Date().toISOString().split('T')[0].replace(/-/g, '') + '_' + new Date().toTimeString().split(' ')[0].replace(/:/g, '') + '.geojson';
                   a.click();
                   URL.revokeObjectURL(url);
                 } catch (err: any) {
@@ -1447,7 +1468,7 @@ function TreeMappingMap({ inventoryId, trees, calculationId }: TreeMappingMapPro
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `grid_${inventoryId}.kml`;
+                  a.download = 'Forest_Grid_' + new Date().toISOString().split('T')[0].replace(/-/g, '') + '_' + new Date().toTimeString().split(' ')[0].replace(/:/g, '') + '.kml';
                   a.click();
                   URL.revokeObjectURL(url);
                 } catch (err: any) {

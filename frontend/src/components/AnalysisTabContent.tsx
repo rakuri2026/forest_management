@@ -630,6 +630,7 @@ const AnalysisTabContent: React.FC<AnalysisTabContentProps> = ({
             <SpeciesTable
               species={data.potential_species}
               calculationId={calculation.id}
+              forestName={calculation.forest_name}
               removedSpecies={data.removed_species || []}
               onSpeciesToggle={(speciesName, enabled) => {
                 console.log(`Species ${speciesName} ${enabled ? 'enabled' : 'disabled'}`);

@@ -8,6 +8,7 @@ import type {
   MyForestsResponse,
   Calculation,
 } from '../types';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 export const API_BASE_URL = 'http://localhost:8001';
 
@@ -1072,7 +1073,7 @@ export const compartmentApi = {
     return response.data;
   },
 
-  exportGpkg: async (calculationId: string): Promise<void> => {
+  exportGpkg: async (calculationId: string, forestName?: string): Promise<void> => {
     const token = localStorage.getItem('access_token');
     console.log('[API] Export GPKG for calculation:', calculationId);
     
@@ -1094,8 +1095,10 @@ export const compartmentApi = {
     const contentDisposition = response.headers.get('content-disposition');
     console.log('[API] Content-Disposition:', contentDisposition);
     
-    let filename = 'compartments.gpkg';
-    if (contentDisposition) {
+    let filename = forestName 
+      ? generateExportFileName(forestName, CONTENT_TYPES.COMPARTMENT, 'gpkg')
+      : 'compartments.gpkg';
+    if (contentDisposition && !forestName) {
       const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
       if (match) {
         filename = match[1].replace(/['"]/g, '');
@@ -1108,14 +1111,14 @@ export const compartmentApi = {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', filename);
+    link.setAttribute('download', getDownloadAttribute(filename));
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
   },
 
-  exportKml: async (calculationId: string): Promise<void> => {
+  exportKml: async (calculationId: string, forestName?: string): Promise<void> => {
     const token = localStorage.getItem('access_token');
     console.log('[API] Export KML for calculation:', calculationId);
     
@@ -1135,8 +1138,10 @@ export const compartmentApi = {
     }
     
     const contentDisposition = response.headers.get('content-disposition');
-    let filename = 'compartments.kml';
-    if (contentDisposition) {
+    let filename = forestName 
+      ? generateExportFileName(forestName, CONTENT_TYPES.COMPARTMENT, 'kml')
+      : 'compartments.kml';
+    if (contentDisposition && !forestName) {
       const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
       if (match) {
         filename = match[1].replace(/['"]/g, '');
@@ -1149,7 +1154,7 @@ export const compartmentApi = {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', filename);
+    link.setAttribute('download', getDownloadAttribute(filename));
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

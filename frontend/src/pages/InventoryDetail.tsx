@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { inventoryApi } from '../services/api';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 export default function InventoryDetail() {
   const { id } = useParams<{ id: string }>();
@@ -8,12 +9,25 @@ export default function InventoryDetail() {
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [forestName, setForestName] = useState<string>('UnknownForest');
 
   useEffect(() => {
     if (id) {
       loadInventory();
+      loadForestName();
     }
   }, [id]);
+
+  const loadForestName = async () => {
+    try {
+      const data = await inventoryApi.getInventoryById(id!);
+      if (data.calculation?.forest_name) {
+        setForestName(data.calculation.forest_name);
+      }
+    } catch (err) {
+      console.error('Failed to load forest name:', err);
+    }
+  };
 
   const loadInventory = async () => {
     try {
@@ -32,12 +46,14 @@ export default function InventoryDetail() {
   };
 
   const handleExport = async (format: 'csv' | 'geojson') => {
+    const extension = format === 'geojson' ? 'geojson' : 'csv';
+    const filename = generateExportFileName(forestName, CONTENT_TYPES.INVENTORY, extension);
     try {
       const blob = await inventoryApi.exportInventory(id!, format);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `inventory_${id}.${format === 'geojson' ? 'geojson' : 'csv'}`;
+      a.download = getDownloadAttribute(filename);
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

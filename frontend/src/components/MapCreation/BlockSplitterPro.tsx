@@ -241,6 +241,15 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
   const [finalBlocks, setFinalBlocks] = useState<Block[]>(initialBlocks);
   const [error, setError] = useState<string>('');
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
+  
+  // Base Map Selection
+  const [baseMap, setBaseMap] = useState<string>('satellite');
+  
+  const baseMapOptions = [
+    { value: 'satellite', label: 'Satellite', icon: '🛰️' },
+    { value: 'topographic', label: 'Topographic', icon: '🗻' },
+    { value: 'osm', label: 'Street Map', icon: '🗺️' },
+  ];
 
   // Handle line drawn
   const handleLineDrawn = (geometry: any) => {
@@ -1030,14 +1039,34 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
 
       {/* Map */}
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Map</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Map</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">Base Map:</span>
+            <div className="flex rounded-md overflow-hidden border border-gray-300">
+              {baseMapOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setBaseMap(opt.value)}
+                  className={`px-3 py-1 text-sm transition-colors ${
+                    baseMap === opt.value
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
         <div className="h-[600px] rounded overflow-hidden border border-gray-300">
           <MapContainer
             center={mapCenter as [number, number]}
             zoom={14}
             style={{ height: '100%', width: '100%' }}
           >
-            <BaseMapSelector />
+            <BaseMapSelector baseMap={baseMap} />
 
             {/* Outer boundary - GREEN */}
             {outerBoundary && (

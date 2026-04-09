@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { compartmentApi, inventoryApi } from '../../services/api';
+import { compartmentApi, inventoryApi, forestApi } from '../../services/api';
 import { AvailableBlock, SplitConfig, SplitPreviewResponse } from './types';
 import { BlockSelectionPanel } from './BlockSelectionPanel';
 import { SplitConfigurationPanel } from './SplitConfigurationPanel';
@@ -8,6 +8,7 @@ import { MapContainer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import BaseMapSelector from '../MapCreation/BaseMapSelector';
+import { generateExportFileName, CONTENT_TYPES } from '../../utils/fileNaming';
 
 // DBH Class colors and sizes (1/3 of original)
 const DBH_CLASS_CONFIG: Record<string, { color: string; fillColor: string; radius: number; label: string }> = {
@@ -272,10 +273,25 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
   const [reassignmentBlockName, setReassignmentBlockName] = useState<string>('');
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  
+  // Forest name for export
+  const [forestName, setForestName] = useState<string>('UnknownForest');
+  
+  // Base Map Selection
+  const [baseMap, setBaseMap] = useState<string>('satellite');
+  
+  const baseMapOptions = [
+    { value: 'satellite', label: 'Satellite', icon: '🛰️' },
+    { value: 'topographic', label: 'Topographic', icon: '🗻' },
+    { value: 'osm', label: 'Street Map', icon: '🗺️' },
+  ];
 
   useEffect(() => {
     loadBlocks();
     loadTrees();
+    forestApi.getCalculation(calculationId).then(data => {
+      setForestName(data.forest_name || 'UnknownForest');
+    }).catch(() => {});
   }, [calculationId]);
 
   const loadTrees = async () => {
@@ -416,7 +432,7 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
     try {
       setError(null);
       setDownloading(true);
-      await compartmentApi.exportGpkg(calculationId);
+      await compartmentApi.exportGpkg(calculationId, forestName);
       console.log('[CompartmentTab] GPKG download completed');
     } catch (err: any) {
       console.error('[CompartmentTab] GPKG download error:', err);
@@ -432,7 +448,7 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
     try {
       setError(null);
       setDownloading(true);
-      await compartmentApi.exportKml(calculationId);
+      await compartmentApi.exportKml(calculationId, forestName);
       console.log('[CompartmentTab] KML download completed');
     } catch (err: any) {
       console.error('[CompartmentTab] KML download error:', err);
@@ -533,7 +549,23 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
         <div className="flex justify-between items-center px-4 py-2 border-b bg-white">
           <h3 className="text-sm font-medium text-gray-700">Block & Compartment Map</h3>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">{allFeatures.length} features</span>
+            <span className="text-xs text-gray-600">Base Map:</span>
+            <div className="flex rounded-md overflow-hidden border border-gray-300">
+              {baseMapOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setBaseMap(opt.value)}
+                  className={`px-2 py-0.5 text-xs transition-colors ${
+                    baseMap === opt.value
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {opt.icon}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs text-gray-500 ml-2">{allFeatures.length} features</span>
             <button
               onClick={handleDownloadGpkg}
               disabled={downloading || allFeatures.length === 0}
@@ -564,7 +596,7 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
             zoom={14}
             style={{ height: '100%', width: '100%' }}
           >
-            <BaseMapSelector />
+            <BaseMapSelector baseMap={baseMap} />
             
             <MapBoundsController bounds={getMapBounds()} />
             

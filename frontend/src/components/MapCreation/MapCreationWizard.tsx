@@ -81,6 +81,15 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
   const polygonCreatorRef = useRef<any>(null);
   const [wardBoundaryGeometry, setWardBoundaryGeometry] = useState<any>(null);
   const [showWardBoundary, setShowWardBoundary] = useState(false);
+  
+  // Base Map Selection
+  const [baseMap, setBaseMap] = useState<string>('satellite');
+  
+  const baseMapOptions = [
+    { value: 'satellite', label: 'Satellite', icon: '🛰️' },
+    { value: 'topographic', label: 'Topographic', icon: '🗻' },
+    { value: 'osm', label: 'Street Map', icon: '🗺️' },
+  ];
 
   const steps = [
     { number: 1, name: 'Boundary', optional: false },
@@ -475,14 +484,34 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
             <div className="space-y-6">
               {/* Visual Map Review */}
               <div className="bg-white p-6 rounded-lg shadow">
-                <h2 className="text-xl font-bold mb-4">Visual Review</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold">Visual Review</h2>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Base Map:</span>
+                    <div className="flex rounded-md overflow-hidden border border-gray-300">
+                      {baseMapOptions.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setBaseMap(opt.value)}
+                          className={`px-3 py-1 text-sm transition-colors ${
+                            baseMap === opt.value
+                              ? 'bg-green-600 text-white'
+                              : 'bg-white text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {opt.icon} {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
                 <div style={{ height: '500px', width: '100%' }} className="border border-gray-300 rounded-lg overflow-hidden">
                   <MapContainer
                     center={getGeometryCenter(outerBoundary, [27.7172, 85.324])}
                     zoom={14}
                     style={{ height: '100%', width: '100%' }}
                   >
-                    <BaseMapSelector />
+                    <BaseMapSelector baseMap={baseMap} />
 
                     {/* Outer Boundary - Green */}
                     {outerBoundary && (

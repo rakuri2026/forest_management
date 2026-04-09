@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Download, Trash2, AlertCircle, CheckCircle, Clock, Loader } from 'lucide-react';
 import api from '../services/api';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface TreeModelConfig {
   min_dbh_cm: number;
@@ -38,14 +39,25 @@ interface TreeModel {
 
 interface TreeModelGeneratorProps {
   calculationId: string;
+  forestName?: string;
 }
 
-const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }) => {
+const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId, forestName: propForestName }) => {
   const [expanded, setExpanded] = useState(false);
   const [models, setModels] = useState<TreeModel[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forestName, setForestName] = useState<string>(propForestName || 'UnknownForest');
+
+  // Load forest name if not provided
+  useEffect(() => {
+    if (!propForestName) {
+      api.forestApi.getCalculation(calculationId).then(data => {
+        setForestName(data.forest_name || 'UnknownForest');
+      }).catch(() => {});
+    }
+  }, [calculationId, propForestName]);
 
   // Configuration state
   const [config, setConfig] = useState<TreeModelConfig>({
@@ -129,9 +141,10 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
   };
 
   // Download model (GPKG)
-  const handleDownload = async (modelId: string, filename: string) => {
+  const handleDownload = async (modelId: string, _backendFilename: string) => {
+    const filename = generateExportFileName(forestName, CONTENT_TYPES.TREE_MODEL, 'gpkg');
     try {
-      const response = await api.get(`/api/tree-models/${modelId}/download`, {  // Fixed: Added /api prefix
+      const response = await api.get(`/api/tree-models/${modelId}/download`, {
         responseType: 'blob'
       });
 
@@ -139,7 +152,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', filename);
+      link.setAttribute('download', getDownloadAttribute(filename));
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -151,7 +164,8 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
   };
 
   // Download Excel
-  const handleDownloadExcel = async (modelId: string, filename: string) => {
+  const handleDownloadExcel = async (modelId: string, _backendFilename: string) => {
+    const filename = generateExportFileName(forestName, CONTENT_TYPES.TREE_MODEL, 'xlsx');
     try {
       const response = await api.get(`/api/tree-models/${modelId}/download-excel`, {
         responseType: 'blob'
@@ -161,7 +175,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', filename);
+      link.setAttribute('download', getDownloadAttribute(filename));
       document.body.appendChild(link);
       link.click();
       link.remove();

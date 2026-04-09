@@ -947,20 +947,19 @@ def analyze_slope(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     Analyze slope raster - categorical codes (0-4)
     Returns percentages, dominant class, and min/max codes for dynamic legend generation
 
-    Slope classes from raster:
+    Slope classes from raster (Forest Regulation 2079):
     0 = No data / Water (excluded from analysis)
-    1 = <10° (Gentle/Flat)
-    2 = 10-20° (Moderate)
-    3 = 20-30° (Steep)
-    4 = >30° (Very Steep)
+    1 = 0-19° (Gentle/Flat)
+    2 = 19-30° (Moderate/Steep)
+    3 = 30-45° (Highly Steep/Sensitive)
+    4 = >45° (Extreme/Cliffs)
     """
     try:
-        # Mapping from raster categorical codes to class names
         slope_map = {
             1: "gentle",
             2: "moderate",
-            3: "steep",
-            4: "very_steep"
+            3: "highly_steep",
+            4: "extreme"
         }
 
         query = text("""
@@ -969,7 +968,7 @@ def analyze_slope(calculation_id: UUID, db: Session) -> Dict[str, Any]:
                 SUM((pvc).count) as pixel_count
             FROM (
                 SELECT ST_ValueCount(ST_Clip(rast, boundary_geom)) as pvc
-                FROM rasters.slope, public.calculations
+                FROM rasters.slope_regulation, public.calculations
                 WHERE calculations.id = :calc_id
                   AND ST_Intersects(rast, boundary_geom)
             ) as subquery
@@ -2462,20 +2461,19 @@ def analyze_slope_geometry(wkt: str, db: Session) -> Dict[str, Any]:
     Analyze slope for a specific geometry
     Returns percentages, dominant class, and min/max codes for dynamic legend generation
 
-    Slope raster contains categorical codes (8-bit unsigned):
+    Slope raster (Forest Regulation 2079) contains categorical codes:
     0 = No data / Water (excluded)
-    1 = Gentle (<10°)
-    2 = Moderate (10-20°)
-    3 = Steep (20-30°)
-    4 = Very Steep (>30°)
+    1 = Gentle/Flat (0-19°)
+    2 = Moderate/Steep (19-30°)
+    3 = Highly Steep/Sensitive (30-45°)
+    4 = Extreme/Cliffs (>45°)
     """
     try:
-        # Mapping from raster values to class names (excluding 0)
         slope_map = {
             1: "gentle",
             2: "moderate",
-            3: "steep",
-            4: "very_steep"
+            3: "highly_steep",
+            4: "extreme"
         }
 
         query = text("""
@@ -2484,7 +2482,7 @@ def analyze_slope_geometry(wkt: str, db: Session) -> Dict[str, Any]:
                 SUM((pvc).count) as pixel_count
             FROM (
                 SELECT ST_ValueCount(ST_Clip(rast, ST_GeomFromText(:wkt, 4326))) as pvc
-                FROM rasters.slope
+                FROM rasters.slope_regulation
                 WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
             ) as subquery
             WHERE (pvc).value IS NOT NULL

@@ -406,6 +406,25 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
   const [error, setError] = useState<string>('');
   const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
   const [slopeThreshold, setSlopeThreshold] = useState<number>(30);
+  
+  // Slope class filter for showing individual classes
+  const [slopeFilters, setSlopeFilters] = useState<Set<number>>(new Set([1, 2, 3, 4]));
+  
+  const slopeClassOptions = [
+    { code: 1, label: 'Gentle', range: '0-19°', color: '#2ECC71' },
+    { code: 2, label: 'Moderate', range: '19-30°', color: '#F1C40F' },
+    { code: 3, label: 'Sensitive', range: '30-45°', color: '#E67E22' },
+    { code: 4, label: 'Extreme', range: '>45°', color: '#DC2626' }
+  ];
+  
+  // Base Map Selection
+  const [baseMap, setBaseMap] = useState<string>('satellite');
+  
+  const baseMapOptions = [
+    { value: 'satellite', label: 'Satellite', icon: '🛰️' },
+    { value: 'topographic', label: 'Topographic', icon: '🗻' },
+    { value: 'osm', label: 'Street Map', icon: '🗺️' },
+  ];
 
   // Validate sub-areas whenever they change
   useEffect(() => {
@@ -645,32 +664,54 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                 className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 mr-2"
               />
               <label htmlFor="showSteepSlope" className="text-sm font-medium text-gray-800">
-                Show Steep Slope Areas
+                Show Slope Classes
               </label>
             </div>
             <HelpTooltip 
-              helpText="When enabled, areas with slope above the threshold will be highlighted in red to help identify protected zones." 
+              helpText="When enabled, selected slope classes will be displayed with different colors." 
               position="top" 
             />
           </div>
           
           {showSteepSlopeMask && (
-            <div className="flex items-center gap-4">
-              <label className="text-sm text-gray-700">
-                Slope Threshold:
-              </label>
-              <select
-                value={slopeThreshold}
-                onChange={(e) => setSlopeThreshold(Number(e.target.value))}
-                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-amber-500 focus:border-amber-500"
-              >
-                <option value={4}>Class 4 (&gt;30°)</option>
-                <option value={3}>Class 3 (&gt;20°)</option>
-                <option value={2}>Class 2 (&gt;10°)</option>
-              </select>
-              <span className="text-sm text-gray-600">
-                {slopeThreshold === 4 ? '(>30° shown in red)' : slopeThreshold === 3 ? '(>20° shown in red)' : '(>10° shown in red)'}
-              </span>
+            <div className="mt-3">
+              <div className="text-xs text-gray-600 mb-2">Select classes to display:</div>
+              <div className="flex flex-wrap gap-3">
+                {slopeClassOptions.map(cls => (
+                  <label
+                    key={cls.code}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={slopeFilters.has(cls.code)}
+                      onChange={() => {
+                        const newFilters = new Set(slopeFilters);
+                        if (newFilters.has(cls.code)) {
+                          if (newFilters.size > 1) {
+                            newFilters.delete(cls.code);
+                          }
+                        } else {
+                          newFilters.add(cls.code);
+                        }
+                        setSlopeFilters(newFilters);
+                      }}
+                      className="w-4 h-4 rounded cursor-pointer"
+                      style={{ accentColor: cls.color }}
+                    />
+                    <div 
+                      className="w-4 h-4 rounded border" 
+                      style={{ backgroundColor: cls.color }}
+                    />
+                    <span className="text-xs text-gray-700">
+                      {cls.label} ({cls.range})
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="text-xs text-gray-500 mt-2">
+                Showing {slopeFilters.size} of 4 classes
+              </div>
             </div>
           )}
         </div>
@@ -865,7 +906,27 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
 
       {/* Map */}
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Map</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Map</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">Base Map:</span>
+            <div className="flex rounded-md overflow-hidden border border-gray-300">
+              {baseMapOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setBaseMap(opt.value)}
+                  className={`px-3 py-1 text-sm transition-colors ${
+                    baseMap === opt.value
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
         {/* Legend */}
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded">
@@ -909,13 +970,14 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
             zoom={14}
             style={{ height: '100%', width: '100%' }}
           >
-            <BaseMapSelector />
+            <BaseMapSelector baseMap={baseMap} />
 
-            {/* Steep Slope Mask Layer - shows areas above threshold in red */}
+            {/* Steep Slope Mask Layer - shows selected classes with different colors */}
             {showSteepSlopeMask && calculationId && (
               <TileLayer
-                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?threshold=${slopeThreshold}&alpha=150`}
-                opacity={0.7}
+                key={`slope-${Array.from(slopeFilters).sort().join(',')}`}
+                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?filter_classes=${Array.from(slopeFilters).sort().join(',')}&alpha=180`}
+                opacity={0.8}
                 zIndex={5}
                 minZoom={13}
                 maxZoom={16}

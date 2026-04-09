@@ -57,6 +57,17 @@ def get_sample_count_from_guideline(
         >>> count = get_sample_count_from_guideline(db, 15.0, 0.1, 100)
         >>> # Returns: 3 samples (from protected area table)
     """
+    # For 2.0%, use manual calculation (no lookup table exists)
+    if intensity_percent == 2.0:
+        plot_area_hectares = plot_size_sqm / 10000.0
+        sample_area_ha = block_area_hectares * 0.02
+        sample_count = max(2, int(sample_area_ha / plot_area_hectares))
+        logger.info(
+            f"Manual calc (2.0%): {block_area_hectares} ha @ {intensity_percent}% "
+            f"with {plot_size_sqm} sqm plots -> {sample_count} samples"
+        )
+        return sample_count
+
     # Determine which table to use based on intensity
     if intensity_percent == 0.5:
         table = "sample_size_half_percent_intensity"
@@ -338,7 +349,7 @@ def validate_guideline_parameters(
         ValueError: Protected area sampling requires 25 or 100 sqm plots
     """
     # Validate intensity
-    valid_intensities = [0.5, 1.0, 0.1]
+    valid_intensities = [0.5, 1.0, 2.0, 0.1]
     if intensity_percent not in valid_intensities:
         raise ValueError(
             f"Invalid intensity: {intensity_percent}%. "
@@ -370,7 +381,7 @@ def validate_guideline_parameters(
             f"Got: {plot_size_sqm} sqm"
         )
 
-    if intensity_percent in [0.5, 1.0] and plot_size_sqm == 25:
+    if intensity_percent in [0.5, 1.0, 2.0] and plot_size_sqm == 25:
         raise ValueError(
             f"{intensity_percent}% intensity (production) does not support 25 sqm plots. "
             f"Use 100-500 sqm plots."

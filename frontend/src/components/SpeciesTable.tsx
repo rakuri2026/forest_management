@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import api from '../services/api';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface Species {
   scientific_name: string;
@@ -22,6 +23,7 @@ interface Species {
 interface SpeciesTableProps {
   species: Species[];
   calculationId: string;
+  forestName?: string;
   removedSpecies?: string[];
   onSpeciesToggle?: (speciesName: string, enabled: boolean) => void;
   onAddSpecies?: () => void;
@@ -38,6 +40,7 @@ interface SpeciesTableProps {
 const SpeciesTable: React.FC<SpeciesTableProps> = ({
   species,
   calculationId,
+  forestName: propForestName,
   removedSpecies = [],
   onSpeciesToggle,
   onAddSpecies,
@@ -51,8 +54,18 @@ const SpeciesTable: React.FC<SpeciesTableProps> = ({
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [enabledSpecies, setEnabledSpecies] = useState<Set<string>>(
-    new Set(species.map(s => s.scientific_name))
+    new Set(species.filter(s => s.confirmed).map(s => s.scientific_name))
   );
+  const [forestName, setForestName] = useState<string>(propForestName || 'UnknownForest');
+
+  // Load forest name if not provided
+  useEffect(() => {
+    if (!propForestName) {
+      api.forestApi.getCalculation(calculationId).then(data => {
+        setForestName(data.forest_name || 'UnknownForest');
+      }).catch(() => {});
+    }
+  }, [calculationId, propForestName]);
   const [sortBy, setSortBy] = useState<string>('role');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [filterRole, setFilterRole] = useState<string>('all');
@@ -342,7 +355,8 @@ const SpeciesTable: React.FC<SpeciesTableProps> = ({
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `species_list_${new Date().toISOString().split('T')[0]}.csv`;
+    const filename = generateExportFileName(forestName, CONTENT_TYPES.SPECIES, 'csv');
+    link.download = getDownloadAttribute(filename);
     link.click();
   };
 

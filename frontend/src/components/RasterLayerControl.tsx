@@ -194,10 +194,10 @@ function generateDynamicBiomassLegend(minBiomass: number, maxBiomass: number): L
 function generateDynamicSlopeLegend(minCode: number, maxCode: number): LegendItem[] {
   // Slope classes (categorical codes)
   const slopeClasses = [
-    { code: 1, color: '#2ECC71', label: 'Gentle', range: '<10°' },        // Green
-    { code: 2, color: '#F1C40F', label: 'Moderate', range: '10-20°' },    // Yellow
-    { code: 3, color: '#E67E22', label: 'Steep', range: '20-30°' },       // Orange
-    { code: 4, color: '#E74C3C', label: 'Very Steep', range: '>30°' }     // Red
+    { code: 1, color: '#2ECC71', label: 'Gentle', range: '0-19°' },           // Green
+    { code: 2, color: '#F1C40F', label: 'Moderate', range: '19-30°' },         // Yellow
+    { code: 3, color: '#E67E22', label: 'Highly Steep', range: '30-45°' },    // Orange
+    { code: 4, color: '#E74C3C', label: 'Extreme', range: '>45°' }             // Red
   ];
 
   // Filter to show ONLY codes that exist in the forest (minCode <= code <= maxCode)
@@ -1046,6 +1046,17 @@ export const RasterLayerControl: React.FC<RasterLayerControlProps> = ({ calculat
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
   const [isPanelMinimized, setIsPanelMinimized] = useState(false);
   const [layerOpacity, setLayerOpacity] = useState<number>(0.5); // Default 50% opacity
+  
+  // Slope class filter state (default: all classes 1-4)
+  const [slopeFilters, setSlopeFilters] = useState<Set<number>>(new Set([1, 2, 3, 4]));
+  
+  // Slope class definitions (Forest Regulation 2079)
+  const slopeClassOptions = [
+    { code: 1, label: 'Gentle', range: '0-19°', color: '#2ECC71' },
+    { code: 2, label: 'Moderate', range: '19-30°', color: '#F1C40F' },
+    { code: 3, label: 'Highly Steep', range: '30-45°', color: '#E67E22' },
+    { code: 4, label: 'Extreme', range: '>45°', color: '#E74C3C' }
+  ];
 
   // Generate dynamic legends based on calculation data
   const dynamicRasterLayers = useMemo(() => {
@@ -1201,10 +1212,10 @@ export const RasterLayerControl: React.FC<RasterLayerControlProps> = ({ calculat
         layers[slopeLayerIndex] = {
           ...layers[slopeLayerIndex],
           legend: [
-            { color: '#2ECC71', label: 'Gentle', range: '<10°' },
-            { color: '#F1C40F', label: 'Moderate', range: '10-20°' },
-            { color: '#E67E22', label: 'Steep', range: '20-30°' },
-            { color: '#E74C3C', label: 'Very Steep', range: '>30°' }
+            { color: '#2ECC71', label: 'Gentle', range: '0-19°' },
+            { color: '#F1C40F', label: 'Moderate', range: '19-30°' },
+            { color: '#E67E22', label: 'Highly Steep', range: '30-45°' },
+            { color: '#E74C3C', label: 'Extreme', range: '>45°' }
           ]
         };
       }
@@ -1496,6 +1507,65 @@ export const RasterLayerControl: React.FC<RasterLayerControlProps> = ({ calculat
                 </div>
               </div>
             )}
+
+            {/* Slope Class Filter - Only show when slope layer is active */}
+            {activeLayers.has('slope') && (
+              <div style={{
+                marginTop: '12px',
+                padding: '8px',
+                backgroundColor: '#fff8e1',
+                borderRadius: '6px',
+                border: '1px solid #ffc107'
+              }}>
+                <div style={{
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  color: '#333',
+                  marginBottom: '8px'
+                }}>
+                  Slope Classes:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {slopeClassOptions.map(cls => (
+                    <label
+                      key={cls.code}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        cursor: 'pointer',
+                        fontSize: '11px'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={slopeFilters.has(cls.code)}
+                        onChange={() => {
+                          const newFilters = new Set(slopeFilters);
+                          if (newFilters.has(cls.code)) {
+                            if (newFilters.size > 1) {  // Keep at least one
+                              newFilters.delete(cls.code);
+                            }
+                          } else {
+                            newFilters.add(cls.code);
+                          }
+                          setSlopeFilters(newFilters);
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <div style={{
+                        width: '12px',
+                        height: '12px',
+                        backgroundColor: cls.color,
+                        border: '1px solid #999',
+                        borderRadius: '2px'
+                      }} />
+                      <span>{cls.label} ({cls.range})</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -1584,6 +1654,70 @@ export const RasterLayerControl: React.FC<RasterLayerControlProps> = ({ calculat
             ))}
           </div>
 
+          {/* Slope Class Filter (only for slope layer) */}
+          {selectedLayer === 'slope' && (
+            <div style={{
+              marginTop: '12px',
+              paddingTop: '8px',
+              borderTop: '1px solid #ddd'
+            }}>
+              <div style={{
+                fontSize: '11px',
+                fontWeight: 'bold',
+                color: '#666',
+                marginBottom: '8px'
+              }}>
+                Filter Classes:
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {slopeClassOptions.map(cls => (
+                  <label
+                    key={cls.code}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      cursor: 'pointer',
+                      fontSize: '11px'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={slopeFilters.has(cls.code)}
+                      onChange={() => {
+                        const newFilters = new Set(slopeFilters);
+                        if (newFilters.has(cls.code)) {
+                          newFilters.delete(cls.code);
+                        } else {
+                          newFilters.add(cls.code);
+                        }
+                        setSlopeFilters(newFilters);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <div style={{
+                      width: '14px',
+                      height: '14px',
+                      backgroundColor: cls.color,
+                      border: '1px solid #999',
+                      borderRadius: '2px'
+                    }} />
+                    <span>{cls.label} ({cls.range})</span>
+                  </label>
+                ))}
+              </div>
+              {slopeFilters.size === 0 && (
+                <div style={{
+                  fontSize: '10px',
+                  color: '#e74c3c',
+                  marginTop: '4px'
+                }}>
+                  At least one class must be selected
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Data Source Attribution */}
           {(() => {
             const currentLayerData = dynamicRasterLayers.find(l => l.id === selectedLayer);
@@ -1614,16 +1748,27 @@ export const RasterLayerControl: React.FC<RasterLayerControlProps> = ({ calculat
       )}
 
       {/* Render active tile layers */}
-      {Array.from(activeLayers).map(layerId => (
-        <TileLayer
-          key={layerId}
-          url={`http://localhost:8001/api/calculations/${calculationId}/tiles/${layerId}/{z}/{x}/{y}.png?alpha=${Math.round(layerOpacity * 255)}&cb=${Date.now()}`}
-          opacity={layerOpacity}  // User-controlled opacity
-          zIndex={500}   // Above base map, below markers
-          maxZoom={18}
-          minZoom={10}
-        />
-      ))}
+      {Array.from(activeLayers).map(layerId => {
+        // Build URL with optional filter for slope layer
+        let url = `http://localhost:8001/api/calculations/${calculationId}/tiles/${layerId}/{z}/{x}/{y}.png?alpha=${Math.round(layerOpacity * 255)}&cb=${Date.now()}`;
+        
+        // Add filter_classes parameter for slope layer (only if not all classes selected)
+        if (layerId === 'slope' && slopeFilters.size < 4) {
+          const filterStr = Array.from(slopeFilters).sort().join(',');
+          url += `&filter_classes=${filterStr}`;
+        }
+        
+        return (
+          <TileLayer
+            key={layerId}
+            url={url}
+            opacity={layerOpacity}
+            zIndex={500}
+            maxZoom={18}
+            minZoom={10}
+          />
+        );
+      })}
     </>
   );
 };

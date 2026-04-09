@@ -221,6 +221,16 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
   const [gpsPointSize, setGpsPointSize] = useState(24);
   const [gpsSnappingEnabled, setGpsSnappingEnabled] = useState(true);
   const [showDescriptionField, setShowDescriptionField] = useState(false);
+  
+  // Base Map Selection
+  const [baseMap, setBaseMap] = useState<string>('satellite');
+  
+  // Base map options
+  const baseMapOptions = [
+    { value: 'satellite', label: 'Satellite', icon: '🛰️' },
+    { value: 'topographic', label: 'Topographic', icon: '🗻' },
+    { value: 'osm', label: 'Street Map', icon: '🗺️' },
+  ];
 
   // Refs for map control
   const mapRef = useRef<L.Map | null>(null);
@@ -848,7 +858,27 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
 
       {/* Map */}
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Map</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Map</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">Base Map:</span>
+            <div className="flex rounded-md overflow-hidden border border-gray-300">
+              {baseMapOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setBaseMap(opt.value)}
+                  className={`px-3 py-1 text-sm transition-colors ${
+                    baseMap === opt.value
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
         <div className="h-[600px] rounded overflow-hidden border border-gray-300">
           <MapContainer
             center={mapCenter}
@@ -856,7 +886,7 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
             style={{ height: '100%', width: '100%' }}
           >
             <MapRefCapture onMapReady={handleMapReady} />
-            <BaseMapSelector />
+            <BaseMapSelector baseMap={baseMap} />
 
             {/* GPS Point Layer - visible in both auto and manual modes */}
             {gpsPoints && gpsPoints.length > 0 && (

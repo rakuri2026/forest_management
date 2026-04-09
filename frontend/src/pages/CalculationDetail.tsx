@@ -1084,7 +1084,7 @@ export default function CalculationDetail() {
 
         {activeTab === 'fieldbook' && (
           <div className="p-6">
-            <FieldbookTab calculationId={calculation.id} />
+            <FieldbookTab calculationId={calculation.id} forestName={calculation.forest_name} />
           </div>
         )}
 
@@ -1096,13 +1096,13 @@ export default function CalculationDetail() {
 
         {activeTab === 'treemodel' && (
           <div className="p-6">
-            <TreeModelGenerator calculationId={calculation.id} onRefresh={loadCalculation} />
+            <TreeModelGenerator calculationId={calculation.id} forestName={calculation.forest_name} onRefresh={loadCalculation} />
           </div>
         )}
 
         {activeTab === 'treemapping' && (
           <div className="p-6">
-            <TreeMappingTab calculationId={calculation.id} />
+            <TreeMappingTab calculationId={calculation.id} forestName={calculation.forest_name} />
           </div>
         )}
 

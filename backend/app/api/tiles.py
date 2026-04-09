@@ -23,6 +23,7 @@ async def get_raster_tile(
     x: int,
     y: int,
     alpha: int = Query(default=128, ge=0, le=255, description="Transparency (0=transparent, 255=opaque)"),
+    filter_classes: str = Query(default=None, description="Comma-separated class codes to filter (e.g., '1,2,3' for slope classes)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -34,7 +35,7 @@ async def get_raster_tile(
     - **y**: Tile Y coordinate (latitude index)
 
     **Available Layers:**
-    - `slope` - Terrain slope (0-90°)
+    - `slope` - Terrain slope (Forest Regulation 2079: Class 1-4)
     - `aspect` - Slope direction (N, NE, E, SE, S, SW, W, NW, Flat)
     - `dem` - Elevation (Digital Elevation Model)
     - `canopy` - Canopy height (meters)
@@ -57,6 +58,7 @@ async def get_raster_tile(
 
     **Parameters:**
     - **alpha**: Transparency level (default 128 = 50%)
+    - **filter_classes**: Comma-separated class codes to show (e.g., '1,2' shows only classes 1 and 2)
 
     **Returns:**
     - PNG image (256×256 pixels) with color-coded raster data
@@ -67,6 +69,7 @@ async def get_raster_tile(
     **Example:**
     ```
     GET /api/calculations/{calc_id}/tiles/slope/14/12345/6789.png?alpha=128
+    GET /api/calculations/{calc_id}/tiles/slope/14/12345/6789.png?filter_classes=1,2
     ```
 
     **Caching:**
@@ -75,24 +78,32 @@ async def get_raster_tile(
     """
     try:
         tile_service = get_tile_service(db)
+        
+        # Parse filter_classes parameter
+        filter_list = None
+        if filter_classes and layer_name == 'slope':
+            try:
+                filter_list = [int(c.strip()) for c in filter_classes.split(',')]
+            except ValueError:
+                pass  # Invalid format, ignore filter
 
-        # Use cached version for better performance
         png_bytes = tile_service.get_tile_cached(
             calculation_id=calculation_id,
             layer_name=layer_name,
             z=z,
             x=x,
             y=y,
-            alpha=alpha
+            alpha=alpha,
+            filter_classes=filter_list
         )
 
         return Response(
             content=png_bytes,
             media_type="image/png",
             headers={
-                "Cache-Control": "public, max-age=86400",  # Cache for 24 hours
+                "Cache-Control": "public, max-age=86400",
                 "Content-Type": "image/png",
-                "Access-Control-Allow-Origin": "*"  # Allow CORS for frontend
+                "Access-Control-Allow-Origin": "*"
             }
         )
 
@@ -416,30 +427,34 @@ async def get_steep_slope_mask_tile(
     z: int,
     x: int,
     y: int,
-    threshold: int = Query(default=4, ge=2, le=4, description="Slope class threshold (2=class 2+, 3=class 3+, 4=class 4 only)"),
+    threshold: int = Query(default=4, ge=2, le=4, description="Slope class threshold (deprecated, use filter_classes)"),
     alpha: int = Query(default=180, ge=0, le=255, description="Transparency (0=transparent, 255=opaque)"),
+    filter_classes: str = Query(default=None, description="Comma-separated class codes to show (e.g., '1,2,3' or '3,4')"),
     db: Session = Depends(get_db)
 ):
     """
-    Get steep slope mask tile - shows areas with slope ABOVE the threshold
+    Get steep slope mask tile - shows selected slope classes with different colors
     
     **Purpose:**
-    - Helps users visually identify steep slopes for defining protected zones
-    - Shows only areas where slope exceeds the threshold (default 30°)
-    - Areas above threshold are colored red
+    - Helps users visually identify slope classes for defining protected zones
+    - Shows selected classes with different colors:
+      - Class 1 (Gentle 0-19°): Green
+      - Class 2 (Moderate 19-30°): Yellow
+      - Class 3 (Sensitive 30-45°): Orange
+      - Class 4 (Extreme >45°): Red
     
     **Parameters:**
-    - **threshold**: Slope threshold in degrees (default 30). Areas ABOVE this value are shown.
+    - **filter_classes**: Comma-separated class codes to show (e.g., '1,2' or '3,4'). If not provided, uses threshold.
     - **alpha**: Transparency level (default 180 = 70%)
     
     **Returns:**
-    - PNG image (256×256 pixels) with steep slopes in red
+    - PNG image (256×256 pixels) with selected slope classes in different colors
     - HTTP 404 if calculation not found
     - HTTP 500 if tile generation fails
     
     **Example:**
     ```
-    GET /api/calculations/{calc_id}/steep-slope-mask/14/12345/6789.png?threshold=30
+    GET /api/calculations/{calc_id}/steep-slope-mask/14/12345/6789.png?filter_classes=3,4
     ```
     """
     try:
@@ -478,15 +493,24 @@ async def get_steep_slope_mask_tile(
         
         print(f"[SteepSlope] Tile bounds: lon=[{lon_min:.4f}, {lon_max:.4f}], lat=[{lat_min:.4f}, {lat_max:.4f}]")
 
-        # Map class threshold to degree threshold
-        if threshold == 4:
-            min_class = 4
-        elif threshold == 3:
-            min_class = 3
-        else:
-            min_class = 2
-            
-        print(f"[SteepSlope] Showing classes >= {min_class}")
+        # Parse filter_classes parameter (new method) or use threshold (legacy)
+        show_classes = None
+        if filter_classes:
+            try:
+                show_classes = [int(c.strip()) for c in filter_classes.split(',')]
+                print(f"[SteepSlope] Filter classes: {show_classes}")
+            except ValueError:
+                pass
+        
+        # Fallback to threshold-based logic
+        if show_classes is None:
+            if threshold == 4:
+                show_classes = [4]
+            elif threshold == 3:
+                show_classes = [3, 4]
+            else:
+                show_classes = [2, 3, 4]
+            print(f"[SteepSlope] Using threshold-based classes: {show_classes}")
         
         try:
             # Use the exact same grid sampling approach as tile_service
@@ -501,7 +525,7 @@ async def get_steep_slope_mask_tile(
                 ),
                 relevant_rasters AS (
                     SELECT r.rast
-                    FROM rasters.slope r, forest_boundary f
+                    FROM rasters.slope_regulation r, forest_boundary f
                     WHERE ST_Intersects(r.rast, f.geom)
                 ),
                 grid AS (
@@ -552,12 +576,20 @@ async def get_steep_slope_mask_tile(
             # Convert to list of dicts for the drawing loop
             raster_data = [{'i': row.i, 'j': row.j, 'val': row.val} for row in result]
             
+            # Class colors (Forest Regulation 2079)
+            class_colors = {
+                1: (46, 204, 113, alpha),   # Green - Gentle
+                2: (241, 196, 15, alpha),   # Yellow - Moderate
+                3: (230, 126, 34, alpha),   # Orange - Sensitive
+                4: (220, 38, 38, alpha)    # Red - Extreme
+            }
+            
             # Create 256x256 image using same approach as tile_service
             cell_size = 256 // sample_size  # 8
             img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
             
-            # Draw each grid cell with reclass logic
+            # Draw each grid cell with class-based colors
             for sample in raster_data:
                 i = sample['i']
                 j = sample['j']
@@ -566,11 +598,13 @@ async def get_steep_slope_mask_tile(
                 if val is None:
                     continue
                 
-                # Reclass: only show cells >= min_class
-                if val >= min_class:
-                    color = (220, 38, 38, alpha)  # Red
-                else:
-                    continue  # Skip non-steep cells (transparent)
+                class_code = int(val)
+                
+                # Only show cells in the selected classes
+                if class_code not in show_classes:
+                    continue  # Skip - transparent
+                
+                color = class_colors.get(class_code, (220, 38, 38, alpha))
                 
                 x1 = i * cell_size
                 y1 = (sample_size - 1 - j) * cell_size  # Flip Y axis like tile_service

@@ -8,6 +8,7 @@ import { LandCoverAnalysis } from './UserGroup/LandCoverAnalysis';
 import { MapExportPanel } from './UserGroup/MapExportPanel';
 import HouseholdInfoTab from './HouseholdInfo/HouseholdInfoTab';
 import api from '../services/api';
+import { generateExportFileName, getDownloadAttribute, CONTENT_TYPES } from '../utils/fileNaming';
 
 interface UserGroupMapTabProps {
   calculationId: string;
@@ -122,6 +123,9 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
       return;
     }
 
+    const activeForestName = forestName || 'UnknownForest';
+    const filename = generateExportFileName(activeForestName, CONTENT_TYPES.USER_GROUP_MAP, format);
+
     try {
       const response = await api.get(`/api/user-group/${extentId}/export`, {
         params: { format },
@@ -132,7 +136,7 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `user_group_map.${format}`);
+      link.setAttribute('download', getDownloadAttribute(filename));
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -278,7 +282,7 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
 
             {showHouseholdInfo && (
               <div className="bg-white rounded-lg shadow-lg">
-                <HouseholdInfoTab calculationId={calculationId} />
+                <HouseholdInfoTab calculationId={calculationId} forestName={forestName} />
               </div>
             )}
           </div>
