@@ -1,11 +1,12 @@
 """
 Pydantic schemas for yearly activities
 """
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from pydantic import BaseModel, Field, validator, model_validator
+from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
+import json
 
 
 # ===== POTENTIAL ACTIVITIES (Master List) =====
@@ -257,13 +258,142 @@ class DrawnFeatureBase(BaseModel):
 
 
 class DrawnFeatureCreate(DrawnFeatureBase):
-    pass
+    @model_validator(mode='after')
+    def validate_spatial_data(self) -> 'DrawnFeatureCreate':
+        """Validate geometry before creating a new feature"""
+        try:
+            geo_dict = json.loads(self.geometry)
+        except json.JSONDecodeError:
+            raise ValueError("Geometry must be a valid JSON string.")
+
+        if "type" not in geo_dict or "coordinates" not in geo_dict:
+            raise ValueError("Invalid GeoJSON format: missing 'type' or 'coordinates'.")
+
+        coords = geo_dict["coordinates"]
+        geom_type = geo_dict["type"].lower()
+
+        # Cross-check geometry type with feature_type
+        expected_type = "linestring" if self.feature_type == "line" else self.feature_type
+        if geom_type != expected_type:
+            raise ValueError(f"Geometry type '{geom_type}' does not match feature_type '{self.feature_type}'.")
+
+        # Validate coordinate structures
+        if geom_type == "point":
+            if not isinstance(coords, list) or len(coords) != 2:
+                raise ValueError("Point coordinates must be a list of two numbers [lng, lat].")
+            if not all(isinstance(c, (int, float)) for c in coords):
+                raise ValueError("Point coordinates must be numeric values.")
+
+        elif geom_type == "linestring":
+            if not isinstance(coords, list) or len(coords) < 2:
+                raise ValueError("LineString must have at least two points to form a valid line.")
+            for i, point in enumerate(coords):
+                if not isinstance(point, list) or len(point) != 2:
+                    raise ValueError(f"LineString point {i} must be a list of [lng, lat].")
+
+        elif geom_type == "polygon":
+            if not isinstance(coords, list) or not isinstance(coords[0], list):
+                raise ValueError("Polygon coordinates must be a list of rings.")
+            if len(coords[0]) < 4:
+                raise ValueError("Polygon must have at least 4 points (including closing point).")
+            
+            # Ensure the polygon is closed (first and last points match)
+            ring = coords[0]
+            if ring[0] != ring[-1]:
+                raise ValueError("Polygon linear ring must be closed (first and last coordinate pairs must match).")
+
+        # Validate with Shapely
+        self._validate_with_shapely(geo_dict, geom_type)
+
+        return self
+
+    def _validate_with_shapely(self, geo_dict: dict, geom_type: str):
+        """Use Shapely to validate geometry validity"""
+        try:
+            from shapely.geometry import shape
+            geom = shape(geo_dict)
+            if not geom.is_valid:
+                if geom_type == "polygon":
+                    raise ValueError("Invalid polygon geometry (may be self-intersecting or have invalid orientation).")
+                else:
+                    raise ValueError(f"Invalid {geom_type} geometry.")
+        except ImportError:
+            # Shapely not available, skip this validation
+            pass
+        except Exception as e:
+            if "Invalid" not in str(e):
+                raise ValueError(f"Geometry validation failed: {str(e)}")
+            raise
 
 
 class DrawnFeatureUpdate(BaseModel):
     feature_type: Optional[str] = Field(None, pattern="^(point|line|polygon)$")
     geometry: Optional[str] = None
     properties: Optional[dict] = None
+
+    @model_validator(mode='after')
+    def validate_spatial_data(self) -> 'DrawnFeatureUpdate':
+        """Validate geometry if it's being updated"""
+        if not self.geometry:
+            return self
+
+        try:
+            geo_dict = json.loads(self.geometry)
+        except json.JSONDecodeError:
+            raise ValueError("Geometry must be a valid JSON string.")
+
+        if "type" not in geo_dict or "coordinates" not in geo_dict:
+            raise ValueError("Invalid GeoJSON format: missing 'type' or 'coordinates'.")
+
+        coords = geo_dict["coordinates"]
+        geom_type = geo_dict["type"].lower()
+
+        # Cross-check geometry type with feature_type (if provided)
+        if self.feature_type:
+            expected_type = "linestring" if self.feature_type == "line" else self.feature_type
+            if geom_type != expected_type:
+                raise ValueError(f"Geometry type '{geom_type}' does not match feature_type '{self.feature_type}'.")
+
+        # Validate coordinate structures
+        if geom_type == "point":
+            if not isinstance(coords, list) or len(coords) != 2:
+                raise ValueError("Point coordinates must be a list of two numbers [lng, lat].")
+
+        elif geom_type == "linestring":
+            if not isinstance(coords, list) or len(coords) < 2:
+                raise ValueError("LineString must have at least two points to form a valid line.")
+
+        elif geom_type == "polygon":
+            if not isinstance(coords, list) or not isinstance(coords[0], list):
+                raise ValueError("Polygon coordinates must be a list of rings.")
+            if len(coords[0]) < 4:
+                raise ValueError("Polygon must have at least 4 points (including closing point).")
+            
+            ring = coords[0]
+            if ring[0] != ring[-1]:
+                raise ValueError("Polygon linear ring must be closed (first and last coordinate pairs must match).")
+
+        # Validate with Shapely
+        self._validate_with_shapely(geo_dict, geom_type)
+
+        return self
+
+    def _validate_with_shapely(self, geo_dict: dict, geom_type: str):
+        """Use Shapely to validate geometry validity"""
+        try:
+            from shapely.geometry import shape
+            geom = shape(geo_dict)
+            if not geom.is_valid:
+                if geom_type == "polygon":
+                    raise ValueError("Invalid polygon geometry (may be self-intersecting or have invalid orientation).")
+                else:
+                    raise ValueError(f"Invalid {geom_type} geometry.")
+        except ImportError:
+            pass
+        except Exception as e:
+            if "Invalid" not in str(e):
+                raise ValueError(f"Geometry validation failed: {str(e)}")
+            raise
 
 
 class DrawnFeatureResponse(DrawnFeatureBase):
