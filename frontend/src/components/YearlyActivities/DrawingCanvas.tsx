@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, useMapEvents, Marker, Polyline, Polygon, GeoJSON } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, useMapEvents, Marker, Polyline, Polygon, GeoJSON, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
-import { Button, Radio, Space, List, Card, message, Popconfirm, Input } from 'antd';
+import * as turf from '@turf/turf';
+import { Button, Radio, Space, List, Card, message, Popconfirm, Input, Divider } from 'antd';
 import { yearlyActivitiesApi } from '../../services/api';
 
 interface BlockSubArea {
@@ -81,24 +82,38 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const [editingLayers, setEditingLayers] = useState<Map<string, any>>(new Map());
   const featureLayersRef = useRef<Map<string, L.Layer>>(new Map());
   
-  // Calculate live measurements
+  // Vertex editing state (for draggable vertices)
+  const [editingVertices, setEditingVertices] = useState<L.LatLng[]>([]);
+  const [vertexBeingDragged, setVertexBeingDragged] = useState<number | null>(null);
+  
+  // Calculate live geodesic measurements using turf.js
   const calculateMeasurements = (points: L.LatLng[], type: string) => {
+    if (points.length < 2) {
+      setCurrentLength(0);
+      setCurrentArea(0);
+      return;
+    }
+    
     if (type === 'line' && points.length >= 2) {
-      const length = points.reduce((acc, p, i) => {
-        return acc + (i > 0 ? points[i - 1].distanceTo(p) : 0);
-      }, 0);
+      // Use turf.js for geodesic length
+      const coords = points.map(p => [p.lng, p.lng] as [number, number]);
+      const lineCoords = points.map(p => [p.lng, p.lat] as [number, number]);
+      const lineFeature = turf.lineString(lineCoords);
+      const length = turf.length(lineFeature, { units: 'meters' });
       setCurrentLength(length);
     } else if (type === 'polygon' && points.length >= 3) {
-      let area = 0;
-      const n = points.length;
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n;
-        area += points[i].lng * points[j].lat;
-        area -= points[j].lng * points[i].lat;
+      // Use turf.js for geodesic area (spherical)
+      const polyCoords = [...points.map(p => [p.lng, p.lat] as [number, number])];
+      // Close the polygon if needed
+      if (polyCoords.length > 0) {
+        const first = polyCoords[0];
+        const last = polyCoords[polyCoords.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          polyCoords.push([...first]);
+        }
       }
-      area = Math.abs(area) / 2;
-      const metersPerDegree = 111320;
-      area = Math.abs(area) * metersPerDegree * metersPerDegree;
+      const polygonFeature = turf.polygon([polyCoords]);
+      const area = turf.area(polygonFeature); // Returns area in square meters
       setCurrentArea(area);
     }
   };
@@ -284,13 +299,109 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
   const handleStartEdit = (feature: any) => {
     setEditingFeatureId(feature.id);
     setEditingFeature(feature);
-    message.info('Click on map to add/move vertices');
+    
+    // Initialize editing vertices from existing feature
+    const coords = parseGeometry(feature.geometry, feature.feature_type);
+    if (coords) {
+      if (feature.feature_type === 'polygon') {
+        // For polygon, coords[0] contains the ring
+        setEditingVertices(coords[0] || coords);
+      } else {
+        setEditingVertices(coords);
+      }
+    }
+    
+    message.info('Drag vertices to move. Right-click vertex to delete.');
   };
 
   const handleStopEdit = () => {
     setEditingFeatureId(null);
     setEditingFeature(null);
+    setEditingVertices([]);
     message.info('Edit mode exited');
+  };
+
+  // Handle vertex drag during drawing (draggable markers)
+  const handleVertexDrag = (index: number, e: L.DragEndEvent) => {
+    const newLatLng = e.target.getLatLng();
+    const newPoints = [...currentPoints];
+    newPoints[index] = newLatLng;
+    setCurrentPoints(newPoints);
+    calculateMeasurements(newPoints, featureType);
+  };
+
+  // Handle right-click on vertex to delete it
+  const handleVertexDelete = (index: number) => {
+    // Prevent breaking shapes - minimum points
+    if (featureType === 'polygon' && currentPoints.length <= 3) {
+      message.warning('Polygon must have at least 3 vertices');
+      return;
+    }
+    if (featureType === 'line' && currentPoints.length <= 2) {
+      message.warning('Line must have at least 2 vertices');
+      return;
+    }
+    
+    const newPoints = currentPoints.filter((_, i) => i !== index);
+    setCurrentPoints(newPoints);
+    calculateMeasurements(newPoints, featureType);
+    message.success('Vertex deleted (right-click)');
+  };
+
+  // Handle vertex drag for editing existing features
+  const handleEditingVertexDrag = (index: number, e: L.DragEndEvent) => {
+    const newLatLng = e.target.getLatLng();
+    const newVertices = [...editingVertices];
+    newVertices[index] = newLatLng;
+    setEditingVertices(newVertices);
+    
+    if (featureType === 'line' || featureType === 'polygon') {
+      calculateMeasurements(newVertices, featureType);
+    }
+  };
+
+  // Handle right-click on editing vertex
+  const handleEditingVertexDelete = (index: number) => {
+    if (!editingFeatureId || !editingFeature) return;
+    
+    const minPoints = featureType === 'polygon' ? 4 : 3;
+    if (editingVertices.length <= minPoints) {
+      message.warning(`Cannot delete - ${featureType} needs at least ${minPoints - 1} vertices`);
+      return;
+    }
+
+    const newVertices = editingVertices.filter((_, i) => i !== index);
+    setEditingVertices(newVertices);
+    
+    // Update the feature on the server
+    const coords = newVertices.map(p => [p.lng, p.lat]);
+    let newGeometry: string;
+    
+    if (featureType === 'polygon') {
+      coords.push(coords[0]); // Close polygon
+      newGeometry = JSON.stringify({
+        type: 'Polygon',
+        coordinates: [coords]
+      });
+    } else {
+      newGeometry = JSON.stringify({
+        type: 'LineString',
+        coordinates: coords
+      });
+    }
+    
+    yearlyActivitiesApi.updateDrawnFeature(activityId, editingFeatureId, {
+      geometry: newGeometry,
+      feature_type: featureType
+    }).then(() => {
+      message.success('Vertex deleted and feature updated');
+      onFeaturesChange();
+    }).catch((err) => {
+      console.error('Error updating feature:', err);
+      message.error('Failed to delete vertex');
+      // Restore the vertex
+      setEditingVertices(editingVertices);
+    });
   };
 
 const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
@@ -497,11 +608,17 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                 click: () => handleFeatureClick(feature)
               }}
             />
+            {/* Draggable vertex markers when editing */}
             {isBeingEdited && lineCoords && lineCoords.map((pos, vidx) => (
               <Marker
                 key={`v-${feature.id}-${vidx}`}
                 position={pos}
-                opacity={0.7}
+                draggable={true}
+                opacity={0.8}
+                eventHandlers={{
+                  dragend: (e) => handleEditingVertexDrag(vidx, e),
+                  contextmenu: () => handleEditingVertexDelete(vidx)
+                }}
               />
             ))}
           </>
@@ -521,12 +638,17 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                 click: () => handleFeatureClick(feature)
               }}
             />
-            {/* Show vertex markers when editing */}
-            {isBeingEdited && polyCoords.map((pos, vidx) => (
+            {/* Draggable vertex markers when editing - right-click to delete */}
+            {isBeingEdited && polyCoords && polyCoords.map((pos: number[], vidx: number) => (
               <Marker
                 key={`v-${feature.id}-${vidx}`}
                 position={pos}
-                opacity={0.7}
+                draggable={true}
+                opacity={0.8}
+                eventHandlers={{
+                  dragend: (e) => handleEditingVertexDrag(vidx, e),
+                  contextmenu: () => handleEditingVertexDelete(vidx)
+                }}
               />
             ))}
           </>
@@ -769,6 +891,47 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
               dashArray="5, 10"
             />
           )}
+          {/* Draggable vertex markers during drawing - right-click to delete */}
+          {currentPoints.length > 0 && (featureType === 'line' || featureType === 'polygon') && (
+            <>
+              {currentPoints.map((pos, index) => (
+                <Marker
+                  key={`draw-vertex-${index}`}
+                  position={pos}
+                  draggable={true}
+                  opacity={0.9}
+                  eventHandlers={{
+                    dragend: (e) => handleVertexDrag(index, e),
+                    contextmenu: () => handleVertexDelete(index)
+                  }}
+                />
+              ))}
+              {/* Show live measurement tooltip on the shape */}
+              {featureType === 'polygon' && currentPoints.length >= 3 && (
+                <Polygon
+                  positions={currentPoints.map(p => [p.lat, p.lng])}
+                  color="#2563eb"
+                  weight={2}
+                  fillOpacity={0.1}
+                >
+                  <Tooltip permanent direction="center" opacity={0.9}>
+                    {formatArea(currentArea)}
+                  </Tooltip>
+                </Polygon>
+              )}
+              {featureType === 'line' && currentPoints.length >= 2 && (
+                <Polyline
+                  positions={currentPoints.map(p => [p.lat, p.lng])}
+                  color="#2563eb"
+                  weight={3}
+                >
+                  <Tooltip permanent direction="top" opacity={0.9}>
+                    {formatLength(currentLength)}
+                  </Tooltip>
+                </Polyline>
+              )}
+            </>
+          )}
         </MapContainer>
         
         {/* Live Measurement Overlay */}
@@ -783,16 +946,35 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
           boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
           fontSize: '13px'
         }}>
-          {featureType === 'line' && currentPoints.length >= 2 && (
-            <div><strong>Length:</strong> {formatLength(currentLength)}</div>
+          {/* Show editing vertices measurements */}
+          {editingVertices.length > 0 && (
+            <>
+              {featureType === 'line' && editingVertices.length >= 2 && (
+                <div><strong>Length:</strong> {formatLength(currentLength)}</div>
+              )}
+              {featureType === 'polygon' && editingVertices.length >= 3 && (
+                <div><strong>Area:</strong> {formatArea(currentArea)}</div>
+              )}
+              <div style={{ marginTop: 4, fontSize: 11, color: '#666' }}>
+                Vertices: {editingVertices.length} (drag to move, right-click to delete)
+              </div>
+            </>
           )}
-          {featureType === 'polygon' && currentPoints.length >= 3 && (
-            <div><strong>Area:</strong> {formatArea(currentArea)}</div>
-          )}
-          {(featureType === 'line' || featureType === 'polygon') && (
-            <div style={{ marginTop: 4, fontSize: 11, color: '#666' }}>
-              Points: {currentPoints.length}
-            </div>
+          {/* Show current drawing measurements */}
+          {editingVertices.length === 0 && (
+            <>
+              {featureType === 'line' && currentPoints.length >= 2 && (
+                <div><strong>Length:</strong> {formatLength(currentLength)}</div>
+              )}
+              {featureType === 'polygon' && currentPoints.length >= 3 && (
+                <div><strong>Area:</strong> {formatArea(currentArea)}</div>
+              )}
+              {(featureType === 'line' || featureType === 'polygon') && currentPoints.length > 0 && (
+                <div style={{ marginTop: 4, fontSize: 11, color: '#666' }}>
+                  Points: {currentPoints.length} (drag to move, right-click to delete)
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
