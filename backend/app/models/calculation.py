@@ -75,6 +75,7 @@ class Calculation(Base):
     forest_committee_members = relationship("ForestUserCommittee", back_populates="calculation", cascade="all, delete-orphan")
     advisory_committee_members = relationship("AdvisoryCommittee", back_populates="calculation", cascade="all, delete-orphan")
     financial_committee_members = relationship("FinancialCommittee", back_populates="calculation", cascade="all, delete-orphan")
+    proposed_activities = relationship("ProposedYearlyActivity", back_populates="calculation", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Calculation(id={self.id}, user_id={self.user_id}, status={self.status.value})>"

@@ -214,7 +214,7 @@ class SubAreaCategory(str):
 
 class BlockBreakdownItem(BaseModel):
     """Schema for block breakdown item"""
-    blockId: str = Field(..., description="Block ID")
+    blockId: Optional[str] = Field(None, description="Block ID")
     blockName: str = Field(..., description="Block name")
     area: float = Field(..., description="Area in hectares in this block")
     percentage: float = Field(..., description="Percentage of sub-area in this block")

@@ -1,0 +1,462 @@
+Building a custom editing interface in React-Leaflet requires managing the state of individual vertices so they can be dragged, added, or removed. Relying strictly on map clicks for editing (as outlined in Prompt 10 of your document) can feel clunky for complex forestry features. 
+
+A more robust approach for manipulating spatial features is to render draggable `<Marker>` components at each vertex of your active line or polygon. 
+
+Here is the implementation for your `DrawingCanvas.tsx`. It handles the critical coordinate conversions, provides live measurements during creation, and allows you to move, delete (via right-click), or add vertices seamlessly before pushing the WKT updates back to your PostgreSQL 18 database.
+
+### 1. The Geometry and Measurement Helpers
+
+First, set up the utility functions. The document's bounding box area calculation for polygons is a rough estimation; for accurate forestry analysis, it is better to rely on a proper geodetic area calculation or standard spatial libraries like Turf.js, but we will implement a reliable standard using Leaflet's built-in spherical distance.
+
+```typescript
+import L from 'leaflet';
+
+// Prompt 4: Coordinate Conversion Handler
+// GeoJSON/DB uses [lng, lat], Leaflet uses [lat, lng]
+export const parseGeometryToLeaflet = (coords: any[], featureType: string): L.LatLngExpression[] | any => {
+  if (featureType === 'point') {
+    return [coords[1], coords[0]]; 
+  } else if (featureType === 'line') {
+    return coords.map((c: number[]) => [c[1], c[0]]);
+  } else if (featureType === 'polygon') {
+    const ring = coords[0];
+    return ring.map((c: number[]) => [c[1], c[0]]);
+  }
+  return [];
+};
+
+export const parseLeafletToGeoJSON = (latlngs: L.LatLng[]) => {
+  return latlngs.map(p => [p.lng, p.lat]);
+};
+
+// Prompt 8: Live Measurements
+export const calculateMeasurements = (points: L.LatLng[], featureType: 'line' | 'polygon'): string => {
+  if (points.length < 2) return '';
+
+  if (featureType === 'line') {
+    const length = points.reduce((acc, p, i) => {
+      return acc + (i > 0 ? points[i - 1].distanceTo(p) : 0);
+    }, 0);
+    return `${length.toFixed(1)} m`;
+  } 
+  
+  if (featureType === 'polygon' && points.length >= 3) {
+    // Note: For high-precision forestry reporting, wrap Turf.js (turf.area) here.
+    // This is a simplified planar approximation for live visual feedback.
+    let area = 0;
+    const earthRadius = 6378137; // meters
+    
+    // Convert to radians and calculate basic spherical area
+    if (points.length > 2) {
+        for (let i = 0; i < points.length; i++) {
+            const p1 = points[i];
+            const p2 = points[(i + 1) % points.length];
+            area += (p2.lng - p1.lng) * (2 + Math.sin(p1.lat * Math.PI / 180) + Math.sin(p2.lat * Math.PI / 180));
+        }
+        area = Math.abs(area * earthRadius * earthRadius / 2.0 * Math.PI / 180.0);
+    }
+    const hectares = (area / 10000).toFixed(2);
+    return `${area.toFixed(1)} m² (${hectares} ha)`;
+  }
+  
+  return '';
+};
+```
+
+### 2. The Interactive `DrawingCanvas` Component
+
+This component manages the active drawing state. Notice how we map over the vertices to create draggable markers for the editing phase.
+
+```tsx
+import React, { useState, useEffect } from 'react';
+import { useMapEvents, Marker, Polyline, Polygon, Tooltip } from 'react-leaflet';
+import L from 'leaflet';
+import { parseLeafletToGeoJSON, calculateMeasurements } from './geometryHelpers';
+
+interface DrawingCanvasProps {
+  activityId: string;
+  drawMode: 'none' | 'line' | 'polygon' | 'edit';
+  editingFeature?: any; 
+  onSaveFeature: (featureData: any) => Promise<void>;
+}
+
+export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ 
+  activityId, 
+  drawMode, 
+  editingFeature,
+  onSaveFeature 
+}) => {
+  const [currentPoints, setCurrentPoints] = useState<L.LatLng[]>([]);
+  const [liveMeasurement, setLiveMeasurement] = useState<string>('');
+
+  // Initialize edit mode with existing feature coordinates
+  useEffect(() => {
+    if (drawMode === 'edit' && editingFeature) {
+      // Assuming parseGeometryToLeaflet is adapted to return L.LatLng arrays
+      const rawCoords = editingFeature.geometry.coordinates;
+      const ring = editingFeature.feature_type === 'polygon' ? rawCoords[0] : rawCoords;
+      
+      const leafLatLngs = ring.map((c: number[]) => L.latLng(c[1], c[0]));
+      setCurrentPoints(leafLatLngs);
+    } else if (drawMode !== 'edit') {
+      setCurrentPoints([]);
+    }
+  }, [drawMode, editingFeature]);
+
+  // Handle map interactions
+  useMapEvents({
+    click(e) {
+      if (drawMode === 'none') return;
+      
+      const newPoints = [...currentPoints, e.latlng];
+      setCurrentPoints(newPoints);
+      
+      if (drawMode === 'line' || drawMode === 'polygon') {
+         setLiveMeasurement(calculateMeasurements(newPoints, drawMode));
+      }
+    },
+    // Double click finishes the drawing (Prompt 6 & 7)
+    dblclick(e) {
+      if (drawMode === 'line' || drawMode === 'polygon') {
+        handleSaveNewFeature();
+      }
+    }
+  });
+
+  // --- EDITING LOGIC: Move and Delete Vertices ---
+
+  const handleVertexDrag = (index: number, e: L.DragEndEvent) => {
+    const newPoints = [...currentPoints];
+    newPoints[index] = e.target.getLatLng();
+    setCurrentPoints(newPoints);
+    
+    // Update live measurements if actively editing
+    if (editingFeature) {
+       setLiveMeasurement(calculateMeasurements(newPoints, editingFeature.feature_type));
+    }
+  };
+
+  const handleVertexDelete = (index: number) => {
+    // Prevent breaking shapes
+    if (editingFeature?.feature_type === 'polygon' && currentPoints.length <= 3) return;
+    if (editingFeature?.feature_type === 'line' && currentPoints.length <= 2) return;
+
+    const newPoints = currentPoints.filter((_, i) => i !== index);
+    setCurrentPoints(newPoints);
+  };
+
+  // --- SAVE LOGIC ---
+
+  const handleSaveNewFeature = async () => {
+    const coords = parseLeafletToGeoJSON(currentPoints);
+    
+    // Prompt 7 requirement: ensure polygon closes 
+    if (drawMode === 'polygon' && currentPoints.length > 2) {
+      const first = currentPoints[0];
+      const last = currentPoints[currentPoints.length - 1];
+      if (first.distanceTo(last) > 1) {
+        coords.push([first.lng, first.lat]);
+      }
+    }
+
+    const geometry = JSON.stringify({
+      type: drawMode === 'polygon' ? 'Polygon' : 'LineString',
+      coordinates: drawMode === 'polygon' ? [coords] : coords
+    });
+
+    await onSaveFeature({
+      feature_type: drawMode, // Prompt 10: Critical requirement
+      geometry,
+      properties: { 
+        measurement: liveMeasurement 
+      }
+    });
+
+    setCurrentPoints([]); // Reset after save
+  };
+
+  // --- RENDER ---
+  
+  const activeType = drawMode === 'edit' ? editingFeature?.feature_type : drawMode;
+
+  return (
+    <>
+      {/* Render the shape in progress */}
+      {activeType === 'line' && currentPoints.length > 1 && (
+        <Polyline positions={currentPoints} color="#e11d48" weight={3}>
+           <Tooltip permanent direction="top">{liveMeasurement}</Tooltip>
+        </Polyline>
+      )}
+
+      {activeType === 'polygon' && currentPoints.length > 2 && (
+        <Polygon positions={currentPoints} color="#059669" fillOpacity={0.3}>
+           <Tooltip permanent direction="center">{liveMeasurement}</Tooltip>
+        </Polygon>
+      )}
+
+      {/* Render Editable Vertices */}
+      {(drawMode === 'line' || drawMode === 'polygon' || drawMode === 'edit') && 
+        currentPoints.map((pos, index) => (
+          <Marker 
+            key={`vertex-${index}`}
+            position={pos}
+            draggable={true} // Allows dragging to move
+            eventHandlers={{
+              dragend: (e) => handleVertexDrag(index, e),
+              contextmenu: () => handleVertexDelete(index) // Right-click to delete
+            }}
+          />
+      ))}
+    </>
+  );
+};
+```
+
+### Key Improvements Explained:
+1. **Editable Vertices:** By mapping over the `currentPoints` array and rendering a `<Marker draggable={true}>`, you give users the ability to click and drag individual nodes without having to write complex hit-detection logic on the map itself.
+2. **Vertex Deletion:** I tied vertex deletion to the `contextmenu` (right-click) event on the markers. It includes guardrails to prevent a user from deleting a polygon down to two points.
+3. **Double-Click Handling:** Bound to `dblclick` via `useMapEvents`, so finishing a shape automatically packages the GeoJSON array and triggers the save function.
+4. **Tooltips:** Wrapped the live measurement output in Leaflet `<Tooltip>` components directly attached to the active shape, which looks much cleaner than a static overlay UI. 
+
+Are you utilizing FastAPI's `BaseModel` for validation on the Python side to catch these incoming WKT updates before they hit Shapely?
+
+
+Ah, that explains it! Passing unvalidated raw strings straight into Shapely is a classic trap in spatial APIs. When a user double-clicks weirdly on the frontend or a coordinate array comes back malformed, Shapely panics, throws an unhandled exception, and takes the whole request down with a 500 Internal Server Error.
+
+By catching this at the Pydantic level, FastAPI will automatically intercept the bad data and return a clean `422 Unprocessable Entity` to your frontend, keeping your backend stable.
+
+Here is how you can implement a robust validation layer for your `DrawnFeatureUpdate` schema using Pydantic's `@model_validator`. This will ensure the geometry is valid JSON, possesses the correct GeoJSON structure, and contains the right number of coordinates for the shape before Shapely even looks at it.
+
+### The Pydantic Validation Solution
+
+Assuming you are using Pydantic v2 (standard in recent FastAPI versions), you can validate the entire model to cross-check the `geometry` against the `feature_type`.
+
+```python
+from pydantic import BaseModel, Field, model_validator
+from typing import Optional, Any
+import json
+
+class DrawnFeatureUpdate(BaseModel):
+    feature_type: Optional[str] = Field(None, pattern="^(point|line|polygon)$")
+    geometry: Optional[str] = None
+    properties: Optional[dict] = None
+
+    @model_validator(mode='after')
+    def validate_spatial_data(self) -> 'DrawnFeatureUpdate':
+        # If geometry isn't being updated, skip validation
+        if not self.geometry:
+            return self
+            
+        try:
+            geo_dict = json.loads(self.geometry)
+        except json.JSONDecodeError:
+            raise ValueError("Geometry must be a valid JSON string.")
+
+        if "type" not in geo_dict or "coordinates" not in geo_dict:
+            raise ValueError("Invalid GeoJSON format: missing 'type' or 'coordinates'.")
+
+        coords = geo_dict["coordinates"]
+        geom_type = geo_dict["type"].lower()
+
+        # 1. Cross-check geometry type with feature_type (if provided)
+        if self.feature_type:
+            expected_type = "linestring" if self.feature_type == "line" else self.feature_type
+            if geom_type != expected_type:
+                raise ValueError(f"Geometry type '{geom_type}' does not match feature_type '{self.feature_type}'.")
+
+        # 2. Validate Coordinate Structures
+        if geom_type == "point":
+            if not isinstance(coords, list) or len(coords) != 2:
+                raise ValueError("Point coordinates must be a list of two numbers [lng, lat].")
+                
+        elif geom_type == "linestring":
+            if not isinstance(coords, list) or len(coords) < 2:
+                raise ValueError("LineString must have at least two points to form a valid line.")
+                
+        elif geom_type == "polygon":
+            # Must be a list of rings, and the first ring must have at least 4 points
+            if not isinstance(coords, list) or not isinstance(coords[0], list) or len(coords[0]) < 4:
+                raise ValueError("Polygon must have at least one linear ring with four or more points.")
+            
+            # 3. Ensure the polygon is closed (first and last points match)
+            ring = coords[0]
+            if ring[0] != ring[-1]:
+                raise ValueError("Polygon linear ring must be closed (first and last coordinate pairs must match).")
+
+        return self
+```
+
+### Why this specific implementation works for your stack:
+
+* **Closed Polygon Check:** In your React document (Prompt 7), you wrote logic to force the polygon to close before saving. This validator acts as a strict backend safety net for that exact rule.
+* **Safe JSON Parsing:** It handles `json.JSONDecodeError` gracefully. If the frontend sends a corrupted string, FastAPI handles it natively.
+* **Clean Database Inserts:** Passing guaranteed, clean geometries into Shapely means the resulting WKT string will be perfectly formatted. This prevents PostGIS from throwing spatial errors when you execute your database commits, which is especially helpful when migrating or upgrading database infrastructures like PostgreSQL 18, where spatial indexing is strict.
+
+Now that the backend is securely validating the geometry, are you planning to store these geometries as raw WKT strings in a standard text column, or are you utilizing a dedicated `GEOMETRY` column type in your database?
+
+Using a dedicated **PostGIS GEOMETRY** column with **GeoAlchemy2** is the industry standard for your stack, especially given your focus on forestry analysis in Nepal. Since you are handling the conversion from GeoJSON string to Shapely and then to PostGIS binary, the frontend must be the "source of truth" for the vertex order and coordinate precision.
+
+To solve the issues with adding, moving, and deleting vertices, the most reliable method in React-Leaflet is to treat each vertex as an independent, draggable object while the shape is in **Edit Mode**.
+
+### 1. The Implementation: `DrawingCanvas.tsx`
+
+This implementation uses draggable markers for every vertex of your line or polygon. It solves the "adding" problem by allowing you to click anywhere on the map to append a point, and the "moving/deleting" problem via marker events.
+
+```tsx
+import React, { useState, useEffect, useMemo } from 'react';
+import { useMapEvents, Marker, Polyline, Polygon, Tooltip } from 'react-leaflet';
+import L from 'leaflet';
+
+// Utility: [lat, lng] (Leaflet) <-> [lng, lat] (GeoJSON/PostGIS)
+const toGeoJSON = (points: L.LatLng[]) => points.map(p => [p.lng, p.lat]);
+const fromGeoJSON = (coords: any[], type: string) => {
+    const ring = type === 'polygon' ? coords[0] : coords;
+    return ring.map((c: number[]) => L.latLng(c[1], c[0]));
+};
+
+export const DrawingCanvas = ({ drawMode, editingFeature, onSave }) => {
+    const [points, setPoints] = useState<L.LatLng[]>([]);
+    const [measure, setMeasure] = useState("");
+
+    // Initialize Edit Mode from PostGIS Geometry
+    useEffect(() => {
+        if (drawMode === 'edit' && editingFeature) {
+            const leafPoints = fromGeoJSON(editingFeature.geometry.coordinates, editingFeature.feature_type);
+            setPoints(leafPoints);
+        } else if (drawMode === 'none') {
+            setPoints([]);
+        }
+    }, [drawMode, editingFeature]);
+
+    // Live Measurements (Prompt 8)
+    useEffect(() => {
+        if (points.length < 2) { setMeasure(""); return; }
+        
+        if (drawMode === 'line' || (drawMode === 'edit' && editingFeature?.feature_type === 'line')) {
+            let total = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                total += points[i].distanceTo(points[i+1]);
+            }
+            setMeasure(`${total.toFixed(1)} m`);
+        } else if (points.length >= 3) {
+            const area = L.GeometryUtil.geodesicArea(points); // Requires Leaflet.Draw or custom calc
+            setMeasure(`${(area / 10000).toFixed(2)} ha (${area.toFixed(0)} m²)`);
+        }
+    }, [points, drawMode]);
+
+    useMapEvents({
+        click(e) {
+            if (drawMode === 'none') return;
+            // Append point on click
+            setPoints(prev => [...prev, e.latlng]);
+        },
+        dblclick() {
+            if (drawMode !== 'none' && points.length > 1) {
+                handleFinish();
+            }
+        }
+    });
+
+    const handleFinish = () => {
+        const coords = toGeoJSON(points);
+        if (drawMode === 'polygon' || editingFeature?.feature_type === 'polygon') {
+            coords.push(coords[0]); // Ensure closed ring for PostGIS
+        }
+        
+        onSave({
+            feature_type: editingFeature?.feature_type || drawMode,
+            geometry: JSON.stringify({
+                type: (editingFeature?.feature_type || drawMode) === 'polygon' ? 'Polygon' : 'LineString',
+                coordinates: (editingFeature?.feature_type || drawMode) === 'polygon' ? [coords] : coords
+            })
+        });
+    };
+
+    return (
+        <>
+            {/* The Visual Shape */}
+            {points.length > 1 && (
+                drawMode === 'polygon' || editingFeature?.feature_type === 'polygon' ? (
+                    <Polygon positions={points} color="#059669"><Tooltip permanent>{measure}</Tooltip></Polygon>
+                ) : (
+                    <Polyline positions={points} color="#e11d48"><Tooltip permanent>{measure}</Tooltip></Polyline>
+                )
+            )}
+
+            {/* Draggable Vertices for Moving/Deleting */}
+            {points.map((p, i) => (
+                <Marker 
+                    key={i} 
+                    position={p} 
+                    draggable={true}
+                    eventHandlers={{
+                        dragend: (e) => {
+                            const newPoints = [...points];
+                            newPoints[i] = e.target.getLatLng();
+                            setPoints(newPoints);
+                        },
+                        contextmenu: () => { // Right-click to Delete Vertex
+                            if (points.length > 2) setPoints(points.filter((_, idx) => idx !== i));
+                        }
+                    }}
+                />
+            ))}
+        </>
+    );
+};
+```
+
+---
+
+### 2. The Backend: FastAPI Validation Logic
+
+Since you are using a **PostGIS GEOMETRY** column, your FastAPI schema must ensure the `geometry` string is valid before `GeoAlchemy2` attempts to commit it. Without this, a malformed string will cause a database driver crash instead of a clean validation error.
+
+```python
+from pydantic import BaseModel, model_validator
+import json
+from shapely.geometry import shape
+
+class DrawnFeatureUpdate(BaseModel):
+    feature_type: str
+    geometry: str # Raw GeoJSON string from frontend
+
+    @model_validator(mode='after')
+    def validate_postgis_compatibility(self):
+        try:
+            # 1. Validate JSON Structure
+            data = json.loads(self.geometry)
+            
+            # 2. Validate with Shapely (Matches what your backend uses)
+            geom = shape(data)
+            
+            if not geom.is_valid:
+                raise ValueError("Invalid spatial geometry (e.g., self-intersecting polygon).")
+            
+            # 3. Ensure type consistency
+            if self.feature_type == "line" and data['type'] != "LineString":
+                raise ValueError("Feature type 'line' requires LineString geometry.")
+            if self.feature_type == "polygon" and data['type'] != "Polygon":
+                raise ValueError("Feature type 'polygon' requires Polygon geometry.")
+                
+            return self
+        except Exception as e:
+            raise ValueError(f"Geometry validation failed: {str(e)}")
+```
+
+---
+
+### 3. Key Solutions for Your Requirements
+
+| Feature | Solution |
+| :--- | :--- |
+| **Moving Vertices** | Every point in the `points` state is rendered as a `<Marker draggable={true}>`. The `dragend` event updates the specific index in the array. |
+| **Deleting Vertices** | Use the `contextmenu` event (right-click) on a vertex marker to filter the `points` array and remove that specific index. |
+| **Adding Vertices** | The `useMapEvents` click handler appends new points to the existing array. For adding a point *between* existing ones, you can add a small "ghost" marker at the midpoint of every segment. |
+| **Live Length** | Calculated using `p1.distanceTo(p2)` in a loop inside a `useEffect` that triggers whenever the `points` state changes. |
+| **Live Area** | Uses `L.GeometryUtil.geodesicArea(points)` which calculates the area in square meters accounting for the Earth's curvature—crucial for accurate forest parcel measurement. |
+
+### Summary of the Data Flow
+1.  **Frontend:** Leaflet `[lat, lng]` $\rightarrow$ `JSON.stringify` (GeoJSON `[lng, lat]`).
+2.  **FastAPI:** Pydantic validates the string $\rightarrow$ `shapely.geometry.shape()` creates object.
+3.  **Database:** `GeoAlchemy2` takes the Shapely object $\rightarrow$ converts to **WKB (Well-Known Binary)** $\rightarrow$ **PostGIS `GEOMETRY(SRID 4326)`**.

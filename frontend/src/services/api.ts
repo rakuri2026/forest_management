@@ -1406,3 +1406,298 @@ export const userGroupApi = {
     return response.data;
   },
 };
+
+/**
+ * Yearly Activities API - Manage yearly program activities with spatial integration
+ */
+export const yearlyActivitiesApi = {
+  /**
+   * List all potential activities from master list
+   */
+  listPotentialActivities: async (filters?: {
+    project_name?: string;
+    program?: string;
+    is_default?: string;
+    is_active?: boolean;
+  }): Promise<any[]> => {
+    const params = { is_active: true, ...filters };
+    const response = await api.get('/api/yearly-activities/potential-activities', { params });
+    return response.data;
+  },
+
+  /**
+   * List proposed activities for a calculation with spatial filtering
+   */
+  listProposedActivities: async (
+    calculationId: string,
+    filters?: {
+      block_id?: string;
+      sub_area_id?: string;
+      sub_area_category?: string;
+      status?: string;
+    }
+  ): Promise<any[]> => {
+    const params = filters || {};
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities`,
+      { params }
+    );
+    return response.data;
+  },
+
+  /**
+   * Create a new proposed activity
+   */
+  createProposedActivity: async (
+    calculationId: string,
+    data: {
+      potential_activity_id: number;
+      block_id?: string;
+      sub_area_id?: string;
+      default_quantity: number;
+      default_yearly_budget: number;
+      notes?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Update a proposed activity (including spatial assignment)
+   */
+  updateProposedActivity: async (
+    proposedActivityId: string,
+    data: {
+      block_id?: string;
+      sub_area_id?: string;
+      default_quantity?: number;
+      default_yearly_budget?: number;
+      notes?: string;
+      status?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/yearly-activities/proposed-activities/${proposedActivityId}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete a proposed activity
+   */
+  deleteProposedActivity: async (proposedActivityId: string): Promise<void> => {
+    await api.delete(`/api/yearly-activities/proposed-activities/${proposedActivityId}`);
+  },
+
+  /**
+   * Get activities with geometry for map visualization
+   */
+  getActivitiesWithGeometry: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities/spatial`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get location summary (activities by block/sub-area)
+   */
+  getLocationSummary: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/location-summary`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get activity summary statistics
+   */
+  getSummary: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/summary`
+    );
+    return response.data;
+  },
+
+  // ===== NEW: SPATIAL ASSIGNMENT APIs =====
+
+  /**
+   * Get spatial assignments for a proposed activity
+   */
+  getSpatialAssignments: async (activityId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/proposed-activities/${activityId}/spatial`
+    );
+    return response.data;
+  },
+
+  /**
+   * Create spatial assignment
+   */
+  createSpatialAssignment: async (
+    activityId: string,
+    data: {
+      block_id?: string;
+      sub_area_id?: string;
+      assignment_type: string;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/yearly-activities/proposed-activities/${activityId}/spatial`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete spatial assignment
+   */
+  deleteSpatialAssignment: async (
+    activityId: string,
+    assignmentId: string
+  ): Promise<void> => {
+    await api.delete(
+      `/api/yearly-activities/proposed-activities/${activityId}/spatial/${assignmentId}`
+    );
+  },
+
+  // ===== NEW: DRAWN FEATURES APIs =====
+
+  /**
+   * Get drawn features for a proposed activity
+   */
+  getDrawnFeatures: async (activityId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/proposed-activities/${activityId}/drawn-features`
+    );
+    return response.data;
+  },
+
+  /**
+   * Create drawn feature
+   */
+  createDrawnFeature: async (
+    activityId: string,
+    data: {
+      feature_type: string;
+      geometry: string;
+      properties: object;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/yearly-activities/proposed-activities/${activityId}/drawn-features`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Update drawn feature
+   */
+  updateDrawnFeature: async (
+    activityId: string,
+    featureId: string,
+    data: {
+      feature_type?: string;
+      geometry?: string;
+      properties?: object;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/yearly-activities/proposed-activities/${activityId}/drawn-features/${featureId}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete drawn feature
+   */
+  deleteDrawnFeature: async (
+    activityId: string,
+    featureId: string
+  ): Promise<void> => {
+    await api.delete(
+      `/api/yearly-activities/proposed-activities/${activityId}/drawn-features/${featureId}`
+    );
+  },
+
+  // ===== NEW: BLOCKS WITH SUB-AREAS =====
+
+  /**
+   * Get blocks with sub-areas for a calculation
+   */
+  getBlocksWithSubareas: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/blocks-with-subareas`
+    );
+    return response.data;
+  },
+
+  // ===== YEAR DETAILS APIs =====
+
+  /**
+   * Get year details for a proposed activity
+   */
+  getYearDetails: async (activityId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/proposed-activities/${activityId}/year-details`
+    );
+    return response.data;
+  },
+
+  /**
+   * Create year detail
+   */
+  createYearDetail: async (
+    activityId: string,
+    data: {
+      year_number: number;
+      quantity?: number;
+      yearly_budget?: number;
+      notes?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/yearly-activities/proposed-activities/${activityId}/year-details`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Update year detail
+   */
+  updateYearDetail: async (
+    activityId: string,
+    detailId: string,
+    data: {
+      quantity?: number;
+      yearly_budget?: number;
+      notes?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/yearly-activities/proposed-activities/${activityId}/year-details/${detailId}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete year detail
+   */
+  deleteYearDetail: async (
+    activityId: string,
+    detailId: string
+  ): Promise<void> => {
+    await api.delete(
+      `/api/yearly-activities/proposed-activities/${activityId}/year-details/${detailId}`
+    );
+  },
+};
