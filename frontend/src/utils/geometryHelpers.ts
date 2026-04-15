@@ -4,9 +4,171 @@
  * Provides safe, reusable functions for geometry operations using Turf.js
  * Handles common issues like Feature vs Geometry, MultiPolygon conversion,
  * and floating-point precision tolerance.
+ * 
+ * Coordinate System Note:
+ * - GeoJSON/Database: [longitude, latitude] (lng first)
+ * - Leaflet/React-Leaflet: [latitude, longitude] (lat first)
  */
 
 import * as turf from '@turf/turf';
+import L from 'leaflet';
+
+/**
+ * Convert GeoJSON coordinates to Leaflet format
+ * GeoJSON: [lng, lat] -> Leaflet: [lat, lng]
+ *
+ * @param coords - GeoJSON coordinates (single point, array of points, or polygon ring)
+ * @param featureType - 'point', 'line', or 'polygon'
+ * @returns Leaflet-compatible LatLngExpression or array of coordinates
+ */
+export function parseGeometryToLeaflet(
+  coords: any,
+  featureType: 'point' | 'line' | 'polygon'
+): L.LatLngExpression | L.LatLngExpression[] | any {
+  if (!coords) return [];
+
+  if (featureType === 'point') {
+    return [coords[1], coords[0]]; // [lat, lng]
+  } else if (featureType === 'line') {
+    return coords.map((c: number[]) => [c[1], c[0]]);
+  } else if (featureType === 'polygon') {
+    // Polygon coordinates are a ring (array of points)
+    const ring = coords[0] || coords;
+    return ring.map((c: number[]) => [c[1], c[0]]);
+  }
+  return [];
+}
+
+/**
+ * Convert Leaflet LatLng array to GeoJSON coordinates
+ * Leaflet: [lat, lng] -> GeoJSON: [lng, lat]
+ *
+ * @param latlngs - Array of Leaflet LatLng objects
+ * @returns GeoJSON-compatible coordinates array
+ */
+export function parseLeafletToGeoJSON(latlngs: L.LatLng[]): [number, number][] {
+  return latlngs.map(p => [p.lng, p.lat] as [number, number]);
+}
+
+/**
+ * Convert GeoJSON geometry to Leaflet LatLng array
+ * Works with Polygon, MultiPolygon, LineString, Point
+ *
+ * @param geometry - GeoJSON geometry object
+ * @returns Leaflet-compatible positions
+ */
+export function geometryToLeaflet(geometry: any): L.LatLngExpression[] | L.LatLngExpression | null {
+  if (!geometry || !geometry.type || !geometry.coordinates) {
+    return null;
+  }
+
+  const { type, coordinates } = geometry;
+
+  switch (type) {
+    case 'Point':
+      return [coordinates[1], coordinates[0]];
+    case 'LineString':
+      return coordinates.map((c: number[]) => [c[1], c[0]] as [number, number]);
+    case 'Polygon':
+      return coordinates[0].map((c: number[]) => [c[1], c[0]] as [number, number]);
+    case 'MultiPolygon':
+      // Return first polygon's outer ring
+      return coordinates[0][0].map((c: number[]) => [c[1], c[0]] as [number, number]);
+    case 'MultiLineString':
+      return coordinates[0].map((c: number[]) => [c[1], c[0]] as [number, number]);
+    default:
+      console.warn('[geometryToLeaflet] Unsupported geometry type:', type);
+      return null;
+  }
+}
+
+/**
+ * Convert Leaflet positions to GeoJSON geometry
+ *
+ * @param positions - Leaflet positions (Marker position, Polyline/Polygon positions)
+ * @param geometryType - Target geometry type: 'Point', 'LineString', 'Polygon'
+ * @returns GeoJSON-compatible geometry object
+ */
+export function leafletToGeometry(
+  positions: L.LatLngExpression | L.LatLngExpression[],
+  geometryType: 'Point' | 'LineString' | 'Polygon'
+): any {
+  // Normalize positions to array
+  const posArray = Array.isArray(positions[0])
+    ? positions as L.LatLngExpression[]
+    : [positions] as L.LatLngExpression[];
+
+  const toCoords = (pos: L.LatLngExpression): [number, number] => {
+    const p = L.latLng(pos);
+    return [p.lng, p.lat];
+  };
+
+  switch (geometryType) {
+    case 'Point':
+      return {
+        type: 'Point',
+        coordinates: toCoords(posArray[0]),
+      };
+    case 'LineString':
+      return {
+        type: 'LineString',
+        coordinates: posArray.map(toCoords),
+      };
+    case 'Polygon':
+      const coords = posArray.map(toCoords);
+      // Close the polygon if not already closed
+      if (coords.length > 0) {
+        const first = coords[0];
+        const last = coords[coords.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          coords.push([...first]);
+        }
+      }
+      return {
+        type: 'Polygon',
+        coordinates: [coords],
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Validate that a polygon is closed (first and last points match)
+ *
+ * @param geometry - GeoJSON Polygon geometry
+ * @returns true if polygon is properly closed
+ */
+export function isPolygonClosed(geometry: any): boolean {
+  if (!geometry || geometry.type !== 'Polygon') return false;
+  
+  const ring = geometry.coordinates[0];
+  if (!ring || ring.length < 4) return false;
+
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  
+  return first[0] === last[0] && first[1] === last[1];
+}
+
+/**
+ * Ensure a polygon is closed by adding the first point at the end
+ *
+ * @param positions - Array of Leaflet positions
+ * @returns Array of positions with the first point added at the end if needed
+ */
+export function ensurePolygonClosed(positions: L.LatLng[]): L.LatLng[] {
+  if (positions.length < 3) return positions;
+
+  const first = positions[0];
+  const last = positions[positions.length - 1];
+  
+  if (first.lat !== last.lat || first.lng !== last.lng) {
+    return [...positions, L.latLng(first.lat, first.lng)];
+  }
+  
+  return positions;
+}
 
 /**
  * Configuration constants for geometry operations
