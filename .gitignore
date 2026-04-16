@@ -35,7 +35,9 @@ outputs/
 
 # Test Data (large files)
 testData/
+tests/
 dumping_files/
+docs/
 migrations/
 
 # Development documentation (progress notes)
@@ -61,6 +63,10 @@ IMPLEMENTATION_*.md
 TOMORROW_*.md
 current_context.md
 session*.txt
+*.md
+
+# Batch files (except system files)
+*.bat
 
 # Temporary scripts
 add_*.py
@@ -89,8 +95,7 @@ insert_*.py
 wait_*.py
 SAFETY_*.py
 
-# Batch files (environment-specific)
-*.bat
+# Batch files (environment-specific - except system files)
 !start_all.bat
 !stop_all.bat
 !restart_all.bat
