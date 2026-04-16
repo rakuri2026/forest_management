@@ -4,13 +4,14 @@ import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import * as turf from '@turf/turf';
-import { Button, Radio, Space, List, Card, message, Popconfirm, Input, Divider } from 'antd';
+import { Button, Radio, Space, List, Card, message, Popconfirm, Input, Divider, Checkbox } from 'antd';
 import { yearlyActivitiesApi } from '../../services/api';
 
 interface BlockSubArea {
   id: string;
   name: string;
-  type: 'block' | 'sub_area';
+  type: 'boundary' | 'block' | 'sub_area';
+  category?: string;
   geometry?: any;
 }
 
@@ -28,9 +29,6 @@ interface DrawingCanvasProps {
   blocksWithSubAreas?: BlockSubArea[];
   availableYears?: YearData[];
   baseMap?: 'satellite' | 'osm' | 'topo';
-  boundaryGeometry?: any;
-  blockLayers?: any[];
-  subAreaLayers?: any[];
 }
 
 const BASE_MAPS = {
@@ -58,12 +56,9 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   blocksWithSubAreas = [],
   availableYears = [],
   baseMap = 'satellite',
-  boundaryGeometry,
-  blockLayers = [],
-  subAreaLayers = [],
 }) => {
   const mapRef = useRef<L.Map | null>(null);
-  const nameInputRef = useRef<any>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [drawingMode, setDrawingMode] = useState(true);
   const [currentPoints, setCurrentPoints] = useState<L.LatLng[]>([]);
   const [tempLayer, setTempLayer] = useState<L.Polyline | L.Polygon | L.Marker | null>(null);
@@ -88,6 +83,12 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   // Vertex editing state (for draggable vertices)
   const [editingVertices, setEditingVertices] = useState<L.LatLng[]>([]);
   const [vertexBeingDragged, setVertexBeingDragged] = useState<number | null>(null);
+  
+  // Layer visibility toggles
+  const [showBoundary, setShowBoundary] = useState(true);
+  const [showBlocks, setShowBlocks] = useState(true);
+  const [showSubAreas, setShowSubAreas] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
   
   // Calculate live geodesic measurements using turf.js
   const calculateMeasurements = (points: L.LatLng[], type: string) => {
@@ -282,20 +283,60 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
 
   const handleCopyFeature = async (targetYear: number) => {
     if (!editingFeature) return;
+    
+    // Get base feature name (without year suffixes)
+    const baseName = (editingFeature?.properties?.name || editingFeature?.feature_type || '')
+      .replace(/\s*\(Y\d+\)\s*/g, '')
+      .trim();
+    
+    // Get the geometry to compare
+    const sourceGeometry = editingFeature.geometry;
+    
+    // Check if any feature with the same geometry already exists for this year
+    // This prevents duplicate geometries assigned to the same year
+    const isDuplicate = drawnFeatures.some(f => 
+      f.id !== editingFeature.id &&  // Not the same feature
+      f.properties?.year === targetYear &&  // Same year
+      f.geometry === sourceGeometry  // Same geometry
+    );
+    
+    if (isDuplicate) {
+      message.warning(`This feature is already assigned to Year ${targetYear}`);
+      return;
+    }
+    
+    // Check if this feature already has the year assigned
+    const currentYear = editingFeature.properties?.year;
+    const existingYears = (editingFeature.properties?.name || '').match(/\(Y(\d+)\)/g) || [];
+    const hasYearAlready = existingYears.some((y: string) => y.includes(`(Y${targetYear})`));
+    
+    if (currentYear === targetYear || hasYearAlready) {
+      message.warning(`Year ${targetYear} is already assigned to this feature`);
+      return;
+    }
+    
     try {
+      // Preserve the area/length from source feature
+      const sourceArea = editingFeature.properties?.area_sqm;
+      const sourceLength = editingFeature.properties?.length_m;
+      
+      console.log('[handleCopyFeature] editingFeature:', JSON.stringify(editingFeature, null, 2));
+      
       await yearlyActivitiesApi.createDrawnFeature(activityId, {
         feature_type: editingFeature.feature_type,
         geometry: editingFeature.geometry,
         properties: { 
-          ...editingFeature.properties,
-          name: `${editingFeature.properties?.name || editingFeature.feature_type} (Y${targetYear})`,
-          year: targetYear
+          name: `${baseName} (Y${targetYear})`,
+          year: targetYear,
+          area_sqm: sourceArea,
+          length_m: sourceLength
         }
       });
-      message.success(`Copied to Year ${targetYear}`);
+      message.success(`Assigned to Year ${targetYear}`);
       onFeaturesChange();
     } catch (error: any) {
-      message.error('Failed to copy feature');
+      console.error('[handleCopyFeature] error:', error);
+      message.error('Failed to assign feature');
     }
   };
 
@@ -601,27 +642,125 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
     return null;
   };
 
-  // Render block/subarea layers
-  const renderBlockLayers = () => {
-    return blocksWithSubAreas?.map((block: BlockSubArea, index: number) => {
-      if (!block.geometry) return null;
+  // Render boundary/block/subarea layers
+  const renderBoundaryLayers = () => {
+    if (!blocksWithSubAreas) return null;
+    
+    return blocksWithSubAreas.map((layer: BlockSubArea, index: number) => {
+      if (!layer.geometry) return null;
+      
+      // Visibility checks
+      if (layer.type === 'boundary' && !showBoundary) return null;
+      if (layer.type === 'block' && !showBlocks) return null;
+      if (layer.type === 'sub_area' && !showSubAreas) return null;
+      
       try {
-        const gj = typeof block.geometry === 'string' ? JSON.parse(block.geometry) : block.geometry;
-        const coords = gj.type === 'Polygon' ? gj.coordinates[0] : gj.coordinates;
+        const gj = typeof layer.geometry === 'string' ? JSON.parse(layer.geometry) : layer.geometry;
+        
+        // Handle MultiPolygon
+        let coords;
+        if (gj.type === 'MultiPolygon') {
+          // Use first polygon of multipolygon
+          coords = gj.coordinates[0][0];
+        } else if (gj.type === 'Polygon') {
+          coords = gj.coordinates[0];
+        } else {
+          coords = gj.coordinates;
+        }
+        
         const latlngs = coords.map((c: number[]) => [c[1], c[0]]);
+        
+        // Different styles for each type
+        const styleMap = {
+          'boundary': { color: '#666666', fillColor: '#cccccc', fillOpacity: 0.05, weight: 2, dashArray: '5, 5' },
+          'block': { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.1, weight: 2 },
+          'sub_area': { color: '#059669', fillColor: '#059669', fillOpacity: 0.15, weight: 2 }
+        };
+        
+        const style = styleMap[layer.type as keyof typeof styleMap] || styleMap['block'];
+        
         return (
           <Polygon
-            key={block.id || index}
+            key={layer.id || `layer-${index}`}
             positions={latlngs}
-            pathOptions={{
-              color: block.type === 'block' ? '#2563eb' : '#059669',
-              fillColor: block.type === 'block' ? '#2563eb' : '#059669',
-              fillOpacity: 0.1,
-              weight: 2
-            }}
+            pathOptions={style}
+          >
+            <Tooltip permanent={false} direction="top">
+              <strong>{layer.name}</strong>
+              {layer.category && <div><small>{layer.category}</small></div>}
+            </Tooltip>
+          </Polygon>
+        );
+      } catch (e) { 
+        console.warn('Error rendering layer:', e);
+        return null; 
+      }
+    });
+  };
+
+  // Render labels with halo effect for blocks and sub-areas
+  const renderLabels = () => {
+    if (!showLabels || !blocksWithSubAreas) return null;
+    
+    return blocksWithSubAreas.map((layer: BlockSubArea, index: number) => {
+      // Only show labels for blocks and sub-areas (not boundary)
+      if (layer.type === 'boundary') return null;
+      if (layer.type === 'block' && !showBlocks) return null;
+      if (layer.type === 'sub_area' && !showSubAreas) return null;
+      if (!layer.geometry) return null;
+      
+      try {
+        const gj = typeof layer.geometry === 'string' ? JSON.parse(layer.geometry) : layer.geometry;
+        
+        let polygon;
+        if (gj.type === 'Polygon') {
+          polygon = turf.polygon(gj.coordinates);
+        } else if (gj.type === 'MultiPolygon') {
+          polygon = turf.multiPolygon(gj.coordinates);
+        } else {
+          return null;
+        }
+        
+        // Get centroid
+        const centroid = turf.centroid(polygon);
+        const [lng, lat] = centroid.geometry.coordinates;
+        
+        // Create custom icon with halo effect
+        const colorMap: Record<string, string> = {
+          'block': '#2563eb',
+          'sub_area': '#059669'
+        };
+        const color = colorMap[layer.type] || '#2563eb';
+        
+        const icon = L.divIcon({
+          className: 'custom-label',
+          html: `<div style="
+            background: white;
+            border: 2px solid ${color};
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: bold;
+            color: ${color};
+            white-space: nowrap;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            text-shadow: -1px -1px 0 white, 1px -1px 0 white, -1px 1px 0 white, 1px 1px 0 white;
+          ">${layer.name}</div>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0]
+        });
+        
+        return (
+          <Marker
+            key={`label-${layer.id || index}`}
+            position={[lat, lng]}
+            icon={icon}
           />
         );
-      } catch (e) { return null; }
+      } catch (e) {
+        console.warn('Error rendering label:', e);
+        return null;
+      }
     });
   };
 
@@ -810,6 +949,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             placeholder="Enter feature name first"
             value={featureName}
             onChange={(e) => setFeatureName(e.target.value)}
+            autoComplete="off"
             suffix={featureName ? <span style={{ color: 'green' }}>✓</span> : null}
           />
 
@@ -844,6 +984,37 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
           >
             {measurementUnit === 'metric' ? 'Metric' : 'Imperial'}
           </Button>
+
+          {/* Layer Toggles */}
+          <Card size="small" title="Reference Layers" style={{ marginTop: '8px' }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Checkbox
+                checked={showBoundary}
+                onChange={(e) => setShowBoundary(e.target.checked)}
+              >
+                <span style={{ color: '#666' }}>⬜ Forest Boundary</span>
+              </Checkbox>
+              <Checkbox
+                checked={showBlocks}
+                onChange={(e) => setShowBlocks(e.target.checked)}
+              >
+                <span style={{ color: '#2563eb' }}>🔵 Blocks</span>
+              </Checkbox>
+              <Checkbox
+                checked={showSubAreas}
+                onChange={(e) => setShowSubAreas(e.target.checked)}
+              >
+                <span style={{ color: '#059669' }}>🟢 Sub-Areas</span>
+              </Checkbox>
+              <Divider style={{ margin: '8px 0' }} />
+              <Checkbox
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+              >
+                <span>🏷️ Labels</span>
+              </Checkbox>
+            </Space>
+          </Card>
 
           {/* Stop Edit Button - shows when editing */}
           {editingFeatureId && (
@@ -943,20 +1114,36 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             <>
               {availableYears && availableYears.length > 1 && (
                 <div style={{ marginTop: 8 }}>
-                  <p style={{ fontSize: 11, marginBottom: 4, color: '#666' }}>Copy to year:</p>
+                  <p style={{ fontSize: 11, marginBottom: 4, color: '#666' }}>Assign to year:</p>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {availableYears
                       .filter(y => y.year !== editingFeature?.properties?.year)
-                      .map(y => (
-                        <Button 
-                          key={y.year} 
-                          size="small" 
-                          onClick={() => handleCopyFeature(y.year)}
-                        >
-                          Y{y.year}
-                        </Button>
-                      ))}
+                      .map(y => {
+                        // Check if this geometry already exists for this year
+                        const sourceGeometry = editingFeature?.geometry;
+                        const isDuplicate = drawnFeatures.some(f => 
+                          f.id !== editingFeature?.id &&  // Not the same feature
+                          f.properties?.year === y.year &&  // Same year
+                          f.geometry === sourceGeometry  // Same geometry
+                        );
+                        
+                        return (
+                          <Button 
+                            key={y.year} 
+                            size="small" 
+                            onClick={() => handleCopyFeature(y.year)}
+                            disabled={isDuplicate}
+                            style={isDuplicate ? { backgroundColor: '#fff1f0', borderColor: '#ffccc7', color: '#ff4d4f' } : {}}
+                            title={isDuplicate ? `Same feature already in Year ${y.year}` : `Assign to Year ${y.year}`}
+                          >
+                            Y{y.year}{isDuplicate && ' ✗'}
+                          </Button>
+                        );
+                      })}
                   </div>
+                  <p style={{ fontSize: 10, color: '#999', marginTop: 6 }}>
+                    ✗ = Same feature already assigned to that year
+                  </p>
                 </div>
               )}
               
@@ -986,53 +1173,10 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             url={BASE_MAPS[baseMap].url}
           />
           
-          {/* Forest Boundary Layer */}
-          {boundaryGeometry && (
-            <GeoJSON
-              data={boundaryGeometry}
-              style={{
-                color: '#666666',
-                weight: 2,
-                fillColor: '#cccccc',
-                fillOpacity: 0.1
-              }}
-            />
-          )}
-
-          {/* Block Layers */}
-          {blockLayers.map((block: any, index: number) => (
-            block.geometry && (
-              <GeoJSON
-                key={`block-${index}`}
-                data={block.geometry}
-                style={{
-                  color: '#2563eb',
-                  weight: 2,
-                  fillColor: '#2563eb',
-                  fillOpacity: 0.15
-                }}
-              />
-            )
-          ))}
-
-          {/* Sub-Area Layers */}
-          {subAreaLayers.map((subArea: any, index: number) => (
-            subArea.geometry && (
-              <GeoJSON
-                key={`subarea-${index}`}
-                data={subArea.geometry}
-                style={{
-                  color: '#059669',
-                  weight: 2,
-                  fillColor: '#059669',
-                  fillOpacity: 0.2
-                }}
-              />
-            )
-          ))}
-          
+          {/* Boundary/Block/SubArea layers rendered by renderBoundaryLayers() */}
           <MapEventsHandler onClick={handleMapClick} onDoubleClick={handleDoubleClick} blocksWithSubAreas={blocksWithSubAreas} />
-          {renderBlockLayers()}
+          {renderBoundaryLayers()}
+          {renderLabels()}
           {renderFeatures()}
           {currentPoints.length > 1 && (featureType === 'line' || featureType === 'polygon') && (
             <Polyline
@@ -1146,18 +1290,27 @@ const MapEventsHandler: React.FC<MapEventsHandlerProps & { blocksWithSubAreas?: 
     if (map && !zoomDone && blocksWithSubAreas && blocksWithSubAreas.length > 0) {
       const bounds = L.latLngBounds([]);
       let hasCoords = false;
-      blocksWithSubAreas.forEach((block: BlockSubArea) => {
-        if (block.geometry) {
+      blocksWithSubAreas.forEach((layer: BlockSubArea) => {
+        if (layer.geometry) {
           try {
-            const gj = typeof block.geometry === 'string' ? JSON.parse(block.geometry) : block.geometry;
+            const gj = typeof layer.geometry === 'string' ? JSON.parse(layer.geometry) : layer.geometry;
             if (gj.coordinates) {
-              const coords = gj.type === 'Polygon' ? gj.coordinates[0] : gj.coordinates;
-              coords.forEach((c: number[]) => {
+              let allCoords = [];
+              if (gj.type === 'Polygon') {
+                allCoords = gj.coordinates[0];
+              } else if (gj.type === 'MultiPolygon') {
+                gj.coordinates.forEach((poly: number[][][]) => {
+                  allCoords = allCoords.concat(poly[0]);
+                });
+              } else {
+                allCoords = gj.coordinates;
+              }
+              allCoords.forEach((c: number[]) => {
                 bounds.extend([c[1], c[0]]);
                 hasCoords = true;
               });
             }
-          } catch (e) { console.warn('Block bounds error', e); }
+          } catch (e) { console.warn('Layer bounds error', e); }
         }
       });
       if (hasCoords && bounds.isValid()) {

@@ -3401,6 +3401,18 @@ async def delete_sub_area(
     result_data["sub_areas"] = new_sub_areas
     result_data["sub_areas_count"] = len(new_sub_areas)
 
+    # ALSO delete from forest_sub_areas table (source of truth)
+    from app.models.forest_sub_area import ForestSubArea
+    try:
+        sub_area_to_delete = db.query(ForestSubArea).filter(
+            ForestSubArea.id == sub_area_id
+        ).first()
+        if sub_area_to_delete:
+            db.delete(sub_area_to_delete)
+            print(f"[delete_sub_area] Also deleted from forest_sub_areas table")
+    except Exception as e:
+        print(f"[delete_sub_area] Warning: Could not delete from forest_sub_areas table: {e}")
+
     # Recalculate total excluded area from scratch (avoids accumulation errors)
     excluded_total = calculate_total_excluded_area(new_sub_areas)
     result_data["excluded_area_hectares"] = round(excluded_total, 4)

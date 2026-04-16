@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Table, InputNumber, Card, Row, Col, message, Button, Space, Select, Tabs } from 'antd';
-import { EditOutlined, SaveOutlined, EnvironmentOutlined, HighlightOutlined } from '@ant-design/icons';
+import { EditOutlined, SaveOutlined, EnvironmentOutlined, HighlightOutlined, DownloadOutlined } from '@ant-design/icons';
 import { yearlyActivitiesApi, forestApi } from '../../services/api';
 import BlockSubAreaSelector from './BlockSubAreaSelector';
 import DrawingCanvas from './DrawingCanvas';
@@ -41,9 +41,16 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
   const [activeTab, setActiveTab] = useState<string>('years');
   const [featureType, setFeatureType] = useState<FeatureType>('polygon');
   const [drawnFeatures, setDrawnFeatures] = useState<any[]>([]);
+  const [exporting, setExporting] = useState(false);
 
   const defaultQuantity = proposedActivity?.default_quantity || 0;
   const defaultBudget = Math.round((proposedActivity?.default_yearly_budget || 5000) / 1000);
+  
+  // Memoize availableYears to prevent unnecessary re-renders
+  const availableYears = useMemo(() => 
+    yearDetails.map(y => ({ year: y.year })),
+    [yearDetails]
+  );
 
   useEffect(() => {
     if (visible && proposedActivity) {
@@ -61,6 +68,40 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
     } catch (err) {
       console.error('Failed to load drawn features', err);
       setDrawnFeatures([]);
+    }
+  };
+
+  const handleExportKml = async () => {
+    if (!proposedActivity?.id) return;
+    if (drawnFeatures.length === 0) {
+      message.warning('No spatial features to export');
+      return;
+    }
+    setExporting(true);
+    try {
+      await yearlyActivitiesApi.exportSpatialFeaturesKml(proposedActivity.id);
+      message.success('KML exported successfully');
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to export KML');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportGpkg = async () => {
+    if (!proposedActivity?.id) return;
+    if (drawnFeatures.length === 0) {
+      message.warning('No spatial features to export');
+      return;
+    }
+    setExporting(true);
+    try {
+      await yearlyActivitiesApi.exportSpatialFeaturesGpkg(proposedActivity.id);
+      message.success('GPKG exported successfully');
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to export GPKG');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -295,11 +336,21 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
       title: 'Spatial',
       dataIndex: 'has_spatial',
       key: 'has_spatial',
-      width: 80,
+      width: 100,
       render: (_: any, record: any) => {
         const hasLocation = record.block_id || record.sub_area_id;
+        const hasDrawnFeature = drawnFeatures.some((f: any) => f.properties?.year === record.year);
+        const featureCount = drawnFeatures.filter((f: any) => f.properties?.year === record.year).length;
+        
+        if (hasDrawnFeature) {
+          return (
+            <span style={{ color: '#52c41a' }} title={`${featureCount} feature(s) drawn`}>
+              ✓ {featureCount}
+            </span>
+          );
+        }
         return hasLocation ? (
-          <span style={{ color: '#52c41a' }}>✓</span>
+          <span style={{ color: '#1890ff' }} title="Block/Sub-area assigned">📍</span>
         ) : (
           <span style={{ color: '#ccc' }}>-</span>
         );
@@ -310,12 +361,14 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
       dataIndex: 'hasOverride',
       key: 'status',
       width: 80,
-      render: (hasOverride: boolean) =>
-        hasOverride ? (
-          <span style={{ color: '#52c41a' }}>Custom</span>
-        ) : (
-          <span style={{ color: '#999' }}>Default</span>
-        ),
+      render: (hasOverride: boolean, record: any) => {
+        const hasDrawnFeature = drawnFeatures.some((f: any) => f.properties?.year === record.year);
+        
+        if (hasDrawnFeature || hasOverride) {
+          return <span style={{ color: '#52c41a' }}>Custom</span>;
+        }
+        return <span style={{ color: '#999' }}>Default</span>;
+      },
     },
     {
       title: 'Action',
@@ -356,8 +409,8 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
   ];
 
   // Calculate totals
-  const totalQuantity = yearDetails.reduce((sum, y) => sum + (y.quantity || 0), 0);
-  const totalBudget = yearDetails.reduce((sum, y) => sum + (y.yearly_budget || 0), 0);
+  const totalQuantity = yearDetails.reduce((sum, y) => sum + (Number(y.quantity) || 0), 0);
+  const totalBudget = yearDetails.reduce((sum, y) => sum + (Number(y.yearly_budget) || 0), 0);
 
   const tabItems = [
     {
@@ -414,7 +467,7 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
       children: (
         <>
           <div style={{ marginBottom: '16px', padding: '12px', background: '#f5f5f5', borderRadius: '4px' }}>
-            <Space>
+            <Space style={{ marginBottom: '8px' }}>
               <span><strong>Draw:</strong></span>
               <Select
                 value={featureType}
@@ -427,8 +480,34 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
                 ]}
               />
             </Space>
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+            <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
               Click on the map to draw • Double-click to finish line/polygon
+            </div>
+            <div style={{ marginTop: '12px', borderTop: '1px solid #ddd', paddingTop: '12px' }}>
+              <Space>
+                <span><strong>Download:</strong></span>
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={handleExportKml}
+                  loading={exporting}
+                  disabled={drawnFeatures.length === 0}
+                  size="small"
+                >
+                  KML
+                </Button>
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={handleExportGpkg}
+                  loading={exporting}
+                  disabled={drawnFeatures.length === 0}
+                  size="small"
+                >
+                  GPKG
+                </Button>
+                <span style={{ fontSize: '11px', color: '#999' }}>
+                  {drawnFeatures.length > 0 ? `${drawnFeatures.length} features` : 'No features'}
+                </span>
+              </Space>
             </div>
           </div>
           <DrawingCanvas
@@ -439,7 +518,7 @@ const YearDetailEditor: React.FC<YearDetailEditorProps> = ({
             drawnFeatures={drawnFeatures}
             onFeaturesChange={loadDrawnFeatures}
             blocksWithSubAreas={blocksWithSubAreas}
-            availableYears={yearDetails.map(y => ({ year: y.year }))}
+            availableYears={availableYears}
           />
         </>
       ),

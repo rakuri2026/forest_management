@@ -334,7 +334,7 @@ const YearlyActivitiesTab: React.FC<YearlyActivitiesTabProps> = ({ calculationId
       if (proposed) {
         await yearlyActivitiesApi.updateProposedActivity(proposed.id, {
           default_quantity: row.default_quantity,
-          default_yearly_budget: row.default_yearly_budget * 1000,
+          default_yearly_budget: row.default_yearly_budget, // Parser already multiplies by 1000
           block_id: row.block_id || null,
           sub_area_id: row.sub_area_id || null
         });

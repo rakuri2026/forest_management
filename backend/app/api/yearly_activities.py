@@ -671,7 +671,7 @@ async def get_drawn_features(
     
     features = db.query(ActivityDrawnFeature).filter(
         ActivityDrawnFeature.proposed_activity_id == activity_id
-    ).all()
+    ).order_by(ActivityDrawnFeature.created_at).all()
     
     result = []
     import shapely
@@ -711,6 +711,8 @@ async def create_drawn_feature(
     from shapely.geometry import mapping as shapely_mapping
     from geoalchemy2.shape import to_shape
     
+    print(f"[create_drawn_feature] feature_data.properties: {feature_data.properties}")
+    
     activity = db.query(ProposedYearlyActivity).filter(ProposedYearlyActivity.id == activity_id).first()
     if not activity:
         raise HTTPException(status_code=404, detail="Proposed activity not found")
@@ -739,6 +741,8 @@ async def create_drawn_feature(
     db.commit()
     db.refresh(feature)
     
+    print(f"[create_drawn_feature] feature.properties after save: {feature.properties}")
+    
     try:
         feat_geom = to_shape(feature.geometry)
         geom_json = shapely_mapping(feat_geom)
@@ -746,7 +750,7 @@ async def create_drawn_feature(
         print(f"Error mapping geometry: {e}")
         geom_json = {"type": feature_data.feature_type, "coordinates": []}
     
-    return DrawnFeatureResponse(
+    response = DrawnFeatureResponse(
         id=feature.id,
         proposed_activity_id=feature.proposed_activity_id,
         feature_type=feature.feature_type,
@@ -755,6 +759,8 @@ async def create_drawn_feature(
         created_at=feature.created_at,
         updated_at=feature.updated_at
     )
+    print(f"[create_drawn_feature] returning response.properties: {response.properties}")
+    return response
 
 
 @router.patch("/proposed-activities/{activity_id}/drawn-features/{feature_id}", response_model=DrawnFeatureResponse)
@@ -968,6 +974,9 @@ async def get_blocks_with_subareas(
     current_user: User = Depends(get_current_user)
 ):
     """Get blocks with their sub-areas for a calculation"""
+    from geoalchemy2.shape import to_shape
+    from shapely.geometry import mapping
+    
     # Verify ownership
     calculation = db.query(Calculation).filter(
         Calculation.id == calculation_id,
@@ -978,22 +987,299 @@ async def get_blocks_with_subareas(
     
     result = []
     
-    # ALWAYS return the forest boundary as a block
+    # 1. Return the forest boundary as "boundary" type (for map display)
     try:
-        from geoalchemy2.shape import to_shape
-        from shapely.geometry import mapping
-        
-        if calculation.outer_boundary:
-            shp = to_shape(calculation.outer_boundary)
+        if calculation.boundary_geom:
+            shp = to_shape(calculation.boundary_geom)
             geom_dict = mapping(shp)
             
             result.append({
-                "id": str(calculation.id)[:8],
-                "name": calculation.forest_name or "Forest",
-                "type": "block",
+                "id": f"{str(calculation.id)[:8]}-boundary",
+                "name": calculation.forest_name or "Forest Boundary",
+                "type": "boundary",
                 "geometry": geom_dict
             })
     except Exception as e:
-        print(f"[DEBUG] Error: {e}")
+        print(f"[DEBUG] Boundary Error: {e}")
+    
+    # 2. Return blocks from result_data (for map display)
+    try:
+        if calculation.result_data and calculation.result_data.get('blocks'):
+            blocks = calculation.result_data.get('blocks', [])
+            for i, block in enumerate(blocks):
+                block_geom = block.get('geometry')
+                if block_geom:
+                    result.append({
+                        "id": block.get('id') or f"block-{i}",
+                        "name": block.get('block_name') or block.get('name') or f"Block {i + 1}",
+                        "type": "block",
+                        "geometry": block_geom
+                    })
+    except Exception as e:
+        print(f"[DEBUG] Blocks Error: {e}")
+    
+    # 3. Return sub-areas from forest_sub_areas table (filtered by result_data for sync)
+    try:
+        from app.models.forest_sub_area import ForestSubArea
+        
+        # Get valid sub-area IDs from result_data
+        valid_sub_area_ids = set()
+        if calculation.result_data and calculation.result_data.get('sub_areas'):
+            for sa in calculation.result_data.get('sub_areas', []):
+                valid_sub_area_ids.add(sa.get('id'))
+        
+        # Get sub-areas from table
+        sub_areas = db.query(ForestSubArea).filter(
+            ForestSubArea.calculation_id == calculation_id
+        ).all()
+        
+        for sub_area in sub_areas:
+            # Only include if it exists in result_data (sync filter)
+            if sub_area.geometry and (str(sub_area.id) in valid_sub_area_ids or not valid_sub_area_ids):
+                shp = to_shape(sub_area.geometry)
+                geom_dict = mapping(shp)
+                result.append({
+                    "id": str(sub_area.id),
+                    "name": sub_area.name or f"Sub-Area",
+                    "type": "sub_area",
+                    "category": sub_area.category,
+                    "geometry": geom_dict
+                })
+    except Exception as e:
+        print(f"[DEBUG] SubAreas Error: {e}")
     
     return result
+
+
+# ===== EXPORT SPATIAL FEATURES =====
+
+@router.get("/proposed-activities/{activity_id}/export/kml")
+async def export_spatial_features_kml(
+    activity_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export drawn spatial features to KML format.
+    """
+    from xml.etree import ElementTree as ET
+    from fastapi.responses import StreamingResponse
+    from geoalchemy2.shape import to_shape
+    import io
+    
+    activity = db.query(ProposedYearlyActivity).filter(
+        ProposedYearlyActivity.id == activity_id
+    ).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Proposed activity not found")
+    
+    calc = db.query(Calculation).filter(Calculation.id == activity.calculation_id).first()
+    if not calc or calc.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    features = db.query(ActivityDrawnFeature).filter(
+        ActivityDrawnFeature.proposed_activity_id == activity_id
+    ).all()
+    
+    # Allow export even if no features (just reference layers)
+    # if not features:
+    #     raise HTTPException(status_code=404, detail="No spatial features to export")
+    
+    activity_name = "Spatial Features"
+    if activity.potential_activity:
+        activity_name = activity.potential_activity.activities or activity_name
+    
+    kml = ET.Element('kml', {'xmlns': 'http://www.opengis.net/kml/2.2'})
+    document = ET.SubElement(kml, 'Document')
+    
+    ET.SubElement(document, 'name').text = f'{activity_name} - Spatial Features'
+    ET.SubElement(document, 'description').text = (
+        f'Exported from Community Forest Management System. '
+        f'Activity: {activity_name}. '
+        f'Total features: {len(features)}.'
+    )
+    
+    # Add features folder (only drawn spatial features)
+    features_folder = ET.SubElement(document, 'Folder')
+    ET.SubElement(features_folder, 'name').text = f'Drawn Features ({len(features)})'
+    
+    style_map = {}
+    
+    for idx, feature in enumerate(features):
+        from geoalchemy2.shape import to_shape
+        from shapely.geometry import mapping as shapely_mapping
+        
+        try:
+            geom = to_shape(feature.geometry)
+        except Exception as e:
+            print(f"Error mapping geometry: {e}")
+            continue
+        
+        feature_type = feature.feature_type
+        feature_name = feature.properties.get('name', f'Feature {idx + 1}') if feature.properties else f'Feature {idx + 1}'
+        feature_year = feature.properties.get('year', 'N/A') if feature.properties else 'N/A'
+        
+        if feature_type not in style_map:
+            style_id = f'style_{feature_type}'
+            style = ET.SubElement(document, 'Style', {'id': style_id})
+            
+            if feature_type == 'point':
+                icon_style = ET.SubElement(style, 'IconStyle')
+                ET.SubElement(icon_style, 'scale').text = '1.2'
+                icon = ET.SubElement(icon_style, 'Icon')
+                ET.SubElement(icon, 'href').text = 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png'
+            elif feature_type == 'line':
+                line_style = ET.SubElement(style, 'LineStyle')
+                ET.SubElement(line_style, 'color').text = 'ff00ff00'
+                ET.SubElement(line_style, 'width').text = '3'
+            elif feature_type == 'polygon':
+                poly_style = ET.SubElement(style, 'PolygonStyle')
+                ET.SubElement(poly_style, 'color').text = '8000ff00'
+                ET.SubElement(poly_style, 'outline').text = '1'
+            
+            style_map[feature_type] = style_id
+        
+        placemark = ET.SubElement(features_folder, 'Placemark')
+        ET.SubElement(placemark, 'name').text = feature_name
+        ET.SubElement(placemark, 'styleUrl').text = f'#{style_map[feature_type]}'
+        
+        desc = f'<b>{feature_name}</b><br/>'
+        desc += f'Type: {feature_type.capitalize()}<br/>'
+        desc += f'Year: {feature_year}<br/>'
+        if feature.properties:
+            for key, value in feature.properties.items():
+                if key not in ['name', 'year']:
+                    desc += f'{key}: {value}<br/>'
+        
+        ET.SubElement(placemark, 'description').text = desc
+        
+        if feature_type == 'point':
+            coords = f'{geom.x:.7f},{geom.y:.7f},0'
+            point_elem = ET.SubElement(placemark, 'Point')
+            ET.SubElement(point_elem, 'coordinates').text = coords
+        elif feature_type == 'line':
+            coords_list = ' '.join([f'{p[0]:.7f},{p[1]:.7f},0' for p in geom.coords])
+            ls_elem = ET.SubElement(placemark, 'LineString')
+            ET.SubElement(ls_elem, 'tessellate').text = '1'
+            ET.SubElement(ls_elem, 'coordinates').text = coords_list
+        elif feature_type == 'polygon':
+            ext_coords = ' '.join([f'{p[0]:.7f},{p[1]:.7f},0' for p in geom.exterior.coords])
+            poly_elem = ET.SubElement(placemark, 'Polygon')
+            outer = ET.SubElement(poly_elem, 'outerBoundaryIs')
+            ls = ET.SubElement(outer, 'LinearRing')
+            ET.SubElement(ls, 'coordinates').text = ext_coords
+    
+    ET.indent(kml)
+    kml_bytes = ET.tostring(kml, encoding='unicode').encode('utf-8')
+    
+    # Use forest name and date in filename with proper Unicode encoding
+    from datetime import datetime
+    from urllib.parse import quote
+    forest_name = calc.forest_name if calc.forest_name else 'Forest'
+    date_str = datetime.now().strftime('%Y%m%d')
+    filename = f"{forest_name}_yearly_activities_{date_str}.kml"
+    encoded_filename = quote(filename)
+    
+    return StreamingResponse(
+        io.BytesIO(kml_bytes),
+        media_type='application/vnd.google-earth.kml+xml',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"}
+    )
+
+
+@router.get("/proposed-activities/{activity_id}/export/gpkg")
+async def export_spatial_features_gpkg(
+    activity_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export drawn spatial features to GPKG format.
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+    import tempfile
+    import os
+    
+    activity = db.query(ProposedYearlyActivity).filter(
+        ProposedYearlyActivity.id == activity_id
+    ).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Proposed activity not found")
+    
+    calc = db.query(Calculation).filter(Calculation.id == activity.calculation_id).first()
+    if not calc or calc.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    features = db.query(ActivityDrawnFeature).filter(
+        ActivityDrawnFeature.proposed_activity_id == activity_id
+    ).all()
+    
+    # Allow export even if no features (just reference layers)
+    # if not features:
+    #     raise HTTPException(status_code=404, detail="No spatial features to export")
+    
+    activity_name = "Spatial Features"
+    if activity.potential_activity:
+        activity_name = activity.potential_activity.activities or activity_name
+    
+    try:
+        import geopandas as gpd
+        from shapely.geometry import mapping
+        from geoalchemy2.shape import to_shape
+        import pandas as pd
+        
+        all_records = []
+        
+        # Add drawn features only
+        for idx, feature in enumerate(features):
+            try:
+                geom = to_shape(feature.geometry)
+                all_records.append({
+                    'id': str(feature.id),
+                    'name': feature.properties.get('name', f'Feature {idx + 1}') if feature.properties else f'Feature {idx + 1}',
+                    'feature_type': feature.feature_type,
+                    'year': feature.properties.get('year', '') if feature.properties else '',
+                    'properties_json': json.dumps(feature.properties) if feature.properties else '{}',
+                    'created_at': str(feature.created_at) if feature.created_at else '',
+                    'geometry': geom
+                })
+            except Exception as e:
+                print(f"Error processing feature {feature.id}: {e}")
+        
+        if not all_records:
+            raise HTTPException(status_code=404, detail="Failed to process any features")
+        
+        gdf = gpd.GeoDataFrame(all_records, crs='EPSG:4326')
+        
+        with tempfile.NamedTemporaryFile(suffix='.gpkg', delete=False) as tmp:
+            tmp_path = tmp.name
+        
+        try:
+            # Write all records to GPKG with layer column
+            gdf.to_file(tmp_path, layer='spatial_data', driver='GPKG')
+            
+            with open(tmp_path, 'rb') as f:
+                gpkg_bytes = f.read()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        
+        # Use forest name and date in filename with proper Unicode encoding
+        from urllib.parse import quote
+        from datetime import datetime
+        forest_name = calc.forest_name if calc.forest_name else 'Forest'
+        date_str = datetime.now().strftime('%Y%m%d')
+        filename = f"{forest_name}_yearly_activities_{date_str}.gpkg"
+        encoded_filename = quote(filename)
+        
+        return StreamingResponse(
+            io.BytesIO(gpkg_bytes),
+            media_type='application/octet-stream',
+            headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"}
+        )
+        
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Required library not installed: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")

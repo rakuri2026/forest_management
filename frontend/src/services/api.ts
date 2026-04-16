@@ -1700,4 +1700,78 @@ export const yearlyActivitiesApi = {
       `/api/yearly-activities/proposed-activities/${activityId}/year-details/${detailId}`
     );
   },
+
+  // ===== EXPORT SPATIAL FEATURES =====
+
+  /**
+   * Export spatial features to KML format
+   */
+  exportSpatialFeaturesKml: async (activityId: string): Promise<void> => {
+    try {
+      const response = await api.get(
+        `/api/yearly-activities/proposed-activities/${activityId}/export/kml`,
+        { responseType: 'blob' }
+      );
+      const blob = new Blob([response.data], { type: 'application/vnd.google-earth.kml+xml' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      // Use filename from Content-Disposition header if available
+      const contentDisposition = response.headers?.['content-disposition'];
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match) {
+          link.setAttribute('download', match[1]);
+        } else {
+          link.setAttribute('download', 'spatial.kml');
+        }
+      } else {
+        link.setAttribute('download', 'spatial.kml');
+      }
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('KML export error:', error);
+      const errorMsg = error.response?.data?.detail || 'Failed to export KML';
+      throw new Error(errorMsg);
+    }
+  },
+
+  /**
+   * Export spatial features to GPKG format
+   */
+  exportSpatialFeaturesGpkg: async (activityId: string): Promise<void> => {
+    try {
+      const response = await api.get(
+        `/api/yearly-activities/proposed-activities/${activityId}/export/gpkg`,
+        { responseType: 'blob' }
+      );
+      const blob = new Blob([response.data], { type: 'application/octet-stream' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      // Use filename from Content-Disposition header if available
+      const contentDisposition = response.headers?.['content-disposition'];
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match) {
+          link.setAttribute('download', match[1]);
+        } else {
+          link.setAttribute('download', 'spatial.gpkg');
+        }
+      } else {
+        link.setAttribute('download', 'spatial.gpkg');
+      }
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('GPKG export error:', error);
+      const errorMsg = error.response?.data?.detail || 'Failed to export GPKG';
+      throw new Error(errorMsg);
+    }
+  },
 };
