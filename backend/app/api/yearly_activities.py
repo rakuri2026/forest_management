@@ -716,15 +716,18 @@ async def create_drawn_feature(
         raise HTTPException(status_code=404, detail="Proposed activity not found")
     
     geojson = json.loads(feature_data.geometry)
+    coords = geojson["coordinates"]
     if feature_data.feature_type == "point":
-        geom = shapely.Point(geojson["coordinates"])
+        geom = shapely.Point(coords)
     elif feature_data.feature_type == "line":
-        geom = shapely.LineString(geojson["coordinates"])
+        if len(coords) < 2:
+            raise HTTPException(status_code=400, detail="Line requires at least 2 points")
+        geom = shapely.LineString(coords)
     else:
-        coords = geojson["coordinates"]
-        if isinstance(coords[0][0], list):
-            coords = coords[0]
-        geom = shapely.Polygon(coords)
+        ring = coords[0] if coords and coords[0] and isinstance(coords[0][0], list) else coords
+        if len(ring) < 4:
+            raise HTTPException(status_code=400, detail="Polygon must have at least 4 points (including closing)")
+        geom = shapely.Polygon(ring)
     
     feature = ActivityDrawnFeature(
         proposed_activity_id=activity_id,
@@ -778,17 +781,30 @@ async def update_drawn_feature(
         feature.feature_type = feature_data.feature_type
     if feature_data.geometry:
         geojson = json.loads(feature_data.geometry)
+        print(f"[update_drawn_feature] geometry: {feature_data.geometry}")
         coords = geojson["coordinates"]
+        print(f"[update_drawn_feature] coords: {coords}, type: {feature_data.feature_type}")
         if feature_data.feature_type == "point":
-            geom = shapely.Point(coords)
+            if coords and len(coords) >= 2 and coords[0] is not None and coords[1] is not None:
+                geom = shapely.Point(coords)
+            else:
+                geom = shapely.Point(coords)
         elif feature_data.feature_type == "line":
-            geom = shapely.LineString(coords)
+            valid_coords = [c for c in coords if isinstance(c, list) and len(c) >= 2 and c[0] is not None and c[1] is not None]
+            if len(valid_coords) < 2:
+                raise HTTPException(status_code=400, detail="Line requires at least 2 valid points")
+            geom = shapely.LineString(valid_coords)
         elif feature_data.feature_type == "polygon":
-            # GeoJSON polygon has nested array: [[[x,y], ...]] - get first ring
-            ring = coords[0] if coords[0] and isinstance(coords[0][0], list) else coords
-            geom = shapely.Polygon(ring)
+            ring = coords[0] if coords and coords[0] and isinstance(coords[0][0], list) else coords
+            valid_ring = [c for c in ring if isinstance(c, list) and len(c) >= 2 and c[0] is not None and c[1] is not None]
+            if len(valid_ring) < 3:
+                raise HTTPException(status_code=400, detail="Polygon must have at least 3 valid coordinates")
+            geom = shapely.Polygon(valid_ring)
         else:
-            geom = shapely.Point(coords)
+            if coords and len(coords) >= 2 and coords[0] is not None and coords[1] is not None:
+                geom = shapely.Point(coords)
+            else:
+                raise HTTPException(status_code=400, detail="Point requires valid coordinates")
         feature.geometry = geom.wkt
     if feature_data.properties:
         feature.properties = feature_data.properties

@@ -1,6 +1,8 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { MapContainer, TileLayer, useMap, useMapEvents, Marker, Polyline, Polygon, GeoJSON, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
+import '@geoman-io/leaflet-geoman-free';
+import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import * as turf from '@turf/turf';
 import { Button, Radio, Space, List, Card, message, Popconfirm, Input, Divider } from 'antd';
 import { yearlyActivitiesApi } from '../../services/api';
@@ -61,6 +63,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   subAreaLayers = [],
 }) => {
   const mapRef = useRef<L.Map | null>(null);
+  const nameInputRef = useRef<any>(null);
   const [drawingMode, setDrawingMode] = useState(true);
   const [currentPoints, setCurrentPoints] = useState<L.LatLng[]>([]);
   const [tempLayer, setTempLayer] = useState<L.Polyline | L.Polygon | L.Marker | null>(null);
@@ -297,28 +300,94 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
   };
 
   const handleStartEdit = (feature: any) => {
-    setEditingFeatureId(feature.id);
-    setEditingFeature(feature);
+    const map = mapRef.current;
+    if (!map) return;
     
-    // Initialize editing vertices from existing feature
-    const coords = parseGeometry(feature.geometry, feature.feature_type);
-    if (coords) {
-      if (feature.feature_type === 'polygon') {
-        // For polygon, coords[0] contains the ring
-        setEditingVertices(coords[0] || coords);
-      } else {
-        setEditingVertices(coords);
+    // Stop editing previous feature first if any
+    if (editingFeatureId && editingFeatureId !== feature.id) {
+      const prevLayer = featureLayersRef.current.get(editingFeatureId);
+      if (prevLayer) {
+        prevLayer.pm.disable();
+        map.removeLayer(prevLayer);
+        featureLayersRef.current.delete(editingFeatureId);
       }
     }
     
-    message.info('Drag vertices to move. Right-click vertex to delete.');
+    setSelectedFeatureId(feature.id);
+    setEditingFeatureId(feature.id);
+    setEditingFeature(feature);
+    
+    const coords = parseGeometry(feature.geometry, feature.feature_type);
+    if (!coords) return;
+    
+    const latlngs = coords.map(c => [c[0], c[1]] as [number, number]);
+    
+    let layer: L.Polyline | L.Polygon;
+    if (feature.feature_type === 'polygon') {
+      layer = L.polygon(latlngs, {
+        color: '#ff9900',
+        weight: 3,
+        fillOpacity: 0.3,
+        dashArray: '5, 5'
+      });
+    } else {
+      layer = L.polyline(latlngs, {
+        color: '#ff9900',
+        weight: 4,
+        dashArray: '5, 5'
+      });
+    }
+    
+    layer.addTo(map);
+    featureLayersRef.current.set(feature.id, layer);
+    layer.pm.enable();
+    
+    layer.on('pm:edit', async () => {
+      const geoJson = layer.toGeoJSON();
+      const newGeometry = JSON.stringify(geoJson.geometry);
+      console.log('[Geoman] Saving:', { featureId: feature.id, featureType: feature.feature_type, geometry: newGeometry });
+      try {
+        await yearlyActivitiesApi.updateDrawnFeature(activityId, feature.id, {
+          geometry: newGeometry,
+          feature_type: feature.feature_type
+        });
+        message.success('Changes saved');
+        onFeaturesChange();
+      } catch (err: any) {
+        const errorDetail = err?.response?.data?.detail;
+        console.error('[Geoman] Save failed:', errorDetail || err);
+        message.error(errorDetail?.[0]?.msg || 'Failed to save');
+      }
+    });
+    
+    message.info('Drag vertices to edit. Changes auto-saved.');
   };
 
-  const handleStopEdit = () => {
+  const handleStopEdit = async () => {
+    const map = mapRef.current;
+    if (map && editingFeatureId) {
+      const layer = featureLayersRef.current.get(editingFeatureId);
+      if (layer) {
+        const geoJson = layer.toGeoJSON();
+        const finalGeometry = JSON.stringify(geoJson.geometry);
+        try {
+          await yearlyActivitiesApi.updateDrawnFeature(activityId, editingFeatureId, {
+            geometry: finalGeometry,
+            feature_type: editingFeature?.feature_type || featureType
+          });
+        } catch (err) {
+          console.error('[Geoman] Final save failed:', err);
+        }
+        layer.pm.disable();
+        map.removeLayer(layer);
+        featureLayersRef.current.delete(editingFeatureId);
+      }
+    }
     setEditingFeatureId(null);
     setEditingFeature(null);
     setEditingVertices([]);
-    message.info('Edit mode exited');
+    onFeaturesChange();
+    message.success('Edit complete');
   };
 
   // Handle vertex drag during drawing (draggable markers)
@@ -349,14 +418,58 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
   };
 
   // Handle vertex drag for editing existing features
-  const handleEditingVertexDrag = (index: number, e: L.DragEndEvent) => {
+  const handleEditingVertexDrag = async (index: number, e: L.DragEndEvent) => {
     const newLatLng = e.target.getLatLng();
     const newVertices = [...editingVertices];
     newVertices[index] = newLatLng;
     setEditingVertices(newVertices);
     
-    if (featureType === 'line' || featureType === 'polygon') {
-      calculateMeasurements(newVertices, featureType);
+    const currentFeatureType = editingFeature?.feature_type || featureType;
+    if (currentFeatureType === 'line' || currentFeatureType === 'polygon') {
+      calculateMeasurements(newVertices, currentFeatureType);
+    }
+    
+    // Save to server after drag
+    if (!editingFeatureId) return;
+    const coords = newVertices
+      .filter(p => p.lat != null && p.lng != null)
+      .map(p => [p.lng, p.lat]);
+    if (coords.length < 2) {
+      message.error('Invalid vertices - cannot save');
+      return;
+    }
+    let newGeometry: string;
+    
+    if (currentFeatureType === 'polygon') {
+      coords.push(coords[0]); // Close polygon
+      newGeometry = JSON.stringify({
+        type: 'polygon',
+        coordinates: [coords]
+      });
+    } else if (currentFeatureType === 'line') {
+      newGeometry = JSON.stringify({
+        type: 'linestring',
+        coordinates: coords
+      });
+    } else {
+      newGeometry = JSON.stringify({
+        type: 'point',
+        coordinates: [coords[0][0], coords[0][1]]
+      });
+    }
+    
+    try {
+      console.log('[handleEditingVertexDrag] Saving:', { activityId, editingFeatureId, currentFeatureType, newGeometry });
+      await yearlyActivitiesApi.updateDrawnFeature(activityId, editingFeatureId, {
+        geometry: newGeometry,
+        feature_type: currentFeatureType
+      });
+      message.success('Vertex moved');
+      onFeaturesChange();
+    } catch (err: any) {
+      const errorDetail = err?.response?.data?.detail;
+      console.error('Error saving vertex drag:', errorDetail || err);
+      message.error(errorDetail?.[0]?.msg || 'Failed to save vertex position');
     }
   };
 
@@ -364,9 +477,10 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
   const handleEditingVertexDelete = (index: number) => {
     if (!editingFeatureId || !editingFeature) return;
     
-    const minPoints = featureType === 'polygon' ? 4 : 3;
+    const currentFeatureType = editingFeature?.feature_type || featureType;
+    const minPoints = currentFeatureType === 'polygon' ? 4 : 3;
     if (editingVertices.length <= minPoints) {
-      message.warning(`Cannot delete - ${featureType} needs at least ${minPoints - 1} vertices`);
+      message.warning(`Cannot delete - ${currentFeatureType} needs at least ${minPoints - 1} vertices`);
       return;
     }
 
@@ -377,7 +491,7 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
     const coords = newVertices.map(p => [p.lng, p.lat]);
     let newGeometry: string;
     
-    if (featureType === 'polygon') {
+    if (currentFeatureType === 'polygon') {
       coords.push(coords[0]); // Close polygon
       newGeometry = JSON.stringify({
         type: 'Polygon',
@@ -514,9 +628,35 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
   // Handle feature click for selection in edit mode
   const handleFeatureClick = (feature: any) => {
     if (editMode === 'edit') {
+      // Stop editing any previous feature first
+      if (editingFeatureId && editingFeatureId !== feature.id) {
+        const map = mapRef.current;
+        if (map) {
+          const prevLayer = featureLayersRef.current.get(editingFeatureId);
+          if (prevLayer) {
+            prevLayer.pm.disable();
+            map.removeLayer(prevLayer);
+            featureLayersRef.current.delete(editingFeatureId);
+          }
+        }
+      }
       setSelectedFeatureId(feature.id);
       setEditingFeature(feature);
       setIsEditing(true);
+      
+      // Zoom to feature on map
+      const map = mapRef.current;
+      if (map) {
+        const coords = parseGeometry(feature.geometry, feature.feature_type);
+        if (coords && coords.length > 0) {
+          if (feature.feature_type === 'point') {
+            map.flyTo([coords[0][0], coords[0][1]], 17);
+          } else {
+            const bounds = L.latLngBounds(coords as L.LatLngExpression[]);
+            map.flyToBounds(bounds, { padding: [50, 50] });
+          }
+        }
+      }
     }
   };
 
@@ -569,7 +709,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
     return drawnFeatures.map((feature: any, index: number) => {
       const coords = parseGeometry(feature.geometry, feature.feature_type);
       console.log('[renderFeatures] type:', feature.feature_type, 'parsed coords:', coords, 'original:', feature.geometry);
-      if (!coords || !coords[0] || coords.length < 2) {
+      if (!coords || !coords[0] || coords[0].length < 2) {
         console.warn('Invalid coords for feature:', feature.id, feature.geometry);
         return null;
       }
@@ -608,8 +748,8 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                 click: () => handleFeatureClick(feature)
               }}
             />
-            {/* Draggable vertex markers when editing */}
-            {isBeingEdited && lineCoords && lineCoords.map((pos, vidx) => (
+            {/* Draggable vertex markers when editing - disabled when using Geoman */}
+            {isBeingEdited && !featureLayersRef.current.has(feature.id) && lineCoords && lineCoords.map((pos, vidx) => (
               <Marker
                 key={`v-${feature.id}-${vidx}`}
                 position={pos}
@@ -638,8 +778,8 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                 click: () => handleFeatureClick(feature)
               }}
             />
-            {/* Draggable vertex markers when editing - right-click to delete */}
-            {isBeingEdited && polyCoords && polyCoords.map((pos: number[], vidx: number) => (
+            {/* Draggable vertex markers when editing - disabled when using Geoman */}
+            {isBeingEdited && !featureLayersRef.current.has(feature.id) && polyCoords && polyCoords.map((pos: number[], vidx: number) => (
               <Marker
                 key={`v-${feature.id}-${vidx}`}
                 position={pos}
@@ -666,6 +806,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
       <div style={{ width: '350px', padding: '12px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
         <Space direction="vertical" style={{ width: '100%' }}>
           <Input
+            ref={nameInputRef}
             placeholder="Enter feature name first"
             value={featureName}
             onChange={(e) => setFeatureName(e.target.value)}
@@ -720,7 +861,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
           <Button
             type={drawingMode ? 'primary' : 'default'}
             onClick={() => setDrawingMode(!drawingMode)}
-            disabled={!featureName}
+            disabled={!featureName || !selectedYear}
             block
           >
             {drawingMode ? 'Drawing Active ✓' : 'Start Drawing'}
@@ -744,27 +885,32 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             <List
               size="small"
               dataSource={drawnFeatures}
-              renderItem={(feature: any) => (
+              renderItem={(feature: any) => {
+                const isBeingEdited = editingFeatureId === feature.id;
+                const isOtherBeingEdited = editingFeatureId && !isBeingEdited;
+                return (
                 <List.Item
                   style={{ 
                     backgroundColor: selectedFeatureId === feature.id ? '#e6f7ff' : undefined,
                     cursor: editMode === 'edit' ? 'pointer' : 'default'
                   }}
-                  onClick={() => editMode === 'edit' && handleFeatureClick(feature)}
+                  onClick={() => editMode === 'edit' && !isOtherBeingEdited && handleFeatureClick(feature)}
                   actions={[
                     <Button 
                       type="link" 
                       size="small"
                       onClick={() => handleStartEdit(feature)}
-                      title="Click then click map to add/move"
+                      disabled={isOtherBeingEdited}
+                      title={isOtherBeingEdited ? 'Stop editing current feature first' : 'Click to edit'}
                     >
-                      {editingFeatureId === feature.id ? 'Editing...' : 'Edit'}
+                      {isBeingEdited ? 'Editing...' : isOtherBeingEdited ? 'In Edit' : 'Edit'}
                     </Button>,
                     <Popconfirm
                       title="Delete this feature?"
                       onConfirm={() => handleDeleteFeature(feature.id)}
+                      disabled={isBeingEdited}
                     >
-                      <Button type="link" danger size="small">Delete</Button>
+                      <Button type="link" danger size="small" disabled={isBeingEdited}>Delete</Button>
                     </Popconfirm>
                   ]}
                 >
@@ -773,54 +919,59 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                     description={`Year ${feature.properties?.year || '-'} • ${feature.feature_type === 'point' ? '1 point' : feature.feature_type === 'line' ? `${feature.properties?.length_m || 0} m` : `${feature.properties?.area_sqm || 0} m²`}`}
                   />
                 </List.Item>
-              )}
+              )}}
             />
           )}
         </Card>
 
-        {/* Copy to year popup */}
-        {selectedFeatureId && (
-          <Card 
-            title="Feature Options" 
-            size="small" 
-            style={{ marginTop: '12px', borderColor: '#2563eb' }}
-            extra={
+        {/* Feature Options - always visible */}
+        <Card 
+          title="Feature Options" 
+          size="small" 
+          style={{ marginTop: '12px', borderColor: '#2563eb' }}
+          extra={
+            selectedFeatureId && (
               <Button size="small" onClick={() => { setSelectedFeatureId(null); setIsEditing(false); }}>
-                Close
+                Clear
               </Button>
-            }
-          >
-            {/* Copy to another year */}
-            {availableYears && availableYears.length > 1 && (
-              <div style={{ marginTop: 8 }}>
-                <p style={{ fontSize: 11, marginBottom: 4, color: '#666' }}>Copy to year:</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {availableYears
-                    .filter(y => y.year !== editingFeature?.properties?.year)
-                    .map(y => (
-                      <Button 
-                        key={y.year} 
-                        size="small" 
-                        onClick={() => handleCopyFeature(y.year)}
-                      >
-                        Y{y.year}
-                      </Button>
-                    ))}
+            )
+          }
+        >
+          {!selectedFeatureId ? (
+            <p style={{ color: '#999', fontSize: 12 }}>Click a feature to select it</p>
+          ) : (
+            <>
+              {availableYears && availableYears.length > 1 && (
+                <div style={{ marginTop: 8 }}>
+                  <p style={{ fontSize: 11, marginBottom: 4, color: '#666' }}>Copy to year:</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {availableYears
+                      .filter(y => y.year !== editingFeature?.properties?.year)
+                      .map(y => (
+                        <Button 
+                          key={y.year} 
+                          size="small" 
+                          onClick={() => handleCopyFeature(y.year)}
+                        >
+                          Y{y.year}
+                        </Button>
+                      ))}
+                  </div>
                 </div>
-              </div>
-            )}
-            
-            <Button 
-              type="primary" 
-              danger 
-              block
-              style={{ marginTop: 12 }}
-              onClick={() => handleDeleteFeature(selectedFeatureId)}
-            >
-              Delete
-            </Button>
-          </Card>
-        )}
+              )}
+              
+              <Button 
+                type="primary" 
+                danger 
+                block
+                style={{ marginTop: 12 }}
+                onClick={() => handleDeleteFeature(selectedFeatureId)}
+              >
+                Delete
+              </Button>
+            </>
+          )}
+        </Card>
       </div>
 
       <div style={{ flex: 1, position: 'relative' }}>

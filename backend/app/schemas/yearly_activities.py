@@ -311,6 +311,7 @@ class DrawnFeatureCreate(DrawnFeatureBase):
         """Use Shapely to validate geometry validity"""
         try:
             from shapely.geometry import shape
+            print(f"[_validate_with_shapely CREATE] geo_dict: {geo_dict}")
             geom = shape(geo_dict)
             if not geom.is_valid:
                 if geom_type == "polygon":
@@ -322,6 +323,7 @@ class DrawnFeatureCreate(DrawnFeatureBase):
             pass
         except Exception as e:
             if "Invalid" not in str(e):
+                print(f"[_validate_with_shapely CREATE] ERROR: {e}")
                 raise ValueError(f"Geometry validation failed: {str(e)}")
             raise
 
@@ -382,6 +384,7 @@ class DrawnFeatureUpdate(BaseModel):
         """Use Shapely to validate geometry validity"""
         try:
             from shapely.geometry import shape
+            print(f"[_validate_with_shapely] geo_dict: {geo_dict}")
             geom = shape(geo_dict)
             if not geom.is_valid:
                 if geom_type == "polygon":
@@ -392,6 +395,7 @@ class DrawnFeatureUpdate(BaseModel):
             pass
         except Exception as e:
             if "Invalid" not in str(e):
+                print(f"[_validate_with_shapely] ERROR: {e}")
                 raise ValueError(f"Geometry validation failed: {str(e)}")
             raise
 
