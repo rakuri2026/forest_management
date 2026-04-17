@@ -71,6 +71,34 @@ async def list_potential_activities(
     return [PotentialActivityResponse.from_orm(act) for act in activities]
 
 
+@router.get("/calculations/{calculation_id}/potential-activities", response_model=List[PotentialActivityResponse])
+async def get_calculation_potential_activities(
+    calculation_id: UUID,
+    project_name: Optional[str] = Query(None),
+    program: Optional[str] = Query(None),
+    is_default: Optional[str] = Query(None),
+    is_active: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    List potential activities for a specific calculation.
+    Returns all active potential activities that can be proposed for this forest.
+    """
+    query = db.query(PotentialActivity).filter(PotentialActivity.is_active == is_active)
+
+    if project_name:
+        query = query.filter(PotentialActivity.project_name == project_name)
+    if program:
+        query = query.filter(PotentialActivity.progarms == program)
+    if is_default:
+        query = query.filter(PotentialActivity.is_default == is_default)
+
+    query = query.order_by(PotentialActivity.id)
+    activities = query.all()
+    return [PotentialActivityResponse.from_orm(act) for act in activities]
+
+
 # ===== PROPOSED ACTIVITIES (Per Forest) =====
 
 @router.get("/calculations/{calculation_id}/proposed-activities", response_model=List[ProposedActivityWithYears])
@@ -857,22 +885,92 @@ async def delete_drawn_feature(
     return {"message": "Drawn feature deleted"}
 
 
-# ===== YEAR DETAILS ENDPOINTS =====
+@router.post("/proposed-activities/{activity_id}/drawn-features/{feature_id}/copy", response_model=DrawnFeatureResponse)
+async def copy_drawn_feature(
+    activity_id: UUID,
+    feature_id: UUID,
+    request: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Copy a drawn feature to a different year"""
+    from shapely.geometry import mapping as shapely_mapping
+    from geoalchemy2.shape import to_shape
+    
+    # Get the source feature
+    source_feature = db.query(ActivityDrawnFeature).filter(
+        ActivityDrawnFeature.id == feature_id,
+        ActivityDrawnFeature.proposed_activity_id == activity_id
+    ).first()
+    if not source_feature:
+        raise HTTPException(status_code=404, detail="Source feature not found")
+    
+    target_year = request.get('target_year')
+    if not target_year:
+        raise HTTPException(status_code=400, detail="target_year is required")
+    
+    # Check if feature with same geometry already exists for target year
+    existing = db.query(ActivityDrawnFeature).filter(
+        ActivityDrawnFeature.proposed_activity_id == activity_id,
+        ActivityDrawnFeature.geometry == source_feature.geometry,
+        ActivityDrawnFeature.properties['year'] == target_year
+    ).first()
+    
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Feature already exists for year {target_year}")
+    
+    # Create new feature
+    new_feature = ActivityDrawnFeature(
+        proposed_activity_id=activity_id,
+        feature_type=source_feature.feature_type,
+        geometry=source_feature.geometry,
+        properties={
+            **source_feature.properties,
+            'year': target_year,
+            'copied_from': str(source_feature.id)
+        }
+    )
+    
+    db.add(new_feature)
+    db.commit()
+    db.refresh(new_feature)
+    
+    try:
+        feat_geom = to_shape(new_feature.geometry)
+        geom_json = shapely_mapping(feat_geom)
+    except Exception as e:
+        print(f"Error mapping geometry: {e}")
+        geom_json = {"type": source_feature.feature_type, "coordinates": []}
+    
+    return DrawnFeatureResponse(
+        id=new_feature.id,
+        proposed_activity_id=new_feature.proposed_activity_id,
+        feature_type=new_feature.feature_type,
+        geometry=json.dumps(geom_json),
+        properties=new_feature.properties,
+        created_at=new_feature.created_at,
+        updated_at=new_feature.updated_at
+    )
+
+
+# ===== YEAR DETAILS =====
 
 @router.get("/proposed-activities/{activity_id}/year-details", response_model=List[YearDetailResponse])
-async def get_year_details(
+async def list_year_details(
     activity_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get all year details for a proposed activity"""
-    activity = db.query(ProposedYearlyActivity).filter(ProposedYearlyActivity.id == activity_id).first()
+    activity = db.query(ProposedYearlyActivity).filter(
+        ProposedYearlyActivity.id == activity_id
+    ).first()
     if not activity:
         raise HTTPException(status_code=404, detail="Proposed activity not found")
     
     details = db.query(ActivityYearDetail).filter(
         ActivityYearDetail.proposed_activity_id == activity_id
-    ).all()
+    ).order_by(ActivityYearDetail.year_number).all()
     
     return [YearDetailResponse.from_orm(d) for d in details]
 
@@ -884,8 +982,10 @@ async def create_year_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Create or update year detail for a proposed activity"""
-    activity = db.query(ProposedYearlyActivity).filter(ProposedYearlyActivity.id == activity_id).first()
+    """Create a year detail for a proposed activity"""
+    activity = db.query(ProposedYearlyActivity).filter(
+        ProposedYearlyActivity.id == activity_id
+    ).first()
     if not activity:
         raise HTTPException(status_code=404, detail="Proposed activity not found")
     
@@ -896,28 +996,24 @@ async def create_year_detail(
     ).first()
     
     if existing:
-        existing.quantity = detail_data.quantity
-        existing.yearly_budget = detail_data.yearly_budget
-        existing.target_completion_month = detail_data.target_completion_month
-        existing.notes = detail_data.notes
-        existing.status = detail_data.status
-        db.commit()
-        db.refresh(existing)
-        return YearDetailResponse.from_orm(existing)
+        raise HTTPException(status_code=400, detail=f"Year detail for year {detail_data.year_number} already exists")
     
-    # Create new
     detail = ActivityYearDetail(
         proposed_activity_id=activity_id,
         year_number=detail_data.year_number,
         quantity=detail_data.quantity,
         yearly_budget=detail_data.yearly_budget,
         target_completion_month=detail_data.target_completion_month,
-        notes=detail_data.notes,
-        status=detail_data.status
+        actual_quantity=detail_data.actual_quantity,
+        actual_budget=detail_data.actual_budget,
+        status=detail_data.status or 'planned',
+        notes=detail_data.notes
     )
+    
     db.add(detail)
     db.commit()
     db.refresh(detail)
+    
     return YearDetailResponse.from_orm(detail)
 
 
@@ -929,19 +1025,34 @@ async def update_year_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update year detail"""
+    """Update a year detail"""
     detail = db.query(ActivityYearDetail).filter(
         ActivityYearDetail.id == detail_id,
         ActivityYearDetail.proposed_activity_id == activity_id
     ).first()
+    
     if not detail:
         raise HTTPException(status_code=404, detail="Year detail not found")
     
-    for field, value in detail_data.dict(exclude_unset=True).items():
-        setattr(detail, field, value)
+    # Update fields
+    if detail_data.quantity is not None:
+        detail.quantity = detail_data.quantity
+    if detail_data.yearly_budget is not None:
+        detail.yearly_budget = detail_data.yearly_budget
+    if detail_data.target_completion_month is not None:
+        detail.target_completion_month = detail_data.target_completion_month
+    if detail_data.actual_quantity is not None:
+        detail.actual_quantity = detail_data.actual_quantity
+    if detail_data.actual_budget is not None:
+        detail.actual_budget = detail_data.actual_budget
+    if detail_data.status is not None:
+        detail.status = detail_data.status
+    if detail_data.notes is not None:
+        detail.notes = detail_data.notes
     
     db.commit()
     db.refresh(detail)
+    
     return YearDetailResponse.from_orm(detail)
 
 
@@ -952,20 +1063,20 @@ async def delete_year_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete year detail"""
+    """Delete a year detail"""
     detail = db.query(ActivityYearDetail).filter(
         ActivityYearDetail.id == detail_id,
         ActivityYearDetail.proposed_activity_id == activity_id
     ).first()
+    
     if not detail:
         raise HTTPException(status_code=404, detail="Year detail not found")
     
     db.delete(detail)
     db.commit()
+    
     return {"message": "Year detail deleted"}
 
-
-# ===== NEW: BLOCKS WITH SUB-AREAS =====
 
 @router.get("/calculations/{calculation_id}/blocks-with-subareas")
 async def get_blocks_with_subareas(
@@ -1013,6 +1124,7 @@ async def get_blocks_with_subareas(
                         "id": block.get('id') or f"block-{i}",
                         "name": block.get('block_name') or block.get('name') or f"Block {i + 1}",
                         "type": "block",
+                        "area_hectares": block.get('area_hectares') or block.get('area') or 0,
                         "geometry": block_geom
                     })
     except Exception as e:
@@ -1021,6 +1133,7 @@ async def get_blocks_with_subareas(
     # 3. Return sub-areas from forest_sub_areas table (filtered by result_data for sync)
     try:
         from app.models.forest_sub_area import ForestSubArea
+        from app.models.forest_block import ForestBlock
         
         # Get valid sub-area IDs from result_data
         valid_sub_area_ids = set()
@@ -1028,21 +1141,30 @@ async def get_blocks_with_subareas(
             for sa in calculation.result_data.get('sub_areas', []):
                 valid_sub_area_ids.add(sa.get('id'))
         
-        # Get sub-areas from table
-        sub_areas = db.query(ForestSubArea).filter(
+        # Get sub-areas from table with block info using JOIN
+        sub_areas = db.query(
+            ForestSubArea,
+            ForestBlock.name.label('block_name')
+        ).outerjoin(
+            ForestBlock, ForestBlock.id == ForestSubArea.block_id
+        ).filter(
             ForestSubArea.calculation_id == calculation_id
         ).all()
         
-        for sub_area in sub_areas:
+        for sub_area, block_name in sub_areas:
             # Only include if it exists in result_data (sync filter)
             if sub_area.geometry and (str(sub_area.id) in valid_sub_area_ids or not valid_sub_area_ids):
                 shp = to_shape(sub_area.geometry)
                 geom_dict = mapping(shp)
+                
                 result.append({
                     "id": str(sub_area.id),
                     "name": sub_area.name or f"Sub-Area",
                     "type": "sub_area",
                     "category": sub_area.category,
+                    "area_hectares": sub_area.area_hectares or 0,
+                    "block_id": str(sub_area.block_id) if sub_area.block_id else None,
+                    "block_name": block_name or "",
                     "geometry": geom_dict
                 })
     except Exception as e:
