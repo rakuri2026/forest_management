@@ -95,7 +95,7 @@ async def generate_fieldbook(
 async def list_fieldbook_points(
     calculation_id: UUID,
     format: Optional[str] = Query(None, description="Export format: csv, excel, gpx, geojson"),
-    include_topographic: bool = Query(True, description="Include topographic features (ridge/river data)"),
+    include_topographic: bool = Query(False, description="Include topographic features (ridge/river data)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):

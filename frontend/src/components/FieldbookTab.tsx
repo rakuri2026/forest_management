@@ -15,12 +15,16 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   const [interpolationDistance, setInterpolationDistance] = useState(50);
   const [extractElevation, setExtractElevation] = useState(true);
 
+  // Topographic features toggle (default: OFF for performance)
+  const [includeTopographic, setIncludeTopographic] = useState(false);
+
   useEffect(() => {
     loadFieldbook();
   }, [calculationId]);
 
   const loadFieldbook = async (skipCache: boolean = false) => {
-    const cacheKey = `fieldbook_${calculationId}`;
+    // Include topographic in cache key to separate cached results
+    const cacheKey = `fieldbook_${calculationId}_${includeTopographic}`;
 
     // Try to load from cache first (unless explicitly skipped)
     if (!skipCache) {
@@ -42,7 +46,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
     setError(null);
     try {
       console.log('🔄 Fetching fieldbook from server...');
-      const data = await fieldbookApi.list(calculationId);
+      const data = await fieldbookApi.list(calculationId, includeTopographic);
       setFieldbook(data);
 
       // Cache the result
@@ -212,6 +216,32 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
                 <div className="text-gray-600">Total Points</div>
                 <div className="text-lg font-semibold">{fieldbook.total_count}</div>
               </div>
+            </div>
+
+            {/* Topographic features toggle */}
+            <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-md">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="includeTopographic"
+                  checked={includeTopographic}
+                  onChange={(e) => setIncludeTopographic(e.target.checked)}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <label htmlFor="includeTopographic" className="ml-2 text-sm text-gray-700">
+                  Calculate Topographic Features (Ridges/Rivers)
+                </label>
+              </div>
+              <button
+                onClick={() => loadFieldbook(true)} // Force reload from server
+                disabled={loading}
+                className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                {loading ? 'Loading...' : 'Refresh'}
+              </button>
+              <span className="text-xs text-gray-500">
+                {includeTopographic ? 'Calculating nearest ridge/river for each point...' : 'Feature calculation is OFF for faster loading'}
+              </span>
             </div>
 
             <div className="flex gap-2 flex-wrap">

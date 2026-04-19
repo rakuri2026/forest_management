@@ -830,8 +830,18 @@ export const fieldbookApi = {
     return response.data;
   },
 
-  list: async (calculationId: string): Promise<any> => {
-    const response = await api.get(`/api/calculations/${calculationId}/fieldbook`);
+  list: async (calculationId: string, includeTopographic: boolean = false): Promise<any> => {
+    const response = await api.get(`/api/calculations/${calculationId}/fieldbook`, {
+      params: { include_topographic: includeTopographic }
+    });
+    return response.data;
+  },
+
+  // Explicitly request with topographic features
+  listWithTopographic: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/calculations/${calculationId}/fieldbook`, {
+      params: { include_topographic: true }
+    });
     return response.data;
   },
 
@@ -1627,18 +1637,6 @@ export const yearlyActivitiesApi = {
     );
   },
 
-  // ===== NEW: BLOCKS WITH SUB-AREAS =====
-
-  /**
-   * Get blocks with sub-areas for a calculation
-   */
-  getBlocksWithSubareas: async (calculationId: string): Promise<any[]> => {
-    const response = await api.get(
-      `/api/yearly-activities/calculations/${calculationId}/blocks-with-subareas`
-    );
-    return response.data;
-  },
-
   // ===== YEAR DETAILS APIs =====
 
   /**
@@ -1773,5 +1771,80 @@ export const yearlyActivitiesApi = {
       const errorMsg = error.response?.data?.detail || 'Failed to export GPKG';
       throw new Error(errorMsg);
     }
+  },
+
+  // ===== NEW PAGE API METHODS =====
+
+  /**
+   * Get potential activities (master list) for a calculation
+   */
+  getPotentialActivities: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/potential-activities`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get proposed activities for a calculation
+   */
+  getProposedActivities: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/proposed-activities`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get all year details for a proposed activity
+   */
+  getAllYearDetails: async (activityId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/proposed-activities/${activityId}/year-details`
+    );
+    return response.data;
+  },
+
+  /**
+   * Copy drawn feature to another year
+   */
+  copyDrawnFeature: async (
+    activityId: string,
+    featureId: string,
+    targetYear: number
+  ): Promise<any> => {
+    const response = await api.post(
+      `/api/yearly-activities/proposed-activities/${activityId}/drawn-features/${featureId}/copy`,
+      { target_year: targetYear }
+    );
+    return response.data;
+  },
+
+  /**
+   * Get blocks with sub-areas for a calculation
+   */
+  getBlocksWithSubareas: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(
+      `/api/yearly-activities/calculations/${calculationId}/blocks-with-subareas`
+    );
+    return response.data;
+  },
+
+  /**
+   * Update spatial assignment
+   */
+  updateSpatialAssignment: async (
+    activityId: string,
+    assignmentId: string,
+    data: {
+      block_id?: string;
+      sub_area_id?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.patch(
+      `/api/yearly-activities/proposed-activities/${activityId}/spatial/${assignmentId}`,
+      data
+    );
+    return response.data;
   },
 };
