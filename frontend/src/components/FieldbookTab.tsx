@@ -12,7 +12,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   const [generating, setGenerating] = useState(false);
 
   // Generation settings
-  const [interpolationDistance, setInterpolationDistance] = useState(50);
+  const [interpolationDistance, setInterpolationDistance] = useState(100);
   const [extractElevation, setExtractElevation] = useState(true);
 
   // Topographic features toggle (default: OFF for performance)
@@ -158,7 +158,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               <input
                 type="number"
                 min="5"
-                max="100"
+                max="200"
                 value={interpolationDistance}
                 onChange={(e) => setInterpolationDistance(parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md"
