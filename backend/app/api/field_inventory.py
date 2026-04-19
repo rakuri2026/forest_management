@@ -71,12 +71,15 @@ async def preview_column_mapping(
     """
     Preview automatic column mapping for uploaded CSV file
     """
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+    if not file.filename.endswith('.csv') and not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Only CSV and XLSX files are supported")
 
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content), nrows=10)
+        if file.filename.endswith('.xlsx'):
+            df = pd.read_excel(io.BytesIO(content), nrows=10)
+        else:
+            df = pd.read_csv(io.BytesIO(content), nrows=10)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
 
@@ -111,8 +114,8 @@ async def upload_field_inventory(
     """
     Upload and validate field inventory CSV
     """
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+    if not file.filename.endswith('.csv') and not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Only CSV and XLSX files are supported")
 
     # Parse mapping
     try:
@@ -120,12 +123,15 @@ async def upload_field_inventory(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid mapping JSON")
 
-    # Read CSV
+    # Read file
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        if file.filename.endswith('.xlsx'):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            df = pd.read_csv(io.BytesIO(content))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 
     # Validate
     validator = FieldInventoryValidator(db)
@@ -179,12 +185,15 @@ async def process_field_inventory(
     if field_inventory.status != 'validated':
         raise HTTPException(status_code=400, detail=f"Cannot process. Status: {field_inventory.status}")
 
-    # Read CSV
+    # Read file
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        if field_inventory.uploaded_filename.endswith('.xlsx'):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            df = pd.read_csv(io.BytesIO(content))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 
     # Process
     service = FieldInventoryService(db)

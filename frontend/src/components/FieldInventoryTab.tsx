@@ -1348,11 +1348,11 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              CSV File (22 columns)
+              CSV or XLSX File (22 columns)
             </label>
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx"
               onChange={handleFileChange}
               className="block w-full text-sm text-gray-500
                 file:mr-4 file:py-2 file:px-4
