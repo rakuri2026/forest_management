@@ -181,23 +181,20 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               </label>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm text-blue-800 font-medium">
-                    Topographic Features (Ridges/Rivers) Calculated Automatically During Export
-                  </p>
-                  <p className="text-xs text-blue-700 mt-1">
-                    The CSV and Excel exports now include nearest ridge/river information automatically using an optimized algorithm (20-100x faster than before). No need to enable any checkboxes.
-                  </p>
-                </div>
-              </div>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="includeTopographic"
+                checked={includeTopographic}
+                onChange={(e) => setIncludeTopographic(e.target.checked)}
+                className="h-4 w-4 text-blue-600"
+              />
+              <label htmlFor="includeTopographic" className="ml-2 text-sm text-gray-700">
+                Calculate Topographic Features (Ridges/Rivers)
+              </label>
             </div>
+
+            
 
             <button
               onClick={handleGenerate}
@@ -218,29 +215,26 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               </div>
             </div>
 
-            {/* Topographic features toggle */}
+            {/* Topographic features toggle - only when fieldbook exists */}
             <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-md">
               <div className="flex items-center">
                 <input
                   type="checkbox"
-                  id="includeTopographic"
+                  id="includeTopographicView"
                   checked={includeTopographic}
-                  onChange={(e) => setIncludeTopographic(e.target.checked)}
+                  onChange={async (e) => {
+                    setIncludeTopographic(e.target.checked);
+                    // Force reload after toggling
+                    await loadFieldbook(true);
+                  }}
                   className="h-4 w-4 text-blue-600"
                 />
-                <label htmlFor="includeTopographic" className="ml-2 text-sm text-gray-700">
-                  Calculate Topographic Features (Ridges/Rivers)
+                <label htmlFor="includeTopographicView" className="ml-2 text-sm text-gray-700">
+                  Show Topographic Features (Ridges/Rivers)
                 </label>
               </div>
-              <button
-                onClick={() => loadFieldbook(true)} // Force reload from server
-                disabled={loading}
-                className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
-              >
-                {loading ? 'Loading...' : 'Refresh'}
-              </button>
               <span className="text-xs text-gray-500">
-                {includeTopographic ? 'Calculating nearest ridge/river for each point...' : 'Feature calculation is OFF for faster loading'}
+                {includeTopographic ? 'Showing nearest ridge/river for each point' : 'Feature calculation is OFF'}
               </span>
             </div>
 
