@@ -215,29 +215,6 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               </div>
             </div>
 
-            {/* Topographic features toggle - only when fieldbook exists */}
-            <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-md">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="includeTopographicView"
-                  checked={includeTopographic}
-                  onChange={async (e) => {
-                    setIncludeTopographic(e.target.checked);
-                    // Force reload after toggling
-                    await loadFieldbook(true);
-                  }}
-                  className="h-4 w-4 text-blue-600"
-                />
-                <label htmlFor="includeTopographicView" className="ml-2 text-sm text-gray-700">
-                  Show Topographic Features (Ridges/Rivers)
-                </label>
-              </div>
-              <span className="text-xs text-gray-500">
-                {includeTopographic ? 'Showing nearest ridge/river for each point' : 'Feature calculation is OFF'}
-              </span>
-            </div>
-
             <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => handleExport('csv')}
