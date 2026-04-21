@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { inventoryApi } from '../services/api';
 import { CorrectionPreviewDialog } from './CorrectionPreviewDialog';
 import ColumnMappingPreview from './ColumnMappingPreview';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 interface TreeMappingTabProps {
   calculationId: string;
@@ -419,6 +422,111 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
                 <p className="text-xs text-gray-500 mt-1">{(summary.total_firewood_chatta || 0).toFixed(0)} chatta</p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Species and DBH Analysis Charts */}
+        {summary && (summary.species_distribution || summary.dbh_classes) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Species Distribution Pie Chart */}
+            {summary.species_distribution && Object.keys(summary.species_distribution).length > 0 && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-lg font-semibold mb-4">Species Distribution</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={Object.entries(summary.species_distribution).map(([name, value]) => ({ name, value: Number(value) }))}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                      labelLine={false}
+                    >
+                      {Object.keys(summary.species_distribution).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* DBH Classes Bar Chart */}
+            {summary.dbh_classes && Object.keys(summary.dbh_classes).length > 0 && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-lg font-semibold mb-4">DBH Class Distribution</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart
+                    data={Object.entries(summary.dbh_classes).map(([name, value]) => ({ name, value: Number(value) }))}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="value" fill="#22c55e" name="Trees" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tabular Species and DBH Summary */}
+        {summary && (summary.species_distribution || summary.dbh_classes) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Species Table */}
+            {summary.species_distribution && Object.keys(summary.species_distribution).length > 0 && (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <h3 className="text-lg font-semibold px-6 py-4 border-b">Species Summary</h3>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Species</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Count</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {Object.entries(summary.species_distribution).map(([species, count]: [string, any], idx: number) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 text-sm">{species}</td>
+                        <td className="px-4 py-2 text-sm text-right font-medium">{Number(count)}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-500">{((Number(count) / summary.total_trees) * 100).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* DBH Classes Table */}
+            {summary.dbh_classes && Object.keys(summary.dbh_classes).length > 0 && (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <h3 className="text-lg font-semibold px-6 py-4 border-b">DBH Class Summary</h3>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">DBH Class</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Count</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {Object.entries(summary.dbh_classes).map(([dbhClass, count]: [string, any], idx: number) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 text-sm">{dbhClass}</td>
+                        <td className="px-4 py-2 text-sm text-right font-medium">{Number(count)}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-500">{((Number(count) / summary.total_trees) * 100).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

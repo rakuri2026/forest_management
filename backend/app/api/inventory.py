@@ -541,7 +541,7 @@ async def upload_inventory(
 
     Returns validation report
     """
-    # Check if tree mapping already exists for this calculation
+    # Check if tree mapping already exists for this calculation - auto-delete if exists
     if calculation_id:
         existing_mapping = db.query(InventoryCalculation).filter(
             InventoryCalculation.calculation_id == UUID(calculation_id),
@@ -549,10 +549,9 @@ async def upload_inventory(
         ).first()
 
         if existing_mapping:
-            raise HTTPException(
-                status_code=400,
-                detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
-            )
+            # Delete existing mapping (cascade deletes trees)
+            db.delete(existing_mapping)
+            db.commit()
 
     # Validate file type
     if not file.filename.endswith('.csv'):
@@ -901,20 +900,23 @@ async def get_inventory_summary(
     )
     species_distribution = {row[0]: row[1] for row in species_query.fetchall()}
 
-    # Get DBH classes
+    # Get DBH classes using subquery
     dbh_query = db.execute(
         text("""
-        SELECT
-            CASE
-                WHEN dia_cm < 10 THEN 'Seedling (<10cm)'
-                WHEN dia_cm < 20 THEN 'Sapling (10-20cm)'
-                WHEN dia_cm < 40 THEN 'Pole (20-40cm)'
-                ELSE 'Mature (>40cm)'
-            END as dbh_class,
-            COUNT(*) as count
-        FROM public.inventory_trees
-        WHERE inventory_calculation_id = :inventory_id
+        SELECT dbh_class, COUNT(*) as count
+        FROM (
+            SELECT
+                CASE
+                    WHEN dia_cm < 10 THEN 'Seedling (<10cm)'
+                    WHEN dia_cm < 20 THEN 'Sapling (10-20cm)'
+                    WHEN dia_cm < 40 THEN 'Pole (20-40cm)'
+                    ELSE 'Mature (>40cm)'
+                END as dbh_class
+            FROM public.inventory_trees
+            WHERE inventory_calculation_id = :inventory_id AND dia_cm IS NOT NULL
+        ) sub
         GROUP BY dbh_class
+        ORDER BY dbh_class
         """),
         {"inventory_id": str(inventory_id)}
     )

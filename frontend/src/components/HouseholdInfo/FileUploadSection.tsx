@@ -3,8 +3,8 @@
  * Handles Excel (.xlsx, .xls) and CSV file upload with validation preview
  */
 import React, { useState } from 'react';
-import { Upload, Button, Card, Alert, Table, Tag, Space, message, Modal } from 'antd';
-import { UploadOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined } from '@ant-design/icons';
+import { Upload, Button, Card, Alert, Table, Tag, Space, message, Modal, Form, Input, InputNumber, Select } from 'antd';
+import { UploadOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, PlusOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import * as api from '../../services/api';
 import type { HouseholdUploadResponse, HouseholdUploadValidation } from '../../types/household';
@@ -23,6 +23,9 @@ const FileUploadSection: React.FC<FileUploadSectionProps> = ({
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<HouseholdUploadResponse | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [addForm] = Form.useForm();
+  const [adding, setAdding] = useState(false);
 
   const handleUpload = async () => {
     if (!selectedFile) {
@@ -152,8 +155,36 @@ const FileUploadSection: React.FC<FileUploadSectionProps> = ({
     },
   ];
 
+  const handleAddHousehold = async (values: any) => {
+    setAdding(true);
+    try {
+      await api.userGroupApi.createHousehold(calculationId, values);
+      message.success('Household added successfully');
+      setAddModalVisible(false);
+      addForm.resetFields();
+      onUploadSuccess();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to add household');
+    } finally {
+      setAdding(false);
+    }
+  };
+
   return (
     <div>
+      <div style={{ marginBottom: 16 }}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => setAddModalVisible(true)}
+        >
+          Add Household Manually
+        </Button>
+        <span style={{ marginLeft: 12, color: '#666' }}>
+          Or upload a file below
+        </span>
+      </div>
+
       {hasExistingData && (
         <Alert
           message="Append Mode Enabled"
@@ -254,6 +285,90 @@ const FileUploadSection: React.FC<FileUploadSectionProps> = ({
           )}
         </Space>
       </Card>
+
+      <Modal
+        title="Add New Household"
+        open={addModalVisible}
+        onCancel={() => { setAddModalVisible(false); addForm.resetFields(); }}
+        footer={null}
+        width={600}
+        destroyOnClose
+      >
+        <Form
+          form={addForm}
+          layout="vertical"
+          onFinish={handleAddHousehold}
+        >
+          <Form.Item
+            name="house_no"
+            label="House No"
+            rules={[{ required: true, message: 'Please enter house number' }]}
+          >
+            <Input placeholder="e.g., H-001" />
+          </Form.Item>
+
+          <Form.Item
+            name="surname"
+            label="Surname / Family Name"
+            rules={[{ required: true, message: 'Please enter surname' }]}
+          >
+            <Input placeholder="e.g., Sharma" />
+          </Form.Item>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+            <Form.Item
+              name="male_population"
+              label="Male Population"
+            >
+              <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+
+            <Form.Item
+              name="female_population"
+              label="Female Population"
+            >
+              <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+
+            <Form.Item
+              name="total_population"
+              label="Total Population"
+            >
+              <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item
+              name="forest_dependent"
+              label="Forest Dependent"
+            >
+              <Select placeholder="Select">
+                <Select.Option value="Yes">Yes</Select.Option>
+                <Select.Option value="No">No</Select.Option>
+              </Select>
+            </Form.Item>
+
+            <Form.Item
+              name="caste"
+              label="Caste/Ethnicity"
+            >
+              <Input placeholder="e.g., Brahmin" />
+            </Form.Item>
+          </div>
+
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit" loading={adding}>
+                Add Household
+              </Button>
+              <Button onClick={() => { setAddModalVisible(false); addForm.resetFields(); }}>
+                Cancel
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
