@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Map, Settings, Download, Play, Image, Users } from 'lucide-react';
+import { Upload, Settings, Download, Play, Image, Users, Map } from 'lucide-react';
+import { Tabs } from 'antd';
 import { ExtentUploadSection } from './UserGroup/ExtentUploadSection';
 import { AutoBufferSection } from './UserGroup/AutoBufferSection';
 import { UserGroupMapVisualization } from './UserGroup/UserGroupMapVisualization';
@@ -23,7 +24,7 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [showExportPanel, setShowExportPanel] = useState(false);
-  const [showHouseholdInfo, setShowHouseholdInfo] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<string>('boundary');
   const [forestName, setForestName] = useState<string>(propForestName || '');
   const mapRef = useRef<any>(null);
 
@@ -164,34 +165,34 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
     }
   };
 
-  return (
-    <div className="user-group-map-tab p-6">
-      <h2 className="text-2xl font-bold mb-6">User Group Map</h2>
-
-      {/* Method Selection */}
+  const renderBoundaryTab = () => (
+    <>
       <div className="method-selector mb-6">
-        <div className="flex gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-4 mb-4">
           <button
-            className={`px-4 py-2 rounded flex items-center gap-2 ${
-              activeMethod === 'upload' ? 'bg-blue-600 text-white' : 'bg-gray-200'
+            className={`px-4 py-3 rounded-lg flex items-center justify-center gap-2 border-2 ${
+              activeMethod === 'upload' 
+                ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                : 'border-gray-300 bg-white hover:border-blue-400'
             }`}
             onClick={() => setActiveMethod('upload')}
           >
-            <Upload size={16} />
-            Upload Boundary
+            <Upload size={18} />
+            <span className="font-medium">Upload Boundary</span>
           </button>
           <button
-            className={`px-4 py-2 rounded flex items-center gap-2 ${
-              activeMethod === 'auto' ? 'bg-blue-600 text-white' : 'bg-gray-200'
+            className={`px-4 py-3 rounded-lg flex items-center justify-center gap-2 border-2 ${
+              activeMethod === 'auto' 
+                ? 'border-purple-600 bg-purple-50 text-purple-700' 
+                : 'border-gray-300 bg-white hover:border-purple-400'
             }`}
             onClick={() => setActiveMethod('auto')}
           >
-            <Settings size={16} />
-            Auto-Buffer
+            <Settings size={18} />
+            <span className="font-medium">Auto-Buffer</span>
           </button>
         </div>
 
-        {/* Render selected method component */}
         {activeMethod === 'upload' && (
           <ExtentUploadSection
             calculationId={calculationId}
@@ -207,22 +208,20 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
         )}
       </div>
 
-      {/* Analyze and Delete Buttons */}
       {extentId && (
         <div className="analyze-section mb-6 flex gap-3">
           <button
             className={`${
               analyzing ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'
-            } text-white px-6 py-3 rounded transition-colors flex items-center gap-2`}
+            } text-white px-8 py-3 rounded-lg flex items-center gap-2 font-medium text-lg`}
             onClick={handleAnalyze}
             disabled={analyzing}
           >
-            <Play size={16} />
-            {analyzing ? 'Analyzing...' : 'Analyze User Group'}
+            <Play size={18} />
+            {analyzing ? 'Analyzing...' : 'Analyze'}
           </button>
-
           <button
-            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded transition-colors flex items-center gap-2"
+            className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2"
             onClick={handleDelete}
             disabled={analyzing}
             title="Delete current User Group extent and analysis"
@@ -232,15 +231,13 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
               <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
               <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
             </svg>
-            Delete Extent
+            Delete
           </button>
         </div>
       )}
 
-      {/* Results Section */}
       {results && (
         <>
-          {/* Map Visualization */}
           <UserGroupMapVisualization
             calculationId={calculationId}
             forestBoundary={results.forest_boundary}
@@ -251,10 +248,8 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
             ref={mapRef}
           />
 
-          {/* Statistics Dashboard */}
           <SettlementStatistics settlements={results.settlements} />
 
-          {/* Land Cover & Biomass Analysis */}
           <div className="mt-6">
             <LandCoverAnalysis
               calculationId={calculationId}
@@ -262,58 +257,32 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
             />
           </div>
 
-          {/* Household Information Section */}
-          <div className="mt-6">
-            <div className="flex gap-3 mb-4">
-              <button
-                className={`${
-                  showHouseholdInfo ? 'bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
-                } text-white px-6 py-3 rounded transition-colors flex items-center gap-2`}
-                onClick={() => setShowHouseholdInfo(!showHouseholdInfo)}
-              >
-                <Users size={16} />
-                {showHouseholdInfo ? 'Hide' : 'Show'} Household Information
-              </button>
-            </div>
-
-            {showHouseholdInfo && (
-              <div className="bg-white rounded-lg shadow-lg">
-                <HouseholdInfoTab calculationId={calculationId} />
-              </div>
-            )}
-          </div>
-
-          {/* Export Options */}
           <div className="export-section mt-6">
-            <h3 className="text-xl font-semibold mb-3">Export Results</h3>
+            <h3 className="text-lg font-semibold mb-3">Export</h3>
             <div className="flex gap-3 flex-wrap">
               <button
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors flex items-center gap-2"
+                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center gap-2"
                 onClick={() => handleExport('csv')}
               >
-                <Download size={16} />
-                Export CSV
+                <Download size={16} />CSV
               </button>
               <button
-                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors flex items-center gap-2"
+                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2"
                 onClick={() => handleExport('geojson')}
               >
-                <Download size={16} />
-                Export GeoJSON
+                <Download size={16} />GeoJSON
               </button>
               <button
-                className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors flex items-center gap-2"
+                className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 flex items-center gap-2"
                 onClick={() => setShowExportPanel(true)}
               >
-                <Image size={16} />
-                Export PNG (A5)
+                <Image size={16} />PNG
               </button>
             </div>
           </div>
         </>
       )}
 
-      {/* Map Export Panel Modal */}
       {showExportPanel && results && (
         <MapExportPanel
           forestBoundary={results.forest_boundary}
@@ -326,6 +295,46 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
           onClose={() => setShowExportPanel(false)}
         />
       )}
+    </>
+  );
+
+  const renderUserListTab = () => (
+    <div className="bg-white rounded-lg shadow-lg">
+      <HouseholdInfoTab calculationId={calculationId} />
+    </div>
+  );
+
+  return (
+    <div className="user-group-map-tab p-6">
+      <h2 className="text-2xl font-bold mb-6">User Group Map</h2>
+
+      <Tabs 
+        activeKey={activeSubTab} 
+        onChange={setActiveSubTab}
+        className="mb-6"
+        items={[
+          {
+            key: 'boundary',
+            label: (
+              <span className="flex items-center gap-2">
+                <Map size={16} />
+                User Boundary
+              </span>
+            ),
+            children: renderBoundaryTab(),
+          },
+          {
+            key: 'userlist',
+            label: (
+              <span className="flex items-center gap-2">
+                <Users size={16} />
+                User Name List
+              </span>
+            ),
+            children: renderUserListTab(),
+          },
+        ]}
+      />
     </div>
   );
 }

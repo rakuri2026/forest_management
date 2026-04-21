@@ -206,10 +206,18 @@ class SubAreaCategory(str):
     TOURIST = "tourist"
     OFFICE = "office"
     PRIVATE_LAND = "private_land"
+    AGROFORESTRY = "agroforestry"
+    TREE_STRATA = "tree_strata"
+    WATER_HOLE = "water_hole"
+    WILDLIFE_CORRIDOR = "wildlife_corridor"
 
     @classmethod
     def valid_categories(cls) -> List[str]:
-        return [cls.PROTECTED, cls.PLANTATION, cls.PRO_POOR, cls.RELIGIOUS, cls.BIODIVERSITY, cls.TOURIST, cls.OFFICE, cls.PRIVATE_LAND]
+        return [
+            cls.PROTECTED, cls.PLANTATION, cls.PRO_POOR, cls.RELIGIOUS,
+            cls.BIODIVERSITY, cls.TOURIST, cls.OFFICE, cls.PRIVATE_LAND,
+            cls.AGROFORESTRY, cls.TREE_STRATA, cls.WATER_HOLE, cls.WILDLIFE_CORRIDOR
+        ]
 
 
 class BlockBreakdownItem(BaseModel):

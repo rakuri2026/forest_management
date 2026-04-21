@@ -2893,7 +2893,8 @@ async def add_sub_area(
         )
 
     # Validate category
-    valid_categories = ["protected", "plantation", "pro-poor", "religious", "biodiversity", "tourist", "office", "private_land"]
+    from app.schemas.forest import SubAreaCategory
+    valid_categories = SubAreaCategory.valid_categories()
     if request.category not in valid_categories:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3214,7 +3215,8 @@ async def update_sub_area(
             if request.name is not None:
                 sub_areas[i]["name"] = request.name
             if request.category is not None:
-                valid_categories = ["protected", "plantation", "pro-poor", "religious", "biodiversity", "tourist", "office", "private_land"]
+                from app.schemas.forest import SubAreaCategory
+                valid_categories = SubAreaCategory.valid_categories()
                 if request.category not in valid_categories:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,

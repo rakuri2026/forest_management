@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, LayersControl } from 'react-leaflet';
+import BaseMapSelector from './MapCreation/BaseMapSelector';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
@@ -7,6 +8,7 @@ import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import * as turf from '@turf/turf';
 import { forestApi } from '../services/api';
 import { calculateAreaHectares, calculateSubAreaByBlock, detectBlockForSubArea, validateSubAreasNoOverlap, validateSubAreaSum } from '../utils/geometryValidation';
+import { NumericScale } from './NumericScale';
 
 interface SubArea {
   id: string;
@@ -38,6 +40,10 @@ const SUB_AREA_CATEGORIES = [
   { value: 'tourist', label: 'Tourist Attraction', color: '#ec4899', isExcluded: false },
   { value: 'office', label: 'Office Area', color: '#6b7280', isExcluded: false },
   { value: 'private_land', label: 'Private Land (Excluded)', color: '#dc2626', isExcluded: true },
+  { value: 'agroforestry', label: 'Agro-forestry Area', color: '#84cc17', isExcluded: false },
+  { value: 'tree_strata', label: 'Tree Strata', color: '#15803d', isExcluded: false },
+  { value: 'water_hole', label: 'Water hole', color: '#0ea5e9', isExcluded: false },
+  { value: 'wildlife_corridor', label: 'Wildlife corridor', color: '#a855f7', isExcluded: false },
 ];
 
 const MapEditor: React.FC<MapEditorProps> = ({
@@ -82,7 +88,8 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [selectedSubAreaId, setSelectedSubAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit_boundary' | 'edit_blocks' | 'edit_subareas'>('edit_boundary');
   const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
-  const [slopeThreshold, setSlopeThreshold] = useState<number>(4);
+  const [slopeMinClass, setSlopeMinClass] = useState<number>(4);
+  const [showCanopyMask, setShowCanopyMask] = useState<boolean>(false);
   
   // Auto-switch to subareas mode if there are existing sub-areas (after loading) - but only on initial load
   useEffect(() => {
@@ -1524,30 +1531,47 @@ const MapEditor: React.FC<MapEditorProps> = ({
                       className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 mr-2"
                     />
                     <label htmlFor="showSteepSlope" className="text-sm font-medium text-gray-800">
-                      Show Steep Slope Areas
+                      Show Slope Regulation Areas
                     </label>
                   </div>
                 </div>
                 
                 {showSteepSlopeMask && (
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-gray-700">
-                      Slope Threshold:
-                    </label>
-                    <select
-                      value={slopeThreshold}
-                      onChange={(e) => setSlopeThreshold(Number(e.target.value))}
-                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-amber-500 focus:border-amber-500"
-                    >
-                      <option value={4}>Class 4 (&gt;30°)</option>
-                      <option value={3}>Class 3 (&gt;20°)</option>
-                      <option value={2}>Class 2 (&gt;10°)</option>
-                    </select>
-                    <span className="text-xs text-gray-600">
-                      (red = class {slopeThreshold}+)
-                    </span>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-700">
+                        Sensitivity Level:
+                      </label>
+                      <select
+                        value={slopeMinClass}
+                        onChange={(e) => setSlopeMinClass(Number(e.target.value))}
+                        className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-amber-500 focus:border-amber-500"
+                      >
+<option value={4}>Extreme/Cliffs (&gt;45)</option>
+                      <option value={3}>Highly Steep (30-45)</option>
+                      <option value={2}>Moderate/Steep (19-30)</option>
+                      <option value={1}>Gentle/Flat (0-19)</option>
+                      </select>
+                    </div>
+                    <div className="text-sm text-red-600 font-medium">
+                      → Displaying: Class {slopeMinClass === 4 ? '4' : `${slopeMinClass}-4`} (and above)
+                    </div>
                   </div>
                 )}
+
+                {/* Canopy Mask */}
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="checkbox"
+                    id="showCanopy"
+                    checked={showCanopyMask}
+                    onChange={(e) => setShowCanopyMask(e.target.checked)}
+                    className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 mr-2"
+                  />
+                  <label htmlFor="showCanopy" className="text-sm font-medium text-gray-800">
+                    Show Canopy (&gt;15m)
+                  </label>
+                </div>
               </div>
 
               {/* Active Drawing Indicator */}
@@ -2021,19 +2045,28 @@ const MapEditor: React.FC<MapEditorProps> = ({
               }, 500); // Wait for PM to initialize
             }}
           >
-            <TileLayer
-              attribution='&copy; OpenStreetMap'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            <BaseMapSelector />
+            <NumericScale />
             
-            {/* Steep Slope Mask Layer - shows areas above threshold in red */}
+            {/* Slope Regulation Mask Layer - shows sensitive areas in red */}
             {showSteepSlopeMask && (
               <TileLayer
-                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?threshold=${slopeThreshold}&alpha=150`}
+                url={`/api/calculations/${calculationId}/slope-regulation-mask/{z}/{x}/{y}.png?min_class=${slopeMinClass}&alpha=150`}
                 opacity={0.7}
                 zIndex={5}
                 minZoom={13}
-                maxZoom={16}
+                maxZoom={20}
+              />
+            )}
+
+            {/* Canopy Mask Layer - shows trees >15m in green */}
+            {showCanopyMask && (
+              <TileLayer
+                url={`/api/calculations/${calculationId}/canopy-mask/{z}/{x}/{y}.png?alpha=150`}
+                opacity={0.7}
+                zIndex={5}
+                minZoom={13}
+                maxZoom={20}
               />
             )}
           </MapContainer>

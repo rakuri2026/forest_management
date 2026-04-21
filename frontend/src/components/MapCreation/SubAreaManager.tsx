@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import * as turf from '@turf/turf';
 import HelpTooltip, { helpTexts } from '../HelpTooltip';
+import { NumericScale } from '../NumericScale';
+
 import {
   validateSubAreasNoOverlap,
   validateSubAreaSum,
@@ -40,8 +41,13 @@ interface SubAreaManagerProps {
   outerBoundary: any;
   onSubAreasChange: (subAreas: SubArea[]) => void;
   initialSubAreas?: SubArea[];
-  calculationId?: string;  // Required for steep slope tile layer
+  calculationId?: string;
 }
+
+const formatLiveArea = (sqMeters: number): string => {
+  const hectares = sqMeters / 10000;
+  return `${sqMeters.toFixed(1)} m² (${hectares.toFixed(2)} ha)`;
+};
 
 // Predefined sub-area categories
 const SUB_AREA_CATEGORIES = [
@@ -52,7 +58,11 @@ const SUB_AREA_CATEGORIES = [
   { value: 'biodiversity', label: 'Bio-diversity Rich', color: '#06b6d4', isExcluded: false },
   { value: 'tourist', label: 'Tourist Attraction', color: '#ec4899', isExcluded: false },
   { value: 'office', label: 'Office Area', color: '#6b7280', isExcluded: false },
-  { value: 'private_land', label: 'Private Land (Excluded)', color: '#dc2626', isExcluded: true },  // Excluded from forest area
+  { value: 'private_land', label: 'Private Land (Excluded)', color: '#dc2626', isExcluded: true },
+  { value: 'agroforestry', label: 'Agro-forestry Area', color: '#84cc17', isExcluded: false },
+  { value: 'tree_strata', label: 'Tree Strata', color: '#15803d', isExcluded: false },
+  { value: 'water_hole', label: 'Water hole', color: '#0ea5e9', isExcluded: false },
+  { value: 'wildlife_corridor', label: 'Wildlife corridor', color: '#a855f7', isExcluded: false },
 ];
 
 // Map component with drawing controls for sub-areas
@@ -65,6 +75,7 @@ const SubAreaDrawingControls: React.FC<{
   selectedSubAreaId: string | null;
   onSubAreaEdit: (subAreaId: string, geometry: any) => void;
   onSubAreaDelete: (subAreaId: string) => void;
+  onLiveAreaChange?: (area: number) => void;
 }> = ({
   blocks,
   outerBoundary,
@@ -74,17 +85,26 @@ const SubAreaDrawingControls: React.FC<{
   selectedSubAreaId,
   onSubAreaEdit,
   onSubAreaDelete,
+  onLiveAreaChange,
 }) => {
   const map = useMap();
   const layersRef = useRef<Map<string, L.Layer>>(new Map());
   const pendingLayersRef = useRef<L.Layer[]>([]);
   const boundaryLayerRef = useRef<L.Layer | null>(null);
+  const [liveArea, setLiveArea] = useState<number>(0);
 
   // Stabilize callbacks to prevent effect re-triggering
   const callbacksRef = useRef({ onSubAreaCreated, onSubAreaEdit, onSubAreaDelete });
   useEffect(() => {
     callbacksRef.current = { onSubAreaCreated, onSubAreaEdit, onSubAreaDelete };
   }, [onSubAreaCreated, onSubAreaEdit, onSubAreaDelete]);
+
+  // Propagate live area to parent
+  useEffect(() => {
+    if (onLiveAreaChange) {
+      onLiveAreaChange(liveArea);
+    }
+  }, [liveArea, onLiveAreaChange]);
 
   // FIRST useEffect: STRICTLY Leaflet-Geoman Setup
   useEffect(() => {
@@ -199,11 +219,34 @@ const SubAreaDrawingControls: React.FC<{
           // Ignore errors during drawing
         }
       }
+      // Calculate live area during drawing
+      if (layer) {
+        try {
+          const gj = layer.toGeoJSON();
+          if (gj.geometry && gj.geometry.type === 'Polygon' && gj.geometry.coordinates.length > 0) {
+            const coords = gj.geometry.coordinates[0];
+            if (coords.length >= 3) {
+              const closedCoords = [...coords];
+              const first = closedCoords[0];
+              const last = closedCoords[closedCoords.length - 1];
+              if (first[0] !== last[0] || first[1] !== last[1]) {
+                closedCoords.push([...first]);
+              }
+              const poly = turf.polygon([closedCoords]);
+              const area = turf.area(poly);
+              setLiveArea(area);
+            }
+          }
+        } catch (err) {
+          setLiveArea(0);
+        }
+      }
     };
 
     // Handle polygon creation
     const handleCreate = (e: any) => {
       console.log('[SubAreaDrawingControls] handleCreate triggered');
+      setLiveArea(0);  // Clear live area after polygon is created
       const layer = e.layer;
       const geoJSON = layer.toGeoJSON();
 
@@ -405,7 +448,9 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
   const [selectedBlockFilter, setSelectedBlockFilter] = useState<string>('all');
   const [error, setError] = useState<string>('');
   const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
-  const [slopeThreshold, setSlopeThreshold] = useState<number>(30);
+  const [slopeMinClass, setSlopeMinClass] = useState<number>(4);
+  const [showCanopyMask, setShowCanopyMask] = useState<boolean>(false);
+  const [liveArea, setLiveArea] = useState<number>(0);
 
   // Validate sub-areas whenever they change
   useEffect(() => {
@@ -633,7 +678,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
           </div>
         </div>
 
-        {/* Steep Slope Mask Control */}
+        {/* Slope Regulation Mask Control */}
         <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center">
@@ -645,34 +690,59 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                 className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 mr-2"
               />
               <label htmlFor="showSteepSlope" className="text-sm font-medium text-gray-800">
-                Show Steep Slope Areas
+                Show Slope Regulation Areas
               </label>
             </div>
             <HelpTooltip 
-              helpText="When enabled, areas with slope above the threshold will be highlighted in red to help identify protected zones." 
+              helpText="When enabled, sensitive slope areas will be highlighted in red. Select class and above (3 shows 3+4, 2 shows 2+3+4, etc.)" 
               position="top" 
             />
           </div>
           
           {showSteepSlopeMask && (
-            <div className="flex items-center gap-4">
-              <label className="text-sm text-gray-700">
-                Slope Threshold:
-              </label>
-              <select
-                value={slopeThreshold}
-                onChange={(e) => setSlopeThreshold(Number(e.target.value))}
-                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-amber-500 focus:border-amber-500"
-              >
-                <option value={4}>Class 4 (&gt;30°)</option>
-                <option value={3}>Class 3 (&gt;20°)</option>
-                <option value={2}>Class 2 (&gt;10°)</option>
-              </select>
-              <span className="text-sm text-gray-600">
-                {slopeThreshold === 4 ? '(>30° shown in red)' : slopeThreshold === 3 ? '(>20° shown in red)' : '(>10° shown in red)'}
-              </span>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-4">
+                <label className="text-sm text-gray-700">
+                  Sensitivity Level:
+                </label>
+                <select
+                  value={slopeMinClass}
+                  onChange={(e) => setSlopeMinClass(Number(e.target.value))}
+                  className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-amber-500 focus:border-amber-500"
+                >
+<option value={4}>Extreme/Cliffs (&gt;45)</option>
+                <option value={3}>Highly Steep (30-45)</option>
+                <option value={2}>Moderate/Steep (19-30)</option>
+                <option value={1}>Gentle/Flat (0-19)</option>
+                </select>
+              </div>
+              <div className="text-sm text-red-600 font-medium">
+                → Displaying: Class {slopeMinClass === 4 ? '4' : `${slopeMinClass}-4`} (and above)
+              </div>
             </div>
           )}
+        </div>
+
+        {/* Canopy Mask Control */}
+        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="showCanopy"
+                checked={showCanopyMask}
+                onChange={(e) => setShowCanopyMask(e.target.checked)}
+                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 mr-2"
+              />
+              <label htmlFor="showCanopy" className="text-sm font-medium text-gray-800">
+                Show Canopy (&gt;15m)
+              </label>
+            </div>
+            <HelpTooltip 
+              helpText="When enabled, areas with tree canopy height > 15m will be highlighted in green." 
+              position="top" 
+            />
+          </div>
         </div>
 
         {/* Error Messages */}
@@ -903,22 +973,34 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
           </div>
         </div>
 
-        <div className="h-[600px] rounded overflow-hidden border border-gray-300">
+        <div className="h-[600px] rounded overflow-hidden border border-gray-300 relative">
           <MapContainer
             center={mapCenter as [number, number]}
             zoom={14}
             style={{ height: '100%', width: '100%' }}
           >
             <BaseMapSelector />
+            <NumericScale />
 
-            {/* Steep Slope Mask Layer - shows areas above threshold in red */}
+            {/* Slope Regulation Mask Layer - shows sensitive areas in red */}
             {showSteepSlopeMask && calculationId && (
               <TileLayer
-                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?threshold=${slopeThreshold}&alpha=150`}
+                url={`/api/calculations/${calculationId}/slope-regulation-mask/{z}/{x}/{y}.png?min_class=${slopeMinClass}&alpha=150`}
                 opacity={0.7}
                 zIndex={5}
                 minZoom={13}
-                maxZoom={16}
+                maxZoom={20}
+              />
+            )}
+
+            {/* Canopy Mask Layer - shows trees >15m in green */}
+            {showCanopyMask && calculationId && (
+              <TileLayer
+                url={`/api/calculations/${calculationId}/canopy-mask/{z}/{x}/{y}.png?alpha=150`}
+                opacity={0.7}
+                zIndex={5}
+                minZoom={13}
+                maxZoom={20}
               />
             )}
 
@@ -946,8 +1028,31 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
               selectedSubAreaId={selectedSubAreaId}
               onSubAreaEdit={handleSubAreaEdit}
               onSubAreaDelete={handleSubAreaDelete}
+              onLiveAreaChange={setLiveArea}
             />
           </MapContainer>
+
+            {/* Live Area Label - shown during polygon drawing */}
+            {liveArea > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 10,
+                  right: 10,
+                  zIndex: 1000,
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  padding: '8px 12px',
+                  borderRadius: 4,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#1f2937',
+                  border: '2px solid #3b82f6',
+                }}
+              >
+                {formatLiveArea(liveArea)}
+              </div>
+            )}
         </div>
       </div>
     </div>
