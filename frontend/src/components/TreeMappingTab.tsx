@@ -25,6 +25,7 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
   const [validationResult, setValidationResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [updatingBlockSubarea, setUpdatingBlockSubarea] = useState(false);
 
   // Column mapping state
   const [showColumnMapping, setShowColumnMapping] = useState(false);
@@ -43,24 +44,67 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
   const checkTreeMapping = async () => {
     try {
       setLoading(true);
+      
+      // First check if ANY tree mapping exists (regardless of owner)
+      const existingCheck = await inventoryApi.checkTreeMappingExists(calculationId).catch(() => null);
+      
+      if (existingCheck?.exists) {
+        // Show existing data 
+        setTreeMapping({
+          id: existingCheck.inventory_id,
+          uploaded_filename: existingCheck.filename,
+          status: existingCheck.status
+        });
+        
+        // Load summary for existing data
+        loadTreeData(existingCheck.inventory_id);
+        
+        setError(`Tree mapping already exists: ${existingCheck.filename}. Delete it first to upload new data.`);
+        setLoading(false);
+        return;
+      }
+      
+      // No tree mapping exists - check for current user's data
       const mapping = await inventoryApi.getTreeMappingByCalculation(calculationId);
       setTreeMapping(mapping);
 
-      // Load summary and tree preview if mapping exists
       if (mapping?.id) {
         loadTreeData(mapping.id);
       }
     } catch (err: any) {
-      // 404 means no tree mapping exists yet
       if (err.response?.status === 404) {
         setTreeMapping(null);
         setSummary(null);
         setTrees([]);
       } else {
-        console.error('Error checking tree mapping:', err);
+        console.log('checkTreeMapping error:', err);
+        setTreeMapping(null);
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Force delete tree mapping from another user
+  const forceDeletePrevious = async () => {
+    if (!treeMapping?.id) return;
+    
+    try {
+      setDeleting(true);
+      await inventoryApi.forceDeleteByCalculation(calculationId);
+      setTreeMapping(null);
+      setSummary(null);
+      setTrees([]);
+      setError(null);
+      setFile(null);
+      setValidationResult(null);
+      alert('Previous uploaded tree data deleted successfully. You can now upload new data.');
+    } catch (err: any) {
+      console.log('Force delete error:', err);
+      // Force delete should still work - reload
+      await checkTreeMapping();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -85,6 +129,30 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
       setFile(e.target.files[0]);
       setValidationResult(null);
       setError(null);
+    }
+  };
+
+  // Handle clearing current tree mapping to re-upload
+  const handleClearAndReupload = async () => {
+    if (!treeMapping?.id) return;
+    
+    if (!confirm('Clear current tree mapping and upload again? This will remove the uploaded data.')) {
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      await inventoryApi.deleteInventory(treeMapping.id);
+      setTreeMapping(null);
+      setSummary(null);
+      setTrees([]);
+      setFile(null);
+      setValidationResult(null);
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to clear tree mapping');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -150,6 +218,20 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
         calculationId,
         epsg
       );
+      
+      // If data already exists, show it and don't replace
+      if (result.exists) {
+        // Show existing data info
+        setTreeMapping({
+          id: result.inventory_id,
+          uploaded_filename: result.filename,
+          status: result.status
+        });
+        setError(`Tree mapping already exists: ${result.filename}. Delete it first to upload new data.`);
+        setUploading(false);
+        return;
+      }
+      
       setValidationResult(result);
 
       // DEBUG: Log validation response
@@ -241,6 +323,23 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
       setError(err.response?.data?.detail || 'Failed to delete tree mapping');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleUpdateBlockSubarea = async () => {
+    if (!treeMapping?.id) return;
+
+    try {
+      setUpdatingBlockSubarea(true);
+      setError(null);
+      const result = await inventoryApi.updateTreeBlockSubarea(treeMapping.id);
+      alert(result.message || 'Block/Sub-area updated successfully');
+      // Reload tree data to see updated values
+      loadTreeData(treeMapping.id);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to update block/sub-area');
+    } finally {
+      setUpdatingBlockSubarea(false);
     }
   };
 
@@ -371,6 +470,13 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
                 className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
               >
                 Export GeoJSON
+              </button>
+              <button
+                onClick={handleUpdateBlockSubarea}
+                disabled={updatingBlockSubarea}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm disabled:bg-gray-400"
+              >
+                {updatingBlockSubarea ? 'Updating...' : 'Update Block/Sub-area'}
               </button>
               <button
                 onClick={handleDelete}
@@ -552,6 +658,8 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">DBH (cm)</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Height (m)</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Volume (m³)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sub-area</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Remark</th>
                   </tr>
                 </thead>
@@ -559,9 +667,11 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
                   {trees.map((tree: any, idx: number) => (
                     <tr key={idx} className="hover:bg-gray-50">
                       <td className="px-4 py-2 text-sm">{tree.species || '-'}</td>
-                      <td className="px-4 py-2 text-sm">{tree.dia_dbh ? tree.dia_dbh.toFixed(1) : '-'}</td>
-                      <td className="px-4 py-2 text-sm">{tree.height ? tree.height.toFixed(1) : '-'}</td>
-                      <td className="px-4 py-2 text-sm">{tree.volume_m3 ? tree.volume_m3.toFixed(3) : '-'}</td>
+                      <td className="px-4 py-2 text-sm">{tree.dia_cm ? tree.dia_cm.toFixed(1) : '-'}</td>
+                      <td className="px-4 py-2 text-sm">{tree.height_m ? tree.height_m.toFixed(1) : '-'}</td>
+                      <td className="px-4 py-2 text-sm">{tree.tree_volume ? tree.tree_volume.toFixed(3) : '-'}</td>
+                      <td className="px-4 py-2 text-sm text-blue-600">{tree.block_name || '-'}</td>
+                      <td className="px-4 py-2 text-sm text-purple-600">{tree.sub_area_name || '-'}</td>
                       <td className="px-4 py-2 text-sm">
                         <span className={`px-2 py-1 rounded text-xs ${
                           tree.remark === 'Mother' ? 'bg-green-100 text-green-800' :
@@ -756,6 +866,17 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
                   'Upload and Process'
                 )}
               </button>
+              
+              {/* Show delete option if tree mapping exists - use force delete to remove any user's data */}
+              {(treeMapping?.id) && (
+                <button
+                  onClick={forceDeletePrevious}
+                  disabled={deleting}
+                  className="mt-3 w-full flex justify-center py-2 px-4 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-600 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:bg-gray-100"
+                >
+                  {deleting ? 'Deleting...' : 'Delete Previous Data'}
+                </button>
+              )}
             </div>
           </div>
         </div>

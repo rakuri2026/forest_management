@@ -38,7 +38,7 @@ from ..schemas.yearly_activities import (
     BlockWithSubAreasResponse
 )
 
-router = APIRouter(prefix="/api/yearly-activities", tags=["yearly_activities"])
+router = APIRouter(prefix="/api/yearly-activities")
 
 
 # ===== POTENTIAL ACTIVITIES (Master List) =====

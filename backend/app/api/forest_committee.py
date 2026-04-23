@@ -29,7 +29,7 @@ from ..schemas.forest_committee import (
 )
 from ..services.forest_committee_service import ForestCommitteeValidation
 
-router = APIRouter(prefix="/api/forest-committee", tags=["forest_committee"])
+router = APIRouter(prefix="/api/forest-committee")
 
 
 # ============================================================================

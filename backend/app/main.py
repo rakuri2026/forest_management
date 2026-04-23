@@ -29,6 +29,7 @@ from .core.database import check_db_connection, Base, engine
 from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router
 from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
 from .api import location_search, tiles, user_group, household_info, forest_committee, yearly_activities
+from .api import compartments
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -234,6 +235,12 @@ app.include_router(
 app.include_router(
     yearly_activities.router,
     tags=["Yearly Activities"]
+)
+
+# Include compartment management router
+app.include_router(
+    compartments.router,
+    tags=["Compartments"]
 )
 
 

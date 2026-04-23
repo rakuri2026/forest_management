@@ -5,6 +5,7 @@ import { Card, Select, Spin, Empty, Tag, message, Radio, Space, Button, List } f
 const Option = Select.Option;
 import { yearlyActivitiesApi, forestApi } from '../../services/api';
 import DrawingCanvas from './DrawingCanvas';
+import { NumericScale } from '../NumericScale';
 
 interface ActivityMapViewProps {
   calculationId: string;
@@ -354,6 +355,7 @@ const ActivityMapView: React.FC<ActivityMapViewProps> = ({ calculationId, select
               attribution={BASE_MAPS[baseMap].attribution}
               url={BASE_MAPS[baseMap].url}
             />
+<NumericScale />
             
             {/* Forest Boundary Layer */}
             {boundaryGeometry && (
@@ -510,6 +512,7 @@ const ActivityMapView: React.FC<ActivityMapViewProps> = ({ calculationId, select
             attribution={BASE_MAPS[baseMap].attribution}
             url={BASE_MAPS[baseMap].url}
           />
+          <NumericScale />
 
           {/* Forest Boundary Layer */}
           {boundaryGeometry && (

@@ -20,7 +20,7 @@ from ..schemas.biodiversity import (
 )
 from ..utils.auth import get_current_user
 
-router = APIRouter(prefix="/biodiversity", tags=["biodiversity"])
+router = APIRouter(prefix="/biodiversity")
 
 
 @router.get("/species", response_model=BiodiversitySpeciesListResponse)

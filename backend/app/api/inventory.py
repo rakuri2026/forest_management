@@ -299,17 +299,27 @@ async def confirm_and_upload_with_mapping(
     # (Re-use existing validation logic from /upload endpoint)
 
     # Check if tree mapping already exists for this calculation
+    existing_mapping = None
     if calculation_id:
         existing_mapping = db.query(InventoryCalculation).filter(
-            InventoryCalculation.calculation_id == UUID(calculation_id),
-            InventoryCalculation.user_id == current_user.id
+            InventoryCalculation.calculation_id == UUID(calculation_id)
         ).first()
 
+        # If exists - return it instead of blocking (show user what exists)
         if existing_mapping:
-            raise HTTPException(
-                status_code=400,
-                detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
-            )
+            return {
+                "inventory_id": str(existing_mapping.id),
+                "exists": True,
+                "filename": existing_mapping.uploaded_filename,
+                "status": existing_mapping.status,
+                "summary": {
+                    "ready_for_processing": False,
+                    "message": f"Tree mapping already exists: {existing_mapping.uploaded_filename}. Delete it first to upload new data."
+                },
+                "errors": [{"type": "existing", "message": f"Tree mapping '{existing_mapping.uploaded_filename}' already exists. Delete it to upload new data."}],
+                "warnings": [],
+                "boundary_check": None
+            }
 
     # IMPORTANT: Check boundary FIRST if calculation_id provided
     # This gives fast feedback if >20% outside, before expensive validation
@@ -511,10 +521,24 @@ async def confirm_and_upload_with_mapping(
         except Exception as e:
             db.rollback()
             if 'uq_inventory_calculations_calculation_id' in str(e) or 'duplicate key value' in str(e):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Tree mapping already exists for this calculation. Please delete the existing tree mapping first."
-                )
+                # Check what exists and return info
+                existing = db.query(InventoryCalculation).filter(
+                    InventoryCalculation.calculation_id == UUID(calculation_id)
+                ).first()
+                if existing:
+                    return {
+                        "inventory_id": str(existing.id),
+                        "exists": True,
+                        "filename": existing.uploaded_filename,
+                        "status": existing.status,
+                        "summary": {
+                            "ready_for_processing": False,
+                            "message": f"Tree mapping already exists: {existing.uploaded_filename}"
+                        },
+                        "errors": [{"type": "existing", "message": "Tree mapping already exists. Delete it to upload new data."}],
+                        "warnings": [],
+                        "boundary_check": None
+                    }
             raise
 
         validation_report['inventory_id'] = str(inventory.id)
@@ -1085,6 +1109,30 @@ async def get_tree_mapping_by_calculation(
     return tree_mapping
 
 
+@router.get("/by-calculation/{calculation_id}/check")
+async def check_tree_mapping_exists(
+    calculation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Check if ANY tree mapping exists for this calculation (regardless of owner)
+    """
+    tree_mapping = db.query(InventoryCalculation).filter(
+        InventoryCalculation.calculation_id == calculation_id
+    ).first()
+
+    if not tree_mapping:
+        return {"exists": False}
+
+    return {
+        "exists": True,
+        "inventory_id": str(tree_mapping.id),
+        "filename": tree_mapping.uploaded_filename,
+        "status": tree_mapping.status
+    }
+
+
 @router.delete("/{inventory_id}")
 async def delete_inventory(
     inventory_id: UUID,
@@ -1101,6 +1149,28 @@ async def delete_inventory(
 
     if not inventory:
         raise HTTPException(status_code=404, detail="Tree mapping not found")
+
+    db.delete(inventory)
+    db.commit()
+
+    return {"message": "Tree mapping deleted successfully"}
+
+
+@router.delete("/by-calculation/{calculation_id}/force")
+async def force_delete_inventory_by_calculation(
+    calculation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Force delete tree mapping for a calculation (overrides user ownership)
+    """
+    inventory = db.query(InventoryCalculation).filter(
+        InventoryCalculation.calculation_id == calculation_id
+    ).first()
+
+    if not inventory:
+        raise HTTPException(status_code=404, detail="No tree mapping found")
 
     db.delete(inventory)
     db.commit()

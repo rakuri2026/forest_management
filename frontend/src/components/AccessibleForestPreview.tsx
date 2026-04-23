@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import { LatLngBounds } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { NumericScale } from './NumericScale';
 
 interface AccessibleForestPreviewProps {
   previewData: any;
@@ -151,6 +152,7 @@ export function AccessibleForestPreview({ previewData }: AccessibleForestPreview
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+            <NumericScale />
 
             {/* Accessible Forest Layer (GREEN) */}
             {accessible_forest?.geometry && (

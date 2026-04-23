@@ -27,6 +27,7 @@ from .user_group import UserGroupExtent, UserGroupBuilding
 from .household_information import HouseholdInformation
 from .caste_classification import CasteClassification
 from .forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialCommittee
+from .compartment import CompartmentSplitHistory
 
 __all__ = [
     "User",
@@ -61,4 +62,5 @@ __all__ = [
     "ForestUserCommittee",
     "AdvisoryCommittee",
     "FinancialCommittee",
+    "CompartmentSplitHistory",
 ]

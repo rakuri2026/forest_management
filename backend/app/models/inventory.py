@@ -157,6 +157,12 @@ class InventoryTree(Base):
 
     # Metadata
     local_name = Column(String(100), nullable=True)
+
+    # Block and Sub-area association (derived from GPS location)
+    block_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_blocks.id", ondelete="SET NULL"), nullable=True)
+    block_name = Column(String(255), nullable=True)
+    sub_area_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_sub_areas.id", ondelete="SET NULL"), nullable=True)
+    sub_area_name = Column(String(255), nullable=True)
     row_number = Column(Integer, nullable=True)
 
     # Extra columns from uploaded CSV (JSONB)

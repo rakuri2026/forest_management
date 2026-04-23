@@ -5,8 +5,11 @@ import 'leaflet/dist/leaflet.css';
 import { MapLegend } from './MapLegend';
 import { RasterClickHandler } from './RasterClickHandler';
 import { RasterLayerControls } from './RasterLayerControls';
+import { NumericScale } from '../NumericScale';
 
 const { BaseLayer, Overlay } = LayersControl;
+
+
 
 // Component to handle auto-zoom to boundaries
 function AutoZoom({ forestBoundary, extentBoundary }: { forestBoundary: any; extentBoundary?: any }) {
@@ -446,6 +449,7 @@ export const UserGroupMapVisualization = forwardRef(function UserGroupMapVisuali
           calculationId={calculationId}
           enabled={clickQueryEnabled}
         />
+        <NumericScale />
       </MapContainer>
 
         {/* Map Legend - Inside map container */}

@@ -6,6 +6,7 @@ import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import * as turf from '@turf/turf';
 import { Button, Radio, Space, List, Card, message, Popconfirm, Input, Divider, Checkbox } from 'antd';
 import { yearlyActivitiesApi } from '../../services/api';
+import { NumericScale } from '../NumericScale';
 
 interface BlockSubArea {
   id: string;
@@ -18,6 +19,66 @@ interface BlockSubArea {
 interface YearData {
   year: number;
 }
+
+const EditableTag: React.FC<{
+  text: string;
+  onSave: (newText: string) => void;
+}> = ({ text, onSave }) => {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(text);
+  const inputRef = useRef<Input>(null);
+
+  useEffect(() => {
+    setValue(text);
+  }, [text]);
+
+  const handleEdit = () => {
+    setEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleSave = () => {
+    if (value.trim() && value !== text) {
+      onSave(value.trim());
+    } else {
+      setValue(text);
+    }
+    setEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSave();
+    } else if (e.key === 'Escape') {
+      setValue(text);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <Input
+        ref={inputRef}
+        size="small"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={handleKeyDown}
+        style={{ width: 120 }}
+      />
+    );
+  }
+
+  return (
+    <span 
+      onClick={handleEdit} 
+      style={{ cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
+      title="Click to rename"
+    >
+      {text} ✎
+    </span>
+  );
+};
 
 interface DrawingCanvasProps {
   calculationId: string;
@@ -49,7 +110,7 @@ const BASE_MAPS = {
 const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   calculationId,
   activityId,
-  featureType,
+  featureType: _propFeatureType,  // ignored - using internal state
   onFeatureTypeChange,
   drawnFeatures,
   onFeaturesChange,
@@ -63,7 +124,9 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const [currentPoints, setCurrentPoints] = useState<L.LatLng[]>([]);
   const [tempLayer, setTempLayer] = useState<L.Polyline | L.Polygon | L.Marker | null>(null);
   const [featureName, setFeatureName] = useState('');
-  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [featureCounter, setFeatureCounter] = useState(0);
+  const [selectedYears, setSelectedYears] = useState<number[]>([]);
+  const [featureType, setFeatureType] = useState<'point' | 'line' | 'polygon'>('polygon');
   const [isDrawing, setIsDrawing] = useState(false);
   
   // Live measurements state
@@ -89,6 +152,13 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const [showBlocks, setShowBlocks] = useState(true);
   const [showSubAreas, setShowSubAreas] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  
+  // Auto-select first year when availableYears is provided
+  useEffect(() => {
+    if (availableYears && availableYears.length > 0 && selectedYears.length === 0) {
+      setSelectedYears([availableYears[0].year]);
+    }
+  }, [availableYears]);
   
   // Calculate live geodesic measurements using turf.js
   const calculateMeasurements = (points: L.LatLng[], type: string) => {
@@ -148,7 +218,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       return;
     }
     
-    if (!featureName || !selectedYear || !drawingMode) return;
+    if (!selectedYears.length || !drawingMode) return;
     const latlng = e.latlng;
     const newPoints = [...currentPoints, latlng];
     setCurrentPoints(newPoints);
@@ -167,18 +237,21 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         type: 'Point',
         coordinates: [latlng.lng, latlng.lat]
       });
+      
+      const name = featureName || `Feature ${featureCounter + 1}`;
 
       await yearlyActivitiesApi.createDrawnFeature(activityId, {
         feature_type: 'point',
         geometry,
-        properties: { label: featureName || `Point at ${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`, name: featureName, year: selectedYear }
+        properties: { label: name, name: name, years: selectedYears }
       });
 
       message.success('Point added');
       onFeaturesChange();
       setCurrentPoints([]);
       setFeatureName('');
-      setSelectedYear(null);
+      setFeatureCounter(prev => prev + 1);
+      setSelectedYears([availableYears[0]?.year].filter(Boolean));
     } catch (error: any) {
       message.error('Failed to add point');
     }
@@ -191,7 +264,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       return;
     }
     
-    if (!featureName || !selectedYear || currentPoints.length < 2) return;
+    if (!selectedYears.length || currentPoints.length < 2) return;
     e.originalEvent?.preventDefault();
 
     if (featureType === 'line') {
@@ -213,17 +286,20 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         return acc + currentPoints[i - 1].distanceTo(p);
       }, 0);
 
-await yearlyActivitiesApi.createDrawnFeature(activityId, {
-          feature_type: 'line',
-          geometry,
-          properties: { length_m: Math.round(length), name: featureName, year: selectedYear }
-        });
+      const name = featureName || `Feature ${featureCounter + 1}`;
+      
+      await yearlyActivitiesApi.createDrawnFeature(activityId, {
+        feature_type: 'line',
+        geometry,
+        properties: { length_m: Math.round(length), name: name, years: selectedYears }
+      });
 
       message.success('Line added');
       onFeaturesChange();
       setCurrentPoints([]);
       setFeatureName('');
-      setSelectedYear(null);
+      setFeatureCounter(prev => prev + 1);
+      setSelectedYears([availableYears[0]?.year].filter(Boolean));
     } catch (error: any) {
       message.error('Failed to add line');
     }
@@ -253,18 +329,21 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
       });
 
       console.log('[createPolygon] saving geometry:', geometry);
+      
+      const name = featureName || `Feature ${featureCounter + 1}`;
 
       await yearlyActivitiesApi.createDrawnFeature(activityId, {
         feature_type: 'polygon',
         geometry,
-        properties: { area_sqm: Math.round(areaSqM), name: featureName, year: selectedYear }
+        properties: { area_sqm: Math.round(areaSqM), name: name, years: selectedYears }
       });
 
       message.success('Polygon added');
       onFeaturesChange();
       setCurrentPoints([]);
       setFeatureName('');
-      setSelectedYear(null);
+      setFeatureCounter(prev => prev + 1);
+      setSelectedYears([availableYears[0]?.year].filter(Boolean));
     } catch (error: any) {
       console.error('[createPolygon] error:', error);
       message.error('Failed to add polygon');
@@ -411,10 +490,28 @@ await yearlyActivitiesApi.createDrawnFeature(activityId, {
       if (layer) {
         const geoJson = layer.toGeoJSON();
         const finalGeometry = JSON.stringify(geoJson.geometry);
+        
+        // Recalculate length/area after editing
+        let newProperties: any = {};
+        const geom = geoJson.geometry;
+        
+        if (geom.type === 'LineString' && geom.coordinates) {
+          const lineFeature = turf.lineString(geom.coordinates);
+          const length = turf.length(lineFeature, { units: 'meters' });
+          newProperties.length_m = Math.round(length);
+        } else if (geom.type === 'Polygon' && geom.coordinates) {
+          // Use outer ring for area calculation
+          const polyCoords = geom.coordinates[0].map((c: number[]) => [c[0], c[1]] as [number, number]);
+          const polygonFeature = turf.polygon([polyCoords]);
+          const area = turf.area(polygonFeature);
+          newProperties.area_sqm = Math.round(area);
+        }
+        
         try {
           await yearlyActivitiesApi.updateDrawnFeature(activityId, editingFeatureId, {
             geometry: finalGeometry,
-            feature_type: editingFeature?.feature_type || featureType
+            feature_type: editingFeature?.feature_type || featureType,
+            properties: { ...editingFeature?.properties, ...newProperties }
           });
         } catch (err) {
           console.error('[Geoman] Final save failed:', err);
@@ -944,37 +1041,45 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
     <div style={{ display: 'flex', height: '100%' }}>
       <div style={{ width: '350px', padding: '12px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Input
-            ref={nameInputRef}
-            placeholder="Enter feature name first"
-            value={featureName}
-            onChange={(e) => setFeatureName(e.target.value)}
-            autoComplete="off"
-            suffix={featureName ? <span style={{ color: 'green' }}>✓</span> : null}
-          />
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Feature Name:</label>
+            <Input
+              ref={nameInputRef}
+              placeholder="Enter feature name"
+              value={featureName}
+              onChange={(e) => setFeatureName(e.target.value)}
+              autoComplete="off"
+              suffix={featureName ? <span style={{ color: 'green' }}>✓</span> : null}
+            />
+          </div>
 
           {availableYears && availableYears.length > 0 && (
-            <Radio.Group
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
-              buttonStyle="solid"
-            >
-              {availableYears.map(y => (
-                <Radio.Button key={y.year} value={y.year}>{y.year}</Radio.Button>
-              ))}
-            </Radio.Group>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Select Years:</label>
+              <Checkbox.Group
+                value={selectedYears}
+                onChange={(vals) => setSelectedYears(vals as number[])}
+                style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}
+              >
+                {availableYears.map(y => (
+                  <Checkbox key={y.year} value={y.year} style={{ margin: 0 }}>{y.year}</Checkbox>
+                ))}
+              </Checkbox.Group>
+            </div>
           )}
 
           <Radio.Group
-            value={featureType}
-            onChange={(e) => onFeatureTypeChange(e.target.value)}
-            buttonStyle="solid"
-            disabled={!featureName || !selectedYear}
-          >
-            <Radio.Button value="point">Point</Radio.Button>
-            <Radio.Button value="line">Line</Radio.Button>
-            <Radio.Button value="polygon">Polygon</Radio.Button>
-          </Radio.Group>
+              value={featureType}
+              onChange={(e) => setFeatureType(e.target.value)}
+              buttonStyle="solid"
+              size="small"
+              disabled={!selectedYears.length}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}
+            >
+              <Radio.Button value="point" style={{ margin: 0 }}>Point</Radio.Button>
+              <Radio.Button value="line" style={{ margin: 0 }}>Line</Radio.Button>
+              <Radio.Button value="polygon" style={{ margin: 0 }}>Polygon</Radio.Button>
+            </Radio.Group>
 
           {/* Unit Toggle */}
           <Button
@@ -1032,7 +1137,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
           <Button
             type={drawingMode ? 'primary' : 'default'}
             onClick={() => setDrawingMode(!drawingMode)}
-            disabled={!featureName || !selectedYear}
+            disabled={!selectedYears.length}
             block
           >
             {drawingMode ? 'Drawing Active ✓' : 'Start Drawing'}
@@ -1056,7 +1161,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             <List
               size="small"
               dataSource={drawnFeatures}
-              renderItem={(feature: any) => {
+              renderItem={(feature: any, index: number) => {
                 const isBeingEdited = editingFeatureId === feature.id;
                 const isOtherBeingEdited = editingFeatureId && !isBeingEdited;
                 return (
@@ -1076,6 +1181,17 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                     >
                       {isBeingEdited ? 'Editing...' : isOtherBeingEdited ? 'In Edit' : 'Edit'}
                     </Button>,
+                    <Button 
+                      type="link" 
+                      size="small"
+                      onClick={() => {
+                        setSelectedFeatureId(feature.id);
+                        setEditingFeature(feature);
+                      }}
+                      title="Edit years"
+                    >
+                      Years
+                    </Button>,
                     <Popconfirm
                       title="Delete this feature?"
                       onConfirm={() => handleDeleteFeature(feature.id)}
@@ -1086,8 +1202,22 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
                   ]}
                 >
                   <List.Item.Meta
-                    title={feature.properties?.name || feature.feature_type}
-                    description={`Year ${feature.properties?.year || '-'} • ${feature.feature_type === 'point' ? '1 point' : feature.feature_type === 'line' ? `${feature.properties?.length_m || 0} m` : `${feature.properties?.area_sqm || 0} m²`}`}
+                    title={
+                      <EditableTag 
+                        text={feature.properties?.name || `Feature ${index + 1}`}
+                        onSave={async (newName) => {
+                          try {
+                            await yearlyActivitiesApi.updateDrawnFeature(activityId, feature.id, {
+                              properties: { ...feature.properties, name: newName, label: newName }
+                            });
+                            onFeaturesChange();
+                          } catch (error) {
+                            message.error('Failed to update name');
+                          }
+                        }}
+                      />
+                    }
+                    description={`Years: ${feature.properties?.years?.join(', ') || feature.properties?.year || '-'} • ${feature.feature_type === 'point' ? '1 point' : feature.feature_type === 'line' ? `${feature.properties?.length_m || 0} m` : `${feature.properties?.area_sqm || 0} m²`}`}
                   />
                 </List.Item>
               )}}
@@ -1112,38 +1242,35 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             <p style={{ color: '#999', fontSize: 12 }}>Click a feature to select it</p>
           ) : (
             <>
-              {availableYears && availableYears.length > 1 && (
+              {availableYears && availableYears.length > 0 && (
                 <div style={{ marginTop: 8 }}>
-                  <p style={{ fontSize: 11, marginBottom: 4, color: '#666' }}>Assign to year:</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {availableYears
-                      .filter(y => y.year !== editingFeature?.properties?.year)
-                      .map(y => {
-                        // Check if this geometry already exists for this year
-                        const sourceGeometry = editingFeature?.geometry;
-                        const isDuplicate = drawnFeatures.some(f => 
-                          f.id !== editingFeature?.id &&  // Not the same feature
-                          f.properties?.year === y.year &&  // Same year
-                          f.geometry === sourceGeometry  // Same geometry
-                        );
-                        
-                        return (
-                          <Button 
-                            key={y.year} 
-                            size="small" 
-                            onClick={() => handleCopyFeature(y.year)}
-                            disabled={isDuplicate}
-                            style={isDuplicate ? { backgroundColor: '#fff1f0', borderColor: '#ffccc7', color: '#ff4d4f' } : {}}
-                            title={isDuplicate ? `Same feature already in Year ${y.year}` : `Assign to Year ${y.year}`}
-                          >
-                            Y{y.year}{isDuplicate && ' ✗'}
-                          </Button>
-                        );
-                      })}
-                  </div>
-                  <p style={{ fontSize: 10, color: '#999', marginTop: 6 }}>
-                    ✗ = Same feature already assigned to that year
-                  </p>
+                  <p style={{ fontSize: 11, marginBottom: 4, color: '#666' }}>Assigned Years:</p>
+                  <Checkbox.Group
+                    value={editingFeature?.properties?.years || [editingFeature?.properties?.year].filter(Boolean)}
+                    onChange={(vals) => {
+                      const newYears = vals as number[];
+                      yearlyActivitiesApi.updateDrawnFeature(activityId, editingFeature.id, {
+                        properties: { 
+                          ...editingFeature?.properties, 
+                          years: newYears,
+                          year: newYears[0]
+                        }
+                      }).then(() => {
+                        // Update local state too
+                        setEditingFeature({
+                          ...editingFeature,
+                          properties: { ...editingFeature?.properties, years: newYears, year: newYears[0] }
+                        });
+                        onFeaturesChange();
+                        message.success('Years updated');
+                      });
+                    }}
+                    style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}
+                  >
+                    {availableYears.map(y => (
+                      <Checkbox key={y.year} value={y.year} style={{ margin: 0 }}>{y.year}</Checkbox>
+                    ))}
+                  </Checkbox.Group>
                 </div>
               )}
               
@@ -1172,6 +1299,7 @@ const handleMapClickForEdit = (e: L.LeafletMouseEvent) => {
             attribution={BASE_MAPS[baseMap].attribution}
             url={BASE_MAPS[baseMap].url}
           />
+          <NumericScale />
           
           {/* Boundary/Block/SubArea layers rendered by renderBoundaryLayers() */}
           <MapEventsHandler onClick={handleMapClick} onDoubleClick={handleDoubleClick} blocksWithSubAreas={blocksWithSubAreas} />

@@ -106,6 +106,12 @@ class InventoryTreeResponse(BaseModel):
     longitude: Optional[float]
     latitude: Optional[float]
 
+    # Block and Sub-area
+    block_id: Optional[UUID]
+    block_name: Optional[str]
+    sub_area_id: Optional[UUID]
+    sub_area_name: Optional[str]
+
     class Config:
         from_attributes = True
 

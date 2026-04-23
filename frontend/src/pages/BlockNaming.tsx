@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, GeoJSON, Popup, useMap, Marker } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, GeoJSON, Popup, Marker } from 'react-leaflet';
 import * as turf from '@turf/turf';
 import { forestApi } from '../services/api';
 import { Tooltip } from '../components/Tooltip';
 import '../styles/compact.css';
+import { NumericScale } from '../components/NumericScale';
 
 interface BlockPolygon {
   index: number;
@@ -439,6 +438,7 @@ const BlockNamingPage: React.FC = () => {
 
             {/* Auto-fit bounds to boundary */}
             <FitBoundaryBounds geometry={calculation?.geometry} />
+            <NumericScale />
 
             {/* Show polygons for multi-block mode */}
             {blockMode === 'multiple' && polygons.map((poly, idx) => {

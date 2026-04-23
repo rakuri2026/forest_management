@@ -12,7 +12,7 @@ from ..core.database import get_db
 from ..services.tile_service import get_tile_service
 
 
-router = APIRouter(prefix="/api", tags=["tiles"])
+router = APIRouter(prefix="/api")
 
 
 @router.get("/calculations/{calculation_id}/tiles/{layer_name}/{z}/{x}/{y}.png")

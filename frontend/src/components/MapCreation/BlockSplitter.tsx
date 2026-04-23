@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import {
@@ -11,6 +10,7 @@ import {
   formatArea,
   splitPolygonWithLine,
 } from '../../utils/geometryValidation';
+import { NumericScale } from '../NumericScale';
 
 interface Block {
   id: string;
@@ -598,6 +598,7 @@ const BlockSplitter: React.FC<BlockSplitterProps> = ({
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             />
+            <NumericScale />
 
             {/* Outer boundary */}
             {outerBoundary && (

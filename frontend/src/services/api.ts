@@ -568,6 +568,48 @@ export const inventoryApi = {
     return response.data;
   },
 
+  // Preview column mapping for uploaded CSV
+  previewColumnMapping: async (file: File): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post("/api/inventory/preview-mapping", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
+  // Confirm column mapping and save preferences
+  confirmColumnMapping: async (
+    file: File,
+    mapping: Record<string, string>,
+    savePreference: boolean,
+    gridSpacing: number,
+    calculationId?: string,
+    projectionEpsg?: number
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mapping", JSON.stringify(mapping));
+    formData.append("save_preference", savePreference.toString());
+    formData.append("grid_spacing_meters", gridSpacing.toString());
+    if (calculationId) {
+      formData.append("calculation_id", calculationId);
+    }
+    if (projectionEpsg) {
+      formData.append("projection_epsg", projectionEpsg.toString());
+    }
+
+    const response = await api.post("/api/inventory/confirm-mapping", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  },
+
   processInventory: async (id: string, file: File): Promise<any> => {
     const formData = new FormData();
     formData.append("file", file);
@@ -595,6 +637,18 @@ export const inventoryApi = {
     return response.data;
   },
 
+  // Get tree mapping data for a calculation
+  getTreeMappingByCalculation: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/tree-mapping/${calculationId}`);
+    return response.data;
+  },
+
+  // Check if ANY tree mapping exists (regardless of owner)
+  checkTreeMappingExists: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/by-calculation/${calculationId}/check`);
+    return response.data;
+  },
+
   listInventoryTrees: async (
     id: string,
     params?: {
@@ -607,28 +661,34 @@ export const inventoryApi = {
     return response.data;
   },
 
-  exportInventory: async (id: string, format: "csv" | "geojson"): Promise<Blob> => {
+exportInventory: async (id: string, format: "csv" | "geojson" | "excel"): Promise<{blob: Blob, filename: string}> => {
     const response = await api.get(`/api/inventory/${id}/export`, {
       params: { format },
       responseType: "blob",
     });
-    return response.data;
+    return {
+      blob: response.data,
+      filename: `inventory_${id}.${format}`
+    };
   },
 
   deleteInventory: async (id: string): Promise<void> => {
     await api.delete(`/api/inventory/${id}`);
   },
 
-  getTreeMappingByCalculation: async (calculationId: string): Promise<any> => {
-    const response = await api.get(`/api/inventory/by-calculation/${calculationId}`);
+  // Force delete tree mapping by calculation (ignores user ownership)
+  forceDeleteByCalculation: async (calculationId: string): Promise<any> => {
+    const response = await api.delete(`/api/inventory/by-calculation/${calculationId}/force`);
     return response.data;
   },
 
+  // Get correction preview for boundary correction
   getCorrectionPreview: async (inventoryId: string): Promise<any> => {
     const response = await api.get(`/api/inventory/${inventoryId}/correction-preview`);
     return response.data;
   },
 
+  // Accept boundary corrections
   acceptCorrections: async (inventoryId: string, file: File): Promise<any> => {
     const formData = new FormData();
     formData.append("file", file);
@@ -641,46 +701,17 @@ export const inventoryApi = {
     return response.data;
   },
 
-  // Column Mapping endpoints
-  previewColumnMapping: async (file: File): Promise<any> => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await api.post("/api/inventory/preview-mapping", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
+  // Get grid cells for a specific inventory calculation
+  getGridCells: async (inventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/inventory/${inventoryId}/grid-cells`);
     return response.data;
   },
 
-  confirmColumnMapping: async (
-    file: File,
-    mapping: Record<string, string>,
-    savePreference: boolean = false,
-    gridSpacing: number = 20.0,
-    calculationId?: string,
-    projectionEpsg?: number,
-    correctionStrategy: string = "nearest_tree"
-  ): Promise<any> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("mapping", JSON.stringify(mapping));
-    formData.append("save_preference", savePreference.toString());
-    formData.append("grid_spacing_meters", gridSpacing.toString());
-    formData.append("correction_strategy", correctionStrategy);
-
-    if (calculationId) {
-      formData.append("calculation_id", calculationId);
-    }
-    if (projectionEpsg) {
-      formData.append("projection_epsg", projectionEpsg.toString());
-    }
-
-    const response = await api.post("/api/inventory/confirm-mapping", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+  // Export grid cells as GeoJSON or KML
+  exportGrid: async (inventoryId: string, format: 'geojson' | 'kml'): Promise<Blob> => {
+    const response = await api.get(`/api/inventory/${inventoryId}/export-grid`, {
+      params: { format },
+      responseType: 'blob',
     });
     return response.data;
   },
@@ -1846,5 +1877,125 @@ export const yearlyActivitiesApi = {
       data
     );
     return response.data;
+  },
+};
+
+
+// ============================================================================
+// Compartment Management API
+// ============================================================================
+
+export const compartmentApi = {
+  getAvailableBlocks: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(`/api/compartments/available-blocks/${calculationId}`);
+    return response.data;
+  },
+
+  getAllBlocks: async (calculationId: string): Promise<any[]> => {
+    const response = await api.get(`/api/compartments/calculation/${calculationId}/all-blocks`);
+    return response.data;
+  },
+
+  previewSplit: async (request: {
+    block_id: string;
+    method: 'parallel' | 'grid' | 'custom';
+    parameters: Record<string, any>;
+  }): Promise<any> => {
+    const response = await api.post('/api/compartments/preview-split', request);
+    return response.data;
+  },
+
+  executeSplit: async (request: {
+    block_id: string;
+    method: 'parallel' | 'grid' | 'custom';
+    parameters: Record<string, any>;
+    naming_pattern?: string;
+    reassign_trees?: boolean;
+    notes?: string;
+  }): Promise<any> => {
+    const response = await api.post('/api/compartments/execute-split', request);
+    return response.data;
+  },
+
+  getSplitDirections: async (): Promise<any[]> => {
+    const response = await api.get('/api/compartments/split-directions');
+    return response.data;
+  },
+
+  undoSplit: async (splitHistoryId: string): Promise<any> => {
+    const response = await api.delete(`/api/compartments/split/${splitHistoryId}`);
+    return response.data;
+  },
+
+  deleteCompartments: async (blockId: string): Promise<any> => {
+    const response = await api.delete(`/api/compartments/block/${blockId}/compartments`);
+    return response.data;
+  },
+
+  getTreesNeedingAssignment: async (blockId: string): Promise<any> => {
+    const response = await api.get(`/api/compartments/trees-needing-assignment/${blockId}`);
+    return response.data;
+  },
+
+  reassignTrees: async (request: {
+    block_id: string;
+    auto_assign?: boolean;
+    manual_assignments?: Record<string, string>;
+  }): Promise<any> => {
+    const response = await api.post('/api/compartments/reassign-trees', request);
+    return response.data;
+  },
+
+  getTreesForMap: async (calculationId: string): Promise<{ count: number; trees: any[] }> => {
+    const response = await api.get(`/api/compartments/calculation/${calculationId}/trees`);
+    return response.data;
+  },
+
+  exportGpkg: async (calculationId: string, forestName?: string): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`/api/compartments/calculation/${calculationId}/export-gpkg`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Export failed: ${response.status}`);
+    }
+    
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', forestName ? `${forestName}_compartments.gpkg` : 'compartments.gpkg');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+
+  exportKml: async (calculationId: string, forestName?: string): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`/api/compartments/calculation/${calculationId}/export-kml`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Export failed: ${response.status}`);
+    }
+    
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', forestName ? `${forestName}_compartments.kml` : 'compartments.kml');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   },
 };

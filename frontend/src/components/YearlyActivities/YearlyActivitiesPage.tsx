@@ -342,17 +342,30 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
   };
 
   // Update quantity
+  // Update quantity - also recalculate year budgets
   const handleQuantityChange = (configId: string, value: number) => {
-    setActivityConfigs(activityConfigs.map(c =>
-      c.id === configId ? { ...c, default_quantity: value } : c
-    ));
+    setActivityConfigs(activityConfigs.map(c => {
+      if (c.id !== configId) return c;
+      // Recalculate year_budgets based on new quantity
+      const newYearBudgets = c.year_budgets.map(yb => ({
+        ...yb,
+        quantity: value
+      }));
+      return { ...c, default_quantity: value, year_budgets: newYearBudgets };
+    }));
   };
 
-  // Update budget
+  // Update budget - also recalculate all year budgets
   const handleBudgetChange = (configId: string, value: number) => {
-    setActivityConfigs(activityConfigs.map(c =>
-      c.id === configId ? { ...c, default_budget: value } : c
-    ));
+    setActivityConfigs(activityConfigs.map(c => {
+      if (c.id !== configId) return c;
+      // Recalculate year_budgets based on new default_budget (value is in NPR)
+      const newYearBudgets = c.year_budgets.map(yb => ({
+        ...yb,
+        budget: Math.round(value) // Keep value as NPR
+      }));
+      return { ...c, default_budget: value, year_budgets: newYearBudgets };
+    }));
   };
 
   // Update specific year budget
@@ -362,6 +375,18 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
         ...c,
         year_budgets: c.year_budgets.map((yb, idx) =>
           idx === yearIndex ? { ...yb, budget: value } : yb
+        )
+      } : c
+    ));
+  };
+
+  // Update specific year quantity
+  const handleYearQuantityChange = (configId: string, yearIndex: number, value: number) => {
+    setActivityConfigs(activityConfigs.map(c =>
+      c.id === configId ? {
+        ...c,
+        year_budgets: c.year_budgets.map((yb, idx) =>
+          idx === yearIndex ? { ...yb, quantity: value } : yb
         )
       } : c
     ));
@@ -463,6 +488,92 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       console.error('Failed to delete feature:', error);
       message.error('Failed to delete feature');
     }
+  };
+
+  // Export to CSV
+  const handleExportCSV = () => {
+    const headers = [
+      'S.No',
+      'Activity',
+      'Program',
+      'Unit',
+      'Quantity (Year-Value)',
+      'Budget (Year-Value)',
+      'Total Budget (10 Yrs)',
+      'Location Type',
+      'Location Details',
+      'Spatial Features'
+    ];
+    
+    const rows = activityConfigs.map((config, idx) => {
+      // Quantity: only years with value > 0
+      const qtyValues = config.year_budgets
+        .filter(yb => yb.quantity > 0)
+        .map(yb => `Y${yb.year}:${Math.round(yb.quantity)}`)
+        .join(', ');
+      
+      // Budget: only years with value > 0
+      const budgetValues = config.year_budgets
+        .filter(yb => yb.budget > 0)
+        .map(yb => `Y${yb.year}:${yb.budget}`)
+        .join(', ');
+      
+      // Total budget
+      const totalBudget = config.year_budgets.reduce((sum, yb) => sum + yb.budget, 0);
+      
+      // Location details
+      const locationType = config.year_budgets[0]?.location || 'all';
+      let locationDetails = '';
+      if (locationType === 'all') {
+        locationDetails = 'All Blocks';
+      } else if (locationType === 'blocks') {
+        const selectedBlockNames = config.year_budgets[0]?.selected_blocks
+          ?.map(id => blocks.find(b => b.id === id)?.name)
+          .filter(Boolean)
+          .join(', ');
+        locationDetails = selectedBlockNames || '';
+      } else if (locationType === 'sub_areas') {
+        const selectedSubAreaNames = config.year_budgets[0]?.selected_sub_areas
+          ?.map(id => subAreas.find(sa => sa.id === id)?.name)
+          .filter(Boolean)
+          .join(', ');
+        locationDetails = selectedSubAreaNames || '';
+      } else {
+        locationDetails = 'No specific location';
+      }
+      
+      // Spatial features
+      const featureNames = config.drawn_features
+        .map(f => f.properties?.name || f.properties?.label || 'Unnamed')
+        .join(', ');
+      
+      return [
+        idx + 1,
+        config.activity,
+        config.program,
+        config.unit,
+        qtyValues || 'None',
+        budgetValues || 'None',
+        totalBudget,
+        locationType,
+        locationDetails,
+        featureNames || 'None'
+      ];
+    });
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${forestName}_yearly_activities_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    message.success('CSV exported successfully');
   };
 
   // Save all
@@ -691,6 +802,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
               onQuantityChange={(val) => handleQuantityChange(config.id, val)}
               onBudgetChange={(val) => handleBudgetChange(config.id, val)}
               onYearBudgetChange={(configId, yearIndex, value) => handleYearBudgetChange(configId, yearIndex, value)}
+              onYearQuantityChange={(configId, yearIndex, value) => handleYearQuantityChange(configId, yearIndex, value)}
               onLocationTypeChange={(type) => handleLocationTypeChange(config.id, type)}
               onBlockToggle={(blockId) => handleBlockToggle(config.id, blockId)}
               onSubAreaToggle={(subAreaId) => handleSubAreaToggle(config.id, subAreaId)}
@@ -706,6 +818,13 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       <div className="page-footer">
         <Space>
           <Button onClick={onClose}>Cancel</Button>
+          <Button 
+            icon={<FileTextOutlined />} 
+            onClick={handleExportCSV}
+            disabled={activityConfigs.length === 0}
+          >
+            Export CSV
+          </Button>
           <Button 
             type="primary" 
             icon={<SaveOutlined />} 
@@ -811,6 +930,7 @@ interface ActivityCardProps {
   onQuantityChange: (value: number) => void;
   onBudgetChange: (value: number) => void;
   onYearBudgetChange: (configId: string, yearIndex: number, value: number) => void;
+  onYearQuantityChange: (configId: string, yearIndex: number, value: number) => void;
   onLocationTypeChange: (type: 'none' | 'all' | 'blocks' | 'sub_areas') => void;
   onBlockToggle: (blockId: string) => void;
   onSubAreaToggle: (subAreaId: string) => void;
@@ -829,6 +949,7 @@ const ActivityCard: React.FC<ActivityCardProps> = ({
   onQuantityChange,
   onBudgetChange,
   onYearBudgetChange,
+  onYearQuantityChange,
   onLocationTypeChange,
   onBlockToggle,
   onSubAreaToggle,
@@ -842,6 +963,8 @@ const ActivityCard: React.FC<ActivityCardProps> = ({
   const [tempBudget, setTempBudget] = useState(config.default_budget);
   const [showAddFeature, setShowAddFeature] = useState(false);
   const [copyYearModal, setCopyYearModal] = useState<string | null>(null);
+  const [editingQtyIndex, setEditingQtyIndex] = useState<number | null>(null);
+  const [tempQty, setTempQty] = useState(0);
   const [editingYearIndex, setEditingYearIndex] = useState<number | null>(null);
   const [tempYearBudget, setTempYearBudget] = useState(0);
 
@@ -1148,12 +1271,54 @@ const ActivityCard: React.FC<ActivityCardProps> = ({
 
           <Divider />
 
+          {/* Quantity by Year */}
+          <div className="content-section">
+            <label>📊 Quantity by Year ({config.unit}):</label>
+            <div className="year-budget-grid">
+              {config.year_budgets.map((yb, idx) => (
+                <div key={`qty-${yb.year}`} className="year-budget-item">
+                  {editingQtyIndex === idx ? (
+                    <Input
+                      size="small"
+                      style={{ width: 60 }}
+                      value={tempQty}
+                      onChange={(e) => setTempQty(Number(e.target.value) || 0)}
+                      onBlur={() => {
+                        onYearQuantityChange(config.id, idx, tempQty);
+                        setEditingQtyIndex(null);
+                      }}
+                      onPressEnter={() => {
+                        onYearQuantityChange(config.id, idx, tempQty);
+                        setEditingQtyIndex(null);
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <span
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setTempQty(yb.quantity);
+                        setEditingQtyIndex(idx);
+                      }}
+                      title="Click to edit"
+                    >
+                      <Text strong>Y{yb.year}:</Text>
+                      <Text> {Math.round(yb.quantity)}</Text>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Divider />
+
           {/* Budget by Year */}
           <div className="content-section">
             <label>💰 Budget by Year:</label>
             <div className="year-budget-grid">
               {config.year_budgets.map((yb, idx) => (
-                <div key={yb.year} className="year-budget-item">
+                <div key={`budget-${yb.year}`} className="year-budget-item">
                   {editingYearIndex === idx ? (
                     <Input
                       size="small"

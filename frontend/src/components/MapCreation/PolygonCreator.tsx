@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Marker, Polyline, useMap } from 'react-leaflet';
-import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import HelpTooltip, { helpTexts } from '../HelpTooltip';
 import { GPSPoint, gpsPointsToPolygon } from '../../utils/gpsUtils';
+import { NumericScale } from '../NumericScale';
+
 import {
   validatePolygonGeometry,
   calculateAreaHectares,
@@ -758,6 +759,7 @@ const PolygonCreator = forwardRef<PolygonCreatorHandle, PolygonCreatorProps>(({
           >
             <MapRefCapture onMapReady={handleMapReady} />
             <BaseMapSelector />
+            <NumericScale />
 
             {/* Show GPS points if in auto mode */}
             {mode === 'auto' && gpsPoints.length > 0 && (

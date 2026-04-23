@@ -10,11 +10,13 @@ import { TreeMappingTab } from '../components/TreeMappingTab';
 import BiodiversityTab from '../components/BiodiversityTab';
 import AnalysisTabContent from '../components/AnalysisTabContent';
 import MapsTab from '../components/MapsTab';
+import { VerticalSidebar, createTabGroups } from '../components/VerticalSidebar';
 import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
 import { UserGroupMapTab } from '../components/UserGroupMapTab';
 import { TotalInventoryTab } from '../components/TotalInventoryTab';
 import { FieldInventoryTab } from '../components/FieldInventoryTab';
-import YearlyActivitiesTab from '../components/YearlyActivitiesTab';
+import { CompartmentTab } from '../components/Compartment';
+import YearlyActivitiesPage from '../components/YearlyActivities/YearlyActivitiesPage';
 import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
 import type { AnalysisOptions } from '../constants/analysisPresets';
 import { RasterLayerControl } from '../components/RasterLayerControl';
@@ -145,7 +147,7 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
   const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'yearlyactivities'>('analysis');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities'>('analysis');
 
   // Re-analysis modal state
   const [showReanalysisModal, setShowReanalysisModal] = useState(false);
@@ -611,142 +613,26 @@ export default function CalculationDetail() {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="border-b border-gray-200">
-          <nav className="flex -mb-px">
-            <button
-              onClick={() => setActiveTab('analysis')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'analysis'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Analysis
-            </button>
-            <button
-              onClick={() => setActiveTab('subareas')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'subareas'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Sub-Areas
-            </button>
-            <button
-              onClick={() => setActiveTab('yearlyactivities')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'yearlyactivities'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Yearly Activities
-            </button>
-            <button
-              onClick={() => setActiveTab('fieldbook')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'fieldbook'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Fieldbook
-            </button>
-            <button
-              onClick={() => setActiveTab('sampling')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'sampling'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Sampling
-            </button>
-            <button
-              onClick={() => setActiveTab('treemodel')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'treemodel'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Tree Model
-            </button>
-            <button
-              onClick={() => setActiveTab('treemapping')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'treemapping'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Tree Mapping
-            </button>
-            <button
-              onClick={() => setActiveTab('biodiversity')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'biodiversity'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Biodiversity
-            </button>
-            <button
-              onClick={() => setActiveTab('maps')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'maps'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Maps
-            </button>
-            <button
-              onClick={() => setActiveTab('usergroup')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'usergroup'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              User Group Map
-            </button>
-            <button
-              onClick={() => setActiveTab('fieldinventory')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'fieldinventory'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Field Inventory
-            </button>
-            <button
-              onClick={() => setActiveTab('totalinventory')}
-              className={`px-6 py-3 border-b-2 font-medium text-sm ${
-                activeTab === 'totalinventory'
-                  ? 'border-green-500 text-green-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Total Inventory
-            </button>
-          </nav>
-        </div>
-
-        {/* Tab Content */}
-        {activeTab === 'analysis' && (
-          <div className="p-6">
-            <AnalysisTabContent
-              calculation={calculation}
-              blocks={blocks}
-              subAreas={subAreas}
+        {/* Tab Navigation with Vertical Sidebar */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Vertical Sidebar */}
+          <div className="w-56 flex-shrink-0 overflow-y-auto">
+            <VerticalSidebar
+              groups={createTabGroups()}
+              activeTab={activeTab}
+              onTabChange={(tabId) => setActiveTab(tabId as typeof activeTab)}
             />
           </div>
-        )}
+
+          {/* Tab Content */}
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === 'analysis' && (
+              <AnalysisTabContent
+                calculation={calculation}
+                blocks={blocks}
+                subAreas={subAreas}
+              />
+            )}
 
         {activeTab === 'subareas' && (
           <div className="p-6">
@@ -1126,11 +1012,22 @@ export default function CalculationDetail() {
           </div>
         )}
 
-        {activeTab === 'yearlyactivities' && (
+        {activeTab === 'compartments' && (
           <div className="p-6">
-            <YearlyActivitiesTab calculationId={calculation.id} />
+            <CompartmentTab calculationId={calculation.id} />
           </div>
         )}
+
+        {activeTab === 'yearlyactivities' && (
+          <YearlyActivitiesPage 
+            calculationId={calculation.id}
+            forestName={calculation.forest_name}
+            area={calculation.result_data?.area_hectares || 0}
+            onClose={() => setActiveTab('details')}
+          />
+        )}
+          </div>
+        </div>
 
         {/* Whole Forest Analysis Section - New Organized Layout */}
         {activeTab === 'analysis' && (

@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import { forestApi } from '../services/api';
 import type { CommunityForest } from '../types';
 import 'leaflet/dist/leaflet.css';
+import { NumericScale } from '../components/NumericScale';
 
 const ForestDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -106,6 +107,7 @@ const ForestDetail: React.FC = () => {
                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                       url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
+                    <NumericScale />
                     <GeoJSON
                       data={forest.geometry}
                       style={{

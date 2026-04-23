@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import HelpTooltip, { helpTexts } from '../HelpTooltip';
+import { NumericScale } from '../NumericScale';
+
 import {
   parseCSVCoordinates,
   parsePastedCoordinates,
@@ -510,6 +511,7 @@ const GPSPointInput: React.FC<GPSPointInputProps> = ({ onPointsChange, initialPo
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               />
+              <NumericScale />
               {points.map((point) => (
                 <Marker key={point.id} position={[point.latitude, point.longitude]}>
                   <Popup>

@@ -329,8 +329,8 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
                         )}
                       </td>
                       <td className="px-3 py-2 text-xs font-mono text-gray-700">
-                        <div>{parseFloat(point.longitude).toFixed(6)}</div>
-                        <div className="text-gray-500">{parseFloat(point.latitude).toFixed(6)}</div>
+                        <div>{parseFloat(point.latitude).toFixed(5)}</div>
+                        <div className="text-gray-500">{parseFloat(point.longitude).toFixed(5)}</div>
                       </td>
                       <td className="px-3 py-2 text-xs font-mono text-gray-600">
                         {point.easting_utm && point.northing_utm ? (

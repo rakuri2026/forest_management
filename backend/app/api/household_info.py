@@ -36,7 +36,7 @@ from ..schemas.household_info import (
 from ..services.household_calculations import HouseholdCalculations
 from ..services.forest_committee_service import ForestCommitteeValidation
 
-router = APIRouter(prefix="/api/household", tags=["household_information"])
+router = APIRouter(prefix="/api/household")
 
 
 # ============================================================================

@@ -22,6 +22,7 @@ import {
 } from '../../utils/geometryHelpers';
 import { GPSPoint } from '../../utils/gpsUtils';
 import BaseMapSelector from './BaseMapSelector';
+import { NumericScale } from '../NumericScale';
 
 interface Block {
   id: string;
@@ -1038,6 +1039,7 @@ const BlockSplitterPro: React.FC<BlockSplitterProps> = ({
             style={{ height: '100%', width: '100%' }}
           >
             <BaseMapSelector />
+            <NumericScale />
 
             {/* Outer boundary - GREEN */}
             {outerBoundary && (

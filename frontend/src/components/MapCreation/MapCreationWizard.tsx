@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { MapContainer, GeoJSON, Marker } from 'react-leaflet';
-import L from 'leaflet';
 import GPSPointInput from './GPSPointInput';
 import PolygonCreator from './PolygonCreator';
 import BlockSplitterPro from './BlockSplitterPro';
@@ -8,6 +7,7 @@ import SubAreaManager from './SubAreaManager';
 import BaseMapSelector from './BaseMapSelector';
 import LocationSearch from './LocationSearch';
 import HelpTooltip, { helpTexts } from '../HelpTooltip';
+import { NumericScale } from '../NumericScale';
 import { GPSPoint } from '../../utils/gpsUtils';
 import { formatArea, calculateAreaHectares, cleanAndValidateBlocks } from '../../utils/geometryValidation';
 import { getGeometryCenter } from '../../utils/geometryHelpers';
@@ -483,6 +483,7 @@ const MapCreationWizard: React.FC<MapCreationWizardProps> = ({
                     style={{ height: '100%', width: '100%' }}
                   >
                     <BaseMapSelector />
+                    <NumericScale />
 
                     {/* Outer Boundary - Green */}
                     {outerBoundary && (
