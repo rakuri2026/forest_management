@@ -109,6 +109,7 @@ interface YearBudget {
   year: number;
   quantity: number;
   budget: number;
+  year_detail_id: string | null;
   location: 'none' | 'all' | 'blocks' | 'sub_areas';
   selected_blocks: string[];
   selected_sub_areas: string[];
@@ -145,11 +146,28 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [selectedPotentialId, setSelectedPotentialId] = useState<string | null>(null);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Load initial data
   useEffect(() => {
     loadData();
   }, [calculationId]);
+
+  // Track unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Mark as unsaved when activity configs change
+  const markUnsaved = () => setHasUnsavedChanges(true);
+  const markSaved = () => setHasUnsavedChanges(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -227,6 +245,12 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       
       // Load spatial assignments
       const spatialRes = await yearlyActivitiesApi.getSpatialAssignments(pa.id);
+      const existingBlockIds = (spatialRes || [])
+        .filter((a: any) => a.block_id && a.assignment_type === 'block')
+        .map((a: any) => a.block_id);
+      const existingSubAreaIds = (spatialRes || [])
+        .filter((a: any) => a.sub_area_id && a.assignment_type === 'sub_area')
+        .map((a: any) => a.sub_area_id);
       
       // Load drawn features
       const featuresRes = await yearlyActivitiesApi.getDrawnFeatures(pa.id);
@@ -256,9 +280,10 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
           year: yd.year_number || 1,
           quantity: typeof yd.quantity === 'string' ? parseFloat(yd.quantity) || 1 : Number(yd.quantity) || 1,
           budget: typeof yd.yearly_budget === 'string' ? parseFloat(yd.yearly_budget) || defaultBudget : Number(yd.yearly_budget) || defaultBudget,
-          location: 'none',
-          selected_blocks: [],
-          selected_sub_areas: []
+          year_detail_id: yd.id || null,
+          location: existingBlockIds.length > 0 ? 'blocks' : existingSubAreaIds.length > 0 ? 'sub_areas' : 'none',
+          selected_blocks: existingBlockIds,
+          selected_sub_areas: existingSubAreaIds
         })) || generateDefaultYearBudgets(pa, defaultBudget),
         spatial_assignments: spatialRes || [],
         drawn_features: featuresRes || []
@@ -274,6 +299,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       year: i + 1,
       quantity: pa.default_quantity || 1,
       budget: budget || 5000,
+      year_detail_id: null,
       location: 'none' as const,
       selected_blocks: [],
       selected_sub_areas: []
@@ -344,6 +370,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
   // Update quantity
   // Update quantity - also recalculate year budgets
   const handleQuantityChange = (configId: string, value: number) => {
+    markUnsaved();
     setActivityConfigs(activityConfigs.map(c => {
       if (c.id !== configId) return c;
       // Recalculate year_budgets based on new quantity
@@ -357,6 +384,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
   // Update budget - also recalculate all year budgets
   const handleBudgetChange = (configId: string, value: number) => {
+    markUnsaved();
     setActivityConfigs(activityConfigs.map(c => {
       if (c.id !== configId) return c;
       // Recalculate year_budgets based on new default_budget (value is in NPR)
@@ -370,6 +398,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
   // Update specific year budget
   const handleYearBudgetChange = (configId: string, yearIndex: number, value: number) => {
+    markUnsaved();
     setActivityConfigs(activityConfigs.map(c =>
       c.id === configId ? {
         ...c,
@@ -382,6 +411,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
   // Update specific year quantity
   const handleYearQuantityChange = (configId: string, yearIndex: number, value: number) => {
+    markUnsaved();
     setActivityConfigs(activityConfigs.map(c =>
       c.id === configId ? {
         ...c,
@@ -394,6 +424,40 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
   // Update location type
   const handleLocationTypeChange = (configId: string, type: 'none' | 'all' | 'blocks' | 'sub_areas') => {
+    const config = activityConfigs.find(c => c.id === configId);
+    const currentType = config?.year_budgets[0]?.location;
+    const hasSelectedBlocks = (config?.year_budgets[0]?.selected_blocks?.length || 0) > 0;
+    const hasSelectedSubAreas = (config?.year_budgets[0]?.selected_sub_areas?.length || 0) > 0;
+    
+    // Check if user is switching away from blocks/sub_areas with selections
+    if ((currentType === 'blocks' && hasSelectedBlocks) || (currentType === 'sub_areas' && hasSelectedSubAreas)) {
+      if (type === 'all' || type === 'none') {
+        Modal.confirm({
+          title: 'Clear Selections?',
+          content: `You have ${hasSelectedBlocks ? 'blocks' : 'sub-areas'} selected. Switching to "${type === 'all' ? 'All Blocks' : 'No specific location'}" will clear these selections. Do you want to continue?`,
+          okText: 'Clear & Switch',
+          cancelText: 'Keep Selections',
+          okButtonProps: { danger: true },
+          onOk: () => {
+            markUnsaved();
+            setActivityConfigs(activityConfigs.map(c =>
+              c.id === configId ? {
+                ...c,
+                year_budgets: c.year_budgets.map(yb => ({
+                  ...yb,
+                  location: type,
+                  selected_blocks: [],
+                  selected_sub_areas: []
+                }))
+              } : c
+            ));
+          }
+        });
+        return;
+      }
+    }
+    
+    markUnsaved();
     setActivityConfigs(activityConfigs.map(c =>
       c.id === configId ? {
         ...c,
@@ -409,6 +473,13 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
   // Toggle block selection
   const handleBlockToggle = (configId: string, blockId: string) => {
+    // Skip if blockId is not a valid UUID format
+    if (!blockId || blockId.length !== 36) {
+      console.warn('Invalid block ID:', blockId);
+      return;
+    }
+    
+    markUnsaved();
     setActivityConfigs(activityConfigs.map(c => {
       if (c.id !== configId) return c;
       return {
@@ -428,6 +499,13 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
   // Toggle sub-area selection - auto-select parent block
   const handleSubAreaToggle = (configId: string, subAreaId: string) => {
+    // Skip if subAreaId is not a valid UUID format
+    if (!subAreaId || subAreaId.length !== 36) {
+      console.warn('Invalid sub-area ID:', subAreaId);
+      return;
+    }
+    
+    markUnsaved();
     const subArea = subAreas.find(sa => sa.id === subAreaId);
     const parentBlockId = subArea?.block_id;
     
@@ -439,7 +517,8 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
           const hasSubArea = yb.selected_sub_areas.includes(subAreaId);
           let newSelectedBlocks = [...yb.selected_blocks];
           
-          if (!hasSubArea && parentBlockId && !newSelectedBlocks.includes(parentBlockId)) {
+          // Only add parent block if it's a valid UUID
+          if (!hasSubArea && parentBlockId && parentBlockId.length === 36 && !newSelectedBlocks.includes(parentBlockId)) {
             newSelectedBlocks.push(parentBlockId);
           }
           
@@ -589,20 +668,18 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
 
         // Update year details
         for (const yb of config.year_budgets) {
-          const existingDetail = yearDetailsMap[config.id]
-            ?.find((yd: any) => yd.year_number === yb.year);
-          
-          if (existingDetail) {
-            await yearlyActivitiesApi.updateYearDetail(config.id, existingDetail.id, {
+          if (yb.year_detail_id) {
+            await yearlyActivitiesApi.updateYearDetail(config.id, yb.year_detail_id, {
               quantity: yb.quantity,
               yearly_budget: yb.budget
             });
           } else {
-            await yearlyActivitiesApi.createYearDetail(config.id, {
+            const newDetail = await yearlyActivitiesApi.createYearDetail(config.id, {
               year_number: yb.year,
               quantity: yb.quantity,
               yearly_budget: yb.budget
             });
+            yb.year_detail_id = newDetail.id;
           }
         }
 
@@ -623,9 +700,9 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
           // Sync block assignments
           const currentBlockIds = currentAssignments.filter(a => a.block_id).map(a => a.block_id);
           
-          // Add new blocks
+          // Add new blocks (validate UUID format)
           for (const blockId of selectedBlocks) {
-            if (!currentBlockIds.includes(blockId)) {
+            if (!currentBlockIds.includes(blockId) && blockId && blockId.length === 36) {
               await yearlyActivitiesApi.createSpatialAssignment(config.id, {
                 block_id: blockId,
                 assignment_type: 'block'
@@ -643,10 +720,12 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
           // Sync sub-area assignments
           const currentSubAreaIds = currentAssignments.filter(a => a.sub_area_id).map(a => a.sub_area_id);
           
-          // Add new sub-areas
+          // Add new sub-areas (validate UUID format)
           for (const subAreaId of selectedSubAreas) {
-            if (!currentSubAreaIds.includes(subAreaId)) {
+            if (!currentSubAreaIds.includes(subAreaId) && subAreaId && subAreaId.length === 36) {
+              const subArea = subAreas.find(sa => sa.id === subAreaId);
               await yearlyActivitiesApi.createSpatialAssignment(config.id, {
+                block_id: subArea?.block_id && subArea.block_id.length === 36 ? subArea.block_id : null,
                 sub_area_id: subAreaId,
                 assignment_type: 'sub_area'
               });
@@ -662,20 +741,64 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
         }
       }
       message.success('All changes saved');
+      markSaved();
       
       // Update local yearDetailsMap to reflect saved state
       const newYearDetailsMap = {...yearDetailsMap};
       for (const config of activityConfigs) {
         newYearDetailsMap[config.id] = config.year_budgets.map(yb => ({
+          id: yb.year_detail_id,
           year_number: yb.year,
           quantity: yb.quantity,
           yearly_budget: yb.budget
         }));
       }
       setYearDetailsMap(newYearDetailsMap);
-    } catch (error) {
+      
+      // Also update activityConfigs to reflect saved year_detail_ids and spatial_assignments
+      setActivityConfigs(prev => prev.map(config => {
+        const updatedConfig = {
+          ...config,
+          year_budgets: config.year_budgets.map(yb => ({ ...yb }))
+        };
+        
+        // Update spatial_assignments based on what we did in the save
+        const locationType = config.year_budgets[0]?.location || 'all';
+        const selectedBlocks = config.year_budgets[0]?.selected_blocks || [];
+        const selectedSubAreas = config.year_budgets[0]?.selected_sub_areas || [];
+        const originalAssignments = config.spatial_assignments || [];
+        
+        if (locationType === 'all' || locationType === 'none') {
+          // All assignments should be deleted
+          updatedConfig.spatial_assignments = [];
+        } else if (locationType === 'blocks') {
+          // Keep only selected block assignments
+          updatedConfig.spatial_assignments = originalAssignments.filter(
+            a => a.block_id && selectedBlocks.includes(a.block_id)
+          );
+        } else if (locationType === 'sub_areas') {
+          // Keep only selected sub-area assignments
+          updatedConfig.spatial_assignments = originalAssignments.filter(
+            a => a.sub_area_id && selectedSubAreas.includes(a.sub_area_id)
+          );
+        }
+        
+        return updatedConfig;
+      }));
+    } catch (error: any) {
       console.error('Failed to save:', error);
-      message.error('Failed to save changes');
+      const rawDetail = error.response?.data?.detail;
+      let errorDetail = 'Unknown error occurred';
+      if (typeof rawDetail === 'string') {
+        errorDetail = rawDetail;
+      } else if (Array.isArray(rawDetail)) {
+        errorDetail = rawDetail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ');
+      } else if (rawDetail && typeof rawDetail === 'object') {
+        errorDetail = rawDetail.msg || rawDetail.message || JSON.stringify(rawDetail);
+      } else if (error.message) {
+        errorDetail = error.message;
+      }
+      message.error(`Failed to save: ${errorDetail}`);
     } finally {
       setSaving(false);
     }
@@ -817,7 +940,27 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       {/* Footer */}
       <div className="page-footer">
         <Space>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button 
+            onClick={() => {
+              if (hasUnsavedChanges) {
+                Modal.confirm({
+                  title: 'Unsaved Changes',
+                  content: 'You have unsaved changes. Are you sure you want to leave? Your changes will be lost.',
+                  okText: 'Leave Without Saving',
+                  cancelText: 'Cancel',
+                  okButtonProps: { danger: true },
+                  onOk: () => {
+                    markSaved();
+                    onClose();
+                  }
+                });
+              } else {
+                onClose();
+              }
+            }}
+          >
+            Cancel
+          </Button>
           <Button 
             icon={<FileTextOutlined />} 
             onClick={handleExportCSV}

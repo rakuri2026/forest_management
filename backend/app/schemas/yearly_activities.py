@@ -226,12 +226,6 @@ class SpatialAssignmentBase(BaseModel):
     sub_area_id: Optional[UUID] = None
     assignment_type: str = Field(default="all_blocks", pattern="^(all_blocks|block|sub_area)$")
 
-    @validator('sub_area_id')
-    def validate_sub_area_requires_block(cls, v, values):
-        if v is not None and values.get('block_id') is None:
-            raise ValueError('sub_area_id requires block_id to be set')
-        return v
-
 
 class SpatialAssignmentCreate(SpatialAssignmentBase):
     pass

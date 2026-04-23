@@ -15,7 +15,6 @@ from ..models.user import User
 from ..models.calculation import Calculation
 from ..models.yearly_activities import PotentialActivity, ProposedYearlyActivity, ActivityYearDetail, ActivitySpatialAssignment, ActivityDrawnFeature
 from ..models.forest_block import ForestBlock
-from ..models.forest_sub_area import ForestSubArea
 from ..schemas.yearly_activities import (
     PotentialActivityResponse,
     ProposedActivityCreate,
@@ -39,6 +38,21 @@ from ..schemas.yearly_activities import (
 )
 
 router = APIRouter(prefix="/api/yearly-activities")
+
+
+def get_sub_area_info_from_result_data(result_data: dict, sub_area_id: UUID) -> dict:
+    """Get sub-area name and category from calculation result_data"""
+    if not result_data or not result_data.get('sub_areas'):
+        return {}
+    
+    sub_area_id_str = str(sub_area_id)
+    for sa in result_data.get('sub_areas', []):
+        if str(sa.get('id')) == sub_area_id_str:
+            return {
+                "sub_area_name": sa.get('name'),
+                "sub_area_category": sa.get('category')
+            }
+    return {}
 
 
 # ===== POTENTIAL ACTIVITIES (Master List) =====
@@ -127,10 +141,8 @@ async def list_proposed_activities(
     query = db.query(ProposedYearlyActivity).options(
         joinedload(ProposedYearlyActivity.potential_activity),
         joinedload(ProposedYearlyActivity.block),
-        joinedload(ProposedYearlyActivity.sub_area),  # NEW
         joinedload(ProposedYearlyActivity.year_details),
-        joinedload(ProposedYearlyActivity.spatial_assignments).joinedload(ActivitySpatialAssignment.block),
-        joinedload(ProposedYearlyActivity.spatial_assignments).joinedload(ActivitySpatialAssignment.sub_area)
+        joinedload(ProposedYearlyActivity.spatial_assignments).joinedload(ActivitySpatialAssignment.block)
     ).filter(ProposedYearlyActivity.calculation_id == calculation_id)
 
     # Apply filters
@@ -138,15 +150,19 @@ async def list_proposed_activities(
         query = query.filter(ProposedYearlyActivity.block_id == block_id)
     if sub_area_id:
         query = query.filter(ProposedYearlyActivity.sub_area_id == sub_area_id)
-    if sub_area_category:
-        # Join with ForestSubArea to filter by category
-        query = query.join(ForestSubArea, ProposedYearlyActivity.sub_area_id == ForestSubArea.id).filter(
-            ForestSubArea.category == sub_area_category
-        )
     if status:
         query = query.filter(ProposedYearlyActivity.status == status)
 
     proposed_activities = query.all()
+
+    # Filter by sub_area_category using result_data
+    if sub_area_category:
+        proposed_activities = [
+            pa for pa in proposed_activities
+            if pa.sub_area_id and (
+                get_sub_area_info_from_result_data(calculation.result_data, pa.sub_area_id).get("sub_area_category") == sub_area_category
+            )
+        ]
 
     # Format response with spatial details
     result = []
@@ -174,10 +190,14 @@ async def list_proposed_activities(
         if pa.block:
             pa_dict["block_name"] = pa.block.name
 
-        if pa.sub_area:
-            pa_dict["sub_area_name"] = pa.sub_area.name
-            pa_dict["sub_area_category"] = pa.sub_area.category
-            pa_dict["location_description"] = f"{pa.sub_area.name} ({pa.sub_area.category}), {pa.block.name}"
+        if pa.sub_area_id:
+            sub_area_info = get_sub_area_info_from_result_data(calculation.result_data, pa.sub_area_id)
+            if sub_area_info:
+                pa_dict["sub_area_name"] = sub_area_info.get("sub_area_name")
+                pa_dict["sub_area_category"] = sub_area_info.get("sub_area_category")
+                pa_dict["location_description"] = f"{sub_area_info.get('sub_area_name')} ({sub_area_info.get('sub_area_category')}), {pa_dict.get('block_name', '')}"
+            else:
+                pa_dict["location_description"] = f"Block: {pa_dict.get('block_name', '')} (Sub-Area ID: {pa.sub_area_id})"
         elif pa.block:
             pa_dict["location_description"] = f"{pa.block.name} (entire block)"
         else:
@@ -202,9 +222,11 @@ async def list_proposed_activities(
             # Load block name if block_id exists
             if sa.block_id and sa.block:
                 sa_dict["block_name"] = sa.block.name
-            # Load sub-area name if sub_area_id exists
-            if sa.sub_area_id and sa.sub_area:
-                sa_dict["sub_area_name"] = sa.sub_area.name
+            # Load sub-area name from result_data
+            if sa.sub_area_id:
+                sub_area_info = get_sub_area_info_from_result_data(calculation.result_data, sa.sub_area_id)
+                if sub_area_info:
+                    sa_dict["sub_area_name"] = sub_area_info.get("sub_area_name")
             sa_list.append(sa_dict)
         
         pa_dict["assign_to_all_blocks"] = pa.assign_to_all_blocks
@@ -272,7 +294,12 @@ async def create_proposed_activity(
     db.refresh(proposed)
 
     # Load relationships
-    db.refresh(proposed, ['potential_activity', 'block', 'sub_area'])
+    db.refresh(proposed, ['potential_activity', 'block'])
+
+    # Get sub-area info from result_data
+    sub_area_info = {}
+    if proposed.sub_area_id:
+        sub_area_info = get_sub_area_info_from_result_data(calculation.result_data, proposed.sub_area_id)
 
     # Format response
     response_dict = {
@@ -293,10 +320,10 @@ async def create_proposed_activity(
         response_dict["potential_activity"] = PotentialActivityResponse.from_orm(proposed.potential_activity)
     if proposed.block:
         response_dict["block_name"] = proposed.block.name
-    if proposed.sub_area:
-        response_dict["sub_area_name"] = proposed.sub_area.name
-        response_dict["sub_area_category"] = proposed.sub_area.category
-        response_dict["location_description"] = f"{proposed.sub_area.name} ({proposed.sub_area.category}), {proposed.block.name}"
+    if proposed.sub_area_id and sub_area_info:
+        response_dict["sub_area_name"] = sub_area_info.get("sub_area_name")
+        response_dict["sub_area_category"] = sub_area_info.get("sub_area_category")
+        response_dict["location_description"] = f"{sub_area_info.get('sub_area_name')} ({sub_area_info.get('sub_area_category')}), {proposed.block.name if proposed.block else ''}"
     elif proposed.block:
         response_dict["location_description"] = f"{proposed.block.name} (entire block)"
     else:
@@ -331,7 +358,12 @@ async def update_proposed_activity(
         setattr(proposed, field, value)
 
     db.commit()
-    db.refresh(proposed, ['potential_activity', 'block', 'sub_area'])
+    db.refresh(proposed, ['potential_activity', 'block'])
+
+    # Get sub-area info from result_data
+    sub_area_info = {}
+    if proposed.sub_area_id:
+        sub_area_info = get_sub_area_info_from_result_data(calculation.result_data, proposed.sub_area_id)
 
     # Format response
     response_dict = {
@@ -352,10 +384,10 @@ async def update_proposed_activity(
         response_dict["potential_activity"] = PotentialActivityResponse.from_orm(proposed.potential_activity)
     if proposed.block:
         response_dict["block_name"] = proposed.block.name
-    if proposed.sub_area:
-        response_dict["sub_area_name"] = proposed.sub_area.name
-        response_dict["sub_area_category"] = proposed.sub_area.category
-        response_dict["location_description"] = f"{proposed.sub_area.name} ({proposed.sub_area.category}), {proposed.block.name}"
+    if proposed.sub_area_id and sub_area_info:
+        response_dict["sub_area_name"] = sub_area_info.get("sub_area_name")
+        response_dict["sub_area_category"] = sub_area_info.get("sub_area_category")
+        response_dict["location_description"] = f"{sub_area_info.get('sub_area_name')} ({sub_area_info.get('sub_area_category')}), {proposed.block.name if proposed.block else ''}"
     elif proposed.block:
         response_dict["location_description"] = f"{proposed.block.name} (entire block)"
     else:
@@ -416,31 +448,37 @@ async def get_activities_with_geometry(
     query = db.query(
         ProposedYearlyActivity,
         PotentialActivity,
-        ForestBlock,
-        ForestSubArea,
-        func.ST_AsGeoJSON(ForestSubArea.geometry).label('sub_area_geojson')
+        ForestBlock
     ).join(
         PotentialActivity,
         ProposedYearlyActivity.potential_activity_id == PotentialActivity.id
     ).outerjoin(
         ForestBlock,
         ProposedYearlyActivity.block_id == ForestBlock.id
-    ).outerjoin(
-        ForestSubArea,
-        ProposedYearlyActivity.sub_area_id == ForestSubArea.id
     ).filter(
         ProposedYearlyActivity.calculation_id == calculation_id
     )
 
     results = query.all()
 
+    # Build sub-area lookup from result_data
+    sub_areas_by_id = {}
+    if calculation.result_data and calculation.result_data.get('sub_areas'):
+        for sa in calculation.result_data.get('sub_areas', []):
+            sub_areas_by_id[str(sa.get('id'))] = sa
+
     # Format for map display
     features = []
-    for pa, pot, block, sub_area, geojson in results:
+    for pa, pot, block in results:
+        # Get sub-area info from result_data
+        if not pa.sub_area_id:
+            continue  # Skip activities without sub-area assignment
+        
+        sub_area = sub_areas_by_id.get(str(pa.sub_area_id))
         if not sub_area:
-            continue  # Skip activities without spatial geometry
+            continue  # Sub-area not found in result_data
 
-        geometry = json.loads(geojson) if geojson else None
+        geometry = sub_area.get('geometry')
 
         features.append({
             "type": "Feature",
@@ -450,15 +488,15 @@ async def get_activities_with_geometry(
                 "activity_name": pot.activities,
                 "project_name": pot.project_name,
                 "program": pot.progarms,
-                "sub_area_name": sub_area.name,
-                "sub_area_category": sub_area.category,
+                "sub_area_name": sub_area.get('name'),
+                "sub_area_category": sub_area.get('category'),
                 "block_name": block.name if block else None,
                 "quantity": float(pa.default_quantity),
                 "unit": pot.unit,
                 "yearly_budget": float(pa.default_yearly_budget),
                 "total_budget_10_years": float(pa.default_yearly_budget * 10),
                 "status": pa.status,
-                "location_description": f"{pot.activities} in {sub_area.name} ({sub_area.category})"
+                "location_description": f"{pot.activities} in {sub_area.get('name')} ({sub_area.get('category')})"
             }
         })
 
@@ -487,8 +525,7 @@ async def get_activity_location_summary(
 
     # Get all proposed activities with relationships
     proposed_activities = db.query(ProposedYearlyActivity).options(
-        joinedload(ProposedYearlyActivity.block),
-        joinedload(ProposedYearlyActivity.sub_area)
+        joinedload(ProposedYearlyActivity.block)
     ).filter(ProposedYearlyActivity.calculation_id == calculation_id).all()
 
     # Initialize counters
@@ -506,12 +543,15 @@ async def get_activity_location_summary(
             whole_forest_count += 1
 
         # Count by sub-area
-        if pa.sub_area:
-            sub_area_name = pa.sub_area.name
-            category = pa.sub_area.category
+        if pa.sub_area_id:
+            sub_area_info = get_sub_area_info_from_result_data(calculation.result_data, pa.sub_area_id)
+            sub_area_name = sub_area_info.get("sub_area_name")
+            category = sub_area_info.get("sub_area_category")
 
-            by_sub_area[sub_area_name] = by_sub_area.get(sub_area_name, 0) + 1
-            by_sub_area_category[category] = by_sub_area_category.get(category, 0) + 1
+            if sub_area_name:
+                by_sub_area[sub_area_name] = by_sub_area.get(sub_area_name, 0) + 1
+            if category:
+                by_sub_area_category[category] = by_sub_area_category.get(category, 0) + 1
 
     return ActivityLocationSummary(
         by_block=by_block,
@@ -612,8 +652,19 @@ async def get_spatial_assignments(
         ActivitySpatialAssignment.proposed_activity_id == activity_id
     ).all()
     
+    # Get sub-area names from calculation result_data
+    calculation = db.query(Calculation).filter(Calculation.id == activity.calculation_id).first()
+    sub_area_names = {}
+    if calculation and calculation.result_data and calculation.result_data.get('sub_areas'):
+        for sa in calculation.result_data.get('sub_areas', []):
+            sub_area_names[str(sa.get('id'))] = sa.get('name') or 'Sub-Area'
+    
     result = []
     for a in assignments:
+        sub_area_name = None
+        if a.sub_area_id:
+            sub_area_name = sub_area_names.get(str(a.sub_area_id))
+        
         data = {
             "id": a.id,
             "proposed_activity_id": a.proposed_activity_id,
@@ -622,7 +673,7 @@ async def get_spatial_assignments(
             "assignment_type": a.assignment_type,
             "created_at": a.created_at,
             "block_name": a.block.name if a.block else None,
-            "sub_area_name": a.sub_area.name if a.sub_area else None
+            "sub_area_name": sub_area_name
         }
         result.append(SpatialAssignmentResponse(**data))
     
@@ -651,6 +702,15 @@ async def create_spatial_assignment(
     db.commit()
     db.refresh(assignment)
     
+    # Get sub-area name from calculation result_data
+    calculation = db.query(Calculation).filter(Calculation.id == activity.calculation_id).first()
+    sub_area_name = None
+    if assignment.sub_area_id and calculation and calculation.result_data and calculation.result_data.get('sub_areas'):
+        for sa in calculation.result_data.get('sub_areas', []):
+            if str(sa.get('id')) == str(assignment.sub_area_id):
+                sub_area_name = sa.get('name') or 'Sub-Area'
+                break
+    
     return SpatialAssignmentResponse(
         id=assignment.id,
         proposed_activity_id=assignment.proposed_activity_id,
@@ -659,7 +719,7 @@ async def create_spatial_assignment(
         assignment_type=assignment.assignment_type,
         created_at=assignment.created_at,
         block_name=assignment.block.name if assignment.block else None,
-        sub_area_name=assignment.sub_area.name if assignment.sub_area else None
+        sub_area_name=sub_area_name
     )
 
 
@@ -1117,12 +1177,13 @@ async def get_blocks_with_subareas(
     try:
         if calculation.result_data and calculation.result_data.get('blocks'):
             blocks = calculation.result_data.get('blocks', [])
-            for i, block in enumerate(blocks):
+            for block in blocks:
                 block_geom = block.get('geometry')
-                if block_geom:
+                block_id = block.get('id') or block.get('block_id')
+                if block_geom and block_id and len(str(block_id)) == 36:
                     result.append({
-                        "id": block.get('id') or f"block-{i}",
-                        "name": block.get('block_name') or block.get('name') or f"Block {i + 1}",
+                        "id": str(block_id),
+                        "name": block.get('block_name') or block.get('name') or "Block",
                         "type": "block",
                         "area_hectares": block.get('area_hectares') or block.get('area') or 0,
                         "geometry": block_geom
@@ -1130,42 +1191,35 @@ async def get_blocks_with_subareas(
     except Exception as e:
         print(f"[DEBUG] Blocks Error: {e}")
     
-    # 3. Return sub-areas from forest_sub_areas table (filtered by result_data for sync)
+    # 3. Return sub-areas from result_data (primary source)
     try:
-        from app.models.forest_sub_area import ForestSubArea
-        from app.models.forest_block import ForestBlock
-        
-        # Get valid sub-area IDs from result_data
-        valid_sub_area_ids = set()
         if calculation.result_data and calculation.result_data.get('sub_areas'):
-            for sa in calculation.result_data.get('sub_areas', []):
-                valid_sub_area_ids.add(sa.get('id'))
-        
-        # Get sub-areas from table with block info using JOIN
-        sub_areas = db.query(
-            ForestSubArea,
-            ForestBlock.name.label('block_name')
-        ).outerjoin(
-            ForestBlock, ForestBlock.id == ForestSubArea.block_id
-        ).filter(
-            ForestSubArea.calculation_id == calculation_id
-        ).all()
-        
-        for sub_area, block_name in sub_areas:
-            # Only include if it exists in result_data (sync filter)
-            if sub_area.geometry and (str(sub_area.id) in valid_sub_area_ids or not valid_sub_area_ids):
-                shp = to_shape(sub_area.geometry)
-                geom_dict = mapping(shp)
+            sub_areas = calculation.result_data.get('sub_areas', [])
+            
+            for sa in sub_areas:
+                sa_id = str(sa.get('id'))
+                # Skip if not a valid UUID
+                if not sa_id or len(sa_id) != 36:
+                    continue
+                    
+                block_name = ""
+                
+                # Try to get block name from blocks in result_data
+                if calculation.result_data.get('blocks'):
+                    for block in calculation.result_data.get('blocks', []):
+                        if block.get('block_id') == sa.get('blockId') or block.get('id') == sa.get('blockId'):
+                            block_name = block.get('block_name') or block.get('name') or ""
+                            break
                 
                 result.append({
-                    "id": str(sub_area.id),
-                    "name": sub_area.name or f"Sub-Area",
+                    "id": sa_id,
+                    "name": sa.get('name') or "Sub-Area",
                     "type": "sub_area",
-                    "category": sub_area.category,
-                    "area_hectares": sub_area.area_hectares or 0,
-                    "block_id": str(sub_area.block_id) if sub_area.block_id else None,
-                    "block_name": block_name or "",
-                    "geometry": geom_dict
+                    "category": sa.get('category') or '',
+                    "area_hectares": sa.get('area_hectares') or 0,
+                    "block_id": sa.get('blockId') or None,
+                    "block_name": sa.get('blockName') or block_name,
+                    "geometry": sa.get('geometry') or None
                 })
     except Exception as e:
         print(f"[DEBUG] SubAreas Error: {e}")

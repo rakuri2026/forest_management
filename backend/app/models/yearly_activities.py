@@ -78,7 +78,7 @@ class ProposedYearlyActivity(Base):
     calculation_id = Column(UUID(as_uuid=True), ForeignKey("public.calculations.id", ondelete="CASCADE"), nullable=False)
     potential_activity_id = Column(Integer, ForeignKey("public.potential_activities.id", ondelete="CASCADE"), nullable=False)
     block_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_blocks.id", ondelete="SET NULL"), nullable=True)
-    sub_area_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_sub_areas.id", ondelete="SET NULL"), nullable=True)
+    sub_area_id = Column(UUID(as_uuid=True), nullable=True)  # No FK - sub-areas stored in result_data
 
     # Default values (apply to all 10 years unless overridden)
     default_quantity = Column(Numeric(10, 2), nullable=False)
@@ -98,16 +98,13 @@ class ProposedYearlyActivity(Base):
     calculation = relationship("Calculation", back_populates="proposed_activities")
     potential_activity = relationship("PotentialActivity", back_populates="proposed_activities")
     block = relationship("ForestBlock", foreign_keys=[block_id])
-    sub_area = relationship("ForestSubArea", foreign_keys=[sub_area_id])
     year_details = relationship("ActivityYearDetail", back_populates="proposed_activity", cascade="all, delete-orphan")
     spatial_assignments = relationship("ActivitySpatialAssignment", back_populates="proposed_activity", cascade="all, delete-orphan")
     drawn_features = relationship("ActivityDrawnFeature", back_populates="proposed_activity", cascade="all, delete-orphan")
 
     def __repr__(self):
         location = "entire forest"
-        if self.sub_area:
-            location = f"{self.sub_area.name} ({self.sub_area.category})"
-        elif self.block:
+        if self.block:
             location = f"{self.block.name}"
         return f"<ProposedYearlyActivity(id={self.id}, location={location})>"
 
@@ -169,18 +166,17 @@ class ActivitySpatialAssignment(Base):
         CheckConstraint("assignment_type IN ('all_blocks', 'block', 'sub_area')", name='chk_assignment_type'),
         {"schema": "public"}
     )
-
+    
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     proposed_activity_id = Column(UUID(as_uuid=True), ForeignKey("public.proposed_yearly_activities.id", ondelete="CASCADE"), nullable=False)
     block_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_blocks.id", ondelete="CASCADE"), nullable=True)
-    sub_area_id = Column(UUID(as_uuid=True), ForeignKey("public.forest_sub_areas.id", ondelete="CASCADE"), nullable=True)
+    sub_area_id = Column(UUID(as_uuid=True), nullable=True)  # No FK - sub-areas stored in result_data
     assignment_type = Column(String(20), nullable=False, server_default="all_blocks")
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-
+    
     # Relationships
     proposed_activity = relationship("ProposedYearlyActivity", back_populates="spatial_assignments")
     block = relationship("ForestBlock")
-    sub_area = relationship("ForestSubArea")
 
     def __repr__(self):
         return f"<ActivitySpatialAssignment(id={self.id}, type={self.assignment_type})>"

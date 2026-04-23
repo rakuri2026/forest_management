@@ -623,3 +623,196 @@ async def get_steep_slope_mask_tile(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Tile generation failed: {str(e)}")
+
+
+@router.get("/calculations/{calculation_id}/canopy-mask/{z}/{x}/{y}.png")
+async def get_canopy_mask_tile(
+    calculation_id: str,
+    z: int,
+    x: int,
+    y: int,
+    min_height: float = Query(default=15.0, ge=5.0, le=30.0, description="Minimum canopy height in meters"),
+    alpha: int = Query(default=180, ge=0, le=255, description="Transparency (0=transparent, 255=opaque)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get canopy mask tile - shows areas with canopy height ABOVE the threshold
+    
+    **Purpose:**
+    - Helps users visually identify areas with tall trees (>15m by default)
+    - Shows areas where canopy height exceeds the threshold
+    - Areas above threshold are colored green
+    
+    **Parameters:**
+    - **min_height**: Minimum canopy height in meters (default 15)
+    - **alpha**: Transparency level (default 180 = 70%)
+    
+    **Returns:**
+    - PNG image (256×256 pixels) with tall canopy areas in green
+    - HTTP 404 if calculation not found
+    - HTTP 500 if tile generation fails
+    """
+    try:
+        from sqlalchemy import text
+        import io
+        from PIL import Image, ImageDraw
+        
+        print(f"[CanopyMask] ===== Tile request: calc={calculation_id}, z={z}, x={x}, y={y}, min_height={min_height} =====")
+        
+        # Get boundary WKT
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM calculations
+            WHERE id = :calc_id
+        """)
+        
+        boundary_result = db.execute(boundary_query, {"calc_id": calculation_id}).first()
+        
+        if not boundary_result or not boundary_result.wkt:
+            raise HTTPException(status_code=404, detail="Calculation not found")
+        
+        boundary_wkt = boundary_result.wkt
+        print(f"[CanopyMask] Boundary WKT length: {len(boundary_wkt)}")
+        
+        # Convert XYZ to bounds
+        n = 2.0 ** z
+        lon_min = x / n * 360.0 - 180.0
+        lon_max = (x + 1) / n * 360.0 - 180.0
+        
+        lat_max_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
+        lat_max = math.degrees(lat_max_rad)
+        
+        lat_min_rad = math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n)))
+        lat_min = math.degrees(lat_min_rad)
+        
+        print(f"[CanopyMask] Tile bounds: lon=[{lon_min:.4f}, {lon_max:.4f}], lat=[{lat_min:.4f}, {lat_max:.4f}]")
+        
+        try:
+            # Use grid sampling approach
+            sample_size = 32
+            lon_step = (lon_max - lon_min) / sample_size
+            lat_step = (lat_max - lat_min) / sample_size
+            
+            # Query for canopy height data
+            query = text("""
+                WITH forest_boundary AS (
+                    SELECT ST_GeomFromText(:boundary_wkt, 4326) as geom
+                ),
+                relevant_rasters AS (
+                    SELECT r.rast
+                    FROM rasters.canopy_height r, forest_boundary f
+                    WHERE ST_Intersects(r.rast, f.geom)
+                ),
+                grid AS (
+                    SELECT
+                        i.i as i,
+                        j.j as j,
+                        :min_lon + (i.i * :lon_step) + (:lon_step / 2.0) as lon,
+                        :min_lat + (j.j * :lat_step) + (:lat_step / 2.0) as lat
+                    FROM
+                        generate_series(0, :sample_size - 1) as i(i),
+                        generate_series(0, :sample_size - 1) as j(j)
+                )
+                SELECT
+                    g.i,
+                    g.j,
+                    ST_Value(r.rast, ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326)) as val
+                FROM grid g
+                CROSS JOIN relevant_rasters r
+                CROSS JOIN forest_boundary f
+                WHERE
+                    ST_Contains(f.geom, ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326))
+                    AND ST_Value(r.rast, ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326)) IS NOT NULL
+                LIMIT 2000
+            """)
+            
+            result = db.execute(query, {
+                "boundary_wkt": boundary_wkt,
+                "min_lon": lon_min,
+                "min_lat": lat_min,
+                "lon_step": lon_step,
+                "lat_step": lat_step,
+                "sample_size": sample_size,
+                "min_height": min_height
+            }).fetchall()
+            
+            print(f"[CanopyMask] Grid samples: {len(result)}")
+            
+            if not result or len(result) == 0:
+                print(f"[CanopyMask] No grid data - returning fallback")
+                raise ValueError("No grid data found")
+            
+            # Convert to list of dicts
+            raster_data = [{'i': row.i, 'j': row.j, 'val': row.val} for row in result]
+            
+            # Create 256x256 image
+            cell_size = 256 // sample_size  # 8
+            img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            
+            # Draw each grid cell with canopy logic
+            for sample in raster_data:
+                i = sample['i']
+                j = sample['j']
+                val = sample['val']
+                
+                if val is None:
+                    continue
+                
+                # Only show cells >= min_height
+                if val >= min_height:
+                    color = (34, 197, 94, alpha)  # Green
+                else:
+                    continue  # Skip low canopy cells (transparent)
+                
+                x1 = i * cell_size
+                y1 = (sample_size - 1 - j) * cell_size  # Flip Y axis
+                x2 = x1 + cell_size
+                y2 = y1 + cell_size
+                
+                draw.rectangle([x1, y1, x2, y2], fill=color)
+            
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format='PNG')
+            img_bytes.seek(0)
+            
+            print(f"[CanopyMask] Generated PNG with {len(raster_data)} data points")
+            return Response(
+                content=img_bytes.getvalue(),
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Content-Type": "image/png",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+              
+        except Exception as e:
+            print(f"[CanopyMask] Query failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Fallback: return empty transparent tile
+        img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        return Response(
+            content=img_bytes.getvalue(),
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Content-Type": "image/png",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+        
+    except HTTPException:
+        raise
+        
+    except Exception as e:
+        print(f"Canopy mask tile error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Canopy mask tile generation failed: {str(e)}")

@@ -985,7 +985,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
             {/* Slope Regulation Mask Layer - shows sensitive areas in red */}
             {showSteepSlopeMask && calculationId && (
               <TileLayer
-                url={`/api/calculations/${calculationId}/slope-regulation-mask/{z}/{x}/{y}.png?min_class=${slopeMinClass}&alpha=150`}
+                url={`/api/calculations/${calculationId}/steep-slope-mask/{z}/{x}/{y}.png?threshold=${slopeMinClass}&alpha=150`}
                 opacity={0.7}
                 zIndex={5}
                 minZoom={13}
