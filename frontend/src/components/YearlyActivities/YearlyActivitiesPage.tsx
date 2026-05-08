@@ -20,23 +20,16 @@ import {
   Typography,
   Tag,
   Statistic,
-  Empty
+  Empty,
+  Drawer
 } from 'antd';
 import {
-  PlusOutlined,
   SaveOutlined,
   CloseOutlined,
-  EditOutlined,
   DeleteOutlined,
   DownOutlined,
   UpOutlined,
-  ExportOutlined,
   ReloadOutlined,
-  CheckCircleFilled,
-  EnvironmentOutlined,
-  MapOutlined,
-  CopyOutlined,
-  ClearOutlined,
   FileTextOutlined
 } from '@ant-design/icons';
 import { yearlyActivitiesApi, forestApi } from '../../services/api';
@@ -129,6 +122,17 @@ interface ActivityConfig {
   drawn_features: DrawnFeature[];
 }
 
+interface MatrixRow {
+  key: string;
+  type: 'proposed' | 'available';
+  activity: string;
+  program: string;
+  unit: string;
+  sn: string;
+  config?: ActivityConfig;
+  potentialId?: string;
+}
+
 const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
   calculationId,
   forestName,
@@ -143,10 +147,9 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
   const [yearDetailsMap, setYearDetailsMap] = useState<Record<string, any[]>>({});
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [subAreas, setSubAreas] = useState<SubArea[]>([]);
-  const [addModalVisible, setAddModalVisible] = useState(false);
-  const [selectedPotentialId, setSelectedPotentialId] = useState<string | null>(null);
-  const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [detailDrawerVisible, setDetailDrawerVisible] = useState(false);
+  const [activeDetailConfigIdx, setActiveDetailConfigIdx] = useState<number | null>(null);
 
   // Load initial data
   useEffect(() => {
@@ -276,15 +279,17 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
         default_quantity: defaultQuantity,
         default_budget: defaultBudget,
         expanded: false,
-        year_budgets: yearDetailsRes?.map((yd: any) => ({
-          year: yd.year_number || 1,
-          quantity: typeof yd.quantity === 'string' ? parseFloat(yd.quantity) || 1 : Number(yd.quantity) || 1,
-          budget: typeof yd.yearly_budget === 'string' ? parseFloat(yd.yearly_budget) || defaultBudget : Number(yd.yearly_budget) || defaultBudget,
-          year_detail_id: yd.id || null,
-          location: existingBlockIds.length > 0 ? 'blocks' : existingSubAreaIds.length > 0 ? 'sub_areas' : 'none',
-          selected_blocks: existingBlockIds,
-          selected_sub_areas: existingSubAreaIds
-        })) || generateDefaultYearBudgets(pa, defaultBudget),
+        year_budgets: (yearDetailsRes && yearDetailsRes.length > 0)
+          ? yearDetailsRes.map((yd: any) => ({
+            year: yd.year_number || 1,
+            quantity: typeof yd.quantity === 'string' ? parseFloat(yd.quantity) || 1 : Number(yd.quantity) || 1,
+            budget: typeof yd.yearly_budget === 'string' ? parseFloat(yd.yearly_budget) || defaultBudget : Number(yd.yearly_budget) || defaultBudget,
+            year_detail_id: yd.id || null,
+            location: existingBlockIds.length > 0 ? 'blocks' : existingSubAreaIds.length > 0 ? 'sub_areas' : 'none',
+            selected_blocks: existingBlockIds,
+            selected_sub_areas: existingSubAreaIds
+          }))
+          : generateDefaultYearBudgets(pa, defaultBudget),
         spatial_assignments: spatialRes || [],
         drawn_features: featuresRes || []
       });
@@ -304,47 +309,6 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       selected_blocks: [],
       selected_sub_areas: []
     }));
-  };
-
-  // Add new activity
-  const handleAddActivity = async () => {
-    if (!selectedPotentialId) {
-      message.warning('Please select an activity');
-      return;
-    }
-
-    try {
-      const newActivity = await yearlyActivitiesApi.createProposedActivity(calculationId, {
-        potential_activity_id: selectedPotentialId,
-        default_quantity: 1,
-        default_yearly_budget: 5000
-      });
-
-      const potential = potentialActivities.find(p => p.id === selectedPotentialId);
-      
-      const newConfig: ActivityConfig = {
-        id: newActivity.id,
-        proposed_activity_id: selectedPotentialId,
-        activity: potential?.activity || 'Unknown',
-        program: potential?.program || '',
-        unit: potential?.unit || 'units',
-        default_quantity: 1,
-        default_budget: 5000,
-        expanded: true,
-        year_budgets: generateDefaultYearBudgets({ default_quantity: 1, default_yearly_budget: 5000 } as ProposedActivity, 5000),
-        spatial_assignments: [],
-        drawn_features: []
-      };
-
-      setActivityConfigs([...activityConfigs, newConfig]);
-      setProposedActivities([...proposedActivities, newActivity]);
-      setAddModalVisible(false);
-      setSelectedPotentialId(null);
-      message.success('Activity added');
-    } catch (error) {
-      console.error('Failed to add activity:', error);
-      message.error('Failed to add activity');
-    }
   };
 
   // Remove activity
@@ -819,22 +783,120 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
     };
   }, [activityConfigs]);
 
-  // Available activities for add modal
-  const availableActivities = potentialActivities.filter(
-    pa => !proposedActivities.some(pr => pr.potential_activity_id === pa.id)
-  );
+  // Build combined matrix rows (all potential activities + proposed activities)
+  const matrixRows = useMemo<MatrixRow[]>(() => {
+    const rows: MatrixRow[] = [];
+    const proposedIds = new Set(activityConfigs.map(c => c.proposed_activity_id));
+    let sn = 0;
 
-  // Unique programs from available activities
-  const uniquePrograms = useMemo(() => {
-    const programs = new Set(availableActivities.map(pa => pa.program).filter(Boolean));
-    return Array.from(programs).sort();
-  }, [availableActivities]);
+    // Group potential activities by program, then sort
+    const byProgram = new Map<string, any[]>();
+    potentialActivities.forEach(pa => {
+      const program = pa.program || pa.progarms || 'Uncategorized';
+      if (!byProgram.has(program)) byProgram.set(program, []);
+      byProgram.get(program)!.push(pa);
+    });
+    const sortedPrograms = Array.from(byProgram.keys()).sort();
+    const sortedActivities: any[] = [];
+    sortedPrograms.forEach(prog => {
+      sortedActivities.push(...byProgram.get(prog)!);
+    });
 
-  // Filtered activities based on selected program
-  const filteredActivities = useMemo(() => {
-    if (!selectedProgram) return availableActivities;
-    return availableActivities.filter(pa => pa.program === selectedProgram);
-  }, [availableActivities, selectedProgram]);
+    // First pass: add proposed activities (preserving their order within each program)
+    const addedKeys = new Set<string>();
+    sortedActivities.forEach(pa => {
+      const paId = String(pa.id);
+      const matchingConfig = activityConfigs.find(c => c.proposed_activity_id === paId);
+      if (matchingConfig) {
+        sn++;
+        rows.push({
+          key: matchingConfig.id,
+          type: 'proposed',
+          activity: matchingConfig.activity,
+          program: matchingConfig.program || 'Uncategorized',
+          unit: matchingConfig.unit,
+          sn: String(sn),
+          config: matchingConfig,
+        });
+        addedKeys.add(paId);
+      }
+    });
+
+    // Second pass: add available activities (not yet proposed)
+    sortedActivities.forEach(pa => {
+      const paId = String(pa.id);
+      if (addedKeys.has(paId)) return;
+      sn++;
+      rows.push({
+        key: `avail-${paId}`,
+        type: 'available',
+        activity: pa.activity || pa.activities || 'Unknown',
+        program: pa.program || pa.progarms || 'Uncategorized',
+        unit: pa.unit || 'units',
+        sn: String(sn),
+        potentialId: paId,
+      });
+    });
+
+    return rows;
+  }, [activityConfigs, potentialActivities]);
+
+  // Group rows by program for rendering
+  const groupedByProgram = useMemo(() => {
+    const map = new Map<string, MatrixRow[]>();
+    matrixRows.forEach(row => {
+      const program = row.program || 'Uncategorized';
+      if (!map.has(program)) map.set(program, []);
+      map.get(program)!.push(row);
+    });
+    const groups: { program: string; rows: MatrixRow[]; count: number }[] = [];
+    map.forEach((rows, program) => {
+      const proposedCount = rows.filter(r => r.type === 'proposed').length;
+      groups.push({ program, rows, count: proposedCount });
+    });
+    return groups;
+  }, [matrixRows]);
+
+  const closeDetailDrawer = () => setDetailDrawerVisible(false);
+
+  const activeDetailConfig = useMemo(() => {
+    if (activeDetailConfigIdx === null || activeDetailConfigIdx < 0 || activeDetailConfigIdx >= activityConfigs.length) return null;
+    return activityConfigs[activeDetailConfigIdx];
+  }, [activeDetailConfigIdx, activityConfigs]);
+
+  const handleChooseActivity = async (potentialId: string) => {
+    try {
+      const newActivity = await yearlyActivitiesApi.createProposedActivity(calculationId, {
+        potential_activity_id: Number(potentialId),
+        default_quantity: 1,
+        default_yearly_budget: 5000
+      });
+      const potential = potentialActivities.find(p => String(p.id) === potentialId);
+      const newConfig: ActivityConfig = {
+        id: newActivity.id,
+        proposed_activity_id: potentialId,
+        activity: potential?.activity || potential?.activities || 'Unknown',
+        program: potential?.program || potential?.progarms || '',
+        unit: potential?.unit || 'units',
+        default_quantity: 1,
+        default_budget: 5000,
+        expanded: true,
+        year_budgets: generateDefaultYearBudgets({ default_quantity: 1, default_yearly_budget: 5000 } as ProposedActivity, 5000),
+        spatial_assignments: [],
+        drawn_features: []
+      };
+      const newConfigs = [...activityConfigs, newConfig];
+      const newIdx = newConfigs.length - 1;
+      setActivityConfigs(newConfigs);
+      setProposedActivities([...proposedActivities, newActivity]);
+      setActiveDetailConfigIdx(newIdx);
+      setDetailDrawerVisible(true);
+      message.success('Activity added');
+    } catch (error) {
+      console.error('Failed to add activity:', error);
+      message.error('Failed to add activity');
+    }
+  };
 
   // Get blocks for a specific config (based on location selection)
   const getBlocksForConfig = (config: ActivityConfig) => {
@@ -888,54 +950,179 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
         <Statistic title="Spatial Features" value={totals.totalFeatures} />
       </div>
 
-      {/* Add Activity Button */}
-      <div className="add-activity-bar">
-        <Button 
-          type="primary" 
-          icon={<PlusOutlined />} 
-          onClick={() => setAddModalVisible(true)}
-          disabled={availableActivities.length === 0}
-        >
-          Add Activity
-        </Button>
-        {availableActivities.length === 0 && (
-          <Text type="secondary" style={{ marginLeft: 16 }}>
-            All activities have been added
-          </Text>
-        )}
+      {/* Activity Catalog Matrix */}
+      <div className="activity-cards">
+        <div className="activity-matrix">
+          {groupedByProgram.map(group => (
+            <div key={group.program} className="matrix-program-group">
+              <div className="matrix-program-header">
+                <Space>
+                  <Text strong style={{ fontSize: 15 }}>{group.program}</Text>
+                  <Tag color="blue">{group.count}/{group.rows.length} chosen</Tag>
+                </Space>
+              </div>
+              <Table
+                size="small"
+                dataSource={group.rows}
+                rowKey="key"
+                pagination={false}
+                showHeader={true}
+                scroll={{ x: 'max-content' }}
+                onRow={(record) => ({
+                  onClick: () => {
+                    if (record.type === 'proposed') {
+                      const idx = activityConfigs.findIndex(c => c.id === record.key);
+                      setActiveDetailConfigIdx(idx);
+                      setDetailDrawerVisible(true);
+                    }
+                  },
+                  style: { cursor: record.type === 'proposed' ? 'pointer' : 'default' },
+                  className: record.type === 'proposed' ? 'matrix-row-chosen' : ''
+                })}
+                columns={[
+                  {
+                    title: '#',
+                    dataIndex: 'sn',
+                    width: 40,
+                    align: 'center' as const,
+                  },
+                  {
+                    title: 'Activity',
+                    dataIndex: 'activity',
+                    width: 280,
+                    render: (text: string, record: MatrixRow) => (
+                      <Space>
+                        <Text style={record.type === 'available' ? { color: '#999' } : undefined}>{text}</Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>({record.unit})</Text>
+                        {record.type === 'proposed' && <Tag color="green" style={{ fontSize: 10, lineHeight: '16px' }}>Chosen</Tag>}
+                      </Space>
+                    )
+                  },
+                  {
+                    title: '',
+                    width: 100,
+                    align: 'center' as const,
+                    render: (_: any, record: MatrixRow) => {
+                      if (record.type === 'available') {
+                        return (
+                          <Button
+                            type="primary"
+                            size="small"
+                            style={{ fontSize: 12, height: 26 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleChooseActivity(record.potentialId!);
+                            }}
+                          >
+                            Choose
+                          </Button>
+                        );
+                      }
+                      return (
+                        <Button
+                          size="small"
+                          type="link"
+                          style={{ fontSize: 12, height: 22 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const idx = activityConfigs.findIndex(c => c.id === record.key);
+                            setActiveDetailConfigIdx(idx);
+                            setDetailDrawerVisible(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      );
+                    }
+                  },
+                  ...Array.from({ length: 10 }, (_, i) => ({
+                    title: `Y${i + 1}`,
+                    width: 90,
+                    align: 'center' as const,
+                    render: (_: any, record: MatrixRow) => (
+                      <EditableYearCell
+                        record={record}
+                        yearIndex={i}
+                        onYearBudgetChange={handleYearBudgetChange}
+                        onYearQuantityChange={handleYearQuantityChange}
+                      />
+                    ),
+                  })),
+                  {
+                    title: 'Total',
+                    width: 90,
+                    align: 'center' as const,
+                    render: (_: any, record: MatrixRow) => {
+                      if (record.type === 'available') return null;
+                      const total = record.config!.year_budgets.reduce((s, yb) => s + (Number(yb.budget) || 0), 0);
+                      return <Text strong style={{ fontSize: 13 }}>{Math.round(total / 1000).toLocaleString()}ह</Text>;
+                    }
+                  },
+                ]}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Activity Cards */}
-      <div className="activity-cards">
-        {activityConfigs.length === 0 ? (
-          <Empty 
-            description="No activities added yet. Click 'Add Activity' to get started."
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
+      {/* Activity Detail Full-Screen Drawer */}
+      <Drawer
+        title={activeDetailConfig ? `${(activeDetailConfigIdx ?? 0) + 1}. ${activeDetailConfig.activity}` : 'Activity Details'}
+        open={detailDrawerVisible}
+        onClose={closeDetailDrawer}
+        width="100%"
+        extra={
+          <Space>
+            <Button onClick={closeDetailDrawer}>Close</Button>
+            <Button
+              danger
+              onClick={() => {
+                if (activeDetailConfig) {
+                  handleRemoveActivity(activeDetailConfig.id);
+                  closeDetailDrawer();
+                }
+              }}
+            >
+              Remove
+            </Button>
+            <Button
+              type="primary"
+              onClick={async () => {
+                await handleSaveAll();
+                closeDetailDrawer();
+              }}
+            >
+              OK
+            </Button>
+          </Space>
+        }
+      >
+        {activeDetailConfig && activeDetailConfigIdx !== null && activeDetailConfigIdx >= 0 && activeDetailConfigIdx < activityConfigs.length && (
+          <ActivityCard
+            config={activeDetailConfig}
+            index={(activeDetailConfigIdx ?? 0) + 1}
+            blocks={blocks}
+            subAreas={subAreas}
+            embedded
+            showRemove={false}
+            onToggleExpand={() => {}}
+            onRemove={() => {
+              handleRemoveActivity(activeDetailConfig.id);
+              closeDetailDrawer();
+            }}
+            onQuantityChange={(val) => handleQuantityChange(activeDetailConfig.id, val)}
+            onBudgetChange={(val) => handleBudgetChange(activeDetailConfig.id, val)}
+            onYearBudgetChange={(configId, yearIndex, value) => handleYearBudgetChange(configId, yearIndex, value)}
+            onYearQuantityChange={(configId, yearIndex, value) => handleYearQuantityChange(configId, yearIndex, value)}
+            onLocationTypeChange={(type) => handleLocationTypeChange(activeDetailConfig.id, type)}
+            onBlockToggle={(blockId) => handleBlockToggle(activeDetailConfig.id, blockId)}
+            onSubAreaToggle={(subAreaId) => handleSubAreaToggle(activeDetailConfig.id, subAreaId)}
+            onFeaturesChange={() => handleFeaturesChange(activeDetailConfig.id)}
+            onCopyFeature={(featureId, year) => handleCopyFeature(activeDetailConfig.id, featureId, year)}
+            onDeleteFeature={(featureId) => handleDeleteFeature(activeDetailConfig.id, featureId)}
           />
-        ) : (
-          activityConfigs.map((config, index) => (
-            <ActivityCard
-              key={config.id}
-              config={config}
-              index={index + 1}
-              blocks={blocks}
-              subAreas={subAreas}
-              onToggleExpand={() => handleToggleExpand(config.id)}
-              onRemove={() => handleRemoveActivity(config.id)}
-              onQuantityChange={(val) => handleQuantityChange(config.id, val)}
-              onBudgetChange={(val) => handleBudgetChange(config.id, val)}
-              onYearBudgetChange={(configId, yearIndex, value) => handleYearBudgetChange(configId, yearIndex, value)}
-              onYearQuantityChange={(configId, yearIndex, value) => handleYearQuantityChange(configId, yearIndex, value)}
-              onLocationTypeChange={(type) => handleLocationTypeChange(config.id, type)}
-              onBlockToggle={(blockId) => handleBlockToggle(config.id, blockId)}
-              onSubAreaToggle={(subAreaId) => handleSubAreaToggle(config.id, subAreaId)}
-              onFeaturesChange={() => handleFeaturesChange(config.id)}
-              onCopyFeature={(featureId, year) => handleCopyFeature(config.id, featureId, year)}
-              onDeleteFeature={(featureId) => handleDeleteFeature(config.id, featureId)}
-            />
-          ))
         )}
-      </div>
+      </Drawer>
 
       {/* Footer */}
       <div className="page-footer">
@@ -980,84 +1167,6 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
         </Space>
       </div>
 
-      {/* Add Activity Modal */}
-      <Modal
-        title="Add Activity"
-        open={addModalVisible}
-        onCancel={() => {
-          setAddModalVisible(false);
-          setSelectedPotentialId(null);
-          setSelectedProgram(null);
-        }}
-        onOk={handleAddActivity}
-        okText="Add"
-        okButtonProps={{ disabled: !selectedPotentialId }}
-        width={500}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>Select Program:</Text>
-        </div>
-        <Select
-          style={{ width: '100%', marginBottom: 16 }}
-          placeholder="Select a program..."
-          value={selectedProgram}
-          onChange={(value) => {
-            setSelectedProgram(value);
-            setSelectedPotentialId(null);
-          }}
-          allowClear
-        >
-          {uniquePrograms.map(program => (
-            <Select.Option key={program} value={program}>
-              {program}
-            </Select.Option>
-          ))}
-        </Select>
-        
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>Select Activity:</Text>
-        </div>
-        <Select
-          style={{ width: '100%' }}
-          placeholder={selectedProgram ? "Select an activity..." : "First select a program"}
-          showSearch
-          optionFilterProp="children"
-          value={selectedPotentialId}
-          onChange={setSelectedPotentialId}
-          disabled={!selectedProgram}
-        >
-          {filteredActivities.map(pa => (
-            <Select.Option key={pa.id} value={pa.id}>
-              <div>
-                <Text strong>{pa.activity}</Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Unit: {pa.unit} | Budget: NPR {(pa.yearly_budget || 5000).toLocaleString()}/year
-                </Text>
-              </div>
-            </Select.Option>
-          ))}
-        </Select>
-        
-        {selectedPotentialId && (
-          <div style={{ marginTop: 16, padding: 16, background: '#f0f7ff', borderRadius: 4, border: '1px solid #91caff' }}>
-            {(() => {
-              const selected = availableActivities.find(a => a.id === selectedPotentialId);
-              return selected ? (
-                <>
-                  <Text strong style={{ fontSize: 14 }}>{selected.activity}</Text>
-                  <br />
-                  <Text type="secondary">Program: {selected.program}</Text>
-                  <br />
-                  <Text type="secondary">Default Quantity: {selected.quantity || 1} {selected.unit}</Text>
-                  <br />
-                  <Text type="secondary">Default Budget: NPR {(selected.yearly_budget || 5000).toLocaleString()}/year</Text>
-                </>
-              ) : null;
-            })()}
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };
@@ -1080,6 +1189,8 @@ interface ActivityCardProps {
   onFeaturesChange: () => void;
   onCopyFeature: (featureId: string, year: number) => void;
   onDeleteFeature: (featureId: string) => void;
+  embedded?: boolean;
+  showRemove?: boolean;
 }
 
 const ActivityCard: React.FC<ActivityCardProps> = ({
@@ -1098,7 +1209,9 @@ const ActivityCard: React.FC<ActivityCardProps> = ({
   onSubAreaToggle,
   onFeaturesChange,
   onCopyFeature,
-  onDeleteFeature
+  onDeleteFeature,
+  embedded = false,
+  showRemove = true
 }) => {
   const [editingQuantity, setEditingQuantity] = useState(false);
   const [editingBudget, setEditingBudget] = useState(false);
@@ -1122,133 +1235,98 @@ const ActivityCard: React.FC<ActivityCardProps> = ({
     ? blocks.filter(b => subAreas.some(sa => selectedSubAreas.includes(sa.id) && sa.block_id === b.id))
     : blocks;
 
-  return (
-    <Card className={`activity-card ${config.expanded ? 'expanded' : ''}`}>
-      {/* Card Header */}
-      <div className="card-header" onClick={onToggleExpand}>
-        <div className="card-title">
-          <Text strong style={{ fontSize: 16 }}>
-            {index}. {config.activity}
-          </Text>
-          <Tag color="blue">{config.program}</Tag>
-        </div>
-        <div className="card-actions">
-          {!config.expanded && (
-            <Space size="small">
-              <Text type="secondary">
-                Qty: {Math.round(config.default_quantity)} | Budget: {Math.round((config.default_budget || 0) / 1000)}ह/year
-              </Text>
-              <Text type="secondary">|</Text>
-              <Text type="secondary">
-                📍 {locationType === 'all' ? 'All Blocks' : 
-                    locationType === 'blocks' ? `${selectedBlocks.length} blocks` : 
-                    `${selectedSubAreas.length} sub-areas`}
-              </Text>
-              <Text type="secondary">|</Text>
-              <Text type="secondary">🗺️ {config.drawn_features?.length || 0} features</Text>
-            </Space>
-          )}
-          <Button
-            type="text"
-            size="small"
-            icon={config.expanded ? <UpOutlined /> : <DownOutlined />}
-          />
-        </div>
+  const expandedContent = (
+    <div className="card-content">
+      {/* Quantity and Budget */}
+      <div className="content-section">
+        <Row gutter={24}>
+          <Col span={12}>
+            <label>Quantity (per year):</label>
+            <InputNumber
+              min={1}
+              value={config.default_quantity}
+              onChange={(val) => onQuantityChange(val || 1)}
+              style={{ width: '100%' }}
+              addonAfter={config.unit}
+            />
+          </Col>
+          <Col span={12}>
+            <label>Budget (per year):</label>
+            <InputNumber
+              min={0}
+              value={config.default_budget / 1000}
+              onChange={(val) => onBudgetChange((val || 0) * 1000)}
+              style={{ width: '100%' }}
+              addonAfter="ह (NPR)"
+              formatter={(value) => `${value || 0}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              = NPR {config.default_budget.toLocaleString()}
+            </Text>
+          </Col>
+        </Row>
       </div>
 
-      {/* Expanded Content */}
-      {config.expanded && (
-        <div className="card-content">
-          {/* Quantity and Budget */}
-          <div className="content-section">
-            <Row gutter={24}>
-              <Col span={12}>
-                <label>Quantity (per year):</label>
-                <InputNumber
-                  min={1}
-                  value={config.default_quantity}
-                  onChange={(val) => onQuantityChange(val || 1)}
-                  style={{ width: '100%' }}
-                  addonAfter={config.unit}
-                />
-              </Col>
-              <Col span={12}>
-                <label>Budget (per year):</label>
-                <InputNumber
-                  min={0}
-                  value={config.default_budget / 1000}
-                  onChange={(val) => onBudgetChange((val || 0) * 1000)}
-                  style={{ width: '100%' }}
-                  addonAfter="ह (NPR)"
-                  formatter={(value) => `${value || 0}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  = NPR {config.default_budget.toLocaleString()}
-                </Text>
-              </Col>
-            </Row>
-          </div>
+      <Divider />
 
-          <Divider />
+      {/* Location Selection */}
+      <div className="content-section">
+        <label>📍 Location:</label>
+        <Radio.Group
+          value={locationType}
+          onChange={(e) => onLocationTypeChange(e.target.value)}
+          style={{ display: 'block', marginTop: 8 }}
+        >
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Radio value="none">
+              <Space>
+                <span>No specific location</span>
+                <Tag color="default">General activity</Tag>
+              </Space>
+            </Radio>
 
-          {/* Location Selection */}
-          <div className="content-section">
-            <label>📍 Location:</label>
-            <Radio.Group
-              value={locationType}
-              onChange={(e) => onLocationTypeChange(e.target.value)}
-              style={{ display: 'block', marginTop: 8 }}
-            >
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Radio value="none">
-                  <Space>
-                    <span>No specific location</span>
-                    <Tag color="default">General activity</Tag>
-                  </Space>
-                </Radio>
+            <Radio value="all">
+              <Space>
+                <span>All Blocks (Forest-wide)</span>
+                <Tag color="green">{blocks.length} blocks</Tag>
+              </Space>
+            </Radio>
 
-                <Radio value="all">
-                  <Space>
-                    <span>All Blocks (Forest-wide)</span>
-                    <Tag color="green">{blocks.length} blocks</Tag>
-                  </Space>
-                </Radio>
-
-                <Radio value="blocks" disabled={blocks.length === 0 || locationType === 'all' || locationType === 'sub_areas'}>
-                  <Space>
-                    <span>Specific Blocks</span>
-                    {locationType === 'blocks' && (
-                      <Tag color="blue">{selectedBlocks.length} selected</Tag>
-                    )}
-                  </Space>
-                </Radio>
-                
+            <Radio value="blocks" disabled={blocks.length === 0 || locationType === 'all' || locationType === 'sub_areas'}>
+              <Space>
+                <span>Specific Blocks</span>
                 {locationType === 'blocks' && (
-                  <div className="checkbox-list">
-                    {blocks.map(block => (
-                      <Checkbox
-                        key={block.id}
-                        checked={selectedBlocks.includes(block.id)}
-                        onChange={() => onBlockToggle(block.id)}
-                        style={{ marginLeft: 24 }}
-                      >
-                        <Space>
-                          <span>{block.name}</span>
-                          <Tag>{block.area_hectares.toFixed(0)} ha</Tag>
-                        </Space>
-                      </Checkbox>
-                    ))}
-                  </div>
+                  <Tag color="blue">{selectedBlocks.length} selected</Tag>
                 )}
+              </Space>
+            </Radio>
+            
+            {locationType === 'blocks' && (
+              <div className="checkbox-list">
+                {blocks.map(block => (
+                  <Checkbox
+                    key={block.id}
+                    checked={selectedBlocks.includes(block.id)}
+                    onChange={() => onBlockToggle(block.id)}
+                    style={{ marginLeft: 24 }}
+                  >
+                    <Space>
+                      <span>{block.name}</span>
+                      <Tag>{block.area_hectares.toFixed(0)} ha</Tag>
+                    </Space>
+                  </Checkbox>
+                ))}
+              </div>
+            )}
 
-                <Radio value="sub_areas" disabled={subAreas.length === 0 || locationType === 'all' || locationType === 'blocks'}>
-                  <Space>
-                    <span>Specific Sub-Areas</span>
-                    {locationType === 'sub_areas' && (
-                      <Tag color="green">{selectedSubAreas.length} selected</Tag>
-                    )}
-                  </Space>
-                </Radio>
+            <Radio value="sub_areas" disabled={subAreas.length === 0 || locationType === 'all' || locationType === 'blocks'}>
+              <Space>
+                <span>Specific Sub-Areas</span>
+                {locationType === 'sub_areas' && (
+                  <Tag color="green">{selectedSubAreas.length} selected</Tag>
+                )}
+              </Space>
+            </Radio>
 
                 {locationType === 'sub_areas' && (
                   <div className="checkbox-list">
@@ -1414,107 +1492,249 @@ const ActivityCard: React.FC<ActivityCardProps> = ({
 
           <Divider />
 
-          {/* Quantity by Year */}
+          {/* Year-wise Quantity & Budget Table */}
           <div className="content-section">
-            <label>📊 Quantity by Year ({config.unit}):</label>
-            <div className="year-budget-grid">
-              {config.year_budgets.map((yb, idx) => (
-                <div key={`qty-${yb.year}`} className="year-budget-item">
-                  {editingQtyIndex === idx ? (
-                    <Input
-                      size="small"
-                      style={{ width: 60 }}
-                      value={tempQty}
-                      onChange={(e) => setTempQty(Number(e.target.value) || 0)}
-                      onBlur={() => {
-                        onYearQuantityChange(config.id, idx, tempQty);
-                        setEditingQtyIndex(null);
-                      }}
-                      onPressEnter={() => {
-                        onYearQuantityChange(config.id, idx, tempQty);
-                        setEditingQtyIndex(null);
-                      }}
-                      autoFocus
-                    />
-                  ) : (
-                    <span
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setTempQty(yb.quantity);
-                        setEditingQtyIndex(idx);
-                      }}
-                      title="Click to edit"
-                    >
-                      <Text strong>Y{yb.year}:</Text>
-                      <Text> {Math.round(yb.quantity)}</Text>
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* Budget by Year */}
-          <div className="content-section">
-            <label>💰 Budget by Year:</label>
-            <div className="year-budget-grid">
-              {config.year_budgets.map((yb, idx) => (
-                <div key={`budget-${yb.year}`} className="year-budget-item">
-                  {editingYearIndex === idx ? (
-                    <Input
-                      size="small"
-                      style={{ width: 70 }}
-                      value={tempYearBudget}
-                      onChange={(e) => setTempYearBudget(Number(e.target.value) || 0)}
-                      onBlur={() => {
-                        onYearBudgetChange(config.id, idx, tempYearBudget);
-                        setEditingYearIndex(null);
-                      }}
-                      onPressEnter={() => {
-                        onYearBudgetChange(config.id, idx, tempYearBudget);
-                        setEditingYearIndex(null);
-                      }}
-                      autoFocus
-                    />
-                  ) : (
-                    <span
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setTempYearBudget(yb.budget);
-                        setEditingYearIndex(idx);
-                      }}
-                      title="Click to edit"
-                    >
-                      <Text strong>Y{yb.year}:</Text>
-                      <Text> NPR {yb.budget.toLocaleString()}</Text>
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="budget-total">
-              <Text strong>Total (10 years): NPR {totalBudget.toLocaleString()}</Text>
-              <Text type="secondary"> | Avg: NPR {(totalBudget / 10).toLocaleString()}/year</Text>
-            </div>
+            <label>📊 Year-wise Plan:</label>
+            <Table
+              size="small"
+              dataSource={config.year_budgets}
+              rowKey="year"
+              pagination={false}
+              showHeader={true}
+              columns={[
+                {
+                  title: 'Year',
+                  dataIndex: 'year',
+                  width: 60,
+                  render: (year: number) => <Text strong>Y{year}</Text>
+                },
+                {
+                  title: `Quantity (${config.unit})`,
+                  width: 140,
+                  render: (_: any, _record: any, idx: number) => (
+                    editingQtyIndex === idx ? (
+                      <Input
+                        size="small"
+                        style={{ width: 90 }}
+                        value={tempQty}
+                        onChange={(e) => setTempQty(Number(e.target.value) || 0)}
+                        onBlur={() => {
+                          onYearQuantityChange(config.id, idx, tempQty);
+                          setEditingQtyIndex(null);
+                        }}
+                        onPressEnter={() => {
+                          onYearQuantityChange(config.id, idx, tempQty);
+                          setEditingQtyIndex(null);
+                        }}
+                        autoFocus
+                      />
+                    ) : (
+                      <span
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          setTempQty(_record.quantity);
+                          setEditingQtyIndex(idx);
+                        }}
+                        title="Click to edit"
+                      >
+                        {Math.round(_record.quantity)}
+                      </span>
+                    )
+                  )
+                },
+                {
+                  title: 'Budget (NPR)',
+                  width: 180,
+                  render: (_: any, _record: any, idx: number) => (
+                    editingYearIndex === idx ? (
+                      <Input
+                        size="small"
+                        style={{ width: 140 }}
+                        value={tempYearBudget}
+                        onChange={(e) => setTempYearBudget(Number(e.target.value) || 0)}
+                        onBlur={() => {
+                          onYearBudgetChange(config.id, idx, tempYearBudget);
+                          setEditingYearIndex(null);
+                        }}
+                        onPressEnter={() => {
+                          onYearBudgetChange(config.id, idx, tempYearBudget);
+                          setEditingYearIndex(null);
+                        }}
+                        autoFocus
+                      />
+                    ) : (
+                      <span
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          setTempYearBudget(_record.budget);
+                          setEditingYearIndex(idx);
+                        }}
+                        title="Click to edit"
+                      >
+                        NPR {_record.budget.toLocaleString()}
+                      </span>
+                    )
+                  )
+                }
+              ]}
+              summary={() => (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0}>
+                    <Text strong>Total</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={1}>
+                    <Text strong>{Math.round(config.year_budgets.reduce((s, yb) => s + (Number(yb.quantity) || 0), 0))}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2}>
+                    <Space>
+                      <Text strong>NPR {totalBudget.toLocaleString()}</Text>
+                      <Text type="secondary">| Avg: {(totalBudget / 10).toLocaleString()}/yr</Text>
+                    </Space>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              )}
+            />
           </div>
         </div>
-      )}
+      );
 
-      {/* Card Footer */}
-      <div className="card-footer">
-        <Button 
-          type="text" 
-          danger 
-          size="small" 
-          icon={<DeleteOutlined />}
-          onClick={onRemove}
-        >
-          Remove
-        </Button>
+  const footerContent = (
+    <div className="card-footer">
+      <Button 
+        type="text" 
+        danger 
+        size="small" 
+        icon={<DeleteOutlined />}
+        onClick={onRemove}
+      >
+        Remove
+      </Button>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="activity-card-embedded">
+        {expandedContent}
+        {showRemove && footerContent}
       </div>
+    );
+  }
+
+  const showExpanded = config.expanded;
+
+  return (
+    <Card className={`activity-card ${config.expanded ? 'expanded' : ''}`}>
+      {/* Card Header */}
+      <div className="card-header" onClick={onToggleExpand}>
+        <div className="card-title">
+          <Text strong style={{ fontSize: 16 }}>
+            {index}. {config.activity}
+          </Text>
+          <Tag color="blue">{config.program}</Tag>
+        </div>
+        <div className="card-actions">
+          {!config.expanded && (
+            <Space size="small">
+              <Text type="secondary">
+                Qty: {Math.round(config.default_quantity)} | Budget: {Math.round((config.default_budget || 0) / 1000)}ह/year
+              </Text>
+              <Text type="secondary">|</Text>
+              <Text type="secondary">
+                📍 {locationType === 'all' ? 'All Blocks' : 
+                    locationType === 'blocks' ? `${selectedBlocks.length} blocks` : 
+                    `${selectedSubAreas.length} sub-areas`}
+              </Text>
+              <Text type="secondary">|</Text>
+              <Text type="secondary">🗺️ {config.drawn_features?.length || 0} features</Text>
+            </Space>
+          )}
+          <Button
+            type="text"
+            size="small"
+            icon={config.expanded ? <UpOutlined /> : <DownOutlined />}
+          />
+        </div>
+      </div>
+
+      {showExpanded && expandedContent}
+
+      {footerContent}
     </Card>
+  );
+};
+
+// Editable year cell for the matrix table
+interface EditableYearCellProps {
+  record: MatrixRow;
+  yearIndex: number;
+  onYearBudgetChange: (configId: string, yearIndex: number, value: number) => void;
+  onYearQuantityChange: (configId: string, yearIndex: number, value: number) => void;
+}
+
+const EditableYearCell: React.FC<EditableYearCellProps> = ({
+  record, yearIndex, onYearBudgetChange, onYearQuantityChange
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [editQty, setEditQty] = useState(0);
+  const [editBudget, setEditBudget] = useState(0);
+
+  if (record.type === 'available') {
+    return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+  }
+
+  const yb = record.config!.year_budgets[yearIndex];
+  if (!yb) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+
+  const saveEdit = () => {
+    onYearQuantityChange(record.key, yearIndex, editQty);
+    onYearBudgetChange(record.key, yearIndex, editBudget);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+        <InputNumber
+          size="small"
+          value={editQty}
+          onChange={val => setEditQty(val || 0)}
+          onBlur={saveEdit}
+          onPressEnter={saveEdit}
+          style={{ width: 72, height: 24, fontSize: 11 }}
+          min={0}
+          placeholder="Qty"
+          autoFocus
+        />
+        <InputNumber
+          size="small"
+          value={editBudget / 1000}
+          onChange={val => setEditBudget((val || 0) * 1000)}
+          onBlur={saveEdit}
+          onPressEnter={saveEdit}
+          style={{ width: 72, height: 24, fontSize: 11 }}
+          min={0}
+          step={0.5}
+          placeholder="Budget"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{ cursor: 'pointer', lineHeight: 1.4 }}
+      onClick={(e) => {
+        e.stopPropagation();
+        setEditQty(yb.quantity);
+        setEditBudget(yb.budget);
+        setEditing(true);
+      }}
+      title="Click to edit"
+    >
+      <div style={{ fontSize: 10, color: '#888' }}>Q:{Math.round(yb.quantity)}</div>
+      <div style={{ fontSize: 11, fontWeight: 500 }}>{(Number(yb.budget) / 1000).toFixed(1)}ह</div>
+    </div>
   );
 };
 
