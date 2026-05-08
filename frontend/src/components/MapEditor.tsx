@@ -1131,6 +1131,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
             geometry: subArea.geometry,
             block_id: subArea.block_id,
             block_name: subArea.block_name,
+            block_breakdown: subArea.block_breakdown,
             is_excluded: subArea.is_excluded,
           });
           console.log('Sub-area saved successfully:', result);
@@ -1148,6 +1149,19 @@ const MapEditor: React.FC<MapEditorProps> = ({
           console.error('Full error:', e);
           setError(`Failed to save sub-area "${subArea.name}": ${errorMsg}`);
           return; // Stop saving on first error
+        }
+      }
+
+      // Delete orphaned sub-areas (in backend but no longer in local state)
+      const localIds = new Set(subAreas.map((sa: any) => sa.id));
+      for (const backendId of savedIds) {
+        if (!localIds.has(backendId)) {
+          try {
+            await forestApi.deleteSubArea(calculationId, backendId);
+            console.log(`Deleted orphaned sub-area: ${backendId}`);
+          } catch (e: any) {
+            console.error(`Error deleting orphaned sub-area ${backendId}:`, e);
+          }
         }
       }
 

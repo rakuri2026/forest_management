@@ -15,6 +15,14 @@ from shapely.ops import unary_union
 from ..models.calculation import Calculation
 
 
+def reset_txn(db: Session):
+    """Reset database transaction after any error to prevent cascading failures"""
+    try:
+        db.commit()
+    except:
+        db.rollback()
+
+
 def get_excluded_sub_areas(existing_data: Dict) -> List[Dict]:
     """
     Get all sub-areas that are marked as excluded (private land)
@@ -380,11 +388,13 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
         raster_results = await analyze_rasters(calculation_id, db)
         results.update(raster_results)
         print(f"[ANALYSIS] Raster analysis complete for calculation {calculation_id}", flush=True)
+        reset_txn(db)
 
     # 3. Vector analysis (if enabled)
     if should_run('run_proximity'):
         vector_results = await analyze_vectors(calculation_id, db)
         results.update(vector_results)
+        reset_txn(db)
 
     # 3b. Get administrative location for whole forest
     whole_geom_query = text("""
@@ -430,6 +440,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"  ERROR analyzing nearby features: {e}", flush=True)
             import traceback
             traceback.print_exc()
+            db.rollback()
             results["whole_features_north"] = None
             results["whole_features_east"] = None
             results["whole_features_south"] = None
@@ -444,6 +455,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest physiography: {whole_physio.get('physiography_percentages')}", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest physiography: {e}")
+            db.rollback()
             results["whole_physiography_percentages"] = None
 
     # 3g. Ecoregion for whole forest
@@ -455,6 +467,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest ecoregion: {whole_ecoregion.get('ecoregion_percentages')}", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest ecoregion: {e}")
+            db.rollback()
             results["whole_ecoregion_percentages"] = None
 
     # 3h. NASA Forest 2020 for whole forest
@@ -467,6 +480,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest NASA forest 2020: {whole_nasa.get('nasa_forest_2020_percentages')}", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest NASA forest 2020: {e}")
+            db.rollback()
             results["whole_nasa_forest_2020_percentages"] = None
             results["whole_nasa_forest_2020_dominant"] = None
 
@@ -480,6 +494,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest landcover 1984 dominant: {whole_lc1984.get('landcover_1984_dominant')}", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest landcover 1984: {e}")
+            db.rollback()
             results["landcover_1984_dominant"] = None
             results["landcover_1984_percentages"] = None
 
@@ -493,6 +508,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest hansen 2000 dominant: {whole_hansen2000.get('hansen2000_dominant')}", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest hansen 2000: {e}")
+            db.rollback()
             results["hansen2000_dominant"] = None
             results["hansen2000_percentages"] = None
 
@@ -507,6 +523,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest temperature: {whole_temp.get('temperature_mean_c')}C (mean), {whole_temp.get('temperature_min_c')}C - {whole_temp.get('temperature_max_c')}C (range)", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest temperature: {e}")
+            db.rollback()
             results["temperature_mean_c"] = None
             results["temperature_min_c"] = None
             results["temperature_max_c"] = None
@@ -522,6 +539,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest precipitation: {whole_precip.get('precipitation_mean_mm')} mm/year (mean), {whole_precip.get('precipitation_min_mm')} - {whole_precip.get('precipitation_max_mm')} mm (range)", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest precipitation: {e}")
+            db.rollback()
             results["precipitation_mean_mm"] = None
             results["precipitation_min_mm"] = None
             results["precipitation_max_mm"] = None
@@ -537,6 +555,7 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
             print(f"Whole forest min temp (coldest month): {whole_min_temp.get('min_temp_coldest_mean_c')}C (mean), {whole_min_temp.get('min_temp_coldest_min_c')}C - {whole_min_temp.get('min_temp_coldest_max_c')}C (range)", flush=True)
         except Exception as e:
             print(f"Error analyzing whole forest min temp coldest: {e}")
+            db.rollback()
             results["min_temp_coldest_mean_c"] = None
             results["min_temp_coldest_min_c"] = None
             results["min_temp_coldest_max_c"] = None
@@ -847,30 +866,37 @@ async def analyze_rasters(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     # 1. DEM - Elevation statistics
     dem_results = analyze_dem(calculation_id, db)
     results.update(dem_results)
+    reset_txn(db)
 
     # 2. Slope - Classification percentages
     slope_results = analyze_slope(calculation_id, db)
     results.update(slope_results)
+    reset_txn(db)
 
     # 3. Aspect - Directional percentages
     aspect_results = analyze_aspect(calculation_id, db)
     results.update(aspect_results)
+    reset_txn(db)
 
     # 4. Canopy Height - Forest structure
     canopy_results = analyze_canopy_height(calculation_id, db)
     results.update(canopy_results)
+    reset_txn(db)
 
     # 5. Above-ground Biomass (AGB)
     agb_results = analyze_agb(calculation_id, db)
     results.update(agb_results)
+    reset_txn(db)
 
     # 6. Forest Health
     health_results = analyze_forest_health(calculation_id, db)
     results.update(health_results)
+    reset_txn(db)
 
     # 7. Forest Type
     forest_type_results = analyze_forest_type(calculation_id, db)
     results.update(forest_type_results)
+    reset_txn(db)
 
     # 7.1 Potential Tree Species (based on forest type)
     if forest_type_results.get('forest_type_percentages'):
@@ -879,22 +905,27 @@ async def analyze_rasters(calculation_id: UUID, db: Session) -> Dict[str, Any]:
             db
         )
         results.update(species_results)
+    reset_txn(db)
 
     # 8. ESA WorldCover - Land cover
     esa_results = analyze_esa_worldcover(calculation_id, db)
     results.update(esa_results)
+    reset_txn(db)
 
     # 9. Climate - Temperature and Precipitation
     climate_results = analyze_climate(calculation_id, db)
     results.update(climate_results)
+    reset_txn(db)
 
     # 10. Forest Loss and Gain
     change_results = analyze_forest_change(calculation_id, db)
     results.update(change_results)
+    reset_txn(db)
 
     # 11. Soil properties (RE-ENABLED with optimizations)
     soil_results = analyze_soil(calculation_id, db)
     results.update(soil_results)
+    reset_txn(db)
 
     return results
 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { authApi } from '../services/api';
 import type { User, LoginRequest, RegisterRequest } from '../types';
 
@@ -25,9 +25,34 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+// Auto-refresh interval (check every 5 minutes)
+const REFRESH_CHECK_INTERVAL = 5 * 60 * 1000;
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if token needs refresh (5 minutes before expiry)
+  const checkAndRefreshToken = async () => {
+    const expiryStr = localStorage.getItem('token_expiry');
+    if (!expiryStr) return;
+
+    const expiryTime = parseInt(expiryStr);
+    const now = Date.now();
+    const timeUntilExpiry = expiryTime - now;
+
+    // Refresh if less than 5 minutes left
+    if (timeUntilExpiry < 5 * 60 * 1000) {
+      try {
+        const credentials = { email: user?.email || '', password: '' };
+        // We can't re-login without password, so just logout
+        console.log('[Auth] Token expiring soon, user needs to re-login');
+      } catch (error) {
+        console.error('[Auth] Token refresh failed:', error);
+      }
+    }
+  };
 
   useEffect(() => {
     const loadUser = async () => {
@@ -38,17 +63,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setUser(userData);
         } catch (error) {
           localStorage.removeItem('access_token');
+          localStorage.removeItem('token_expiry');
         }
       }
       setIsLoading(false);
     };
 
     loadUser();
+
+    // Set up periodic token expiry check
+    refreshTimerRef.current = setInterval(checkAndRefreshToken, REFRESH_CHECK_INTERVAL);
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+      }
+    };
   }, []);
 
   const login = async (credentials: LoginRequest) => {
     const tokenData = await authApi.login(credentials);
     localStorage.setItem('access_token', tokenData.access_token);
+    // Set expiry to 5 minutes before actual expiry for safety
+    const expiryTime = Date.now() + (tokenData.expires_in - 300) * 1000;
+    localStorage.setItem('token_expiry', String(expiryTime));
     const userData = await authApi.me();
     setUser(userData);
   };
@@ -61,6 +99,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('access_token');
+    localStorage.removeItem('token_expiry');
     setUser(null);
   };
 

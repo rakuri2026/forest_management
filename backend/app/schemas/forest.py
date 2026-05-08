@@ -324,6 +324,26 @@ class BlockListResponse(BaseModel):
     total_area_hectares: float
 
 
+class BlockAreaDetailItem(BaseModel):
+    """Schema for per-block area detail (Table 5)"""
+    block_name: str
+    total_area_ha: float
+    tree_cover_area_ha: float
+    other_landcover_area_ha: float
+    protected_area_ha: float
+    private_land_area_ha: float
+    effective_area_ha: float
+
+
+class BlockAreaDetailResponse(BaseModel):
+    """Schema for block area detail response (Table 5)"""
+    calculation_id: str
+    forest_name: str
+    total_blocks: int
+    block_details: List[BlockAreaDetailItem]
+    totals: BlockAreaDetailItem
+
+
 class DraftSaveRequest(BaseModel):
     """Schema for saving work-in-progress polygon creation (islands) as draft"""
     forest_name: str = Field(..., min_length=1, max_length=255, description="Name of the forest")

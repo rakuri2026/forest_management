@@ -10,6 +10,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Shared color palette for compartments — distinct colors for visual differentiation
+COMPARTMENT_COLORS = [
+    "#e74c3c", "#3498db", "#2ecc71", "#9b59b6", "#f39c12",
+    "#1abc9c", "#e67e22", "#34495e", "#16a085", "#c0392b",
+    "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#2c3e50",
+    "#f1c40f", "#7f8c8d", "#e91e63", "#00bcd4", "#ff5722",
+]
+
 
 class CompartmentSplitter:
     """Service for splitting forest blocks into compartments"""
@@ -614,3 +622,151 @@ class CompartmentSplitter:
         except Exception as e:
             logger.error(f"Failed to count trees in polygon: {e}")
             return 0
+
+
+    # ============================================================================
+    # NEW: Sub-Compartment Support (Added 2026-05-07)
+    # ============================================================================
+
+    @staticmethod
+    def get_color(index: int) -> str:
+        """
+        Get sequential color from palette based on index.
+        Args:
+            index: 1-based index of the compartment
+        Returns:
+            Hex color string
+        """
+        return COMPARTMENT_COLORS[(index - 1) % len(COMPARTMENT_COLORS)]
+
+    def subdivide_compartment(
+        self,
+        parent_block,
+        method: str,
+        parameters: dict,
+        naming_pattern: str = "{parent_name}-SC{index}",
+        reassign_trees: bool = True,
+        division_level_increment: int = 1
+    ) -> dict:
+        """
+        Divide a compartment into sub-compartments
+        
+        Args:
+            parent_block: Parent ForestBlock instance
+            method: 'parallel', 'grid', or 'custom'
+            parameters: Method-specific parameters
+            naming_pattern: Naming template (use {parent_name} and {index})
+            reassign_trees: Whether to reassign trees to new sub-compartments
+            division_level_increment: How much to increment division_level (default 1)
+        
+        Returns:
+            Dict with success status and created children
+        """
+        try:
+            from shapely.geometry import mapping
+            from ..models.forest_block import ForestBlock
+            from geoalchemy2 import Geometry
+            from shapely.wkt import dumps as wkt_dumps
+            from datetime import datetime
+            
+            # Get parent geometry
+            from geoalchemy2.shape import to_shape
+            parent_geom = to_shape(parent_block.geometry)
+            
+            # Determine division level
+            if parent_block.division_level is None:
+                parent_block.division_level = 1 if parent_block.is_compartment else 0
+            
+            new_level = parent_block.division_level + division_level_increment
+            
+            # Split based on method
+            if method == 'parallel':
+                num_compartments = parameters.get('num_compartments', 3)
+                direction_angle = parameters.get('direction_angle', 90)
+                
+                split_polygons = self.split_parallel_strips(
+                    parent_geom,
+                    direction_angle=direction_angle,
+                    num_compartments=num_compartments
+                )
+                
+            elif method == 'grid':
+                rows = parameters.get('rows', 2)
+                cols = parameters.get('cols', 2)
+                
+                split_polygons = self.split_grid(
+                    parent_geom,
+                    rows=rows,
+                    cols=cols
+                )
+                
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+            
+            if not split_polygons or len(split_polygons) == 0:
+                raise ValueError("Splitting produced no valid polygons")
+            
+            # Create child blocks (sub-compartments)
+            children = []
+            for i, poly in enumerate(split_polygons, start=1):
+                # Calculate area
+                area_sqm = poly.area * 111000 * 111000  # Approximate conversion
+                area_hectares = area_sqm / 10000
+                
+                # Generate name
+                child_name = naming_pattern.format(
+                    parent_name=parent_block.name,
+                    index=i
+                )
+                
+                # Create child block
+                child = ForestBlock(
+                    calculation_id=parent_block.calculation_id,
+                    name=child_name,
+                    geometry=Geometry(geometry_column='geom')(poly.wkt),
+                    area_hectares=area_hectares,
+                    area_sqm=area_sqm,
+                    index=i,
+                    created_at=datetime.utcnow(),
+                    
+                    # Compartment fields
+                    is_compartment=True,
+                    parent_block_id=parent_block.id,
+                    compartment_code=f"{parent_block.compartment_code}-SC{i}" if parent_block.compartment_code else f"SC{i}",
+                    
+                    # NEW: Hierarchy fields
+                    division_level=new_level,
+                    color=self.get_color(i),
+                    is_locked=False,
+                    child_count=0,
+                    display_order=i
+                )
+                
+                self.db.add(child)
+                children.append({
+                    "id": str(child.id),
+                    "name": child.name,
+                    "area_hectares": child.area_hectares,
+                    "area_sqm": child.area_sqm,
+                    "division_level": child.division_level,
+                    "color": child.color
+                })
+            
+            # Update parent's child_count
+            parent_block.child_count = len(children)
+            
+            self.db.commit()
+            
+            logger.info(f"Sub-divided {parent_block.name} into {len(children)} sub-compartments")
+            
+            return {
+                "success": True,
+                "parent_id": str(parent_block.id),
+                "children": children,
+                "children_created": len(children)
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to sub-divide compartment: {e}")
+            raise

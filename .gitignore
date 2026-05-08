@@ -33,6 +33,13 @@ exports/*
 backups/
 outputs/
 
+# GIS raster files (large)
+*.tif
+*.tiff
+
+# GeoPackage export files (generated artifacts)
+*.gpkg
+
 # Test Data (large files)
 testData/
 tests/
@@ -64,6 +71,14 @@ TOMORROW_*.md
 current_context.md
 session*.txt
 *.md
+
+# Backup files
+*.backup
+
+# Temporary/text files
+Report_Generation.txt
+map_prompt.txt
+mock_unified_mapping_ui.html
 
 # Batch files (except system files)
 *.bat

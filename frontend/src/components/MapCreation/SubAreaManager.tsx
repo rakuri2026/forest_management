@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import * as turf from '@turf/turf';
@@ -967,7 +967,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                   className="w-4 h-4 rounded mr-2"
                   style={{ backgroundColor: '#e74c3c' }}
                 />
-                <span className="text-sm text-red-700">Steep Slope (&gt;{slopeThreshold}°)</span>
+                <span className="text-sm text-red-700">Steep Slope (&gt;{slopeMinClass}°)</span>
               </div>
             )}
           </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, GeoJSON, Popup, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, Popup, Marker, useMap } from 'react-leaflet';
 import * as turf from '@turf/turf';
 import { forestApi } from '../services/api';
 import { Tooltip } from '../components/Tooltip';

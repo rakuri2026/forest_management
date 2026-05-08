@@ -723,3 +723,251 @@ def calculate_block_tree_cover_areas(
             })
 
     return results
+
+
+def calculate_block_area_details(
+    db: Session,
+    blocks: List[Dict],
+    sub_areas: List[Dict]
+) -> List[Dict]:
+    """
+    Calculate Table 5 area details for all blocks.
+    Uses exact GIS approach: builds effective geometry by subtracting
+    protected and private land sub-areas from block geometry, then
+    queries ESA WorldCover tree cover on the remaining area directly.
+
+    For each block:
+    1. Tree/Other cover via proportional ESA pixels on full block
+    2. Protected/Private area from sub-area blockBreakdown (for display)
+    3. Effective geometry = Block − Protected − Private (Shapely ST_Difference)
+    4. Effective tree cover = ESA tree pixels on effective geometry
+
+    Args:
+        db: Database session
+        blocks: List of block dicts from result_data['blocks']
+        sub_areas: List of sub-area dicts from result_data['sub_areas']
+
+    Returns:
+        List of dicts with keys:
+            block_name, total_area_ha, tree_cover_area_ha,
+            other_landcover_area_ha, protected_area_ha,
+            private_land_area_ha, effective_area_ha
+    """
+    from shapely.geometry import shape as shapely_shape
+    from shapely.ops import unary_union
+    import pyproj
+    from shapely.ops import transform
+
+    results = []
+
+    for block in blocks:
+        try:
+            block_name = block.get('block_name', 'Unknown')
+            total_area_ha = float(block.get('area_hectares', 0))
+
+            # Get block geometry
+            block_geom = block.get('geometry_wkt') or block.get('geometry')
+            if not block_geom:
+                logger.warning(f"Block {block_name} has no geometry, skipping")
+                results.append({
+                    'block_name': block_name, 'total_area_ha': total_area_ha,
+                    'tree_cover_area_ha': 0.0, 'other_landcover_area_ha': 0.0,
+                    'protected_area_ha': 0.0, 'private_land_area_ha': 0.0,
+                    'effective_area_ha': 0.0, 'error': 'No geometry'
+                })
+                continue
+
+            # Convert to Shapely shape and WKT
+            if isinstance(block_geom, dict):
+                block_shape = shapely_shape(block_geom)
+            elif isinstance(block_geom, str):
+                from shapely.wkt import loads as wkt_loads
+                block_shape = wkt_loads(block_geom)
+            else:
+                logger.warning(f"Block {block_name} has invalid geometry type")
+                results.append({
+                    'block_name': block_name, 'total_area_ha': total_area_ha,
+                    'tree_cover_area_ha': 0.0, 'other_landcover_area_ha': 0.0,
+                    'protected_area_ha': 0.0, 'private_land_area_ha': 0.0,
+                    'effective_area_ha': 0.0, 'error': 'Invalid geometry type'
+                })
+                continue
+
+            geometry_wkt = block_shape.wkt
+
+            # ---------------------------------------------------------------
+            # Query 1: ESA WorldCover on FULL block (tree cover + other)
+            # ---------------------------------------------------------------
+            query = text("""
+                WITH boundary AS (
+                    SELECT ST_GeomFromText(:wkt, 4326) as geom
+                ),
+                clipped_rasters AS (
+                    SELECT ST_Clip(rast, b.geom, 0.0, true) as clipped_rast
+                    FROM rasters.esa_world_cover, boundary b
+                    WHERE ST_Intersects(rast, b.geom)
+                ),
+                pixel_counts AS (
+                    SELECT (ST_ValueCount(clipped_rast, 1, true)).*
+                    FROM clipped_rasters
+                    WHERE clipped_rast IS NOT NULL
+                )
+                SELECT
+                    SUM(count) FILTER (WHERE value = 10) as tree_pixels,
+                    SUM(count) FILTER (WHERE value > 0) as total_pixels
+                FROM pixel_counts
+            """)
+
+            result = db.execute(query, {"wkt": geometry_wkt}).first()
+
+            total_pixels = int(result.total_pixels or 0) if result else 0
+            tree_pixels = int(result.tree_pixels or 0) if result else 0
+
+            if total_pixels > 0 and total_area_ha > 0:
+                tree_cover_ratio = tree_pixels / total_pixels
+                tree_cover_area_ha = total_area_ha * tree_cover_ratio
+                other_landcover_area_ha = total_area_ha * (1 - tree_cover_ratio)
+            else:
+                tree_cover_area_ha = 0.0
+                other_landcover_area_ha = 0.0
+
+            # ---------------------------------------------------------------
+            # Build effective geometry: Block − (Protected ∪ Private)
+            # ---------------------------------------------------------------
+            protected_area_ha = 0.0
+            private_land_area_ha = 0.0
+            excluded_shapes = []
+
+            for sa in sub_areas:
+                sa_category = sa.get('category', '')
+                block_breakdown = sa.get('blockBreakdown', [])
+
+                # Determine if this sub-area belongs to this block
+                belongs = False
+                if block_breakdown and len(block_breakdown) > 0:
+                    entry = next((item for item in block_breakdown if item.get('blockName') == block_name), None)
+                    belongs = entry is not None
+                else:
+                    belongs = (sa.get('blockName') == block_name or sa.get('block_name') == block_name)
+
+                if not belongs:
+                    continue
+
+                # Build intersection geometry for exact area and subtraction
+                sa_geom = sa.get('geometry')
+                if not sa_geom or not isinstance(sa_geom, dict):
+                    continue
+                try:
+                    sa_shape = shapely_shape(sa_geom)
+                    intersection = sa_shape.intersection(block_shape)
+                    if intersection.is_empty:
+                        continue
+
+                    excluded_shapes.append(intersection)
+
+                    # Calculate accurate intersection area using UTM projection
+                    centroid = intersection.centroid
+                    utm_srid = 32644 if centroid.x < 84 else 32645
+                    project = pyproj.Transformer.from_crs(
+                        "EPSG:4326", f"EPSG:{utm_srid}", always_xy=True
+                    ).transform
+                    intersection_utm = transform(project, intersection)
+                    intersection_area_ha = abs(intersection_utm.area) / 10000
+
+                    if sa_category == 'protected':
+                        protected_area_ha += intersection_area_ha
+                    elif sa_category == 'private_land':
+                        private_land_area_ha += intersection_area_ha
+                except Exception as e:
+                    logger.warning(f"Error intersecting sub-area {sa.get('name')} with block {block_name}: {e}")
+                    continue
+
+            # ---------------------------------------------------------------
+            # Query 2: ESA WorldCover on EFFECTIVE geometry
+            # ---------------------------------------------------------------
+            if excluded_shapes:
+                excluded_union = unary_union(excluded_shapes)
+                effective_shape = block_shape.difference(excluded_union)
+            else:
+                effective_shape = block_shape
+
+            if effective_shape.is_empty:
+                effective_area_ha = 0.0
+            else:
+                effective_wkt = effective_shape.wkt
+
+                # Get accurate effective geometry area via UTM projection
+                try:
+                    centroid = effective_shape.centroid
+                    utm_srid = 32644 if centroid.x < 84 else 32645
+                    project = pyproj.Transformer.from_crs(
+                        "EPSG:4326", f"EPSG:{utm_srid}", always_xy=True
+                    ).transform
+                    eff_utm = transform(project, effective_shape)
+                    effective_geom_area_ha = abs(eff_utm.area) / 10000
+                except Exception:
+                    effective_geom_area_ha = total_area_ha - protected_area_ha - private_land_area_ha
+
+                eff_query = text("""
+                    WITH boundary AS (
+                        SELECT ST_GeomFromText(:wkt, 4326) as geom
+                    ),
+                    clipped_rasters AS (
+                        SELECT ST_Clip(rast, b.geom, 0.0, true) as clipped_rast
+                        FROM rasters.esa_world_cover, boundary b
+                        WHERE ST_Intersects(rast, b.geom)
+                    ),
+                    pixel_counts AS (
+                        SELECT (ST_ValueCount(clipped_rast, 1, true)).*
+                        FROM clipped_rasters
+                        WHERE clipped_rast IS NOT NULL
+                    )
+                    SELECT
+                        SUM(count) FILTER (WHERE value = 10) as tree_pixels,
+                        SUM(count) FILTER (WHERE value > 0) as total_pixels
+                    FROM pixel_counts
+                """)
+
+                eff_result = db.execute(eff_query, {"wkt": effective_wkt}).first()
+                eff_total_pixels = int(eff_result.total_pixels or 0) if eff_result else 0
+                eff_tree_pixels = int(eff_result.tree_pixels or 0) if eff_result else 0
+
+                if eff_total_pixels > 0 and effective_geom_area_ha > 0:
+                    eff_ratio = eff_tree_pixels / eff_total_pixels
+                    effective_area_ha = effective_geom_area_ha * eff_ratio
+                else:
+                    effective_area_ha = 0.0
+
+            block_result = {
+                'block_name': block_name,
+                'total_area_ha': round(total_area_ha, 4),
+                'tree_cover_area_ha': round(tree_cover_area_ha, 4),
+                'other_landcover_area_ha': round(other_landcover_area_ha, 4),
+                'protected_area_ha': round(protected_area_ha, 4),
+                'private_land_area_ha': round(private_land_area_ha, 4),
+                'effective_area_ha': round(effective_area_ha, 4)
+            }
+
+            results.append(block_result)
+
+            logger.info(
+                f"Block {block_name}: Total={total_area_ha:.2f}ha, "
+                f"Tree={tree_cover_area_ha:.2f}ha, Other={other_landcover_area_ha:.2f}ha, "
+                f"Protected={protected_area_ha:.2f}ha, Private={private_land_area_ha:.2f}ha, "
+                f"Effective={effective_area_ha:.2f}ha"
+            )
+
+        except Exception as e:
+            logger.error(f"Error calculating block area details for {block.get('block_name', 'Unknown')}: {e}")
+            results.append({
+                'block_name': block.get('block_name', 'Unknown'),
+                'total_area_ha': float(block.get('area_hectares', 0)),
+                'tree_cover_area_ha': 0.0,
+                'other_landcover_area_ha': 0.0,
+                'protected_area_ha': 0.0,
+                'private_land_area_ha': 0.0,
+                'effective_area_ha': 0.0,
+                'error': str(e)
+            })
+
+    return results

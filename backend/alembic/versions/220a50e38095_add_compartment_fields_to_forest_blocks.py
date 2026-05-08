@@ -1,7 +1,7 @@
 """Add compartment fields to forest_blocks
 
 Revision ID: 220a50e38095
-Revises: a16d86d3264a
+Revises: 014
 Create Date: 2026-04-04 17:08:51.911534
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers, used by Alembic.
 revision = '220a50e38095'
-down_revision = 'a16d86d3264a'
+down_revision = '014'
 branch_labels = None
 depends_on = None
 

@@ -11,6 +11,7 @@ import BiodiversityTab from '../components/BiodiversityTab';
 import AnalysisTabContent from '../components/AnalysisTabContent';
 import MapsTab from '../components/MapsTab';
 import { VerticalSidebar, createTabGroups } from '../components/VerticalSidebar';
+import { isUnifiedMappingEnabled } from '../config/featureFlags';
 import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
 import { UserGroupMapTab } from '../components/UserGroupMapTab';
 import { TotalInventoryTab } from '../components/TotalInventoryTab';
@@ -147,7 +148,9 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
   const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities'>('analysis');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities'>(
+    'analysis'
+  );
 
   // Re-analysis modal state
   const [showReanalysisModal, setShowReanalysisModal] = useState(false);
@@ -161,9 +164,19 @@ export default function CalculationDetail() {
   // NEW: Track which block species lists are expanded
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
 
+  // Block rename state
+  const [renamingBlockId, setRenamingBlockId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
   // Map editor state
   const [showMapEditor, setShowMapEditor] = useState(false);
   const [subAreas, setSubAreas] = useState<any[]>([]);
+
+  // Table 5: Block area detail state
+  const [blockAreaDetails, setBlockAreaDetails] = useState<any[]>([]);
+  const [blockAreaTotals, setBlockAreaTotals] = useState<any>(null);
+  const [loadingBlockDetails, setLoadingBlockDetails] = useState(false);
+  const [subAreaRefreshKey, setSubAreaRefreshKey] = useState(0);
 
   useEffect(() => {
     if (id) {
@@ -211,6 +224,27 @@ export default function CalculationDetail() {
       }
     }
   }, [calculation]);
+
+  // Fetch block area details (Table 5) when Sub-Areas tab is active
+  useEffect(() => {
+    if (activeTab === 'subareas' && calculation?.id && (calculation?.result_data?.blocks?.length ?? 0) > 0) {
+      const fetchDetails = async () => {
+        setLoadingBlockDetails(true);
+        try {
+          const data = await forestApi.getBlockAreaDetail(calculation.id);
+          setBlockAreaDetails(data.block_details || []);
+          setBlockAreaTotals(data.totals || null);
+        } catch (err: any) {
+          console.error('Error fetching block area details:', err);
+          setBlockAreaDetails([]);
+          setBlockAreaTotals(null);
+        } finally {
+          setLoadingBlockDetails(false);
+        }
+      };
+      fetchDetails();
+    }
+  }, [activeTab, calculation?.id, calculation?.result_data?.blocks?.length, subAreaRefreshKey]);
 
   // Get map center from geometry
   const getMapCenter = (): [number, number] => {
@@ -469,6 +503,33 @@ export default function CalculationDetail() {
     } : prev);
   };
 
+  // Handle block rename
+  const handleRenameBlock = async (block: any) => {
+    if (!renameValue.trim() || !renamingBlockId) return;
+    try {
+      const blockId = block.block_id;
+      if (blockId) {
+        await forestApi.updateBlock(calculation.id, blockId, renameValue.trim());
+      }
+      // Also update local state for result_data blocks (even without block_id)
+      const updatedBlocks = [...blocks];
+      const idx = updatedBlocks.findIndex((b: any) =>
+        b.block_id ? b.block_id === renamingBlockId : b.block_name === renamingBlockId
+      );
+      if (idx >= 0) {
+        updatedBlocks[idx] = { ...updatedBlocks[idx], block_name: renameValue.trim() };
+      }
+      setCalculation(prev => prev ? {
+        ...prev,
+        result_data: { ...prev.result_data, blocks: updatedBlocks }
+      } : prev);
+    } catch (err: any) {
+      console.error('Failed to rename block:', err);
+    }
+    setRenamingBlockId(null);
+    setRenameValue('');
+  };
+
   // Extract blocks from result_data
   const blocks = calculation.result_data?.blocks || [];
   const totalBlocks = calculation.result_data?.total_blocks || 1;
@@ -564,9 +625,42 @@ export default function CalculationDetail() {
                 <span className="mx-2">•</span>
                 <span className="font-medium">{calculation.is_draft ? 'Draft' : (calculation.uploaded_filename || '-')}</span>
               </div>
-              {totalBlocks > 1 && (
-                <div className="mt-2 text-sm text-green-700 font-medium">
-                  {totalBlocks} Blocks {processingInfo.partitioned && '(Partitioned using division lines)'}
+              {blocks.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {blocks.map((block: any, idx: number) => (
+                    <div key={block.block_id || idx} className="inline-flex items-center gap-1 px-2 py-1 bg-white/70 rounded border border-green-200 text-sm">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0"
+                        style={{ backgroundColor: BLOCK_COLORS[idx % BLOCK_COLORS.length] }}
+                      />
+                      {renamingBlockId === (block.block_id || block.block_name) ? (
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameBlock(block)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleRenameBlock(block); if (e.key === 'Escape') { setRenamingBlockId(null); setRenameValue(''); } }}
+                          className="w-32 px-1 py-0 text-sm border border-green-400 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+                          autoFocus
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <>
+                          <span className="font-medium text-gray-800">{block.block_name}</span>
+                          <button
+                            onClick={() => { setRenamingBlockId(block.block_id || block.block_name); setRenameValue(block.block_name); }}
+                            className="p-0.5 text-gray-400 hover:text-green-600 transition-colors"
+                            title="Rename block"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                      <span className="text-gray-500">{parseFloat(block.area_hectares || 0).toFixed(1)} ha</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -618,7 +712,7 @@ export default function CalculationDetail() {
           {/* Vertical Sidebar */}
           <div className="w-56 flex-shrink-0 overflow-y-auto">
             <VerticalSidebar
-              groups={createTabGroups()}
+              groups={createTabGroups(isUnifiedMappingEnabled())}
               activeTab={activeTab}
               onTabChange={(tabId) => setActiveTab(tabId as typeof activeTab)}
             />
@@ -655,97 +749,13 @@ export default function CalculationDetail() {
               <div className="w-1/2 overflow-auto">
                 {blocks.length > 0 ? (
                   <div className="space-y-6">
-                    {/* Table 1: Summary Card */}
-                    <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg border border-green-200 p-4">
-                      <h3 className="text-lg font-bold text-green-800 mb-3">Table 1: Forest Area Summary</h3>
-                      {(() => {
-                        const gross = parseFloat(calculation.result_data?.area_hectares || 0);
-                        const excluded = parseFloat(calculation.result_data?.excluded_area_hectares || 0);
-                        const net = parseFloat(calculation.result_data?.effective_area_hectares || gross);
-                        
-                        if (excluded > 0) {
-                          return (
-                            <div className="grid grid-cols-3 gap-4 text-center">
-                              <div>
-                                <p className="text-sm text-green-600">Gross Area</p>
-                                <p className="text-xl font-bold text-green-800">{gross.toFixed(2)} ha</p>
-                              </div>
-                              <div>
-                                <p className="text-sm text-red-600">Excluded</p>
-                                <p className="text-xl font-bold text-red-600">- {excluded.toFixed(2)} ha</p>
-                              </div>
-                              <div>
-                                <p className="text-sm text-green-600">Net Forest</p>
-                                <p className="text-xl font-bold text-green-800">{net.toFixed(2)} ha</p>
-                              </div>
-                            </div>
-                          );
-                        } else {
-                          return (
-                            <div className="grid grid-cols-1 gap-4 text-center">
-                              <div>
-                                <p className="text-sm text-green-600">Total Forest Area</p>
-                                <p className="text-xl font-bold text-green-800">{gross.toFixed(2)} ha</p>
-                              </div>
-                            </div>
-                          );
-                        }
-                      })()}
-                    </div>
 
-                    {/* Table 2: Block-wise Area Breakdown */}
-                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                      <div className="bg-blue-50 px-4 py-2 border-b border-gray-200">
-                        <h4 className="text-sm font-semibold text-blue-800">Table 2: Block-wise Area Breakdown</h4>
-                      </div>
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Block</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total (ha)</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Excluded (ha)</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net (ha)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {blocks.map((block: any, idx: number) => {
-                            const excluded = parseFloat(block.excluded_area_hectares || 0);
-                            const total = parseFloat(block.area_hectares || 0);
-                            const net = parseFloat(block.effective_area_hectares || total);
-                            return (
-                              <tr key={idx} className="hover:bg-gray-50">
-                                <td className="px-4 py-2 text-sm font-medium text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
-                                <td className="px-4 py-2 text-sm text-gray-900 text-right">{total.toFixed(2)}</td>
-                                <td className="px-4 py-2 text-sm text-red-600 text-right">
-                                  {excluded > 0 ? excluded.toFixed(2) : '-'}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-green-700 font-semibold text-right">
-                                  {net.toFixed(2)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          <tr className="bg-gray-100 font-semibold">
-                            <td className="px-4 py-2 text-sm text-gray-900">TOTAL</td>
-                            <td className="px-4 py-2 text-sm text-gray-900 text-right">
-                              {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.area_hectares || 0), 0).toFixed(2)}
-                            </td>
-                            <td className="px-4 py-2 text-sm text-red-600 text-right">
-                              {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.excluded_area_hectares || 0), 0).toFixed(2)}
-                            </td>
-                            <td className="px-4 py-2 text-sm text-green-700 text-right">
-                              {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.effective_area_hectares || b.area_hectares || 0), 0).toFixed(2)}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
 
-                    {/* Table 3: Sub-Areas Detail */}
+                    {/* Table 1: Sub-Areas Detail */}
                     {(calculation?.result_data?.sub_areas && calculation.result_data.sub_areas.length > 0) && (
                       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                         <div className="bg-purple-50 px-4 py-2 border-b border-gray-200">
-                          <h4 className="text-sm font-semibold text-purple-800">Table 3: Sub-Areas Detail</h4>
+                          <h4 className="text-sm font-semibold text-purple-800">Table 1: Sub-Areas Detail</h4>
                         </div>
                         <table className="min-w-full divide-y divide-gray-200">
                           <thead className="bg-gray-50">
@@ -753,11 +763,15 @@ export default function CalculationDetail() {
                               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sub-Area Name</th>
                               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
                               <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Area (ha)</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Blocks</th>
                               <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {calculation.result_data.sub_areas.map((sa: any, idx: number) => (
+                            {calculation.result_data.sub_areas.map((sa: any, idx: number) => {
+                              const bd = sa.blockBreakdown || sa.block_breakdown;
+                              const isCrossBlock = bd && bd.length > 1;
+                              return (
                               <tr key={sa.id || idx} className="hover:bg-gray-50">
                                 <td className="px-4 py-2 text-sm font-medium text-gray-900">{sa.name}</td>
                                 <td className="px-4 py-2 text-sm text-gray-500">
@@ -771,6 +785,19 @@ export default function CalculationDetail() {
                                    sa.category === 'office' ? 'Office' : sa.category}
                                 </td>
                                 <td className="px-4 py-2 text-sm text-gray-900 text-right">{sa.area_hectares?.toFixed(4) || 0}</td>
+                                <td className="px-4 py-2 text-sm">
+                                  {isCrossBlock ? (
+                                    <div className="text-xs space-y-0.5">
+                                      {bd.map((b: any, i: number) => (
+                                        <div key={i} className="text-gray-600">
+                                          <span className="font-medium">{b.blockName}</span>: {b.area.toFixed(2)} ha ({b.percentage.toFixed(1)}%)
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-500">{sa.blockName || sa.block_name || '-'}</span>
+                                  )}
+                                </td>
                                 <td className="px-4 py-2 text-center">
                                   {sa.isExcluded || sa.is_excluded ? (
                                     <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Excluded</span>
@@ -779,12 +806,14 @@ export default function CalculationDetail() {
                                   )}
                                 </td>
                               </tr>
-                            ))}
+                              );
+                            })}
                             <tr className="bg-gray-100 font-semibold">
                               <td className="px-4 py-2 text-sm text-gray-900" colSpan={2}>SUB-AREAS TOTAL</td>
                               <td className="px-4 py-2 text-sm text-gray-900 text-right">
                                 {calculation.result_data.sub_areas.reduce((sum: number, sa: any) => sum + parseFloat(sa.area_hectares || 0), 0).toFixed(2)}
                               </td>
+                              <td className="px-4 py-2"></td>
                               <td className="px-4 py-2"></td>
                             </tr>
                           </tbody>
@@ -792,89 +821,134 @@ export default function CalculationDetail() {
                       </div>
                     )}
 
-                    {/* Table 4: Combined (Blocks + Sub-Areas) */}
-                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                      <div className="bg-green-50 px-4 py-2 border-b border-gray-200">
-                        <h4 className="text-sm font-semibold text-green-800">Table 4: Combined View (Blocks + Sub-Areas)</h4>
-                      </div>
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Block / Sub-Area</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total (ha)</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Excluded (ha)</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net (ha)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {blocks.map((block: any, idx: number) => {
-                            const subAreasInBlock = (calculation?.result_data?.sub_areas || []).filter((sa: any) => 
-                              sa.blockName === block.block_name || sa.block_name === block.block_name
-                            );
-                            
-                            const blockExcluded = parseFloat(block.excluded_area_hectares || 0);
-                            const blockTotal = parseFloat(block.area_hectares || 0);
-                            const blockNet = parseFloat(block.effective_area_hectares || blockTotal);
-                            
-                            return (
-                              <>
-                                <tr key={`block-${idx}`} className="bg-green-50 hover:bg-green-100">
-                                  <td className="px-3 py-2 text-sm font-bold text-gray-900">{block.block_name || `Block ${idx + 1}`}</td>
-                                  <td className="px-3 py-2 text-sm text-gray-500">Block</td>
-                                  <td className="px-3 py-2 text-sm text-gray-900 text-right font-semibold">{blockTotal.toFixed(2)}</td>
-                                  <td className="px-3 py-2 text-sm text-red-600 text-right">
-                                    {blockExcluded > 0 ? blockExcluded.toFixed(2) : '-'}
-                                  </td>
-                                  <td className="px-3 py-2 text-sm text-green-700 font-bold text-right">
-                                    {blockNet.toFixed(2)}
+
+
+                    {/* Table 2: Block-wise Area Summary */}
+                    {blockAreaDetails.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="bg-blue-50 px-4 py-2 border-b border-gray-200">
+                          <h4 className="text-sm font-semibold text-blue-800">Table 2: ब्लक अनुसार क्षेत्रफलको विस्तृत विवरण</h4>
+                          <p className="text-xs text-blue-600">(Block-wise Detailed Area Description)</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200 text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left font-medium text-gray-500 uppercase">ब्लकको नाम<br/><span className="font-normal text-gray-400">(Block Name)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">ब्लकको कुल क्षेत्रफल<br/><span className="font-normal text-gray-400">(Total Area ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">रूखले ढाकेको<br/><span className="font-normal text-gray-400">(Tree Cover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">अन्यले ढाकेको<br/><span className="font-normal text-gray-400">(Other Landcover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">संरक्षित क्षेत्र<br/><span className="font-normal text-gray-400">(Protected ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">निजि आवादी<br/><span className="font-normal text-gray-400">(Private Land ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">बहिष्कृत क्षेत्र<br/><span className="font-normal text-gray-400">(Excluded ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">शुद्ध वन क्षेत्रफल<br/><span className="font-normal text-gray-400">(Net Forest ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">प्रभावित क्षेत्र<br/><span className="font-normal text-gray-400">(Effective ha)</span></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {blockAreaDetails.map((detail: any, idx: number) => {
+                                const excluded = (detail.protected_area_ha || 0) + (detail.private_land_area_ha || 0);
+                                const netForest = (detail.total_area_ha || 0) - excluded;
+                                return (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                  <td className="px-2 py-2 text-sm font-medium text-gray-900">{detail.block_name}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{detail.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-700 text-right">{detail.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-600 text-right">{detail.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-600 text-right">{detail.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-600 text-right">{detail.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-700 text-right">{excluded > 0 ? excluded.toFixed(2) : '-'}</td>
+                                  <td className="px-2 py-2 text-sm text-green-700 font-semibold text-right">{netForest.toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-semibold text-right ${(detail.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {detail.effective_area_ha?.toFixed(2)}
                                   </td>
                                 </tr>
-                                {subAreasInBlock.map((sa: any, saIdx: number) => (
-                                  <tr key={`sa-${idx}-${saIdx}`} className="hover:bg-gray-50">
-                                    <td className="px-3 py-2 text-sm text-gray-600 pl-8">↳ {sa.name}</td>
-                                    <td className="px-3 py-2 text-sm text-gray-500">
-                                      {sa.category === 'private_land' ? 'Private Land' :
-                                       sa.category === 'protected' ? 'Protected' :
-                                       sa.category === 'plantation' ? 'Plantation' :
-                                       sa.category === 'religious' ? 'Religious' :
-                                       sa.category === 'biodiversity' ? 'Biodiversity' :
-                                       sa.category === 'pro-poor' ? 'Pro-Poor' :
-                                       sa.category === 'tourist' ? 'Tourist' :
-                                       sa.category === 'office' ? 'Office' : sa.category}
-                                    </td>
-                                    <td className="px-3 py-2 text-sm text-gray-600 text-right">{parseFloat(sa.area_hectares || 0).toFixed(4)}</td>
-                                    <td className="px-3 py-2 text-sm text-red-600 text-right">
-                                      {(sa.isExcluded || sa.is_excluded) ? parseFloat(sa.area_hectares || 0).toFixed(2) : '-'}
-                                    </td>
-                                    <td className="px-3 py-2 text-sm text-right">
-                                      {(sa.isExcluded || sa.is_excluded) ? (
-                                        <span className="text-gray-400">-</span>
-                                      ) : (
-                                        <span className="text-green-600">{parseFloat(sa.area_hectares || 0).toFixed(4)}</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </>
-                            );
-                          })}
-                          <tr className="bg-gray-200 font-bold">
-                            <td className="px-3 py-2 text-sm text-gray-900">TOTAL</td>
-                            <td className="px-3 py-2 text-sm text-gray-900"></td>
-                            <td className="px-3 py-2 text-sm text-gray-900 text-right">
-                              {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.area_hectares || 0), 0).toFixed(2)}
-                            </td>
-                            <td className="px-3 py-2 text-sm text-red-600 text-right">
-                              {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.excluded_area_hectares || 0), 0).toFixed(2)}
-                            </td>
-                            <td className="px-3 py-2 text-sm text-green-700 text-right">
-                              {blocks.reduce((sum: number, b: any) => sum + parseFloat(b.effective_area_hectares || b.area_hectares || 0), 0).toFixed(2)}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
+                                );
+                              })}
+                              {blockAreaTotals && (
+                                <tr className="bg-gray-100 font-semibold">
+                                  <td className="px-2 py-2 text-sm text-gray-900">TOTAL</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{blockAreaTotals.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-800 text-right">{blockAreaTotals.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-800 text-right">{blockAreaTotals.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-700 text-right">{blockAreaTotals.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-700 text-right">{blockAreaTotals.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-800 text-right">{((blockAreaTotals.protected_area_ha || 0) + (blockAreaTotals.private_land_area_ha || 0)).toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-800 text-right">{(blockAreaTotals.total_area_ha - (blockAreaTotals.protected_area_ha || 0) - (blockAreaTotals.private_land_area_ha || 0)).toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-bold text-right ${(blockAreaTotals.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {blockAreaTotals.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Table 3: Community Forests and Block Area Description */}
+                    {blockAreaDetails.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mt-6">
+                        <div className="bg-amber-50 px-4 py-2 border-b border-gray-200">
+                          <h4 className="text-sm font-semibold text-amber-800">
+                            Table 3: सामुदायिक वन तथा वन खण्डको क्षेत्रफल सम्वन्धी विवरण
+                          </h4>
+                          <p className="text-xs text-amber-600">(Community Forests and Block Area Description)</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200 text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left font-medium text-gray-500 uppercase">ब्लकको नाम<br/><span className="font-normal text-gray-400">(Block Name)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">ब्लकको कुल क्षेत्रफल<br/><span className="font-normal text-gray-400">(Total Area ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">रूखले ढाकेको<br/><span className="font-normal text-gray-400">(Tree Cover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">अन्यले ढाकेको<br/><span className="font-normal text-gray-400">(Other Landcover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">संरक्षित क्षेत्र<br/><span className="font-normal text-gray-400">(Protected ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">निजि आवादी<br/><span className="font-normal text-gray-400">(Private Land ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">प्रभावित क्षेत्र<br/><span className="font-normal text-gray-400">(Effective ha)</span></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {blockAreaDetails.map((detail: any, idx: number) => (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                  <td className="px-2 py-2 text-sm font-medium text-gray-900">{detail.block_name}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{detail.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-700 text-right">{detail.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-600 text-right">{detail.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-600 text-right">{detail.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-600 text-right">{detail.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-semibold text-right ${(detail.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {detail.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* TOTAL row */}
+                              {blockAreaTotals && (
+                                <tr className="bg-gray-100 font-semibold">
+                                  <td className="px-2 py-2 text-sm text-gray-900">TOTAL</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{blockAreaTotals.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-800 text-right">{blockAreaTotals.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-800 text-right">{blockAreaTotals.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-700 text-right">{blockAreaTotals.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-700 text-right">{blockAreaTotals.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-bold text-right ${(blockAreaTotals.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {blockAreaTotals.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Loading state for block area details */}
+                    {loadingBlockDetails && blocks.length > 0 && (
+                      <div className="mt-6 bg-white rounded-lg border border-gray-200 p-6 text-center">
+                        <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600 mb-2"></div>
+                        <p className="text-sm text-gray-500">Calculating block area details...</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center py-12 bg-gray-50 rounded-lg">
@@ -1704,8 +1778,33 @@ export default function CalculationDetail() {
                 <div key={index} className="border border-gray-300 rounded-lg bg-white shadow-sm">
                   {/* Block Header */}
                   <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-gray-200">
-                    <h3 className="text-lg font-bold text-gray-900">
-                      Block #{index + 1}: {block.block_name}
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <span>Block #{index + 1}:</span>
+                      {renamingBlockId === (block.block_id || `detail-${index}`) ? (
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameBlock(block)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleRenameBlock(block); if (e.key === 'Escape') { setRenamingBlockId(null); setRenameValue(''); } }}
+                          className="w-48 px-2 py-0.5 text-base border border-green-400 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+                          autoFocus
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <>
+                          <span>{block.block_name}</span>
+                          <button
+                            onClick={() => { setRenamingBlockId(block.block_id || `detail-${index}`); setRenameValue(block.block_name); }}
+                            className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                            title="Rename block"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
                     </h3>
                     <p className="text-sm text-gray-600 mt-1">
                       Area: {parseFloat(block.area_hectares || 0).toFixed(2)} hectares
@@ -2676,6 +2775,8 @@ export default function CalculationDetail() {
               const subAreaData = await forestApi.listSubAreas(id);
               setSubAreas(subAreaData.sub_areas || []);
             }
+            // Trigger Table 5 refresh
+            setSubAreaRefreshKey(k => k + 1);
           }}
           onCancel={() => setShowMapEditor(false)}
         />

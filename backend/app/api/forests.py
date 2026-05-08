@@ -37,6 +37,9 @@ from ..schemas.forest import (
     BlockCreateListRequest,
     BlockResponse,
     BlockListResponse,
+    BlockAreaDetailItem,
+    BlockBreakdownItem,
+    BlockAreaDetailResponse,
     DraftSaveRequest,
     DraftResponse,
     DraftDetailResponse,
@@ -60,7 +63,7 @@ from ..services.analysis import analyze_forest_boundary
 from ..services.fieldbook import generate_fieldbook_points
 from ..services.sampling import create_sampling_design
 from ..services.map_generator import get_map_generator
-from ..services.tree_cover_analysis import calculate_accessible_forest_area, calculate_block_tree_cover_areas
+from ..services.tree_cover_analysis import calculate_accessible_forest_area, calculate_block_tree_cover_areas, calculate_block_area_details
 from ..services.map_creation_service import (
     geojson_to_wkt,
     process_map_creation_data,
@@ -768,6 +771,37 @@ async def create_forest_from_map(
     flag_modified(calculation, "result_data")
     db.commit()
     db.refresh(calculation)
+
+    # Create ForestBlock records from blocks in result_data
+    # This ensures compartments API can find blocks in forest_blocks table
+    if blocks_for_analysis:
+        from app.models.forest_block import ForestBlock
+        from uuid import uuid4
+
+        print(f"[create-from-map] Creating {len(blocks_for_analysis)} ForestBlock records...")
+
+        for idx, block_data in enumerate(blocks_for_analysis):
+            block_geom_wkt = db.scalar(
+                select(func.ST_AsText(func.ST_GeomFromGeoJSON(json.dumps(block_data.get("geometry")))))
+            )
+
+            if not block_geom_wkt:
+                print(f"  Warning: Could not convert geometry for block {block_data.get('block_name')}")
+                continue
+
+            forest_block = ForestBlock(
+                id=uuid4(),
+                calculation_id=calculation.id,
+                name=block_data.get("block_name", f"Block {idx + 1}"),
+                geometry=func.ST_GeomFromText(block_geom_wkt, 4326),
+                area_hectares=block_data.get("area_hectares", 0),
+                index=idx,
+                created_at=datetime.now(datetime.timezone.utc)
+            )
+            db.add(forest_block)
+
+        db.commit()
+        print(f"[create-from-map] Created {len(blocks_for_analysis)} ForestBlock records successfully")
 
     # Prepare response
     geometry_json = None
@@ -2959,6 +2993,13 @@ async def add_sub_area(
         # Generate unique ID
         sub_area_id = str(uuid.uuid4())
 
+        # Calculate block breakdown from geometry (handles cross-block sub-areas)
+        blocks_for_breakdown = (calculation.result_data or {}).get("blocks", [])
+        if request.block_breakdown:
+            block_breakdown = [item.model_dump() for item in request.block_breakdown]
+        else:
+            block_breakdown = calculate_block_breakdown(mapping(geom), blocks_for_breakdown)
+
         # Create sub-area object
         new_sub_area = {
             "id": sub_area_id,
@@ -2969,10 +3010,16 @@ async def add_sub_area(
             "area_hectares": round(area_hectares, 4),
             "blockId": request.block_id,
             "blockName": request.block_name,
-            "blockBreakdown": [item.model_dump() for item in request.block_breakdown] if request.block_breakdown else None,
+            "blockBreakdown": block_breakdown,
             "isExcluded": request.is_excluded,
             "created_at": datetime.now().isoformat()
         }
+
+        # Update primary block assignment if blockBreakdown is available
+        if block_breakdown and not request.block_id:
+            primary = max(block_breakdown, key=lambda x: x.get("area", 0))
+            new_sub_area["blockId"] = primary.get("blockId")
+            new_sub_area["blockName"] = primary.get("blockName")
 
         # Get or initialize result_data
         result_data = calculation.result_data or {}
@@ -3023,9 +3070,9 @@ async def add_sub_area(
             category=request.category,
             geometry=mapping(geom),
             area_hectares=round(area_hectares, 4),
-            block_id=request.block_id,
-            block_name=request.block_name,
-            block_breakdown=request.block_breakdown,
+            block_id=new_sub_area.get("blockId") if not request.block_id else request.block_id,
+            block_name=new_sub_area.get("blockName") if not request.block_name else request.block_name,
+            block_breakdown=[BlockBreakdownItem(**item) for item in block_breakdown] if block_breakdown else None,
             is_excluded=request.is_excluded
         )
 
@@ -3385,11 +3432,13 @@ async def delete_sub_area(
 
     # Find and remove the sub-area
     sub_area_found = False
+    deleted_area = 0
     new_sub_areas = []
 
     for sa in sub_areas:
         if sa.get("id") == sub_area_id:
             sub_area_found = True
+            deleted_area = sa.get("area_hectares", 0)
         else:
             new_sub_areas.append(sa)
 
@@ -3777,8 +3826,18 @@ async def get_calculation_polygons(
     
     # For each geometry, get its area and geometry separately (using UTM for accurate area)
     polygons = []
+    poly_index = 0  # Only count polygon geometries
     for i in range(1, num_geoms + 1):
         try:
+            # Check geometry type first - skip non-polygons (e.g., LineStrings from corrupted boundaries)
+            geom_type_result = db.execute(
+                text("SELECT ST_GeometryType(ST_GeometryN(boundary_geom, :idx)) as gtype FROM calculations WHERE id = :calc_id"),
+                {"calc_id": str(calculation_id), "idx": i}
+            ).first()
+            if geom_type_result and geom_type_result.gtype not in ('ST_Polygon', 'ST_MultiPolygon'):
+                print(f"Skipping non-polygon geometry {i}: {geom_type_result.gtype}")
+                continue
+
             # Extract the i-th geometry from the collection and transform to UTM for accurate area
             single_geom_query = db.execute(
                 text("""
@@ -3793,13 +3852,14 @@ async def get_calculation_polygons(
             
             if single_geom_query and single_geom_query.geometry:
                 geom_json = json.loads(single_geom_query.geometry)
-                print(f"Polygon {i}: area_hectares = {single_geom_query.area_hectares}")
+                print(f"Polygon {poly_index}: area_hectares = {single_geom_query.area_hectares}")
                 polygons.append(BlockPolygonResponse(
-                    index=i - 1,
+                    index=poly_index,
                     geometry=geom_json,
                     area_hectares=round(single_geom_query.area_hectares, 4) if single_geom_query.area_hectares else 0,
-                    current_name=existing_blocks.get(i - 1, f"Block {i}")
+                    current_name=existing_blocks.get(poly_index, f"Block {poly_index + 1}")
                 ))
+                poly_index += 1
         except Exception as e:
             print(f"Error extracting polygon {i}: {e}")
             continue
@@ -3948,14 +4008,22 @@ async def create_blocks_from_polygons(
     
     for block_req in request.blocks:
         # Get the polygon geometry for this index
+        # Filter out non-polygon geometries (e.g., LineStrings from corrupted boundaries)
         # Use ST_Area(geography()) for accurate geodesic calculation
         polygon_query = db.execute(
             text("""
+                WITH polygon_dump AS (
+                    SELECT
+                        (ST_Dump(boundary_geom)).geom as poly_geom,
+                        row_number() OVER () as rn
+                    FROM calculations
+                    WHERE id = :calc_id
+                )
                 SELECT
-                    (ST_Dump(boundary_geom)).geom as polygon_geom,
-                    ST_Area(geography((ST_Dump(boundary_geom)).geom)) / 10000.0 as area_hectares
-                FROM calculations
-                WHERE id = :calc_id
+                    poly_geom as polygon_geom,
+                    ST_Area(geography(poly_geom)) / 10000.0 as area_hectares
+                FROM polygon_dump
+                WHERE ST_GeometryType(poly_geom) IN ('ST_Polygon', 'ST_MultiPolygon')
                 OFFSET :offset LIMIT 1
             """),
             {"calc_id": str(calculation_id), "offset": block_req.polygon_index}
@@ -3965,6 +4033,12 @@ async def create_blocks_from_polygons(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Polygon index {block_req.polygon_index} not found"
+            )
+        
+        if not polygon_query.area_hectares or polygon_query.area_hectares <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Polygon index {block_req.polygon_index} has invalid area ({polygon_query.area_hectares} ha)"
             )
         
         # Create block record
@@ -4088,6 +4162,65 @@ async def get_calculation_blocks(
     )
 
 
+@router.put("/calculations/{calculation_id}/boundary")
+async def update_boundary_geometry(
+    calculation_id: UUID,
+    request: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the forest boundary geometry.
+    
+    Allows users to edit the boundary polygon after initial creation.
+    Updates both the boundary_geom in database and the geometry in result_data.
+    """
+    from shapely.geometry import shape, mapping
+    from geoalchemy2.shape import from_shape
+    import json
+    
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+    
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+    
+    geometry = request.get('geometry')
+    if not geometry:
+        raise HTTPException(status_code=400, detail="Geometry is required")
+    
+    try:
+        # Convert GeoJSON to PostGIS geometry
+        geom_shape = shape(geometry)
+        geom_wkb = from_shape(geom_shape, srid=4326)
+        
+        # Update boundary_geom
+        calculation.boundary_geom = geom_wkb
+        
+        # Update result_data
+        result_data = calculation.result_data or {}
+        result_data['geometry'] = geometry
+        result_data['area_hectares'] = request.get('area_hectares', 0)
+        calculation.result_data = result_data
+        
+        flag_modified(calculation, "result_data")
+        db.commit()
+        
+        print(f"[update-boundary] Updated boundary for calculation {calculation_id}")
+        
+        return {
+            "success": True,
+            "message": "Boundary updated successfully",
+            "area_hectares": result_data['area_hectares']
+        }
+        
+    except Exception as e:
+        print(f"[update-boundary] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update boundary: {str(e)}")
+
+
 @router.patch("/calculations/{calculation_id}/blocks/{block_id}", response_model=BlockResponse)
 async def update_block(
     calculation_id: UUID,
@@ -4124,14 +4257,43 @@ async def update_block(
             detail="Block not found"
         )
     
+    old_name = block.name
     block.name = name
+
+    # Sync result_data blocks array
+    result_data = calculation.result_data or {}
+    if "blocks" in result_data:
+        for block_data in result_data["blocks"]:
+            if block_data.get("block_id") == str(block_id) or block_data.get("block_name") == old_name:
+                block_data["block_name"] = name
+
+    # Sync sub-areas blockName references
+    if "sub_areas" in result_data:
+        block_id_str = str(block_id)
+        for sa in result_data["sub_areas"]:
+            if sa.get("blockId") == block_id_str:
+                sa["blockName"] = name
+            if sa.get("block_name") == old_name:
+                sa["block_name"] = name
+            # Sync block_breakdown items
+            if "blockBreakdown" in sa:
+                for bb in sa["blockBreakdown"]:
+                    if bb.get("blockId") == block_id_str:
+                        bb["blockName"] = name
+
+    # Sync calculation.block_name if it matches the old name
+    if calculation.block_name == old_name:
+        calculation.block_name = name
+
+    calculation.result_data = result_data
+    flag_modified(calculation, "result_data")
     db.commit()
     db.refresh(block)
-    
+
     geojson_result = db.query(
         func.ST_AsGeoJSON(block.geometry).label('geojson')
     ).first()
-    
+
     return BlockResponse(
         id=str(block.id),
         name=block.name,
@@ -4572,6 +4734,91 @@ async def recalculate_areas(
         "sub_areas_updated": recalculated_subareas,
         "total_excluded_area": round(excluded_total, 4)
     }
+
+
+# ============================================
+# TABLE 5: Block Area Detail Endpoint
+# ============================================
+
+
+@router.get(
+    "/calculations/{calculation_id}/block-area-detail",
+    response_model=BlockAreaDetailResponse
+)
+async def get_block_area_detail(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get per-block area details for Table 5 (सामुदायिक वन तथा वन खण्डको क्षेत्रफल सम्वन्धी विवरण).
+
+    Combines:
+    - Geometric block area (from coordinates)
+    - Tree cover area (ESA WorldCover pixel value=10, proportional)
+    - Other landcover area (ESA WorldCover pixel value≠10, proportional)
+    - Protected area (from sub-areas with category='protected')
+    - Private land (from sub-areas with category='private_land')
+    - Effective area = Tree Cover - Protected - Private Land
+
+    Uses proportional pixel-to-area conversion to ensure Tree + Other = Total Block Area.
+    """
+    # Get calculation
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+
+    if not calculation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calculation not found"
+        )
+
+    # Check permissions
+    if calculation.user_id != current_user.id and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied"
+        )
+
+    # Get blocks from result_data
+    result_data = calculation.result_data or {}
+    blocks = result_data.get("blocks", [])
+
+    if not blocks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calculation has no blocks. Create blocks first."
+        )
+
+    # Get sub-areas from result_data
+    sub_areas = result_data.get("sub_areas", [])
+
+    # Calculate block area details
+    try:
+        block_details = calculate_block_area_details(db, blocks, sub_areas)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating block area details: {str(e)}"
+        )
+
+    # Calculate totals
+    totals = BlockAreaDetailItem(
+        block_name="TOTAL",
+        total_area_ha=round(sum(b['total_area_ha'] for b in block_details), 4),
+        tree_cover_area_ha=round(sum(b['tree_cover_area_ha'] for b in block_details), 4),
+        other_landcover_area_ha=round(sum(b['other_landcover_area_ha'] for b in block_details), 4),
+        protected_area_ha=round(sum(b['protected_area_ha'] for b in block_details), 4),
+        private_land_area_ha=round(sum(b['private_land_area_ha'] for b in block_details), 4),
+        effective_area_ha=round(sum(b['effective_area_ha'] for b in block_details), 4),
+    )
+
+    return BlockAreaDetailResponse(
+        calculation_id=str(calculation_id),
+        forest_name=calculation.forest_name or "Unknown",
+        total_blocks=len(block_details),
+        block_details=[BlockAreaDetailItem(**b) for b in block_details],
+        totals=totals
+    )
 
 
 # ============================================

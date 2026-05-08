@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { compartmentApi, inventoryApi, forestApi } from '../../services/api';
 import { AvailableBlock, SplitConfig, SplitPreviewResponse } from './types';
-import { BlockSelectionPanel } from './BlockSelectionPanel';
+import { CompartmentTreeView } from './CompartmentTreeView';
+import { CompartmentDetailsPanel } from './CompartmentDetailsPanel';
 import { SplitConfigurationPanel } from './SplitConfigurationPanel';
 import { TreeReassignmentDialog } from './TreeReassignmentDialog';
 import { MapContainer, GeoJSON, useMap } from 'react-leaflet';
@@ -162,7 +163,11 @@ function MapBoundsController({ bounds }: { bounds: [[number, number], [number, n
   
   useEffect(() => {
     if (bounds) {
-      map.fitBounds(bounds, { padding: [30, 30] });
+      try {
+        map.fitBounds(bounds, { padding: [30, 30] });
+      } catch (e) {
+        console.error('Error fitting bounds:', e);
+      }
     }
   }, [bounds, map]);
   
@@ -188,13 +193,21 @@ function PolygonLabels({ features }: { features: any[] }) {
       
       // Calculate centroid
       const coords = geom.coordinates[0];
+      if (!Array.isArray(coords) || coords.length < 3) return;
       let latSum = 0, lonSum = 0;
+      let valid = true;
       coords.forEach((c: number[]) => {
-        lonSum += c[0];
-        latSum += c[1];
+        if (c && typeof c[0] === 'number' && typeof c[1] === 'number' && !isNaN(c[0]) && !isNaN(c[1])) {
+          lonSum += c[0];
+          latSum += c[1];
+        } else {
+          valid = false;
+        }
       });
+      if (!valid) return;
       const centerLat = latSum / coords.length;
       const centerLon = lonSum / coords.length;
+      if (isNaN(centerLat) || isNaN(centerLon)) return;
       
       const labelColor = feature.is_compartment ? '#10b981' : '#3b82f6';
       
@@ -286,9 +299,15 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
     { value: 'osm', label: 'Street Map', icon: '🗺️' },
   ];
 
+  // NEW: Compartment tree state
+  const [compartmentTree, setCompartmentTree] = useState<any[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<any | null>(null);
+
   useEffect(() => {
     loadBlocks();
     loadTrees();
+    loadCompartmentTree();
     forestApi.getCalculation(calculationId).then(data => {
       setForestName(data.forest_name || 'UnknownForest');
     }).catch(() => {});
@@ -312,6 +331,18 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
       }
     } catch (err: any) {
       console.error('[CompartmentTab] Error loading trees:', err);
+    }
+  };
+
+  // NEW: Load compartment tree
+  const loadCompartmentTree = async () => {
+    try {
+      console.log('[CompartmentTab] Loading compartment tree for:', calculationId);
+      const data = await compartmentApi.getCompartmentTree(calculationId);
+      console.log('[CompartmentTab] Compartment tree loaded:', data);
+      setCompartmentTree(data.blocks || []);
+    } catch (err: any) {
+      console.error('[CompartmentTab] Error loading compartment tree:', err);
     }
   };
 
@@ -427,6 +458,128 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
     }
   };
 
+  // NEW: Handle node selection (highlight on map)
+  const handleSelectNode = (nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    
+    // Find node in tree
+    const findNode = (nodes: any[]): any | null => {
+      for (const node of nodes) {
+        if (node.id === nodeId) return node;
+        if (node.children && node.children.length > 0) {
+          const found = findNode(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    
+    const node = findNode(compartmentTree);
+    setSelectedNode(node);
+    
+    // If node is a block, set selectedBlock for split configuration
+    if (node && !node.is_compartment) {
+      // Find the block in blocks array
+      const block = blocks.find(b => b.id === nodeId);
+      if (block) {
+        setSelectedBlock(block);
+      }
+    }
+    
+    console.log('[CompartmentTab] Selected node:', node?.name, 'ID:', nodeId);
+  };
+
+  // NEW: Handle rename
+  const handleRename = async (nodeId: string, newName: string) => {
+    try {
+      await compartmentApi.updateCompartmentName(nodeId, newName);
+      setSuccessMessage(`Renamed to "${newName}"`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+      
+      // Reload tree
+      await loadCompartmentTree();
+      await loadBlocks();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Failed to rename');
+      console.error('[CompartmentTab] Rename failed:', err);
+    }
+  };
+
+  // NEW: Handle delete compartment
+  const handleDeleteNode = async (nodeId: string, nodeName: string) => {
+    if (!confirm(`Delete compartment "${nodeName}"? This will also delete any sub-compartments.`)) {
+      return;
+    }
+    try {
+      const result = await compartmentApi.deleteCompartment(nodeId);
+      setSuccessMessage(`Deleted "${nodeName}"${result.children_deleted > 0 ? ` and ${result.children_deleted} sub-compartment(s)` : ''}.`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+
+      // Reload tree
+      await loadCompartmentTree();
+      await loadBlocks();
+      if (selectedNodeId === nodeId) {
+        setSelectedNodeId(null);
+        setSelectedNode(null);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Failed to delete compartment');
+      console.error('[CompartmentTab] Delete failed:', err);
+    }
+  };
+
+  // NEW: Handle toggle lock
+  const handleToggleLock = async (nodeId: string) => {
+    try {
+      const result = await compartmentApi.toggleLockBlock(nodeId);
+      setSuccessMessage(result.message || 'Lock status updated');
+      setTimeout(() => setSuccessMessage(null), 3000);
+      
+      // Reload tree
+      await loadCompartmentTree();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Failed to toggle lock');
+      console.error('[CompartmentTab] Toggle lock failed:', err);
+    }
+  };
+
+  // NEW: Handle sub-divide (redirects to split configuration)
+  const handleSubDivide = (nodeId: string) => {
+    // Find the node in tree
+    const findNode = (nodes: any[]): any | null => {
+      for (const node of nodes) {
+        if (node.id === nodeId) return node;
+        if (node.children && node.children.length > 0) {
+          const found = findNode(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    
+    const node = findNode(compartmentTree);
+    if (node && node.is_compartment) {
+      // Set selectedBlock to show split configuration
+      const block = blocks.find(b => b.id === nodeId);
+      if (block) {
+        setSelectedBlock(block);
+      } else {
+        // If not in blocks array, create a temporary AvailableBlock object
+        setSelectedBlock({
+          id: node.id,
+          name: node.name,
+          area_sqm: node.area_sqm,
+          area_hectares: node.area_hectares,
+          geometry: null,
+          has_compartments: node.child_count > 0,
+          tree_count: node.tree_count || 0,
+          compartment_count: node.child_count || 0,
+          total_trees_in_calculation: 0
+        });
+      }
+    }
+  };
+
   const handleDownloadGpkg = async () => {
     console.log('[CompartmentTab] Download GPKG clicked, calculationId:', calculationId);
     try {
@@ -470,24 +623,42 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
       const geom = b.geometry;
       if (geom?.coordinates && geom.coordinates[0]) {
         const coords = geom.coordinates[0];
-        return coords.reduce((sum: number, c: number[]) => sum + c[1], 0) / coords.length;
+        if (!Array.isArray(coords) || coords.length < 3) return NaN;
+        let sum = 0, count = 0;
+        coords.forEach((c: number[]) => {
+          if (c && typeof c[1] === 'number' && !isNaN(c[1])) { sum += c[1]; count++; }
+        });
+        return count > 0 ? sum / count : NaN;
       }
-      return 27.7172;
-    });
+      return NaN;
+    }).filter((v: number) => !isNaN(v));
+    
     const lons = targetFeatures.map(b => {
       const geom = b.geometry;
       if (geom?.coordinates && geom.coordinates[0]) {
         const coords = geom.coordinates[0];
-        return coords.reduce((sum: number, c: number[]) => sum + c[0], 0) / coords.length;
+        if (!Array.isArray(coords) || coords.length < 3) return NaN;
+        let sum = 0, count = 0;
+        coords.forEach((c: number[]) => {
+          if (c && typeof c[0] === 'number' && !isNaN(c[0])) { sum += c[0]; count++; }
+        });
+        return count > 0 ? sum / count : NaN;
       }
-      return 85.324;
-    });
+      return NaN;
+    }).filter((v: number) => !isNaN(v));
     
-    if (lats.length === 0) return [27.7172, 85.3240];
+    if (lats.length === 0 || lons.length === 0) return [27.7172, 85.3240];
+    
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    
+    if (isNaN(minLat) || isNaN(maxLat) || isNaN(minLon) || isNaN(maxLon)) return [27.7172, 85.3240];
     
     return [
-      (Math.min(...lats) + Math.max(...lats)) / 2,
-      (Math.min(...lons) + Math.max(...lons)) / 2
+      (minLat + maxLat) / 2,
+      (minLon + maxLon) / 2
     ];
   };
 
@@ -505,6 +676,7 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
       const geom = feature.geometry;
       if (geom?.coordinates && geom.coordinates[0]) {
         for (const coord of geom.coordinates[0]) {
+          if (!coord || coord.length < 2 || isNaN(coord[0]) || isNaN(coord[1])) continue;
           minLat = Math.min(minLat, coord[1]);
           maxLat = Math.max(maxLat, coord[1]);
           minLon = Math.min(minLon, coord[0]);
@@ -513,7 +685,7 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
       }
     }
     
-    if (minLat === 90) return null;
+    if (minLat === 90 || isNaN(minLat) || isNaN(maxLat) || isNaN(minLon) || isNaN(maxLon)) return null;
     
     return [[minLat, minLon], [maxLat, maxLon]];
   };
@@ -603,19 +775,23 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
             <GridOverlay inventoryId={inventoryId} show={showGrid} />
             
             {/* Render all blocks and compartments */}
-            {allFeatures.map((feature) => (
+            {allFeatures.map((feature) => {
+              const geom = feature.geometry;
+              if (geom?.coordinates?.[0]?.[0] && (isNaN(geom.coordinates[0][0][0]) || isNaN(geom.coordinates[0][0][1]))) return null;
+              return (
               <GeoJSON
                 key={feature.id}
                 data={feature.geometry}
                 style={{
-                  color: selectedBlock?.id === feature.id ? '#ef4444' : (feature.is_compartment ? '#10b981' : '#3b82f6'),
-                  weight: selectedBlock?.id === feature.id ? 3 : (feature.is_compartment ? 1.5 : 2),
-                  fillOpacity: selectedBlock?.id === feature.id ? 0.3 : (feature.is_compartment ? 0.4 : 0.15),
-                  fillColor: feature.is_compartment ? '#86efac' : '#93c5fd',
+                  color: selectedNodeId === feature.id ? '#ef4444' : (feature.is_compartment ? (feature.color || '#10b981') : '#3b82f6'),
+                  weight: selectedNodeId === feature.id ? 4 : (feature.is_compartment ? 1.5 : 2),
+                  fillOpacity: selectedNodeId === feature.id ? 0.4 : (feature.is_compartment ? 0.4 : 0.15),
+                  fillColor: feature.is_compartment ? (feature.color || '#86efac') : '#93c5fd',
                   interactive: false
                 }}
               />
-            ))}
+              );
+            })}
             
             {/* Add tree points if visible */}
             {showTrees && trees.length > 0 && (
@@ -792,54 +968,68 @@ export function CompartmentTab({ calculationId }: CompartmentTabProps) {
         </div>
       </div>
 
-      {/* Bottom panels: Block selection + Configuration */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left panel: Block selection */}
-        <div className="w-1/3 border-r p-4 overflow-y-auto">
-          <BlockSelectionPanel
-            blocks={blocks}
-            selectedBlock={selectedBlock}
-            onSelectBlock={setSelectedBlock}
-            onDeleteCompartments={handleDeleteCompartments}
-            loading={loading}
-          />
-        </div>
-
-        {/* Right panel: Configuration */}
-        <div className="w-2/3 p-4 overflow-y-auto">
-          {selectedBlock ? (
-            <SplitConfigurationPanel
-              key={selectedBlock.id}
-              block={selectedBlock}
-              onPreviewSplit={handlePreviewSplit}
-              onExecuteSplit={handleExecuteSplit}
+        {/* Bottom panels: Tree View + Details/Configuration */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left panel: Compartment Tree View */}
+          <div className="w-1/3 border-r overflow-y-auto">
+            <CompartmentTreeView 
+              tree={compartmentTree}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={handleSelectNode}
+              onRenameNode={handleRename}
+              onToggleLock={handleToggleLock}
+              onSubDivide={handleSubDivide}
+              onDeleteNode={handleDeleteNode}
             />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <svg
-                className="w-16 h-16 text-gray-300 mb-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
+          </div>
+
+          {/* Right panel: Details or Configuration */}
+          <div className="w-2/3 p-4 overflow-y-auto">
+            {selectedNode ? (
+              <>
+                {/* Show split configuration if it's a block or unlocked compartment */}
+                {(!selectedNode.is_compartment || !selectedNode.is_locked) && selectedBlock && (
+                  <SplitConfigurationPanel
+                    key={selectedBlock.id}
+                    block={selectedBlock}
+                    onPreviewSplit={handlePreviewSplit}
+                    onExecuteSplit={handleExecuteSplit}
+                  />
+                )}
+                
+                {/* Show details panel */}
+                <CompartmentDetailsPanel 
+                  node={selectedNode}
+                  onSubDivide={() => handleSubDivide(selectedNode.id)}
+                  onDelete={handleDeleteNode}
                 />
-              </svg>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                Select a Forest Block
-              </h3>
-              <p className="text-gray-500 max-w-sm">
-                Choose a forest block from the list or click on the map to configure compartment splitting options.
-                You can split blocks into parallel strips or grid patterns.
-              </p>
-            </div>
-          )}
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <svg
+                  className="w-16 h-16 text-gray-300 mb-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2"
+                  />
+                </svg>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Select a Compartment
+                </h3>
+                <p className="text-gray-500 max-w-sm">
+                  Choose a compartment from the tree view to view details or configure splitting options.
+                  You can sub-divide compartments and lock them from further division.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
       {/* Tree Reassignment Dialog */}
       {showReassignmentDialog && reassignmentBlockId && (

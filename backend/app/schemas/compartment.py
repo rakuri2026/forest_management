@@ -7,6 +7,91 @@ from uuid import UUID
 from datetime import datetime
 
 
+# NEW: Request Schemas for hierarchy support
+
+class RenameBlockRequest(BaseModel):
+    """Request to rename any block/compartment/sub-compartment"""
+    new_name: str = Field(..., min_length=1, max_length=255)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "new_name": "North-East Patch"
+            }
+        }
+
+
+class SubDivideRequest(BaseModel):
+    """Request to create sub-compartments"""
+    method: Literal["parallel", "grid", "custom"]
+    parameters: Dict[str, Any]
+    naming_pattern: str = Field(default="{parent_name}-S{index}")
+    reassign_trees: bool = Field(default=True)
+    notes: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "method": "parallel",
+                "parameters": {
+                    "direction_angle": 90,
+                    "num_compartments": 3
+                },
+                "naming_pattern": "{parent_name}-S{index}"
+            }
+        }
+
+
+# NEW: Response Schemas for hierarchical tree
+
+class CompartmentTreeNode(BaseModel):
+    """Tree node for hierarchical display"""
+    id: UUID
+    name: str
+    area_hectares: float
+    area_sqm: float
+    division_level: int = 0
+    color: Optional[str] = None
+    is_locked: bool = False
+    child_count: int = 0
+    is_compartment: bool = False
+    compartment_code: Optional[str] = None
+    children: List['CompartmentTreeNode'] = []
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "name": "B1-C1",
+                "area_hectares": 65.42,
+                "area_sqm": 654200.0,
+                "division_level": 1,
+                "color": "#33FF57",
+                "is_locked": False,
+                "child_count": 3,
+                "children": []
+            }
+        }
+
+
+class CompartmentTreeResponse(BaseModel):
+    """Full tree response"""
+    blocks: List[CompartmentTreeNode]
+    total_area_hectares: float
+    total_compartments: int
+    total_sub_compartments: int = 0
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "blocks": [],
+                "total_area_hectares": 1000.5,
+                "total_compartments": 12,
+                "total_sub_compartments": 36
+            }
+        }
+
+
 # Request Schemas
 
 class SplitPreviewRequest(BaseModel):

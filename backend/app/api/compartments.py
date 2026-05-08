@@ -33,7 +33,7 @@ from ..schemas.compartment import (
     CompartmentPreview,
     SplitValidation
 )
-from ..services.compartment_splitter import CompartmentSplitter
+from ..services.compartment_splitter import CompartmentSplitter, COMPARTMENT_COLORS
 from ..services.tree_reassignment import (
     get_trees_needing_assignment,
     auto_assign_trees_by_location,
@@ -163,6 +163,7 @@ async def get_all_blocks_for_map(
                         fb.area_hectares,
                         fb.index,
                         fb.area_sqm,
+                        fb.color,
                         COALESCE(fb.area_sqm, ST_Area(geography(fb.geometry))) as calculated_area,
                         pb.name as parent_block_name,
                         COUNT(it.id)::int as tree_count,
@@ -174,7 +175,7 @@ async def get_all_blocks_for_map(
                     LEFT JOIN forest_blocks fb2 ON fb2.parent_block_id = fb.id AND fb2.is_compartment = true
                     WHERE fb.calculation_id = :calc_id
                     GROUP BY fb.id, fb.name, fb.is_compartment, fb.parent_block_id, 
-                             fb.compartment_code, fb.area_hectares, fb.index, fb.area_sqm, pb.name
+                             fb.compartment_code, fb.area_hectares, fb.index, fb.area_sqm, fb.color, pb.name
                 )
             SELECT 
                 bs.*,
@@ -200,6 +201,7 @@ async def get_all_blocks_for_map(
                 "is_compartment": row.is_compartment,
                 "parent_block_name": row.parent_block_name,
                 "compartment_code": row.compartment_code,
+                "color": row.color,
                 "index": row.index
             })
         
@@ -864,27 +866,21 @@ async def preview_split(
                 detail="This block already has compartments. Please delete them first or select a different block."
             )
 
-        # Check if ANY other block in this calculation already has compartments
-        other_blocks_with_compartments = db.query(ForestBlock).filter(
-            ForestBlock.calculation_id == block.calculation_id,
-            ForestBlock.id != block.id,
-            ForestBlock.is_compartment == False
-        ).all()
-
-        for other_block in other_blocks_with_compartments:
-            other_compartment_count = db.query(ForestBlock).filter(
-                ForestBlock.parent_block_id == other_block.id,
-                ForestBlock.is_compartment == True
-            ).count()
-            if other_compartment_count > 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot create compartments: Block '{other_block.name}' already has {other_compartment_count} compartments. You must delete existing compartments before creating new ones."
-                )
-
+        # Check if THIS block already has compartments (prevent duplicate creation)
+        existing_compartments = db.query(ForestBlock).filter(
+            ForestBlock.parent_block_id == block.id,
+            ForestBlock.is_compartment == True
+        ).count()
+        
+        if existing_compartments > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Block '{block.name}' already has {existing_compartments} compartments. Delete existing compartments first."
+            )
+        
         # Convert to Shapely polygon
         polygon = postgis_to_shapely(block.geometry)
-
+        
         # Perform split based on method
         if request.method == "parallel":
             compartments = CompartmentSplitter.split_parallel_strips(
@@ -994,27 +990,21 @@ async def execute_split(
                 detail="This block already has compartments. Please delete them first or select a different block."
             )
 
-        # Check if ANY other block in this calculation already has compartments
-        other_blocks_with_compartments = db.query(ForestBlock).filter(
-            ForestBlock.calculation_id == block.calculation_id,
-            ForestBlock.id != block.id,
-            ForestBlock.is_compartment == False
-        ).all()
-
-        for other_block in other_blocks_with_compartments:
-            other_compartment_count = db.query(ForestBlock).filter(
-                ForestBlock.parent_block_id == other_block.id,
-                ForestBlock.is_compartment == True
-            ).count()
-            if other_compartment_count > 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot create compartments: Block '{other_block.name}' already has {other_compartment_count} compartments. You must delete existing compartments before creating new ones."
-                )
-
+        # Check if THIS block already has compartments (prevent duplicate creation)
+        existing_compartments = db.query(ForestBlock).filter(
+            ForestBlock.parent_block_id == block.id,
+            ForestBlock.is_compartment == True
+        ).count()
+        
+        if existing_compartments > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Block '{block.name}' already has {existing_compartments} compartments. Delete existing compartments first."
+            )
+        
         # Convert to Shapely polygon
         polygon = postgis_to_shapely(block.geometry)
-
+        
         # Perform split
         if request.method == "parallel":
             compartments = CompartmentSplitter.split_parallel_strips(
@@ -1061,7 +1051,8 @@ async def execute_split(
                 is_compartment=True,
                 parent_block_id=block.id,
                 compartment_code=comp_name,
-                area_sqm=comp_area_sqm
+                area_sqm=comp_area_sqm,
+                color=COMPARTMENT_COLORS[i % len(COMPARTMENT_COLORS)]
             )
 
             db.add(compartment)
@@ -1219,6 +1210,95 @@ async def delete_compartments_by_block(
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to delete compartments: {e}")
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+
+
+@router.delete("/{compartment_id}")
+async def delete_compartment(
+    compartment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a single compartment or sub-compartment.
+    If it has child compartments, they are cascade-deleted.
+    Trees assigned to this compartment are moved back to the parent block.
+
+    Args:
+        compartment_id: Compartment UUID
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        Success message
+    """
+    try:
+        compartment = db.query(ForestBlock).filter(
+            ForestBlock.id == compartment_id
+        ).first()
+
+        if not compartment:
+            raise HTTPException(status_code=404, detail="Compartment not found")
+
+        if not compartment.is_compartment:
+            raise HTTPException(status_code=400, detail="Can only delete compartments")
+
+        parent_block_id = compartment.parent_block_id
+
+        # Check for child compartments (sub-compartments)
+        child_compartments = db.query(ForestBlock).filter(
+            ForestBlock.parent_block_id == compartment_id,
+            ForestBlock.is_compartment == True
+        ).all()
+
+        # Collect all compartment IDs to delete (this compartment + children)
+        ids_to_delete = [compartment_id]
+        for child in child_compartments:
+            ids_to_delete.append(child.id)
+
+        # Check for trees assigned to any of these compartments
+        trees_in_compartment = db.query(InventoryTree).filter(
+            InventoryTree.block_id.in_(ids_to_delete)
+        ).count()
+
+        if trees_in_compartment > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete: {trees_in_compartment} trees are assigned to this compartment. Please delete the tree inventory first."
+            )
+
+        # Delete child compartments
+        for child in child_compartments:
+            db.delete(child)
+
+        # Delete the compartment itself
+        db.delete(compartment)
+
+        # Update parent's child_count if parent exists
+        if parent_block_id:
+            parent = db.query(ForestBlock).filter(ForestBlock.id == parent_block_id).first()
+            if parent:
+                parent.child_count = db.query(ForestBlock).filter(
+                    ForestBlock.parent_block_id == parent_block_id
+                ).count()
+
+        db.commit()
+
+        return {
+            "success": True,
+            "compartment_id": str(compartment_id),
+            "compartment_name": compartment.name,
+            "deleted": True,
+            "children_deleted": len(child_compartments),
+            "trees_moved_back": 0
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to delete compartment: {e}")
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 
@@ -1491,3 +1571,270 @@ async def reassign_trees(
     except Exception as e:
         logger.error(f"Failed to reassign trees: {e}")
         raise HTTPException(status_code=500, detail=f"Reassignment failed: {str(e)}")
+
+
+@router.patch("/{compartment_id}/name")
+async def update_compartment_name(
+    compartment_id: UUID,
+    request: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update compartment name.
+    
+    Args:
+        compartment_id: Compartment UUID
+        request: Dict with 'name' field
+        db: Database session
+        current_user: Authenticated user
+    
+    Returns:
+        Updated compartment info
+    """
+    try:
+        from app.models.forest_block import ForestBlock
+        
+        # Get compartment
+        compartment = db.query(ForestBlock).filter(
+            ForestBlock.id == compartment_id,
+            ForestBlock.is_compartment == True
+        ).first()
+        
+        if not compartment:
+            raise HTTPException(status_code=404, detail="Compartment not found")
+        
+        # Update name
+        new_name = request.get('name')
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        
+        compartment.name = new_name
+        compartment.compartment_code = new_name
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Compartment name updated",
+            "id": str(compartment.id),
+            "name": compartment.name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update compartment name: {e}")
+        raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+
+
+# ============================================================================
+# NEW: Compartment Hierarchy Endpoints (Added 2026-05-07)
+# ============================================================================
+
+@router.patch("/blocks/{block_id}/toggle-lock")
+async def toggle_lock_block(
+    block_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Toggle lock status to prevent/allow further division
+    
+    Args:
+        block_id: Block/Compartment UUID
+        db: Database session
+        current_user: Authenticated user
+    
+    Returns:
+        Updated lock status
+    """
+    try:
+        block = db.query(ForestBlock).filter(
+            ForestBlock.id == block_id
+        ).first()
+        
+        if not block:
+            raise HTTPException(status_code=404, detail="Block not found")
+        
+        # Toggle lock status
+        block.is_locked = not block.is_locked
+        db.commit()
+        
+        status = "locked" if block.is_locked else "unlocked"
+        logger.info(f"Toggled lock for block {block.name}: now {status}")
+        
+        return {
+            "success": True,
+            "block_id": str(block_id),
+            "is_locked": block.is_locked,
+            "message": f"Block '{block.name}' is now {status}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to toggle lock: {e}")
+        raise HTTPException(status_code=500, detail=f"Toggle lock failed: {str(e)}")
+
+
+@router.get("/calculations/{calculation_id}/compartment-tree")
+async def get_compartment_tree(
+    calculation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get hierarchical tree of blocks → compartments → sub-compartments
+    
+    Args:
+        calculation_id: Calculation UUID
+        db: Database session
+        current_user: Authenticated user
+    
+    Returns:
+        Hierarchical tree structure with all blocks and compartments
+    """
+    try:
+        # Fetch all blocks for calculation
+        blocks = db.query(ForestBlock).filter(
+            ForestBlock.calculation_id == calculation_id
+        ).order_by(ForestBlock.display_order).all()
+        
+        logger.info(f"Building tree for calculation {calculation_id}: {len(blocks)} blocks")
+        
+        # Build tree structure recursively
+        def build_tree(parent_id=None, level=0):
+            nodes = []
+            for block in blocks:
+                if block.parent_block_id == parent_id:
+                    # Get children recursively
+                    children = build_tree(block.id, level + 1)
+                    
+                    # Count trees in this block/compartment
+                    from app.models.inventory import InventoryTree
+                    tree_count = db.query(InventoryTree).filter(
+                        InventoryTree.block_id == block.id
+                    ).count()
+                    
+                    node = {
+                        "id": str(block.id),
+                        "name": block.name,
+                        "area_hectares": block.area_hectares,
+                        "area_sqm": block.area_sqm or (block.area_hectares * 10000),
+                        "division_level": block.division_level,
+                        "color": block.color,
+                        "is_locked": block.is_locked,
+                        "child_count": len(children),
+                        "is_compartment": block.is_compartment,
+                        "compartment_code": block.compartment_code,
+                        "tree_count": tree_count,
+                        "children": children
+                    }
+                    nodes.append(node)
+            
+            return nodes
+        
+        tree = build_tree(None, 0)
+        
+        # Calculate totals
+        total_area = sum(b.area_hectares for b in blocks if b.parent_block_id is None)
+        total_compartments = sum(1 for b in blocks if b.is_compartment and b.division_level == 1)
+        total_sub_compartments = sum(1 for b in blocks if b.is_compartment and b.division_level >= 2)
+        
+        return {
+            "blocks": tree,
+            "total_area_hectares": total_area,
+            "total_compartments": total_compartments,
+            "total_sub_compartments": total_sub_compartments
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to build compartment tree: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load tree: {str(e)}")
+
+
+@router.post("/blocks/{block_id}/sub-divide")
+async def subdivide_block(
+    block_id: UUID,
+    config: dict,  # Will be validated by compartment_splitter
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Divide a compartment into sub-compartments (extends execute_split logic)
+    
+    Args:
+        block_id: Parent block/compartment UUID
+        config: { method, parameters, naming_pattern, reassign_trees, notes }
+        db: Database session
+        current_user: Authenticated user
+    
+    Returns:
+        Success message with created sub-compartments
+    """
+    try:
+        # Get parent block
+        parent = db.query(ForestBlock).filter(
+            ForestBlock.id == block_id
+        ).first()
+        
+        if not parent:
+            raise HTTPException(status_code=404, detail="Block not found")
+        
+        if not parent.is_compartment:
+            raise HTTPException(status_code=400, detail="Can only sub-divide compartments")
+        
+        if parent.is_locked:
+            raise HTTPException(status_code=400, detail="Block is locked from further division")
+        
+        # Update division_level if not set
+        if parent.division_level is None:
+            parent.division_level = 1 if parent.is_compartment else 0
+        
+        # Use existing compartment splitter logic
+        from ..services.compartment_splitter import CompartmentSplitter
+        
+        splitter = CompartmentSplitter(db)
+        
+        # Prepare split request
+        method = config.get("method", "parallel")
+        parameters = config.get("parameters", {})
+        naming_pattern = config.get("naming_pattern", "{parent_name}-SC{index}")
+        reassign_trees = config.get("reassign_trees", True)
+        
+        # Execute split using existing logic
+        # This reuses the execute_split logic but sets parent_block_id and division_level
+        result = splitter.subdivide_compartment(
+            parent_block=parent,
+            method=method,
+            parameters=parameters,
+            naming_pattern=naming_pattern,
+            reassign_trees=reassign_trees,
+            division_level_increment=1  # Creates next level (sub-compartment)
+        )
+        
+        # Update parent's child_count
+        parent.child_count = db.query(ForestBlock).filter(
+            ForestBlock.parent_block_id == parent.id
+        ).count()
+        
+        db.commit()
+        
+        logger.info(f"Sub-divided {parent.name} into {len(result.get('children', []))} sub-compartments")
+        
+        return {
+            "success": True,
+            "message": f"Sub-divided into {parent.child_count} sub-compartments",
+            "parent_id": str(block_id),
+            "sub_compartments_created": parent.child_count,
+            "children": result.get("children", [])
+        }
+        
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to sub-divide block: {e}")
+        raise HTTPException(status_code=500, detail=f"Sub-division failed: {str(e)}")

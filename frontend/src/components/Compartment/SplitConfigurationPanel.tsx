@@ -22,8 +22,8 @@ export function SplitConfigurationPanel({
   const [method, setMethod] = useState<'parallel' | 'grid' | 'custom'>('parallel');
   const [directions, setDirections] = useState<SplitDirection[]>([]);
   const [directionAngle, setDirectionAngle] = useState<number | null>(null);
-  const [numCompartments, setNumCompartments] = useState(10);
-  const [gridRows, setGridRows] = useState(2);
+  const [numCompartments, setNumCompartments] = useState(8);
+  const [gridRows, setGridRows] = useState(4);
   const [gridColumns, setGridColumns] = useState(2);
   const [namingPattern, setNamingPattern] = useState('{block_name}-C{index}');
   const [reassignTrees, setReassignTrees] = useState(true);

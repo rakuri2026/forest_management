@@ -262,6 +262,14 @@ export const forestApi = {
     return response.data;
   },
 
+  // Block area detail (Table 5) - get per-block forest area description
+  getBlockAreaDetail: async (calculationId: string): Promise<any> => {
+    const response = await api.get(
+      `/api/forests/calculations/${calculationId}/block-area-detail`
+    );
+    return response.data;
+  },
+
   // Geometry editing endpoints
   updateGeometry: async (
     calculationId: string,
@@ -284,6 +292,7 @@ export const forestApi = {
       geometry: any;
       block_id?: string;
       block_name?: string;
+      block_breakdown?: Array<{ blockId: string; blockName: string; area: number; percentage: number }>;
       is_excluded?: boolean;
     }
   ): Promise<any> => {
@@ -454,6 +463,20 @@ export const forestApi = {
     const response = await api.post(
       `/api/forests/calculations/${calculationId}/blocks`,
       { blocks }
+    );
+    return response.data;
+  },
+
+  /**
+   * Update forest boundary geometry
+   */
+  updateBoundaryGeometry: async (calculationId: string, data: {
+    geometry: any;
+    area_hectares: number;
+  }): Promise<any> => {
+    const response = await api.put(
+      `/api/forests/calculations/${calculationId}/boundary`,
+      data
     );
     return response.data;
   },
@@ -1932,6 +1955,19 @@ export const compartmentApi = {
     return response.data;
   },
 
+  deleteCompartment: async (compartmentId: string): Promise<any> => {
+    const response = await api.delete(`/api/compartments/${compartmentId}`);
+    return response.data;
+  },
+
+  /**
+   * Update compartment name
+   */
+  updateCompartmentName: async (compartmentId: string, name: string): Promise<any> => {
+    const response = await api.patch(`/api/compartments/${compartmentId}/name`, { name });
+    return response.data;
+  },
+
   getTreesNeedingAssignment: async (blockId: string): Promise<any> => {
     const response = await api.get(`/api/compartments/trees-needing-assignment/${blockId}`);
     return response.data;
@@ -1997,5 +2033,38 @@ export const compartmentApi = {
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Toggle lock status for a block/compartment
+   */
+  toggleLockBlock: async (blockId: string): Promise<any> => {
+    const response = await api.patch(`/api/compartments/blocks/${blockId}/toggle-lock`);
+    return response.data;
+  },
+
+  /**
+   * Get hierarchical compartment tree for a calculation
+   */
+  getCompartmentTree: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/compartments/calculations/${calculationId}/compartment-tree`);
+    return response.data;
+  },
+
+  /**
+   * Sub-divide a compartment into sub-compartments
+   */
+  subdivideBlock: async (
+    blockId: string,
+    config: {
+      method: 'parallel' | 'grid' | 'custom';
+      parameters: Record<string, any>;
+      naming_pattern?: string;
+      reassign_trees?: boolean;
+      notes?: string;
+    }
+  ): Promise<any> => {
+    const response = await api.post(`/api/compartments/blocks/${blockId}/sub-divide`, config);
+    return response.data;
   },
 };

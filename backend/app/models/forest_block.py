@@ -17,7 +17,7 @@ class ForestBlock(Base):
     
     Each forest can have multiple blocks (e.g., North Block, South Block, etc.)
     Created from user-uploaded polygon files where each polygon becomes a block.
-    Supports compartment splitting for equal-area subdivision.
+    Supports compartment splitting and sub-compartment hierarchy.
     """
     __tablename__ = "forest_blocks"
     __table_args__ = {"schema": "public"}
@@ -36,9 +36,16 @@ class ForestBlock(Base):
     compartment_code = Column(String(50), nullable=True)
     area_sqm = Column(Float, nullable=True)
     
+    # NEW: Hierarchy fields for sub-compartment support
+    division_level = Column(Integer, nullable=False, default=0)  # 0=Block, 1=Compartment, 2+=Sub-compartment
+    color = Column(String(7), nullable=True)  # Hex color like "#FF5733"
+    is_locked = Column(Boolean, nullable=False, default=False)  # Lock from further division
+    child_count = Column(Integer, nullable=False, default=0)  # Cached child count
+    display_order = Column(Integer, nullable=False, default=0)  # Order in parent's list
+    
     # Relationships
     parent_block = relationship("ForestBlock", remote_side=[id], foreign_keys=[parent_block_id])
     compartments = relationship("ForestBlock", back_populates="parent_block", foreign_keys=[parent_block_id])
     
     def __repr__(self):
-        return f"<ForestBlock(id={self.id}, name={self.name}, calculation_id={self.calculation_id})>"
+        return f"<ForestBlock(id={self.id}, name={self.name}, level={self.division_level}, locked={self.is_locked})>"

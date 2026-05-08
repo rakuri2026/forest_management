@@ -419,164 +419,68 @@ export const splitPolygonWithLine = (
   polygon: any,
   line: any
 ): any[] => {
-  try {
-    const polygonFeature = turf.feature(polygon);
-    const lineFeature = turf.feature(line);
-
-    // Get polygon boundary
-    const polygonBoundary = turf.polygonToLine(polygonFeature);
-
-    // Find intersection points between line and polygon boundary
-    const intersections = turf.lineIntersect(lineFeature, polygonBoundary);
-
-    console.log(`Found ${intersections.features.length} intersection points`);
-
-    if (intersections.features.length < 2) {
-      // Line doesn't fully cross the polygon, try buffer method directly
-      console.log('Line does not have 2+ intersections, using buffer method');
-      return splitPolygonWithBuffer(polygon, line);
-    }
-
-    // Get the two intersection points (use first and last if multiple)
-    const point1 = intersections.features[0];
-    const point2 = intersections.features[intersections.features.length - 1];
-
-    // Get ALL coordinates from the drawn line (to preserve curves)
-    const lineCoords = line.coordinates;
-    console.log(`Line has ${lineCoords.length} coordinate points`);
-
-    // Get polygon coordinates
-    const polyCoords = polygon.coordinates[0];
-
-    // Find indices of intersection points on polygon boundary
-    const indices = findInsertionIndices(polyCoords, point1.geometry.coordinates, point2.geometry.coordinates);
-
-    // Split polygon into two parts
-    const part1Coords = [];
-    const part2Coords = [];
-
-    // First polygon: from point1 to point2 along boundary, then back via cutting line
-    for (let i = indices.idx1; i !== indices.idx2; ) {
-      part1Coords.push(polyCoords[i]);
-      i = (i + 1) % (polyCoords.length - 1);
-      if (i === indices.idx2) {
-        part1Coords.push(polyCoords[i]);
-        break;
-      }
-    }
-    // Add intersection point
-    part1Coords.push(point2.geometry.coordinates);
-    // Add ALL intermediate points from the drawn line (in REVERSE order)
-    for (let i = lineCoords.length - 1; i >= 0; i--) {
-      part1Coords.push(lineCoords[i]);
-    }
-    // Add starting intersection point
-    part1Coords.push(point1.geometry.coordinates);
-    part1Coords.push(part1Coords[0]); // Close polygon
-
-    // Second polygon: from point2 to point1 along boundary (the other way)
-    for (let i = indices.idx2; i !== indices.idx1; ) {
-      part2Coords.push(polyCoords[i]);
-      i = (i + 1) % (polyCoords.length - 1);
-      if (i === indices.idx1) {
-        part2Coords.push(polyCoords[i]);
-        break;
-      }
-    }
-    // Add intersection point
-    part2Coords.push(point1.geometry.coordinates);
-    // Add ALL intermediate points from the drawn line (in FORWARD order)
-    for (let i = 0; i < lineCoords.length; i++) {
-      part2Coords.push(lineCoords[i]);
-    }
-    // Add ending intersection point
-    part2Coords.push(point2.geometry.coordinates);
-    part2Coords.push(part2Coords[0]); // Close polygon
-
-    // Create polygon geometries
-    const polygon1 = {
-      type: 'Polygon',
-      coordinates: [part1Coords],
-    };
-
-    const polygon2 = {
-      type: 'Polygon',
-      coordinates: [part2Coords],
-    };
-
-    // Validate resulting polygons
-    try {
-      const p1 = turf.feature(polygon1);
-      const p2 = turf.feature(polygon2);
-
-      if (turf.area(p1) > 0 && turf.area(p2) > 0) {
-        console.log('Primary split method succeeded');
-
-        // Clean geometries before returning
-        const cleaned1 = cleanPolygonGeometry(polygon1);
-        const cleaned2 = cleanPolygonGeometry(polygon2);
-
-        // Try to clip to original polygon boundary (optional improvement)
-        try {
-          const originalFeature = turf.feature(polygon);
-          const clipped1 = turf.intersect(turf.feature(cleaned1), originalFeature);
-          const clipped2 = turf.intersect(turf.feature(cleaned2), originalFeature);
-
-          if (clipped1 && clipped2 && clipped1.geometry && clipped2.geometry) {
-            console.log('Successfully clipped to original boundary');
-            return [clipped1.geometry, clipped2.geometry];
-          }
-        } catch (clipError) {
-          console.warn('Clipping failed, using cleaned geometries:', clipError);
-        }
-
-        // If clipping failed, return cleaned versions
-        return [cleaned1, cleaned2];
-      } else {
-        console.log('Primary method produced invalid areas, trying buffer method');
-      }
-    } catch (e) {
-      console.log('Primary method validation failed, trying buffer method:', e);
-    }
-
-    // Alternative method: use buffer and difference
+  const coords = line.coordinates || line.geometry?.coordinates;
+  if (!coords || coords.length < 2) {
     return splitPolygonWithBuffer(polygon, line);
-  } catch (error) {
-    console.error('Error splitting polygon:', error);
-    throw error; // Re-throw the original error with its message
   }
+
+  const startPoint = coords[0];
+  const endPoint = coords[coords.length - 1];
+  const geom = polygon.geometry || polygon;
+  const polyCoords = geom.coordinates[0];
+  const n = polyCoords ? polyCoords.length - 1 : 0;
+
+  if (n < 3) {
+    return splitPolygonWithBuffer(polygon, line);
+  }
+
+  const distSq = (a: number[], b: number[]) =>
+    Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2);
+
+  let startIdx = 0, endIdx = 1;
+  let minStartDist = Infinity, minEndDist = Infinity;
+
+  for (let i = 0; i < n; i++) {
+    const dStart = distSq(startPoint, polyCoords[i]);
+    const dEnd = distSq(endPoint, polyCoords[i]);
+    if (dStart < minStartDist) { minStartDist = dStart; startIdx = i; }
+    if (dEnd < minEndDist) { minEndDist = dEnd; endIdx = i; }
+  }
+
+  if (startIdx === endIdx) {
+    endIdx = (startIdx + 1) % n;
+  }
+
+  const walk = (from: number, to: number): number[][] => {
+    const result: number[][] = [];
+    for (let i = from; ; i = (i + 1) % n) {
+      result.push(polyCoords[i]);
+      if (i === to) break;
+    }
+    return result;
+  };
+
+  const part1 = walk(startIdx, endIdx);
+  const part2 = walk(endIdx, startIdx);
+  const lineReversed = [...coords].reverse();
+
+  const makeRing = (bc: number[][]): any => ({
+    type: 'Polygon',
+    coordinates: [[...bc, bc[0]]],
+  });
+
+  try {
+    const p1 = makeRing([...part1, ...lineReversed]);
+    const p2 = makeRing([...part2, ...coords]);
+    const a1 = turf.area(turf.feature(p1));
+    const a2 = turf.area(turf.feature(p2));
+    if (a1 > 100 && a2 > 100) {
+      return [cleanPolygonGeometry(p1), cleanPolygonGeometry(p2)];
+    }
+  } catch {}
+
+  return splitPolygonWithBuffer(polygon, line);
 };
-
-/**
- * Find insertion indices for intersection points on polygon boundary
- */
-function findInsertionIndices(
-  polyCoords: number[][],
-  point1: number[],
-  point2: number[]
-): { idx1: number; idx2: number } {
-  let idx1 = -1;
-  let idx2 = -1;
-  let minDist1 = Infinity;
-  let minDist2 = Infinity;
-
-  for (let i = 0; i < polyCoords.length - 1; i++) {
-    const dist1 = turf.distance(turf.point(point1), turf.point(polyCoords[i]));
-    const dist2 = turf.distance(turf.point(point2), turf.point(polyCoords[i]));
-
-    if (dist1 < minDist1) {
-      minDist1 = dist1;
-      idx1 = i;
-    }
-
-    if (dist2 < minDist2) {
-      minDist2 = dist2;
-      idx2 = i;
-    }
-  }
-
-  return { idx1, idx2 };
-}
 
 /**
  * Clean and fix polygon geometry
@@ -626,56 +530,27 @@ export function cleanPolygonGeometry(polygon: any): any {
  * Alternative splitting method using buffer
  */
 function splitPolygonWithBuffer(polygon: any, line: any): any[] {
-  try {
-    const lineFeature = turf.feature(line);
-
-    // Extend the line to ensure it crosses the polygon
-    const extendedLine = extendLine(lineFeature, 1); // Extend 1km on each end
-
-    // Create a very thin buffer around the line (1 meter)
-    const lineBand = turf.buffer(extendedLine, 0.001, { units: 'kilometers' });
-
-    if (!lineBand) {
-      throw new Error('Failed to create line buffer');
-    }
-
-    // Use difference to split
-    const polygonFeature = turf.feature(polygon);
-    const difference = turf.difference(polygonFeature, lineBand);
-
-    if (!difference) {
-      throw new Error('Line does not intersect polygon');
-    }
-
-    if (difference.geometry.type === 'MultiPolygon') {
-      // Successfully split into multiple polygons
-      const splitPolygons = difference.geometry.coordinates.map((coords: any) => ({
-        type: 'Polygon',
-        coordinates: coords,
-      }));
-
-      // Clean each resulting polygon
-      const cleanedPolygons = splitPolygons.map((poly) => {
-        try {
-          return cleanPolygonGeometry(poly);
-        } catch (cleanError) {
-          console.warn('Could not clean polygon, using original:', cleanError);
-          return poly;
-        }
-      });
-
-      return cleanedPolygons;
-    } else if (difference.geometry.type === 'Polygon') {
-      // Still one polygon, split failed
-      throw new Error('Line does not split the polygon (still one piece after difference)');
-    }
-
-    throw new Error(`Unexpected result type from splitting: ${difference.geometry.type}`);
-  } catch (error: any) {
-    console.error('Buffer split error details:', error);
-    throw new Error(`Failed to split polygon using buffer method: ${error.message}`);
+  const rawLine = line.coordinates ? line : (line.geometry || line);
+  const rawPoly = polygon.geometry || polygon;
+  const lineCoords = rawLine.coordinates || rawLine;
+  if (!lineCoords || lineCoords.length < 2) throw new Error('Invalid line');
+  const extended = extendLine(
+    turf.lineString(lineCoords),
+    10
+  );
+  const band = turf.buffer(extended, 0.02, { units: 'kilometers' });
+  if (!band) throw new Error('Failed to create buffer');
+  const diff = turf.difference(turf.feature(rawPoly), band);
+  if (!diff) throw new Error('Line does not intersect polygon');
+  if (diff.geometry.type === 'MultiPolygon') {
+    return diff.geometry.coordinates.map((c: any) => {
+      const p = { type: 'Polygon', coordinates: c };
+      try { return cleanPolygonGeometry(p); } catch { return p; }
+    });
   }
+  throw new Error('Split did not divide polygon');
 }
+
 
 /**
  * Extend a line on both ends

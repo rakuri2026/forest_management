@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # JWT Authentication
     SECRET_KEY: str = "cf-forest-management-secret-key-2026-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours for mapping work
 
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 50
@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Allow extra env vars without error
 
 
 # Create global settings instance
