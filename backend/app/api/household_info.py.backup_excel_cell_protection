@@ -1,0 +1,1449 @@
+"""
+Household Information API endpoints
+Handles household survey data for community forest user groups
+"""
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from typing import List, Optional
+from uuid import UUID
+import io
+import os
+import csv
+import tempfile
+from datetime import datetime
+from decimal import Decimal
+
+from ..core.database import get_db
+from ..utils.auth import get_current_user
+from ..models.user import User
+from ..models.calculation import Calculation
+from ..models.household_information import HouseholdInformation
+from ..models.caste_classification import CasteClassification
+from ..schemas.household_info import (
+    HouseholdInfoCreate,
+    HouseholdInfoUpdate,
+    HouseholdInfoResponse,
+    HouseholdUploadResponse,
+    HouseholdUploadValidation,
+    HouseholdSummary,
+    CasteClassificationResponse,
+    SurnameSuggestion,
+    TemplateDownloadOptions
+)
+from ..services.household_calculations import HouseholdCalculations
+
+router = APIRouter(prefix="/api/household", tags=["household_information"])
+
+
+# ============================================================================
+# Template Download
+# ============================================================================
+
+@router.post("/calculations/{calculation_id}/template")
+async def download_household_template(
+    calculation_id: UUID,
+    options: TemplateDownloadOptions,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download Excel template for household information entry
+
+    Args:
+        calculation_id: UUID of the calculation (community forest)
+        options: Template download options (land unit, include coordinates)
+
+    Returns:
+        Excel file with headers, data validation, and formulas
+    """
+    # Verify calculation exists and belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
+        from openpyxl.worksheet.datavalidation import DataValidation
+
+        # Create workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Household Information"
+
+        # Color definitions
+        auto_calc_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")  # Light red
+        manual_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")  # Light green
+
+        # Define columns (Nepali headers)
+        columns = [
+            ("A", "घर नंवर", "House No"),
+            ("B", "थर", "Surname"),
+            ("C", "घरमुली पुरूष", "Male Head"),
+            ("D", "घरमुली महिला", "Female Head"),
+            ("E", "टोल ठेगाना", "Address"),
+        ]
+
+        # Add coordinate columns if requested
+        col_offset = 5
+        if options.include_coordinates:
+            columns.extend([
+                ("F", "अक्षाँस", "Latitude"),
+                ("G", "देशान्तर", "Longitude"),
+            ])
+            col_offset = 7
+
+        # Continue with other columns
+        columns.extend([
+            (chr(65 + col_offset), "महिला संख्या", "Female Count"),
+            (chr(65 + col_offset + 1), "पुरूष संख्या", "Male Count"),
+            (chr(65 + col_offset + 2), f"जमिन ({options.land_unit})", f"Land ({options.land_unit})"),
+            (chr(65 + col_offset + 3), "पेशा (वनमा आश्रीत)", "Forest Occupation (Yes/No)"),
+            (chr(65 + col_offset + 4), "पेशा (अन्य)", "Other Occupation (Yes/No)"),
+            (chr(65 + col_offset + 5), "गाइ गोरू", "Cow/Ox Count"),
+            (chr(65 + col_offset + 6), "भैसी राँगा", "Buffalo Count"),
+            (chr(65 + col_offset + 7), "बाख्रा भेडा", "Goat/Sheep Count"),
+            (chr(65 + col_offset + 8), "बन पैदाबारको माग (काठ क्यू.फि.)", "Timber (cft)"),
+            (chr(65 + col_offset + 9), "बन पैदाबारको माग (पोल)", "Poles"),
+            (chr(65 + col_offset + 10), "बन पैदाबारको माग (दाउरा) भारी", "Firewood (Bhari)"),
+            (chr(65 + col_offset + 11), "बन पैदाबारको माग (घाँस) भारी", "Grass (Bhari)"),
+            (chr(65 + col_offset + 12), "बन पैदाबारको माग (सोत्तर) भारी", "Bedding (Bhari)"),
+            (chr(65 + col_offset + 13), "जातिय वर्गिकरण", "Caste Classification"),
+            (chr(65 + col_offset + 14), "अन्य समूहमा सदस्यता", "Other Group (Yes/No)"),
+            (chr(65 + col_offset + 15), "सम्पन्नताको स्तर", "Prosperity Level"),
+            (chr(65 + col_offset + 16), "कैफियत", "Remarks"),
+        ])
+
+        # Style definitions
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        subheader_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        subheader_font = Font(italic=True, size=9)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+
+        # Row 1: Nepali headers
+        for col_letter, nepali_text, _ in columns:
+            cell = ws[f"{col_letter}1"]
+            cell.value = nepali_text
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = border
+
+        # Row 2: English descriptions
+        for col_letter, _, english_text in columns:
+            cell = ws[f"{col_letter}2"]
+            cell.value = english_text
+            cell.fill = subheader_fill
+            cell.font = subheader_font
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = border
+
+        # Define column letters for formulas (MUST BE BEFORE THEY ARE USED)
+        house_no_col = "A"
+        surname_col = "B"
+        firewood_col = chr(65 + col_offset + 10)
+        grass_col = chr(65 + col_offset + 11)
+        bedding_col = chr(65 + col_offset + 12)
+        female_col = chr(65 + col_offset)
+        male_col = chr(65 + col_offset + 1)
+        land_col = chr(65 + col_offset + 2)
+        occupation_col = chr(65 + col_offset + 3)
+        other_occ_col = chr(65 + col_offset + 4)
+        cow_ox_col = chr(65 + col_offset + 5)
+        buffalo_col = chr(65 + col_offset + 6)
+        goat_sheep_col = chr(65 + col_offset + 7)
+        timber_col = chr(65 + col_offset + 8)
+        pole_col = chr(65 + col_offset + 9)
+        caste_col = chr(65 + col_offset + 13)
+        other_group_col = chr(65 + col_offset + 14)
+        prosperity_col = chr(65 + col_offset + 15)
+
+        # Set column widths and apply color coding with borders
+        # Auto-calculated columns: House No, Firewood, Grass, Bedding, Caste, Prosperity
+        auto_calc_cols = [house_no_col, firewood_col, grass_col, bedding_col, caste_col, prosperity_col]
+
+        # Border styles
+        dark_green_border = Border(
+            left=Side(style='thin', color='00704E'),
+            right=Side(style='thin', color='00704E'),
+            top=Side(style='thin', color='00704E'),
+            bottom=Side(style='thin', color='00704E')
+        )
+        dark_red_border = Border(
+            left=Side(style='thin', color='8B0000'),
+            right=Side(style='thin', color='8B0000'),
+            top=Side(style='thin', color='8B0000'),
+            bottom=Side(style='thin', color='8B0000')
+        )
+
+        for col_letter, _, _ in columns:
+            ws.column_dimensions[col_letter].width = 15
+
+            # Apply color coding and borders to data rows (3-5000)
+            for row in range(3, 5001):
+                cell = ws[f"{col_letter}{row}"]
+                if col_letter in auto_calc_cols:
+                    cell.fill = auto_calc_fill  # Light red for auto-calculated
+                    cell.border = dark_red_border  # Dark red border
+                else:
+                    cell.fill = manual_fill  # Light green for manual input
+                    cell.border = dark_green_border  # Dark green border
+
+        # Add data validation for छ/छैन fields (Nepali Yes/No)
+        nepali_yes_no_dv = DataValidation(type="list", formula1='"छ,छैन"', allow_blank=True)
+        nepali_yes_no_dv.error = 'कृपया छ वा छैन चयन गर्नुहोस्'
+        nepali_yes_no_dv.errorTitle = 'अमान्य इनपुट'
+
+        ws.add_data_validation(nepali_yes_no_dv)
+        nepali_yes_no_dv.add(f"{occupation_col}3:{occupation_col}5000")
+        nepali_yes_no_dv.add(f"{other_occ_col}3:{other_occ_col}5000")
+        nepali_yes_no_dv.add(f"{other_group_col}3:{other_group_col}5000")
+
+        # STRICT Integer validation for number fields - BLOCKS non-numeric input
+        integer_dv = DataValidation(
+            type="whole",
+            operator="greaterThanOrEqual",
+            formula1="0",
+            allow_blank=True,
+            showErrorMessage=True,
+            errorStyle='stop',  # STOP means user CANNOT enter invalid data
+            error='कृपया सङ्ख्या मात्र प्रविष्ट गर्नुहोस् (केवल ०-९)\nPlease enter numbers only (0-9)',
+            errorTitle='अमान्य इनपुट / Invalid Input',
+            showInputMessage=True,
+            promptTitle='सङ्ख्या प्रविष्ट गर्नुहोस्',
+            prompt='केवल पूर्ण सङ्ख्या (०, १, २, ३...) प्रविष्ट गर्नुहोस्\nEnter whole numbers only (0, 1, 2, 3...)'
+        )
+        ws.add_data_validation(integer_dv)
+        integer_dv.add(f"{female_col}3:{female_col}5000")
+        integer_dv.add(f"{male_col}3:{male_col}5000")
+        integer_dv.add(f"{cow_ox_col}3:{cow_ox_col}5000")
+        integer_dv.add(f"{buffalo_col}3:{buffalo_col}5000")
+        integer_dv.add(f"{goat_sheep_col}3:{goat_sheep_col}5000")
+        integer_dv.add(f"{pole_col}3:{pole_col}5000")
+
+        # STRICT Decimal validation for land area and timber - BLOCKS non-numeric input
+        decimal_dv = DataValidation(
+            type="decimal",
+            operator="greaterThanOrEqual",
+            formula1="0",
+            allow_blank=True,
+            showErrorMessage=True,
+            errorStyle='stop',  # STOP means user CANNOT enter invalid data
+            error='कृपया दशमलव सङ्ख्या प्रविष्ट गर्नुहोस् (जस्तै: १.५, ०.७५)\nPlease enter decimal numbers (e.g., 1.5, 0.75)',
+            errorTitle='अमान्य इनपुट / Invalid Input',
+            showInputMessage=True,
+            promptTitle='दशमलव सङ्ख्या',
+            prompt='दशमलव सङ्ख्या प्रविष्ट गर्नुहोस् (जस्तै: १५.५, ०.७५)\nEnter decimal numbers (e.g., 15.5, 0.75)'
+        )
+        ws.add_data_validation(decimal_dv)
+        decimal_dv.add(f"{land_col}3:{land_col}5000")
+        decimal_dv.add(f"{timber_col}3:{timber_col}5000")
+
+        # Create Parameters sheet for configurable calculation values
+        ws_params = wb.create_sheet("Parameters", 0)  # Insert as first sheet
+        ws_params.sheet_state = 'visible'
+
+        # Add parameters with defaults
+        param_data = [
+            ["Calculation Parameters", "मापदण्ड"],
+            ["", ""],
+            ["Parameter", "Value", "Unit", "Description (English)", "विवरण (नेपाली)"],
+            ["", "", "", "", ""],
+            ["FIREWOOD CALCULATION", "", "", "Adjust based on geography (Terai/Hills/Mountain)", "भूगोल अनुसार समायोजन गर्नुहोस् (तराई/पहाड/हिमाल)"],
+            ["Person Daily Need", 250, "gm/day", "Daily firewood per person", "प्रति व्यक्ति दैनिक दाउरा"],
+            ["Livestock Daily Need", 600, "gm/day", "Daily firewood per cattle", "प्रति गाईवस्तु दैनिक दाउरा"],
+            ["Bhari Weight", 25, "kg", "Weight of one bhari", "एक भारीको तौल"],
+            ["", "", "", "", ""],
+            ["GRASS CALCULATION", "", "", "Adjust based on pasture availability", "चरण क्षेत्र अनुसार समायोजन गर्नुहोस्"],
+            ["Cow/Ox Daily Need", 20, "kg/day", "Daily grass per cow/ox", "प्रति गाई/गोरु दैनिक घाँस"],
+            ["Buffalo Daily Need", 30, "kg/day", "Daily grass per buffalo", "प्रति भैंसी दैनिक घाँस"],
+            ["Goat/Sheep Daily Need", 5, "kg/day", "Daily grass per goat/sheep", "प्रति बाख्रा/भेडा दैनिक घाँस"],
+            ["Days Per Year", 365, "days", "Calculation period", "गणना अवधि"],
+            ["Bhari Weight", 25, "kg", "Weight of one bhari", "एक भारीको तौल"],
+            ["", "", "", "", ""],
+            ["BEDDING MATERIAL CALCULATION", "", "", "Adjust based on culture and farming", "संस्कृति र खेती अनुसार समायोजन गर्नुहोस्"],
+            ["Cattle Daily Need", 10, "kg/day", "Daily bedding per cattle", "प्रति गाईवस्तु दैनिक सोत्तर"],
+            ["Days Per Year", 365, "days", "Calculation period", "गणना अवधि"],
+            ["Bhari Weight", 25, "kg", "Weight of one bhari", "एक भारीको तौल"],
+            ["", "", "", "", ""],
+            ["DEFAULT VALUES", "", "", "", ""],
+            ["Timber Demand", 5, "cft/year", "Default timber per household", "प्रति घरधुरी काठ"],
+            ["Pole Demand", 5, "nos/year", "Default poles per household", "प्रति घरधुरी पोल"],
+        ]
+
+        for row_idx, row_data in enumerate(param_data, start=1):
+            for col_idx, value in enumerate(row_data, start=1):
+                cell = ws_params.cell(row=row_idx, column=col_idx, value=value)
+                if row_idx == 1:
+                    cell.font = Font(bold=True, size=14, color="FFFFFF")
+                    cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                elif row_idx == 3:
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+                elif row_idx in [5, 10, 17, 22]:
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+                elif col_idx == 2 and row_idx > 3 and value and isinstance(value, (int, float)):
+                    cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+
+        ws_params.column_dimensions['A'].width = 25
+        ws_params.column_dimensions['B'].width = 12
+        ws_params.column_dimensions['C'].width = 12
+        ws_params.column_dimensions['D'].width = 35
+        ws_params.column_dimensions['E'].width = 35
+
+        # Protect Parameters sheet - only allow editing values in column B
+        # First, explicitly lock ALL cells in the Parameters sheet
+        for row in ws_params.iter_rows():
+            for cell in row:
+                cell.protection = Protection(locked=True)
+
+        # Now unlock ONLY the editable parameter values (column B, specific rows)
+        # B6:B8 (Firewood parameters)
+        for row_idx in [6, 7, 8]:
+            ws_params.cell(row=row_idx, column=2).protection = Protection(locked=False)
+
+        # B11:B15 (Grass parameters)
+        for row_idx in [11, 12, 13, 14, 15]:
+            ws_params.cell(row=row_idx, column=2).protection = Protection(locked=False)
+
+        # B18:B20 (Bedding parameters)
+        for row_idx in [18, 19, 20]:
+            ws_params.cell(row=row_idx, column=2).protection = Protection(locked=False)
+
+        # B23:B24 (Default values)
+        for row_idx in [23, 24]:
+            ws_params.cell(row=row_idx, column=2).protection = Protection(locked=False)
+
+        # Protect the Parameters sheet (no password)
+        ws_params.protection.sheet = True
+        ws_params.protection.selectLockedCells = True
+        ws_params.protection.selectUnlockedCells = True
+        ws_params.protection.formatCells = False
+        ws_params.protection.formatColumns = False
+        ws_params.protection.formatRows = False
+        ws_params.protection.insertColumns = False
+        ws_params.protection.insertRows = False
+        ws_params.protection.deleteColumns = False
+        ws_params.protection.deleteRows = False
+
+        # Apply formulas and defaults for rows 3-5000
+        for row in range(3, 5001):
+            # Auto-numbering: House number (increments if surname is filled)
+            if row == 3:
+                ws[f"{house_no_col}{row}"] = f'=IF({surname_col}{row}<>"",ROW()-2,"")'
+            else:
+                ws[f"{house_no_col}{row}"] = f'=IF({surname_col}{row}<>"",IF({surname_col}{row-1}<>"",{house_no_col}{row-1}+1,1),"")'
+
+            # Caste classification VLOOKUP (supports both Nepali and English surnames)
+            ws[f"{caste_col}{row}"] = f'=IFERROR(VLOOKUP({surname_col}{row},CasteDB!$A$2:$B$5000,2,FALSE),IFERROR(VLOOKUP({surname_col}{row},CasteDB!$C$2:$D$5000,2,FALSE),""))'
+
+            # Timber default from Parameters sheet
+            ws[f"{timber_col}{row}"] = f'=Parameters!$B$23'
+
+            # Pole default from Parameters sheet
+            ws[f"{pole_col}{row}"] = f'=Parameters!$B$24'
+
+            # Firewood formula using parameters from Parameters sheet
+            # ((female + male) * person_daily + (cow + buffalo) * livestock_daily) / bhari_weight
+            ws[f"{firewood_col}{row}"] = f'=IF(AND({female_col}{row}<>"",{male_col}{row}<>""),ROUND((({female_col}{row}+{male_col}{row})*Parameters!$B$6+({cow_ox_col}{row}+{buffalo_col}{row})*Parameters!$B$7)/Parameters!$B$8,2),"")'
+
+            # Grass formula using parameters
+            # ((cow * cow_daily + buffalo * buffalo_daily + goat_sheep * goat_daily) * days) / bhari_weight
+            ws[f"{grass_col}{row}"] = f'=IF({cow_ox_col}{row}<>"",ROUND((({cow_ox_col}{row}*Parameters!$B$11+{buffalo_col}{row}*Parameters!$B$12+{goat_sheep_col}{row}*Parameters!$B$13)*Parameters!$B$14)/Parameters!$B$15,2),"")'
+
+            # Bedding formula using parameters
+            # ((cow + buffalo) * cattle_daily * days) / bhari_weight
+            ws[f"{bedding_col}{row}"] = f'=IF({cow_ox_col}{row}<>"",ROUND((({cow_ox_col}{row}+{buffalo_col}{row})*Parameters!$B$18*Parameters!$B$19)/Parameters!$B$20,2),"")'
+
+            # Prosperity level auto-calculation
+            prosperity_formula = f'''=IF(AND({land_col}{row}<>"",{cow_ox_col}{row}<>""),
+IF(AND({land_col}{row}>15,{cow_ox_col}{row}+{buffalo_col}{row}>5,{occupation_col}{row}="छैन"),"सम्पन्न",
+IF(AND({land_col}{row}>=5,{land_col}{row}<=15,{cow_ox_col}{row}+{buffalo_col}{row}>=2,{cow_ox_col}{row}+{buffalo_col}{row}<=4),"मध्यम",
+IF(AND({land_col}{row}>=1,{land_col}{row}<=5,{cow_ox_col}{row}+{buffalo_col}{row}>=2,{cow_ox_col}{row}+{buffalo_col}{row}<=3,{occupation_col}{row}="छ"),"विपन्न",
+IF(AND({land_col}{row}<=1,{goat_sheep_col}{row}>=1,{goat_sheep_col}{row}<=2,{occupation_col}{row}="छ"),"अति विपन्न","मध्यम")))),"")'''
+            ws[f"{prosperity_col}{row}"] = prosperity_formula.replace('\n', '')
+
+        # Load caste classification data and create hidden sheet
+        caste_csv_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+            "testData", "households_information", "caste_classification.csv"
+        )
+
+        ws_caste = wb.create_sheet("CasteDB")
+        ws_caste.sheet_state = 'hidden'  # Hide the sheet
+
+        if os.path.exists(caste_csv_path):
+            with open(caste_csv_path, 'r', encoding='utf-8-sig') as f:
+                csv_reader = csv.reader(f)
+                next(csv_reader)  # Skip header row
+
+                # Add headers to hidden sheet (4 columns for both Nepali and English lookup)
+                ws_caste['A1'] = 'surname_ne'
+                ws_caste['B1'] = 'classification_ne'
+                ws_caste['C1'] = 'surname_en'
+                ws_caste['D1'] = 'classification_ne_copy'
+
+                # Load data (both Nepali and English surnames)
+                row_idx = 2
+                for row in csv_reader:
+                    if len(row) >= 6:
+                        classification_ne = row[0].strip()
+                        surname_ne = row[2].strip()
+                        surname_en = row[5].strip()
+
+                        # Columns A-B: Nepali surname lookup
+                        ws_caste[f'A{row_idx}'] = surname_ne
+                        ws_caste[f'B{row_idx}'] = classification_ne
+
+                        # Columns C-D: English surname lookup
+                        ws_caste[f'C{row_idx}'] = surname_en
+                        ws_caste[f'D{row_idx}'] = classification_ne
+                        row_idx += 1
+
+        # Freeze header rows
+        ws.freeze_panes = "A3"
+
+        # ═══════════════════════════════════════════════════════════════════
+        # SHEET PROTECTION STRATEGY
+        # ═══════════════════════════════════════════════════════════════════
+        # Household Information sheet:
+        #   - Headers (rows 1-2): LOCKED (cannot edit)
+        #   - Auto-calculated columns (red background): LOCKED (read-only)
+        #   - Manual entry columns (green background), rows 3-5000: UNLOCKED (editable)
+        #   - All cells beyond row 5000: LOCKED
+        #   - All cells beyond column Z: LOCKED
+        #   → Result: Only A3:Z5000 (manual entry columns) are editable
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Get manual entry columns (not auto-calculated)
+        manual_entry_cols = [col_letter for col_letter, _, _ in columns if col_letter not in auto_calc_cols]
+
+        # First, explicitly lock ALL cells in the ENTIRE Household Information sheet
+        # This includes all rows and all columns (beyond Z and beyond row 5000)
+        for row in ws.iter_rows():  # All rows, all columns
+            for cell in row:
+                cell.protection = Protection(locked=True)
+
+        # Unlock ENTIRE range A3:Z5000 (all columns A-Z, all rows 3-5000)
+        # This makes the entire data entry range editable, including auto-calculated columns
+        for col_idx in range(1, 27):  # Columns 1-26 (A-Z)
+            for row_idx in range(3, 5001):  # Rows 3-5000
+                ws.cell(row=row_idx, column=col_idx).protection = Protection(locked=False)
+
+        # Protect the worksheet with user-friendly settings (no password)
+        ws.protection.sheet = True
+        ws.protection.selectLockedCells = True  # Can select locked cells
+        ws.protection.selectUnlockedCells = True  # Can select/edit unlocked cells
+        ws.protection.sort = True  # Can sort
+        ws.protection.autoFilter = True  # Can filter
+        ws.protection.formatCells = False  # Cannot format
+        ws.protection.formatColumns = False  # Cannot change column width
+        ws.protection.formatRows = False  # Cannot change row height
+        ws.protection.insertColumns = False  # Cannot insert columns
+        ws.protection.insertRows = False  # Cannot insert rows
+        ws.protection.deleteColumns = False  # Cannot delete columns
+        ws.protection.deleteRows = False  # Cannot delete rows
+
+        # Convert data range to Excel Table named "user_info"
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+
+        # Get the last column letter
+        last_col_letter = columns[-1][0]
+
+        # Create table spanning from A1 to last_column + 5000 rows
+        table = Table(displayName="user_info", ref=f"A1:{last_col_letter}5000")
+        table_style = TableStyleInfo(
+            name="TableStyleLight9",  # Green-themed table style
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False
+        )
+        table.tableStyleInfo = table_style
+        ws.add_table(table)
+
+        # Set print area to define the usable data range
+        # This guides Excel and users to the intended data area
+        ws.print_area = f'A1:{last_col_letter}5000'
+
+        # Set tab color to indicate this is the main data sheet
+        ws.sheet_properties.tabColor = "70AD47"  # Green color
+
+        # Add instructions sheet
+        ws_instructions = wb.create_sheet("Instructions")
+        ws_instructions.column_dimensions['A'].width = 80
+
+        instructions = [
+            "Household Information Form - Instructions",
+            "घरधुरी जानकारी फाराम - निर्देशन",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "IMPORTANT: CONFIGURABLE PARAMETERS",
+            "महत्वपूर्ण: समायोज्य मापदण्डहरू",
+            "═══════════════════════════════════════════════════════════════════",
+            "",
+            "The 'Parameters' sheet contains calculation values that you can adjust",
+            "based on your geography (Terai/Hills/Mountains) and local conditions:",
+            "",
+            "'Parameters' पानामा गणना मानहरू छन् जुन तपाईंको भूगोल (तराई/पहाड/हिमाल)",
+            "र स्थानीय अवस्था अनुसार समायोजन गर्न सक्नुहुन्छ:",
+            "",
+            "FIREWOOD CALCULATION (दाउरा गणना):",
+            "  • Person Daily Need (प्रति व्यक्ति दैनिक): 250 gm/day (default)",
+            "  • Livestock Daily Need (प्रति गाईवस्तु दैनिक): 600 gm/day (default)",
+            "  • Adjust for climate: Higher in cold regions, lower in warm regions",
+            "    जलवायु अनुसार: चिसो क्षेत्रमा बढी, न्यानो क्षेत्रमा कम",
+            "",
+            "GRASS CALCULATION (घाँस गणना):",
+            "  • Cow/Ox Daily Need: 20 kg/day (default)",
+            "  • Buffalo Daily Need: 30 kg/day (default)",
+            "  • Goat/Sheep Daily Need: 5 kg/day (default)",
+            "  • Adjust for pasture availability and grazing practices",
+            "    चरण क्षेत्र र चराइ अभ्यास अनुसार समायोजन गर्नुहोस्",
+            "",
+            "BEDDING MATERIAL (सोत्तर सामग्री):",
+            "  • Cattle Daily Need: 10 kg/day (default)",
+            "  • Adjust based on farming practices and culture",
+            "    खेती अभ्यास र संस्कृति अनुसार समायोजन गर्नुहोस्",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "COLOR CODING / रङ कोडिङ:",
+            "═══════════════════════════════════════════════════════════════════",
+            "  🔴 Light Red + Dark Red Border = Auto-calculated (uses Parameters)",
+            "     हल्का रातो + गाढा रातो बोर्डर = स्वतः गणना (Parameters प्रयोग गर्छ)",
+            "",
+            "  🟢 Light Green + Dark Green Border = Manual entry required",
+            "     हल्का हरियो + गाढा हरियो बोर्डर = म्यानुअल प्रविष्टि आवश्यक",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "EXCEL TABLE FORMAT",
+            "═══════════════════════════════════════════════════════════════════",
+            "  • Data is formatted as Excel Table named 'user_info'",
+            "  • Use built-in filtering and sorting features",
+            "  • Table automatically expands when you add data",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "SHEET PROTECTION / पाना सुरक्षा",
+            "═══════════════════════════════════════════════════════════════════",
+            "WHAT IS PROTECTED:",
+            "  • Header rows (1-2) - LOCKED (cannot edit or delete)",
+            "    शीर्षक पङ्क्तिहरू (१-२) - लक (सम्पादन वा मेटाउन सकिँदैन)",
+            "",
+            "  • Auto-calculated columns (red background) - LOCKED (read-only)",
+            "    स्वतः गणना स्तम्भहरू (रातो पृष्ठभूमि) - लक (पढ्न मात्र)",
+            "",
+            "WHAT YOU CAN EDIT:",
+            "  • Manual entry columns (green background) - UNLOCKED (rows 3-5000)",
+            "    म्यानुअल प्रविष्टि स्तम्भहरू (हरियो पृष्ठभूमि) - अनलक (पङ्क्ति ३-५०००)",
+            "",
+            "  • Up to 4998 households (rows 3-5000) are ready for data entry",
+            "    ४९९८ घरधुरी सम्म (पङ्क्ति ३-५०००) डाटा प्रविष्टि को लागि तयार छ",
+            "",
+            "  • Rows beyond 5000 and columns beyond Z are protected",
+            "    पङ्क्ति ५००० पछि र स्तम्भ Z पछि सुरक्षित छन्",
+            "",
+            "FOR MORE THAN 4998 HOUSEHOLDS:",
+            "  1. Review tab → Unprotect Sheet (no password needed)",
+            "     Review ट्याब → Unprotect Sheet (पासवर्ड आवश्यक छैन)",
+            "",
+            "  2. Enter data in additional rows (beyond row 5000)",
+            "     थप पङ्क्तिहरूमा डाटा प्रविष्ट गर्नुहोस् (पङ्क्ति ५००० पछि)",
+            "",
+            "  3. (Optional) Re-protect: Review → Protect Sheet",
+            "     (वैकल्पिक) पुन: सुरक्षित: Review → Protect Sheet",
+            "",
+            "DATA VALIDATION (STRICTLY ENFORCED):",
+            "  • Number fields ONLY accept numeric input (0-9)",
+            "    सङ्ख्या क्षेत्रहरूले केवल सङ्ख्यात्मक इनपुट (०-९) स्वीकार गर्छन्",
+            "",
+            "  • Text (strings) will be REJECTED in number columns",
+            "    सङ्ख्या स्तम्भहरूमा पाठ (strings) अस्वीकार गरिनेछ",
+            "",
+            "  • Error message will show if invalid data is entered",
+            "    अमान्य डाटा प्रविष्ट गरेमा त्रुटि सन्देश देखिनेछ",
+            "",
+            "OTHER SHEETS:",
+            "  • Parameters: Only column B values editable",
+            "    Parameters: केवल स्तम्भ B मानहरू सम्पादन योग्य",
+            "",
+            "  • Instructions: Fully protected (read-only)",
+            "    Instructions: पूर्ण सुरक्षित (पढ्न मात्र)",
+            "",
+            "  • CasteDB: Hidden (lookup data)",
+            "    CasteDB: लुकाइएको (लुकअप डाटा)",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "STEP-BY-STEP GUIDE",
+            "═══════════════════════════════════════════════════════════════════",
+            "",
+            "1. ADJUST PARAMETERS (Optional - if your area differs from defaults)",
+            "   मापदण्ड समायोजन (वैकल्पिक - यदि तपाईंको क्षेत्र पूर्वनिर्धारितबाट फरक छ)",
+            "   → Go to 'Parameters' sheet",
+            "   → Change values in column B based on your local conditions",
+            "   → Calculations will update automatically",
+            "",
+            "2. FILL HOUSEHOLD DATA (Starting from Row 3)",
+            "   घरधुरी डाटा भर्नुहोस् (पङ्क्ति ३ देखि)",
+            "",
+            "   AUTO-CALCULATED FIELDS (Light Red - Do Not Edit):",
+            "   स्वतः गणना हुने क्षेत्रहरू (हल्का रातो - सम्पादन नगर्नुहोस्):",
+            "",
+            "   a) House Number (घर नंवर): Auto-numbered when surname entered",
+            "      थर प्रविष्ट गर्दा स्वतः नम्बर हुन्छ",
+            "",
+            "   b) Caste Classification (जातिय वर्गिकरण):",
+            "      • Auto-filled from database when surname is entered",
+            "      • Supports both Nepali and English surnames",
+            "      • थर प्रविष्ट गर्दा डाटाबेसबाट स्वतः भरिन्छ",
+            "      • नेपाली र अङ्ग्रेजी दुवै थर समर्थित",
+            "",
+            "   c) Timber & Poles: Uses default from Parameters sheet",
+            "      काठ र पोल: Parameters पानाबाट पूर्वनिर्धारित प्रयोग गर्छ",
+            "",
+            "   d) Firewood (दाउरा): Uses Parameters sheet values",
+            "      Formula: ((Female+Male)×PersonDaily + (Cow+Buffalo)×LivestockDaily) ÷ Bhari",
+            "",
+            "   e) Grass (घाँस): Uses Parameters sheet values",
+            "      Formula: ((Cow×CowDaily + Buffalo×BuffaloDaily + Goat×GoatDaily)×Days) ÷ Bhari",
+            "",
+            "   f) Bedding (सोत्तर): Uses Parameters sheet values",
+            "      Formula: ((Cow+Buffalo)×CattleDaily×Days) ÷ Bhari",
+            "",
+            "   g) Prosperity Level (सम्पन्नताको स्तर):",
+            "      • सम्पन्न: >15 ropani, >5 cattle, non-forest occupation",
+            "      • मध्यम: 5-15 ropani, 2-4 cattle",
+            "      • विपन्न: 1-5 ropani, 2-3 cattle, forest occupation",
+            "      • अति विपन्न: 0-1 ropani, 1-2 goats/sheep, forest occupation",
+            "",
+            "   MANUAL ENTRY FIELDS (Light Green):",
+            "   म्यानुअल प्रविष्टि क्षेत्रहरू (हल्का हरियो):",
+            "   • Surname, Names, Address, Population counts, Land area, Livestock",
+            "   • Occupation fields: Select छ/छैन from dropdown",
+            "   • All numeric fields have validation (only accept numbers)",
+            "",
+            "3. DATA VALIDATION:",
+            "   • Dropdown fields: छ/छैन (for occupation and group membership)",
+            "   • Number fields: Only accept whole numbers ≥ 0",
+            "   • Decimal fields: Only accept decimal numbers ≥ 0 (land, timber)",
+            "",
+            "4. AFTER FILLING:",
+            "   • Save the file (Ctrl+S or File → Save)",
+            "   • Return to the system and upload",
+            "   • System will validate and import all data",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "FILE INFORMATION",
+            "═══════════════════════════════════════════════════════════════════",
+            f"Land Unit: {options.land_unit}",
+            f"Coordinates: {'Included' if options.include_coordinates else 'Not included'}",
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Forest: {calculation.forest_name or 'N/A'}",
+            f"Capacity: Up to 5000 households",
+            "",
+            "═══════════════════════════════════════════════════════════════════",
+            "TIPS / सुझावहरू:",
+            "═══════════════════════════════════════════════════════════════════",
+            "• Formulas are pre-filled up to row 5000",
+            "  सूत्रहरू पङ्क्ति ५००० सम्म पूर्व-भरिएका छन्",
+            "",
+            "• Use Excel's filter feature (Data → Filter) to sort/search",
+            "  क्रमबद्ध/खोजी गर्न Excel को फिल्टर सुविधा प्रयोग गर्नुहोस्",
+            "",
+            "• Hidden sheet 'CasteDB' contains surname-caste mappings",
+            "  लुकेको पाना 'CasteDB' मा थर-जाति म्यापिङ छ",
+            "",
+            "• For technical support, contact your system administrator",
+            "  प्राविधिक सहयोगको लागि, आफ्नो प्रणाली प्रशासकलाई सम्पर्क गर्नुहोस्",
+        ]
+
+        for i, instruction in enumerate(instructions, start=1):
+            cell = ws_instructions[f"A{i}"]
+            cell.value = instruction
+            if i == 1:
+                cell.font = Font(bold=True, size=14)
+            elif instruction.startswith("   "):
+                cell.font = Font(size=10, italic=True)
+            cell.alignment = Alignment(wrap_text=True)
+
+        # Protect Instructions sheet (fully read-only, no password)
+        # Explicitly lock ALL cells in the Instructions sheet
+        for row in ws_instructions.iter_rows():
+            for cell in row:
+                cell.protection = Protection(locked=True)
+
+        # Enable sheet protection (fully read-only)
+        ws_instructions.protection.sheet = True
+        ws_instructions.protection.selectLockedCells = True
+        ws_instructions.protection.selectUnlockedCells = False  # No unlocked cells
+        ws_instructions.protection.formatCells = False
+        ws_instructions.protection.formatColumns = False
+        ws_instructions.protection.formatRows = False
+        ws_instructions.protection.insertColumns = False
+        ws_instructions.protection.insertRows = False
+        ws_instructions.protection.deleteColumns = False
+        ws_instructions.protection.deleteRows = False
+
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False) as tmp:
+            wb.save(tmp.name)
+            tmp_path = tmp.name
+
+        # Return file
+        filename = f"household_template_{calculation.forest_name or 'data'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+        return FileResponse(
+            tmp_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=filename,
+            background=None
+        )
+
+    except ImportError as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"openpyxl library not installed: {str(e)}"
+        )
+    except Exception as e:
+        import traceback
+        print("="*80)
+        print("TEMPLATE GENERATION ERROR:")
+        print("="*80)
+        traceback.print_exc()
+        print("="*80)
+        raise HTTPException(status_code=500, detail=f"Error generating template: {str(e)}")
+
+
+# ============================================================================
+# Upload Excel File
+# ============================================================================
+
+@router.post("/calculations/{calculation_id}/upload", response_model=HouseholdUploadResponse)
+async def upload_household_data(
+    calculation_id: UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload filled Excel file with household data
+
+    Args:
+        calculation_id: UUID of the calculation
+        file: Excel file with household data
+
+    Returns:
+        Upload result with validation errors/warnings
+    """
+    # Verify calculation exists and belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Check if data already exists (one upload per calculation rule)
+    existing_count = db.query(HouseholdInformation).filter(
+        HouseholdInformation.calculation_id == calculation_id
+    ).count()
+
+    if existing_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Household data already exists for this calculation ({existing_count} records). Delete existing data first."
+        )
+
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+
+    try:
+        from openpyxl import load_workbook
+
+        # Read uploaded file
+        contents = await file.read()
+        wb = load_workbook(io.BytesIO(contents))
+        ws = wb.active
+
+        # Parse headers from row 1 (Nepali)
+        headers = []
+        for cell in ws[1]:
+            if cell.value:
+                headers.append(cell.value.strip())
+
+        # Expected header mappings (Nepali -> field name)
+        header_map = {
+            "घर नंवर": "house_no",
+            "थर": "surname",
+            "घरमुली पुरूष": "household_head_male",
+            "घरमुली महिला": "household_head_female",
+            "टोल ठेगाना": "address_tole",
+            "अक्षाँस": "latitude",
+            "देशान्तर": "longitude",
+            "महिला संख्या": "female_count",
+            "पुरूष संख्या": "male_count",
+            "जमिन (ropani)": "land_area",
+            "जमिन (kaththa)": "land_area",
+            "पेशा (वनमा आश्रीत)": "forest_based_occupation",
+            "पेशा (अन्य)": "other_occupation",
+            "गाइ गोरू": "cow_ox_count",
+            "भैसी राँगा": "buffalo_count",
+            "बाख्रा भेडा": "goat_sheep_count",
+            "बन पैदाबारको माग (काठ क्यू.फि.)": "timber_demand_cft",
+            "बन पैदाबारको माग (पोल)": "pole_demand",
+            "बन पैदाबारको माग (दाउरा) भारी": "firewood_demand_bhari",
+            "बन पैदाबारको माग (घाँस) भारी": "grass_demand_bhari",
+            "बन पैदाबारको माग (सोत्तर) भारी": "bedding_demand_bhari",
+            "जातिय वर्गिकरण": "caste_classification_ne",
+            "अन्य समूहमा सदस्यता": "other_group_membership",
+            "सम्पन्नताको स्तर": "prosperity_level",
+            "कैफियत": "remarks"
+        }
+
+        # Determine land unit from headers
+        land_unit = None
+        for header in headers:
+            if "जमिन (ropani)" in header:
+                land_unit = "ropani"
+            elif "जमिन (kaththa)" in header:
+                land_unit = "kaththa"
+
+        # Parse data rows (starting from row 3, skip row 2 which is English headers)
+        validations = []
+        records_to_import = []
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=3, values_only=True), start=3):
+            # Skip empty rows
+            if not any(row):
+                continue
+
+            validation = HouseholdUploadValidation(
+                row_number=row_idx,
+                is_valid=True,
+                errors=[],
+                warnings=[],
+                data={}
+            )
+
+            # Parse row data
+            row_data = {}
+            for col_idx, cell_value in enumerate(row):
+                if col_idx < len(headers):
+                    header = headers[col_idx]
+                    field_name = header_map.get(header)
+
+                    if field_name and cell_value is not None:
+                        # Convert छ/छैन or Yes/No to boolean
+                        if field_name in ['forest_based_occupation', 'other_occupation', 'other_group_membership']:
+                            if isinstance(cell_value, str):
+                                row_data[field_name] = cell_value.strip() in ['छ', 'Yes', 'yes', 'true', '1']
+                            else:
+                                row_data[field_name] = bool(cell_value)
+                        else:
+                            row_data[field_name] = cell_value
+
+            # Add land unit
+            if land_unit:
+                row_data['land_unit'] = land_unit
+
+            # Validate required fields
+            if not row_data.get('house_no'):
+                validation.errors.append("House number is required")
+                validation.is_valid = False
+            if not row_data.get('surname'):
+                validation.errors.append("Surname is required")
+                validation.is_valid = False
+            if row_data.get('female_count') is None:
+                validation.errors.append("Female count is required")
+                validation.is_valid = False
+            if row_data.get('male_count') is None:
+                validation.errors.append("Male count is required")
+                validation.is_valid = False
+
+            # Validate numeric fields
+            numeric_fields = ['house_no', 'female_count', 'male_count', 'cow_ox_count',
+                            'buffalo_count', 'goat_sheep_count', 'pole_demand']
+            for field in numeric_fields:
+                if field in row_data and row_data[field] is not None:
+                    try:
+                        row_data[field] = int(row_data[field])
+                        if row_data[field] < 0:
+                            validation.errors.append(f"{field} cannot be negative")
+                            validation.is_valid = False
+                    except (ValueError, TypeError):
+                        validation.errors.append(f"Invalid value for {field}")
+                        validation.is_valid = False
+
+            # Validate decimal fields
+            decimal_fields = ['latitude', 'longitude', 'land_area', 'timber_demand_cft',
+                            'firewood_demand_bhari', 'grass_demand_bhari', 'bedding_demand_bhari']
+            for field in decimal_fields:
+                if field in row_data and row_data[field] is not None:
+                    try:
+                        row_data[field] = Decimal(str(row_data[field]))
+                    except:
+                        validation.errors.append(f"Invalid decimal value for {field}")
+                        validation.is_valid = False
+
+            # Perform automatic calculations if valid so far
+            if validation.is_valid:
+                try:
+                    calculated_data, warnings = HouseholdCalculations.validate_and_calculate(
+                        row_data, db
+                    )
+                    row_data.update(calculated_data)
+                    validation.warnings.extend(warnings)
+                except Exception as e:
+                    validation.errors.append(f"Calculation error: {str(e)}")
+                    validation.is_valid = False
+
+            validation.data = row_data
+            validations.append(validation)
+
+            if validation.is_valid:
+                records_to_import.append(row_data)
+
+        # Import valid records
+        imported_count = 0
+        if records_to_import:
+            for record_data in records_to_import:
+                household = HouseholdInformation(
+                    calculation_id=calculation_id,
+                    created_by=current_user.id,
+                    **record_data
+                )
+                db.add(household)
+                imported_count += 1
+
+            db.commit()
+
+        return HouseholdUploadResponse(
+            success=imported_count > 0,
+            total_rows=len(validations),
+            valid_rows=len(records_to_import),
+            invalid_rows=len(validations) - len(records_to_import),
+            records_imported=imported_count,
+            validations=validations
+        )
+
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="openpyxl library not installed"
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+
+# ============================================================================
+# CRUD Operations
+# ============================================================================
+
+@router.get("/calculations/{calculation_id}/households", response_model=List[HouseholdInfoResponse])
+def get_households(
+    calculation_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all household records for a calculation"""
+
+    # Verify calculation belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Get households with computed total_population
+    households = db.query(HouseholdInformation).filter(
+        HouseholdInformation.calculation_id == calculation_id
+    ).offset(skip).limit(limit).all()
+
+    # Add computed field
+    results = []
+    for h in households:
+        h_dict = {
+            **{c.name: getattr(h, c.name) for c in h.__table__.columns},
+            "total_population": h.female_count + h.male_count
+        }
+        results.append(HouseholdInfoResponse(**h_dict))
+
+    return results
+
+
+@router.get("/households/{household_id}", response_model=HouseholdInfoResponse)
+def get_household(
+    household_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a single household by ID"""
+
+    household = db.query(HouseholdInformation).filter(
+        HouseholdInformation.id == household_id
+    ).first()
+
+    if not household:
+        raise HTTPException(status_code=404, detail="Household not found")
+
+    # Verify user owns the calculation
+    calculation = db.query(Calculation).filter(
+        Calculation.id == household.calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Return with computed field
+    h_dict = {
+        **{c.name: getattr(household, c.name) for c in household.__table__.columns},
+        "total_population": household.female_count + household.male_count
+    }
+    return HouseholdInfoResponse(**h_dict)
+
+
+@router.post("/calculations/{calculation_id}/households", response_model=HouseholdInfoResponse)
+def create_household(
+    calculation_id: UUID,
+    household_data: HouseholdInfoCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new household record"""
+
+    # Verify calculation belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Perform automatic calculations
+    data_dict = household_data.dict()
+    calculated_data, warnings = HouseholdCalculations.validate_and_calculate(data_dict, db)
+    data_dict.update(calculated_data)
+
+    # Create household
+    household = HouseholdInformation(
+        calculation_id=calculation_id,
+        created_by=current_user.id,
+        **data_dict
+    )
+    db.add(household)
+    db.commit()
+    db.refresh(household)
+
+    # Return with computed field
+    h_dict = {
+        **{c.name: getattr(household, c.name) for c in household.__table__.columns},
+        "total_population": household.female_count + household.male_count
+    }
+    return HouseholdInfoResponse(**h_dict)
+
+
+@router.put("/households/{household_id}", response_model=HouseholdInfoResponse)
+def update_household(
+    household_id: UUID,
+    household_update: HouseholdInfoUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update a household record"""
+
+    household = db.query(HouseholdInformation).filter(
+        HouseholdInformation.id == household_id
+    ).first()
+
+    if not household:
+        raise HTTPException(status_code=404, detail="Household not found")
+
+    # Verify user owns the calculation
+    calculation = db.query(Calculation).filter(
+        Calculation.id == household.calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Update fields
+    update_data = household_update.dict(exclude_unset=True)
+
+    # Perform automatic calculations if relevant fields changed
+    needs_recalc = any(key in update_data for key in [
+        'female_count', 'male_count', 'cow_ox_count', 'buffalo_count', 'goat_sheep_count',
+        'surname', 'land_area', 'land_unit'
+    ])
+
+    if needs_recalc:
+        # Get current data and merge with updates
+        current_data = {c.name: getattr(household, c.name) for c in household.__table__.columns}
+        current_data.update(update_data)
+
+        calculated_data, warnings = HouseholdCalculations.validate_and_calculate(current_data, db)
+        update_data.update(calculated_data)
+
+    # Apply updates
+    for key, value in update_data.items():
+        setattr(household, key, value)
+
+    household.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(household)
+
+    # Return with computed field
+    h_dict = {
+        **{c.name: getattr(household, c.name) for c in household.__table__.columns},
+        "total_population": household.female_count + household.male_count
+    }
+    return HouseholdInfoResponse(**h_dict)
+
+
+@router.delete("/households/{household_id}")
+def delete_household(
+    household_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a household record"""
+
+    household = db.query(HouseholdInformation).filter(
+        HouseholdInformation.id == household_id
+    ).first()
+
+    if not household:
+        raise HTTPException(status_code=404, detail="Household not found")
+
+    # Verify user owns the calculation
+    calculation = db.query(Calculation).filter(
+        Calculation.id == household.calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    db.delete(household)
+    db.commit()
+
+    return {"message": "Household deleted successfully"}
+
+
+@router.delete("/calculations/{calculation_id}/households")
+def delete_all_households(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete all household records for a calculation (before re-upload)"""
+
+    # Verify calculation belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Delete all households
+    deleted_count = db.query(HouseholdInformation).filter(
+        HouseholdInformation.calculation_id == calculation_id
+    ).delete()
+
+    db.commit()
+
+    return {"message": f"Deleted {deleted_count} household records"}
+
+
+# ============================================================================
+# Summary Statistics
+# ============================================================================
+
+@router.get("/calculations/{calculation_id}/summary", response_model=HouseholdSummary)
+def get_household_summary(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get aggregate statistics for all households in a calculation"""
+
+    # Verify calculation belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Get all households
+    households = db.query(HouseholdInformation).filter(
+        HouseholdInformation.calculation_id == calculation_id
+    ).all()
+
+    if not households:
+        raise HTTPException(status_code=404, detail="No household data found")
+
+    # Calculate totals
+    total_households = len(households)
+    total_male = sum(h.male_count for h in households)
+    total_female = sum(h.female_count for h in households)
+    total_population = total_male + total_female
+    total_cow_ox = sum(h.cow_ox_count for h in households)
+    total_buffalo = sum(h.buffalo_count for h in households)
+    total_goat_sheep = sum(h.goat_sheep_count for h in households)
+    total_timber = sum(h.timber_demand_cft for h in households)
+    total_poles = sum(h.pole_demand for h in households)
+    total_firewood = sum(h.firewood_demand_bhari or 0 for h in households)
+    total_grass = sum(h.grass_demand_bhari or 0 for h in households)
+    total_bedding = sum(h.bedding_demand_bhari or 0 for h in households)
+
+    # Average land area
+    land_areas = [h.land_area for h in households if h.land_area is not None]
+    avg_land = Decimal(sum(land_areas) / len(land_areas)) if land_areas else None
+
+    # Caste distribution
+    caste_dist = {}
+    for h in households:
+        if h.caste_classification_ne:
+            caste_dist[h.caste_classification_ne] = caste_dist.get(h.caste_classification_ne, 0) + 1
+
+    # Prosperity distribution
+    prosperity_dist = {}
+    for h in households:
+        prosperity_dist[h.prosperity_level] = prosperity_dist.get(h.prosperity_level, 0) + 1
+
+    # Forest dependent households
+    forest_dependent = sum(1 for h in households if h.forest_based_occupation)
+
+    return HouseholdSummary(
+        total_households=total_households,
+        total_population=total_population,
+        total_male=total_male,
+        total_female=total_female,
+        total_cow_ox=total_cow_ox,
+        total_buffalo=total_buffalo,
+        total_goat_sheep=total_goat_sheep,
+        total_timber_demand_cft=total_timber,
+        total_pole_demand=total_poles,
+        total_firewood_demand_bhari=total_firewood,
+        total_grass_demand_bhari=total_grass,
+        total_bedding_demand_bhari=total_bedding,
+        avg_land_area=avg_land,
+        caste_distribution=caste_dist,
+        prosperity_distribution=prosperity_dist,
+        forest_dependent_households=forest_dependent
+    )
+
+
+# ============================================================================
+# Export Analysis
+# ============================================================================
+
+@router.get("/calculations/{calculation_id}/export")
+async def export_household_analysis(
+    calculation_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Export household data and analysis to Excel"""
+
+    # Verify calculation belongs to user
+    calculation = db.query(Calculation).filter(
+        Calculation.id == calculation_id,
+        Calculation.user_id == current_user.id
+    ).first()
+
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    # Get households and summary
+    households = db.query(HouseholdInformation).filter(
+        HouseholdInformation.calculation_id == calculation_id
+    ).all()
+
+    if not households:
+        raise HTTPException(status_code=404, detail="No household data to export")
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.chart import PieChart, BarChart, Reference
+
+        wb = Workbook()
+
+        # Sheet 1: Household Data
+        ws_data = wb.active
+        ws_data.title = "Household Data"
+
+        # Headers
+        headers = [
+            "House No", "Surname", "Male Head", "Female Head", "Address",
+            "Latitude", "Longitude", "Female Count", "Male Count", "Total Population",
+            "Land Area", "Land Unit", "Forest Occupation", "Other Occupation",
+            "Cow/Ox", "Buffalo", "Goat/Sheep", "Timber (cft)", "Poles",
+            "Firewood (Bhari)", "Grass (Bhari)", "Bedding (Bhari)",
+            "Caste Classification", "Other Group", "Prosperity", "Remarks"
+        ]
+
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws_data.cell(row=1, column=col_idx, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            cell.font = Font(bold=True, color="FFFFFF")
+
+        # Data rows
+        for row_idx, h in enumerate(households, start=2):
+            ws_data.cell(row=row_idx, column=1, value=h.house_no)
+            ws_data.cell(row=row_idx, column=2, value=h.surname)
+            ws_data.cell(row=row_idx, column=3, value=h.household_head_male)
+            ws_data.cell(row=row_idx, column=4, value=h.household_head_female)
+            ws_data.cell(row=row_idx, column=5, value=h.address_tole)
+            ws_data.cell(row=row_idx, column=6, value=float(h.latitude) if h.latitude else None)
+            ws_data.cell(row=row_idx, column=7, value=float(h.longitude) if h.longitude else None)
+            ws_data.cell(row=row_idx, column=8, value=h.female_count)
+            ws_data.cell(row=row_idx, column=9, value=h.male_count)
+            ws_data.cell(row=row_idx, column=10, value=h.female_count + h.male_count)
+            ws_data.cell(row=row_idx, column=11, value=float(h.land_area) if h.land_area else None)
+            ws_data.cell(row=row_idx, column=12, value=h.land_unit)
+            ws_data.cell(row=row_idx, column=13, value="छ" if h.forest_based_occupation else "छैन")
+            ws_data.cell(row=row_idx, column=14, value="छ" if h.other_occupation else "छैन")
+            ws_data.cell(row=row_idx, column=15, value=h.cow_ox_count)
+            ws_data.cell(row=row_idx, column=16, value=h.buffalo_count)
+            ws_data.cell(row=row_idx, column=17, value=h.goat_sheep_count)
+            ws_data.cell(row=row_idx, column=18, value=float(h.timber_demand_cft))
+            ws_data.cell(row=row_idx, column=19, value=h.pole_demand)
+            ws_data.cell(row=row_idx, column=20, value=float(h.firewood_demand_bhari) if h.firewood_demand_bhari else None)
+            ws_data.cell(row=row_idx, column=21, value=float(h.grass_demand_bhari) if h.grass_demand_bhari else None)
+            ws_data.cell(row=row_idx, column=22, value=float(h.bedding_demand_bhari) if h.bedding_demand_bhari else None)
+            ws_data.cell(row=row_idx, column=23, value=h.caste_classification_ne)
+            ws_data.cell(row=row_idx, column=24, value="छ" if h.other_group_membership else "छैन")
+            ws_data.cell(row=row_idx, column=25, value=h.prosperity_level)
+            ws_data.cell(row=row_idx, column=26, value=h.remarks)
+
+        # Sheet 2: Summary Statistics
+        ws_summary = wb.create_sheet("Summary")
+
+        summary_data = [
+            ["Household Summary Statistics", ""],
+            ["", ""],
+            ["Total Households", len(households)],
+            ["Total Population", sum(h.female_count + h.male_count for h in households)],
+            ["  - Male", sum(h.male_count for h in households)],
+            ["  - Female", sum(h.female_count for h in households)],
+            ["", ""],
+            ["Livestock", ""],
+            ["Total Cows/Oxen", sum(h.cow_ox_count for h in households)],
+            ["Total Buffaloes", sum(h.buffalo_count for h in households)],
+            ["Total Goats/Sheep", sum(h.goat_sheep_count for h in households)],
+            ["", ""],
+            ["Forest Product Demands (Yearly)", ""],
+            ["Timber (cft)", float(sum(h.timber_demand_cft for h in households))],
+            ["Poles", sum(h.pole_demand for h in households)],
+            ["Firewood (Bhari)", float(sum(h.firewood_demand_bhari or 0 for h in households))],
+            ["Grass (Bhari)", float(sum(h.grass_demand_bhari or 0 for h in households))],
+            ["Bedding Material (Bhari)", float(sum(h.bedding_demand_bhari or 0 for h in households))],
+            ["", ""],
+            ["Forest Dependent Households", sum(1 for h in households if h.forest_based_occupation)],
+        ]
+
+        for row_idx, (label, value) in enumerate(summary_data, start=1):
+            ws_summary.cell(row=row_idx, column=1, value=label)
+            ws_summary.cell(row=row_idx, column=2, value=value)
+            if row_idx == 1:
+                ws_summary.cell(row=row_idx, column=1).font = Font(bold=True, size=14)
+
+        # Auto-adjust column widths
+        for ws in [ws_data, ws_summary]:
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False) as tmp:
+            wb.save(tmp.name)
+            tmp_path = tmp.name
+
+        filename = f"household_analysis_{calculation.forest_name or 'data'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+        return FileResponse(
+            tmp_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=filename
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating export: {str(e)}")
+
+
+# ============================================================================
+# Utility Endpoints
+# ============================================================================
+
+@router.get("/surnames", response_model=List[SurnameSuggestion])
+def get_surname_suggestions(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db)
+):
+    """Get surname suggestions for autocomplete"""
+
+    results = db.query(CasteClassification).filter(
+        CasteClassification.surname_ne.ilike(f"%{q}%")
+    ).limit(limit).all()
+
+    return [
+        SurnameSuggestion(
+            surname_ne=r.surname_ne,
+            surname_en=r.surname_en,
+            classification_ne=r.classification_ne,
+            caste_ne=r.caste_ne
+        )
+        for r in results
+    ]
+
+
+@router.get("/caste-lookup/{surname}", response_model=List[CasteClassificationResponse])
+def lookup_caste_by_surname(
+    surname: str,
+    db: Session = Depends(get_db)
+):
+    """Lookup caste classification by surname (may return multiple results)"""
+
+    results = db.query(CasteClassification).filter(
+        CasteClassification.surname_ne == surname
+    ).all()
+
+    if not results:
+        raise HTTPException(status_code=404, detail=f"Surname '{surname}' not found in database")
+
+    return results

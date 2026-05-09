@@ -1,0 +1,2814 @@
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { forestApi } from '../services/api';
+import type { Calculation } from '../types';
+import { EditableCell } from '../components/EditableCell';
+import { FieldbookTab } from '../components/FieldbookTab';
+import { SamplingTab } from '../components/SamplingTab';
+import TreeModelGenerator from '../components/TreeModelGenerator';
+import { TreeMappingTab } from '../components/TreeMappingTab';
+import BiodiversityTab from '../components/BiodiversityTab';
+import AnalysisTabContent from '../components/AnalysisTabContent';
+import MapsTab from '../components/MapsTab';
+import { VerticalSidebar, createTabGroups } from '../components/VerticalSidebar';
+import { isUnifiedMappingEnabled } from '../config/featureFlags';
+import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
+import { UserGroupMapTab } from '../components/UserGroupMapTab';
+import { TotalInventoryTab } from '../components/TotalInventoryTab';
+import { FieldInventoryTab } from '../components/FieldInventoryTab';
+import { CompartmentTab } from '../components/Compartment';
+import YearlyActivitiesPage from '../components/YearlyActivities/YearlyActivitiesPage';
+import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
+import type { AnalysisOptions } from '../constants/analysisPresets';
+import { RasterLayerControl } from '../components/RasterLayerControl';
+import { RasterClickInfo } from '../components/RasterClickInfo';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
+import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import MapEditor from '../components/MapEditor';
+
+// Block colors for mapping
+const BLOCK_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#9b59b6', '#f39c12',
+  '#1abc9c', '#e67e22', '#34495e', '#16a085', '#c0392b'
+];
+
+// Validate GeoJSON geometry structure
+function isValidGeoJSON(geometry: any): boolean {
+  if (!geometry || typeof geometry !== 'object') {
+    console.error('Geometry validation failed: not an object', geometry);
+    return false;
+  }
+
+  if (!geometry.type) {
+    console.error('Geometry validation failed: missing type', geometry);
+    return false;
+  }
+
+  const validTypes = ['Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection', 'Feature', 'FeatureCollection'];
+  if (!validTypes.includes(geometry.type)) {
+    console.error('Geometry validation failed: invalid type', geometry.type);
+    return false;
+  }
+
+  if (!geometry.coordinates && geometry.type !== 'GeometryCollection' && geometry.type !== 'Feature' && geometry.type !== 'FeatureCollection') {
+    console.error('Geometry validation failed: missing coordinates', geometry);
+    return false;
+  }
+
+  return true;
+}
+
+// Component to handle auto-zoom to layer and add scale control
+function ZoomToLayer({
+  geometry,
+  setMapInstance,
+  orientation
+}: {
+  geometry: any;
+  setMapInstance: (map: L.Map) => void;
+  orientation: 'portrait' | 'landscape';
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    // Store map instance for external use
+    setMapInstance(map);
+
+    // Remove any existing scale controls first
+    map.eachLayer((layer: any) => {
+      if (layer instanceof L.Control.Scale) {
+        map.removeControl(layer);
+      }
+    });
+
+    // Add single scale control (bottom-left)
+    const scaleControl = L.control.scale({
+      position: 'bottomleft',
+      metric: true,
+      imperial: false,
+      maxWidth: 150
+    });
+    scaleControl.addTo(map);
+
+    // Auto-zoom to layer on initial load - same behavior for both orientations
+    if (geometry && isValidGeoJSON(geometry)) {
+      try {
+        const geoJsonLayer = L.geoJSON(geometry);
+        const bounds = geoJsonLayer.getBounds();
+        if (bounds.isValid()) {
+          // Use same padding for both portrait and landscape for consistent zoom behavior
+          const padding = [50, 50] as [number, number];
+
+          map.fitBounds(bounds, { padding });
+        }
+      } catch (error) {
+        console.error('Error creating GeoJSON layer for zoom:', error);
+      }
+    }
+
+    // Cleanup function
+    return () => {
+      if (map && scaleControl) {
+        map.removeControl(scaleControl);
+      }
+    };
+  }, [geometry, map, setMapInstance, orientation]);
+
+  return null;
+}
+
+// North Arrow Component - Points upward (North)
+function NorthArrow() {
+  return (
+    <div className="absolute top-4 right-4 z-[1000] bg-white rounded-lg shadow-lg p-2 border border-gray-300">
+      <div className="flex flex-col items-center">
+        <div className="text-sm font-bold text-gray-800 mb-1">N</div>
+        <svg width="30" height="50" viewBox="0 0 30 60">
+          {/* Arrow shaft */}
+          <line x1="15" y1="10" x2="15" y2="50" stroke="#333" strokeWidth="2"/>
+          {/* North half (dark/filled) pointing UP */}
+          <polygon points="15,5 10,20 15,18 20,20" fill="#1a1a1a" stroke="#000" strokeWidth="1"/>
+          {/* South half (white/outline) pointing DOWN */}
+          <polygon points="15,18 10,20 15,50 20,20" fill="#ffffff" stroke="#000" strokeWidth="1"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+export default function CalculationDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [calculation, setCalculation] = useState<Calculation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [geometryError, setGeometryError] = useState<string | null>(null);
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
+  const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [boundaryVisible, setBoundaryVisible] = useState(true);
+  const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities'>(
+    'analysis'
+  );
+
+  // Re-analysis modal state
+  const [showReanalysisModal, setShowReanalysisModal] = useState(false);
+  const [reanalysisOptions, setReanalysisOptions] = useState<AnalysisOptions>(DEFAULT_ANALYSIS_OPTIONS);
+  const [reanalyzing, setReanalyzing] = useState(false);
+
+  // Species confirmation state (shared across whole forest and blocks)
+  const [optimisticConfirmations, setOptimisticConfirmations] = useState<Map<string, boolean>>(new Map());
+  const [confirmingSpecies, setConfirmingSpecies] = useState<Set<string>>(new Set());
+
+  // NEW: Track which block species lists are expanded
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
+
+  // Block rename state
+  const [renamingBlockId, setRenamingBlockId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  // Map editor state
+  const [showMapEditor, setShowMapEditor] = useState(false);
+  const [subAreas, setSubAreas] = useState<any[]>([]);
+
+  // Table 5: Block area detail state
+  const [blockAreaDetails, setBlockAreaDetails] = useState<any[]>([]);
+  const [blockAreaTotals, setBlockAreaTotals] = useState<any>(null);
+  const [loadingBlockDetails, setLoadingBlockDetails] = useState(false);
+  const [subAreaRefreshKey, setSubAreaRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (id) {
+      loadCalculation();
+    }
+  }, [id]);
+
+  // Calculate optimal map orientation based on geometry extent
+  useEffect(() => {
+    if (calculation?.geometry) {
+      // First validate the geometry structure
+      if (!isValidGeoJSON(calculation.geometry)) {
+        const errorMsg = 'The boundary geometry data is in an invalid format. The map may not display correctly.';
+        console.error('Invalid GeoJSON structure detected for calculation:', calculation.id);
+        console.error('Geometry data:', calculation.geometry);
+        setGeometryError(errorMsg);
+        setMapOrientation('portrait');
+        return;
+      }
+
+      try {
+        const geoJsonLayer = L.geoJSON(calculation.geometry);
+        const bounds = geoJsonLayer.getBounds();
+
+        if (bounds.isValid()) {
+          const width = bounds.getEast() - bounds.getWest();
+          const height = bounds.getNorth() - bounds.getSouth();
+
+          // If width > height, use landscape; otherwise portrait
+          const orientation = width > height ? 'landscape' : 'portrait';
+          setMapOrientation(orientation);
+          setGeometryError(null); // Clear any previous errors
+          console.log('Geometry loaded successfully, orientation:', orientation);
+        } else {
+          console.warn('Invalid geometry bounds for calculation');
+          setGeometryError('The boundary has invalid geographic bounds.');
+          setMapOrientation('portrait');
+        }
+      } catch (error) {
+        const errorMsg = `Error processing boundary geometry: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        console.error('Error processing geometry:', error);
+        console.error('Problematic geometry:', JSON.stringify(calculation.geometry));
+        setGeometryError(errorMsg);
+        setMapOrientation('portrait');
+      }
+    }
+  }, [calculation]);
+
+  // Fetch block area details (Table 5) when Sub-Areas tab is active
+  useEffect(() => {
+    if (activeTab === 'subareas' && calculation?.id && (calculation?.result_data?.blocks?.length ?? 0) > 0) {
+      const fetchDetails = async () => {
+        setLoadingBlockDetails(true);
+        try {
+          const data = await forestApi.getBlockAreaDetail(calculation.id);
+          setBlockAreaDetails(data.block_details || []);
+          setBlockAreaTotals(data.totals || null);
+        } catch (err: any) {
+          console.error('Error fetching block area details:', err);
+          setBlockAreaDetails([]);
+          setBlockAreaTotals(null);
+        } finally {
+          setLoadingBlockDetails(false);
+        }
+      };
+      fetchDetails();
+    }
+  }, [activeTab, calculation?.id, calculation?.result_data?.blocks?.length, subAreaRefreshKey]);
+
+  // Get map center from geometry
+  const getMapCenter = (): [number, number] => {
+    if (!calculation?.geometry) return [27.7172, 85.3240];
+    try {
+      const layer = L.geoJSON(calculation.geometry);
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) {
+        return [(bounds.getNorth() + bounds.getSouth()) / 2, (bounds.getEast() + bounds.getWest()) / 2] as [number, number];
+      }
+    } catch (e) {
+      console.error('Error calculating center:', e);
+    }
+    return [27.7172, 85.3240];
+  };
+
+  const loadCalculation = async () => {
+    try {
+      setLoading(true);
+      console.log('Loading calculation:', id);
+      const data = await forestApi.getCalculation(id!);
+      console.log('Calculation data loaded:', data);
+      console.log('Result data keys:', data.result_data ? Object.keys(data.result_data) : 'null');
+      console.log('Blocks:', data.result_data?.blocks);
+      
+      // Log geometry info for debugging
+      if (data.geometry) {
+        console.log('Geometry type:', data.geometry.type);
+        console.log('Geometry coordinates:', data.geometry.type === 'Polygon' ? 
+          `Polygon with ${data.geometry.coordinates?.length} rings` : 
+          data.geometry.type === 'MultiPolygon' ? 
+          `MultiPolygon with ${data.geometry.coordinates?.length} polygons` : 'unknown');
+      } else {
+        console.warn('No geometry found in calculation data!');
+      }
+      setCalculation(data);
+    } catch (err: any) {
+      console.error('Error loading calculation:', err);
+      setError(err.response?.data?.detail || 'Failed to load calculation');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper function to get confirmed status (checks optimistic state first)
+  // NEW: Accepts optional blockName for block-specific confirmation status
+  const getConfirmedStatus = (species: any, blockName?: string): boolean => {
+    const scientificName = species.scientific_name;
+    const optimisticKey = blockName ? `${blockName}:${scientificName}` : scientificName;
+
+    if (optimisticConfirmations.has(optimisticKey)) {
+      return optimisticConfirmations.get(optimisticKey)!;
+    }
+    return species.confirmed ?? false;
+  };
+
+  // Handle species confirmation toggle (used by both whole forest and block species)
+  // NEW: Accepts blockName parameter for block-specific confirmation
+  const handleToggleSpeciesConfirmation = async (species: any, blockName?: string) => {
+    const scientificName = species.scientific_name;
+    const currentConfirmed = getConfirmedStatus(species);
+    const newConfirmed = !currentConfirmed;
+
+    // Create a unique key for optimistic updates (includes block context)
+    const optimisticKey = blockName ? `${blockName}:${scientificName}` : scientificName;
+
+    // Optimistic update - change UI immediately
+    setOptimisticConfirmations(prev => {
+      const newMap = new Map(prev);
+      newMap.set(optimisticKey, newConfirmed);
+      return newMap;
+    });
+
+    setConfirmingSpecies(prev => new Set(prev).add(optimisticKey));
+
+    try {
+      // NEW: Pass blockName to API for block-specific confirmation
+      await forestApi.toggleSpeciesConfirmation(id!, scientificName, newConfirmed, blockName);
+      // Success - optimistic update is correct, no page refresh needed
+    } catch (err: any) {
+      console.error('Error confirming species:', err);
+      const context = blockName ? ` in ${blockName}` : '';
+      alert(`Failed to update species${context}: ` + (err.response?.data?.detail || err.message));
+
+      // Revert optimistic update on error
+      setOptimisticConfirmations(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(optimisticKey);
+        return newMap;
+      });
+    } finally {
+      setConfirmingSpecies(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(optimisticKey);
+        return newSet;
+      });
+    }
+  };
+
+  const handleReanalyze = async () => {
+    if (!calculation) return;
+
+    try {
+      setReanalyzing(true);
+      const updatedCalculation = await forestApi.reanalyze(calculation.id, reanalysisOptions);
+      setCalculation(updatedCalculation);
+      setShowReanalysisModal(false);
+    } catch (err: any) {
+      console.error('Reanalysis failed:', err);
+      alert(err.response?.data?.detail || 'Failed to reanalyze. Please try again.');
+    } finally {
+      setReanalyzing(false);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const styles = {
+      processing: 'bg-yellow-100 text-yellow-800',
+      completed: 'bg-green-100 text-green-800',
+      failed: 'bg-red-100 text-red-800',
+    };
+    return styles[status as keyof typeof styles] || 'bg-gray-100 text-gray-800';
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  const handleZoomToLayer = () => {
+    if (calculation?.geometry && mapInstance) {
+      const geoJsonLayer = L.geoJSON(calculation.geometry);
+      const bounds = geoJsonLayer.getBounds();
+      if (bounds.isValid()) {
+        // Use same padding for both portrait and landscape for consistent zoom behavior
+        const padding = [50, 50] as [number, number];
+
+        mapInstance.fitBounds(bounds, { padding });
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="bg-white rounded-lg shadow p-8 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading calculation details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !calculation) {
+    return (
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+          {error || 'Calculation not found'}
+        </div>
+        <button
+          onClick={() => navigate('/my-uploads')}
+          className="mt-4 text-green-600 hover:text-green-700"
+        >
+          ← Back to My Uploads
+        </button>
+      </div>
+    );
+  }
+
+  // Handler to save a whole-forest field
+  const handleSaveWholeForest = async (key: string, newValue: string) => {
+    const numericKeys = [
+      'elevation_mean_m', 'elevation_min_m', 'elevation_max_m',
+      'temperature_mean_c', 'temperature_min_c',
+      'precipitation_mean_mm',
+      'agb_total_mg', 'agb_mean_mg_ha', 'carbon_stock_mg',
+      'forest_loss_hectares', 'forest_gain_hectares', 'fire_loss_hectares',
+      'canopy_mean_m', 'area_hectares', 'area_sqm'
+    ];
+    const val: any = numericKeys.includes(key) ? parseFloat(newValue) : newValue;
+    await forestApi.updateResultData(calculation.id, { [key]: val });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, [key]: val }
+    } : prev);
+  };
+
+  // Handler to save a block-level field
+  const handleSaveBlock = async (blockIndex: number, key: string, newValue: string) => {
+    const numericKeys = [
+      'elevation_mean_m', 'elevation_min_m', 'elevation_max_m',
+      'temperature_mean_c', 'temperature_min_c',
+      'precipitation_mean_mm',
+      'agb_total_mg', 'agb_mean_mg_ha', 'carbon_stock_mg',
+      'forest_loss_hectares', 'forest_gain_hectares', 'fire_loss_hectares',
+      'canopy_mean_m', 'area_hectares', 'area_sqm'
+    ];
+    const val: any = numericKeys.includes(key) ? parseFloat(newValue) : newValue;
+    const updatedBlocks = [...(calculation.result_data?.blocks || [])];
+    updatedBlocks[blockIndex] = { ...updatedBlocks[blockIndex], [key]: val };
+    await forestApi.updateResultData(calculation.id, { blocks: updatedBlocks });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, blocks: updatedBlocks }
+    } : prev);
+  };
+
+  // Handler to save a block extent field
+  const handleSaveBlockExtent = async (blockIndex: number, direction: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedBlocks = [...(calculation.result_data?.blocks || [])];
+    updatedBlocks[blockIndex] = {
+      ...updatedBlocks[blockIndex],
+      extent: { ...updatedBlocks[blockIndex].extent, [direction]: val }
+    };
+    await forestApi.updateResultData(calculation.id, { blocks: updatedBlocks });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, blocks: updatedBlocks }
+    } : prev);
+  };
+
+  // Handler to save whole forest extent field
+  const handleSaveWholeExtent = async (direction: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedExtent = { ...calculation.result_data?.whole_forest_extent, [direction]: val };
+    await forestApi.updateResultData(calculation.id, { whole_forest_extent: updatedExtent });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, whole_forest_extent: updatedExtent }
+    } : prev);
+  };
+
+  // Handler to save whole forest percentages
+  const handleSaveWholePercentages = async (key: string, className: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedPercentages = { ...calculation.result_data?.[key], [className]: val };
+    await forestApi.updateResultData(calculation.id, { [key]: updatedPercentages });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, [key]: updatedPercentages }
+    } : prev);
+  };
+
+  // Handler to save block percentages
+  const handleSaveBlockPercentages = async (blockIndex: number, key: string, className: string, newValue: string) => {
+    const val = parseFloat(newValue);
+    const updatedBlocks = [...(calculation.result_data?.blocks || [])];
+    updatedBlocks[blockIndex] = {
+      ...updatedBlocks[blockIndex],
+      [key]: { ...updatedBlocks[blockIndex][key], [className]: val }
+    };
+    await forestApi.updateResultData(calculation.id, { blocks: updatedBlocks });
+    setCalculation(prev => prev ? {
+      ...prev,
+      result_data: { ...prev.result_data, blocks: updatedBlocks }
+    } : prev);
+  };
+
+  // Handle block rename
+  const handleRenameBlock = async (block: any) => {
+    if (!renameValue.trim() || !renamingBlockId) return;
+    const newName = renameValue.trim();
+    const oldName = block.block_name;
+    const blockId = block.block_id;
+    try {
+      if (blockId) {
+        await forestApi.updateBlock(calculation.id, blockId, newName);
+      }
+      // Update local blocks array
+      const updatedBlocks = [...blocks];
+      const idx = updatedBlocks.findIndex((b: any) =>
+        b.block_id ? b.block_id === renamingBlockId : b.block_name === renamingBlockId
+      );
+      if (idx >= 0) {
+        updatedBlocks[idx] = { ...updatedBlocks[idx], block_name: newName };
+      }
+      // Sync sub-areas that reference this block (match by ID or name)
+      const renameInSubArea = (sa: any) => {
+        let updated = { ...sa };
+        const matchBlock = (ref: any) =>
+          (blockId && ref.blockId === blockId) || ref.blockName === oldName || ref.block_name === oldName;
+        if (matchBlock(sa)) {
+          if (sa.blockId === blockId || sa.blockName === oldName) updated.blockName = newName;
+          if (sa.block_name === oldName) updated.block_name = newName;
+        }
+        if (sa.blockBreakdown) {
+          updated.blockBreakdown = sa.blockBreakdown.map((bb: any) =>
+            matchBlock(bb) ? { ...bb, blockName: newName, block_name: newName } : bb
+          );
+        }
+        return updated;
+      };
+      setCalculation(prev => {
+        if (!prev) return prev;
+        const rd = { ...prev.result_data, blocks: updatedBlocks };
+        if (rd.sub_areas) rd.sub_areas = rd.sub_areas.map(renameInSubArea);
+        return { ...prev, result_data: rd };
+      });
+      setSubAreas(prev => prev.map(renameInSubArea));
+      setSubAreaRefreshKey(k => k + 1);
+    } catch (err: any) {
+      console.error('Failed to rename block:', err);
+    }
+    setRenamingBlockId(null);
+    setRenameValue('');
+  };
+
+  // Extract blocks from result_data
+  const blocks = calculation.result_data?.blocks || [];
+  const totalBlocks = calculation.result_data?.total_blocks || 1;
+  const processingInfo = calculation.result_data?.processing_info || {};
+
+  // Debug logging
+  console.log('Rendering CalculationDetail:', {
+    calculationId: calculation.id,
+    forestName: calculation.forest_name,
+    hasResultData: !!calculation.result_data,
+    blocksCount: blocks.length,
+    totalBlocks,
+    resultDataKeys: calculation.result_data ? Object.keys(calculation.result_data) : []
+  });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-700">Loading calculation...</h2>
+          <p className="text-gray-500 mt-2">Please wait while we fetch the data</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-red-800 mb-2">Error Loading Calculation</h2>
+          <p className="text-red-600">{error}</p>
+          <button
+            onClick={() => navigate('/my-uploads')}
+            className="mt-4 text-red-700 hover:text-red-900 font-medium"
+          >
+            ← Back to My Uploads
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!calculation) {
+    return (
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-yellow-800">Calculation Not Found</h2>
+          <button
+            onClick={() => navigate('/my-uploads')}
+            className="mt-4 text-yellow-700 hover:text-yellow-900 font-medium"
+          >
+            ← Back to My Uploads
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto py-8 px-4">
+      <div className="mb-6">
+        <button
+          onClick={() => navigate('/my-uploads')}
+          className="text-green-600 hover:text-green-700 flex items-center"
+        >
+          <svg className="w-5 h-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to My Uploads
+        </button>
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        {/* Header Section */}
+        <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-green-50 to-green-100">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">
+                {calculation.forest_name}
+                {calculation.is_draft && (
+                  <span className="ml-2 inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                    Draft
+                  </span>
+                )}
+              </h1>
+              <div className="mt-2 flex items-center text-sm text-gray-600">
+                <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Uploaded: {formatDate(calculation.created_at)}</span>
+                <span className="mx-2">•</span>
+                <span className="font-medium">{calculation.is_draft ? 'Draft' : (calculation.uploaded_filename || '-')}</span>
+              </div>
+              {blocks.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {blocks.map((block: any, idx: number) => (
+                    <div key={block.block_id || idx} className="inline-flex items-center gap-1 px-2 py-1 bg-white/70 rounded border border-green-200 text-sm">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0"
+                        style={{ backgroundColor: BLOCK_COLORS[idx % BLOCK_COLORS.length] }}
+                      />
+                      {renamingBlockId === (block.block_id || block.block_name) ? (
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameBlock(block)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleRenameBlock(block); if (e.key === 'Escape') { setRenamingBlockId(null); setRenameValue(''); } }}
+                          className="w-32 px-1 py-0 text-sm border border-green-400 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+                          autoFocus
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <>
+                          <span className="font-medium text-gray-800">{block.block_name}</span>
+                          <button
+                            onClick={() => { setRenamingBlockId(block.block_id || block.block_name); setRenameValue(block.block_name); }}
+                            className="p-0.5 text-gray-400 hover:text-green-600 transition-colors"
+                            title="Rename block"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                      <span className="text-gray-500">{parseFloat(block.area_hectares || 0).toFixed(1)} ha</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => navigate(`/calculations/${id}/block-naming`)}
+                className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit Blocks
+              </button>
+              <button
+                onClick={() => {
+                  // Load sub-areas first
+                  if (id) {
+                    forestApi.listSubAreas(id).then(data => {
+                      setSubAreas(data.sub_areas || []);
+                      setShowMapEditor(true);
+                    }).catch(() => {
+                      setSubAreas([]);
+                      setShowMapEditor(true);
+                    });
+                  }
+                }}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
+                </svg>
+                Edit Map
+              </button>
+              <button
+                onClick={() => setShowReanalysisModal(true)}
+                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Re-run Analysis
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Navigation with Vertical Sidebar */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Vertical Sidebar */}
+          <div className="w-56 flex-shrink-0 overflow-y-auto">
+            <VerticalSidebar
+              groups={createTabGroups(isUnifiedMappingEnabled())}
+              activeTab={activeTab}
+              onTabChange={(tabId) => setActiveTab(tabId as typeof activeTab)}
+            />
+          </div>
+
+          {/* Tab Content */}
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === 'analysis' && (
+              <AnalysisTabContent
+                calculation={calculation}
+                blocks={blocks}
+                subAreas={subAreas}
+              />
+            )}
+
+        {activeTab === 'subareas' && (
+          <div className="p-6">
+            <div className="mb-4 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold">Sub-Areas Management</h2>
+                <p className="text-sm text-gray-600">Draw and manage sub-areas within the forest boundary</p>
+              </div>
+              <button
+                onClick={() => setShowMapEditor(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                + Add Sub-Area (Draw on Map)
+              </button>
+            </div>
+            
+            {/* Split view: Table and Map */}
+            <div className="flex gap-6" style={{ height: '600px' }}>
+              {/* Left side: Comprehensive Table */}
+              <div className="w-1/2 overflow-auto">
+                {blocks.length > 0 ? (
+                  <div className="space-y-6">
+
+
+                    {/* Table 1: Sub-Areas Detail */}
+                    {(calculation?.result_data?.sub_areas && calculation.result_data.sub_areas.length > 0) && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="bg-purple-50 px-4 py-2 border-b border-gray-200">
+                          <h4 className="text-sm font-semibold text-purple-800">Table 1: Sub-Areas Detail</h4>
+                        </div>
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sub-Area Name</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Area (ha)</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Blocks</th>
+                              <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                              {calculation.result_data.sub_areas.map((sa: any, idx: number) => {
+                              const bd = sa.blockBreakdown || sa.block_breakdown;
+                              const isCrossBlock = bd && bd.length > 1;
+                              const lookupBlockName = (blockId?: string, fallback?: string) => {
+                                if (!blockId) return fallback || '-';
+                                const match = blocks.find((b: any) => b.block_id === blockId);
+                                return match?.block_name || fallback || '-';
+                              };
+                              const currentBlockName = lookupBlockName(sa.blockId || sa.block_id, sa.blockName || sa.block_name);
+                              return (
+                              <tr key={sa.id || idx} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 text-sm font-medium text-gray-900">{sa.name}</td>
+                                <td className="px-4 py-2 text-sm text-gray-500">
+                                  {sa.category === 'private_land' ? 'Private Land' :
+                                   sa.category === 'protected' ? 'Protected' :
+                                   sa.category === 'plantation' ? 'Plantation' :
+                                   sa.category === 'religious' ? 'Religious' :
+                                   sa.category === 'biodiversity' ? 'Biodiversity' :
+                                   sa.category === 'pro-poor' ? 'Pro-Poor' :
+                                   sa.category === 'tourist' ? 'Tourist' :
+                                   sa.category === 'office' ? 'Office' : sa.category}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-gray-900 text-right">{sa.area_hectares?.toFixed(4) || 0}</td>
+                                <td className="px-4 py-2 text-sm">
+                                  {isCrossBlock ? (
+                                    <div className="text-xs space-y-0.5">
+                                      {bd.map((b: any, i: number) => (
+                                        <div key={i} className="text-gray-600">
+                                          <span className="font-medium">{lookupBlockName(b.blockId || b.block_id, b.blockName)}</span>: {b.area.toFixed(2)} ha ({b.percentage.toFixed(1)}%)
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-500">{currentBlockName}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                  {sa.isExcluded || sa.is_excluded ? (
+                                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Excluded</span>
+                                  ) : (
+                                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Included</span>
+                                  )}
+                                </td>
+                              </tr>
+                              );
+                            })}
+                            <tr className="bg-gray-100 font-semibold">
+                              <td className="px-4 py-2 text-sm text-gray-900" colSpan={2}>SUB-AREAS TOTAL</td>
+                              <td className="px-4 py-2 text-sm text-gray-900 text-right">
+                                {calculation.result_data.sub_areas.reduce((sum: number, sa: any) => sum + parseFloat(sa.area_hectares || 0), 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-2"></td>
+                              <td className="px-4 py-2"></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+
+
+                    {/* Table 2: Block-wise Area Summary */}
+                    {blockAreaDetails.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="bg-blue-50 px-4 py-2 border-b border-gray-200">
+                          <h4 className="text-sm font-semibold text-blue-800">Table 2: ब्लक अनुसार क्षेत्रफलको विस्तृत विवरण</h4>
+                          <p className="text-xs text-blue-600">(Block-wise Detailed Area Description)</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200 text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left font-medium text-gray-500 uppercase">ब्लकको नाम<br/><span className="font-normal text-gray-400">(Block Name)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">ब्लकको कुल क्षेत्रफल<br/><span className="font-normal text-gray-400">(Total Area ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">रूखले ढाकेको<br/><span className="font-normal text-gray-400">(Tree Cover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">अन्यले ढाकेको<br/><span className="font-normal text-gray-400">(Other Landcover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">संरक्षित क्षेत्र<br/><span className="font-normal text-gray-400">(Protected ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">निजि आवादी<br/><span className="font-normal text-gray-400">(Private Land ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">बहिष्कृत क्षेत्र<br/><span className="font-normal text-gray-400">(Excluded ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">शुद्ध वन क्षेत्रफल<br/><span className="font-normal text-gray-400">(Net Forest ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">प्रभावित क्षेत्र<br/><span className="font-normal text-gray-400">(Effective ha)</span></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {blockAreaDetails.map((detail: any, idx: number) => {
+                                const excluded = (detail.protected_area_ha || 0) + (detail.private_land_area_ha || 0);
+                                const netForest = (detail.total_area_ha || 0) - excluded;
+                                return (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                  <td className="px-2 py-2 text-sm font-medium text-gray-900">{detail.block_name}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{detail.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-700 text-right">{detail.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-600 text-right">{detail.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-600 text-right">{detail.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-600 text-right">{detail.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-700 text-right">{excluded > 0 ? excluded.toFixed(2) : '-'}</td>
+                                  <td className="px-2 py-2 text-sm text-green-700 font-semibold text-right">{netForest.toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-semibold text-right ${(detail.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {detail.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                                );
+                              })}
+                              {blockAreaTotals && (
+                                <tr className="bg-gray-100 font-semibold">
+                                  <td className="px-2 py-2 text-sm text-gray-900">TOTAL</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{blockAreaTotals.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-800 text-right">{blockAreaTotals.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-800 text-right">{blockAreaTotals.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-700 text-right">{blockAreaTotals.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-700 text-right">{blockAreaTotals.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-800 text-right">{((blockAreaTotals.protected_area_ha || 0) + (blockAreaTotals.private_land_area_ha || 0)).toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-800 text-right">{(blockAreaTotals.total_area_ha - (blockAreaTotals.protected_area_ha || 0) - (blockAreaTotals.private_land_area_ha || 0)).toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-bold text-right ${(blockAreaTotals.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {blockAreaTotals.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Table 3: Community Forests and Block Area Description */}
+                    {blockAreaDetails.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mt-6">
+                        <div className="bg-amber-50 px-4 py-2 border-b border-gray-200">
+                          <h4 className="text-sm font-semibold text-amber-800">
+                            Table 3: सामुदायिक वन तथा वन खण्डको क्षेत्रफल सम्वन्धी विवरण
+                          </h4>
+                          <p className="text-xs text-amber-600">(Community Forests and Block Area Description)</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200 text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left font-medium text-gray-500 uppercase">ब्लकको नाम<br/><span className="font-normal text-gray-400">(Block Name)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">ब्लकको कुल क्षेत्रफल<br/><span className="font-normal text-gray-400">(Total Area ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">रूखले ढाकेको<br/><span className="font-normal text-gray-400">(Tree Cover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">अन्यले ढाकेको<br/><span className="font-normal text-gray-400">(Other Landcover ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">संरक्षित क्षेत्र<br/><span className="font-normal text-gray-400">(Protected ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">निजि आवादी<br/><span className="font-normal text-gray-400">(Private Land ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">प्रभावित क्षेत्र<br/><span className="font-normal text-gray-400">(Effective ha)</span></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {blockAreaDetails.map((detail: any, idx: number) => (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                  <td className="px-2 py-2 text-sm font-medium text-gray-900">{detail.block_name}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{detail.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-700 text-right">{detail.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-600 text-right">{detail.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-600 text-right">{detail.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-600 text-right">{detail.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-semibold text-right ${(detail.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {detail.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* TOTAL row */}
+                              {blockAreaTotals && (
+                                <tr className="bg-gray-100 font-semibold">
+                                  <td className="px-2 py-2 text-sm text-gray-900">TOTAL</td>
+                                  <td className="px-2 py-2 text-sm text-gray-900 text-right">{blockAreaTotals.total_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-green-800 text-right">{blockAreaTotals.tree_cover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-gray-800 text-right">{blockAreaTotals.other_landcover_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-orange-700 text-right">{blockAreaTotals.protected_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-red-700 text-right">{blockAreaTotals.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className={`px-2 py-2 text-sm font-bold text-right ${(blockAreaTotals.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                                    {blockAreaTotals.effective_area_ha?.toFixed(2)}
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Loading state for block area details */}
+                    {loadingBlockDetails && blocks.length > 0 && (
+                      <div className="mt-6 bg-white rounded-lg border border-gray-200 p-6 text-center">
+                        <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600 mb-2"></div>
+                        <p className="text-sm text-gray-500">Calculating block area details...</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg">
+                    <p className="text-gray-500">No blocks defined yet.</p>
+                    <p className="text-sm text-gray-400 mt-1">Upload a boundary file or create on map first.</p>
+                  </div>
+                )}
+              </div>
+              
+              {/* Right side: Map */}
+              <div className="w-1/2 rounded-lg overflow-hidden border-2 border-gray-400 shadow-lg">
+                <MapContainer
+                  center={[27.7, 85.3]}
+                  zoom={7}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={true}
+                  attributionControl={true}
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                  {/* Forest boundary */}
+                  {calculation.geometry && (
+                    <GeoJSON
+                      data={calculation.geometry}
+                      style={{
+                        color: '#16a085',
+                        weight: 3,
+                        fillColor: '#1abc9c',
+                        fillOpacity: 0.05
+                      }}
+                    />
+                  )}
+                  {/* Render blocks */}
+                  {blocks.length > 0 && blocks.map((block: any, index: number) => (
+                    block.geometry && (
+                      <GeoJSON
+                        key={`block-${index}-${block.block_name || index}`}
+                        data={block.geometry}
+                        style={{
+                          color: '#2563eb',
+                          weight: 2,
+                          fillColor: '#3b82f6',
+                          fillOpacity: 0.1
+                        }}
+                      />
+                    )
+                  ))}
+                  {/* Render sub-areas */}
+                  {calculation.result_data?.sub_areas && calculation.result_data.sub_areas.map((subArea: any, index: number) => (
+                    subArea.geometry && (
+                      <GeoJSON
+                        key={`subarea-${index}-${subArea.name || index}`}
+                        data={subArea.geometry}
+                        style={{
+                          color: subArea.isExcluded || subArea.is_excluded ? '#dc2626' : '#7c3aed',
+                          weight: 2,
+                          fillColor: subArea.isExcluded || subArea.is_excluded ? '#fca5a5' : '#c4b5fd',
+                          fillOpacity: 0.3
+                        }}
+                      />
+                    )
+                  ))}
+                  <ZoomToLayer
+                    geometry={calculation.geometry}
+                    setMapInstance={() => {}}
+                    orientation="landscape"
+                  />
+                </MapContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'fieldbook' && (
+          <div className="p-6">
+            <FieldbookTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'sampling' && (
+          <div className="p-6">
+            <SamplingTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'treemodel' && (
+          <div className="p-6">
+            <TreeModelGenerator calculationId={calculation.id} onRefresh={loadCalculation} />
+          </div>
+        )}
+
+        {activeTab === 'treemapping' && (
+          <div className="p-6">
+            <TreeMappingTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'biodiversity' && (
+          <div className="p-6">
+            <BiodiversityTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'maps' && (
+          <div className="p-6">
+            <MapsTab
+              calculationId={calculation.id}
+              forestName={calculation.forest_name || undefined}
+            />
+          </div>
+        )}
+
+        {activeTab === 'usergroup' && (
+          <div className="p-6">
+            <UserGroupMapTab
+              calculationId={calculation.id}
+              forestBoundary={calculation.geometry}
+              forestName={calculation.forest_name}
+            />
+          </div>
+        )}
+
+        {activeTab === 'fieldinventory' && (
+          <div className="p-6">
+            <FieldInventoryTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'totalinventory' && (
+          <div className="p-6">
+            <TotalInventoryTab calculationId={calculation.id} />
+          </div>
+        )}
+
+        {activeTab === 'compartments' && (
+          <div className="p-6">
+            <CompartmentTab calculationId={calculation.id} parentBlocks={blocks} />
+          </div>
+        )}
+
+        {activeTab === 'yearlyactivities' && (
+          <YearlyActivitiesPage 
+            calculationId={calculation.id}
+            forestName={calculation.forest_name}
+            area={calculation.result_data?.area_hectares || 0}
+            onClose={() => setActiveTab('details')}
+          />
+        )}
+          </div>
+        </div>
+
+        {/* Whole Forest Analysis Section - New Organized Layout */}
+        {activeTab === 'analysis' && (
+          <AnalysisTabContent
+            calculation={calculation}
+            blocks={blocks}
+            totalBlocks={totalBlocks}
+            handleSaveWholeForest={handleSaveWholeForest}
+            handleSaveWholeExtent={handleSaveWholeExtent}
+            handleSaveWholePercentages={handleSaveWholePercentages}
+            handleSaveBlockExtent={handleSaveBlockExtent}
+            handleSaveBlockField={handleSaveBlock}
+            handleSaveBlockPercentages={handleSaveBlockPercentages}
+            onRefresh={loadCalculation}
+            optimisticConfirmations={optimisticConfirmations}
+            confirmingSpecies={confirmingSpecies}
+            getConfirmedStatus={getConfirmedStatus}
+            handleToggleSpeciesConfirmation={handleToggleSpeciesConfirmation}
+          />
+        )}
+
+        {/* Keep old table structure temporarily for reference - TO BE REMOVED */}
+        {false && activeTab === 'analysis' && (
+          <div className="p-6 border-t border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Whole Forest Analysis (OLD)</h2>
+          <div className="border border-gray-300 rounded-lg bg-white shadow-sm">
+            {/* Forest Header */}
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900">
+                {calculation.forest_name} - Complete Forest Summary
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Total Area: {calculation.result_data?.area_hectares?.toFixed(2)} hectares
+                {calculation.result_data?.excluded_area_hectares > 0 && (
+                  <span className="text-red-600">
+                    {' '}(Net: {calculation.result_data?.effective_area_hectares?.toFixed(2)} ha after {calculation.result_data?.excluded_area_hectares?.toFixed(2)} ha excluded)
+                  </span>
+                )}
+                {totalBlocks > 1 && ` (${totalBlocks} blocks)`}
+              </p>
+            </div>
+
+            {/* Forest Analysis Table */}
+            <div className="p-6">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {/* Area */}
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Total Area</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                      {calculation.result_data?.area_hectares?.toFixed(2)} ha
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {(calculation.result_data?.area_sqm || 0).toLocaleString()} m²
+                    </td>
+                  </tr>
+
+                  {/* Excluded Area (Private Land) */}
+                  {calculation.result_data?.excluded_area_hectares > 0 && (
+                    <>
+                      <tr className="hover:bg-gray-50 bg-red-50">
+                        <td className="px-4 py-3 text-sm font-medium text-red-700">Private Land (Excluded)</td>
+                        <td className="px-4 py-3 text-sm text-red-700 font-mono">
+                          - {calculation.result_data?.excluded_area_hectares?.toFixed(2)} ha
+                        </td>
+                        <td className="px-4 py-3 text-sm text-red-600">
+                          Not part of forest area
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-gray-50 bg-green-50">
+                        <td className="px-4 py-3 text-sm font-bold text-green-700">Net Forest Area</td>
+                        <td className="px-4 py-3 text-sm font-bold text-green-700 font-mono">
+                          {calculation.result_data?.effective_area_hectares?.toFixed(2)} ha
+                        </td>
+                        <td className="px-4 py-3 text-sm text-green-600">
+                          Available for analysis
+                        </td>
+                      </tr>
+                    </>
+                  )}
+
+                  {/* Extent */}
+                  {calculation.result_data?.whole_forest_extent && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.whole_forest_extent.N} displayValue={"N: " + calculation.result_data.whole_forest_extent.N.toFixed(7)} onSave={(v) => handleSaveWholeExtent('N', v)} className="font-mono" />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 font-mono">
+                        <EditableCell value={calculation.result_data.whole_forest_extent.S} displayValue={"S: " + calculation.result_data.whole_forest_extent.S.toFixed(7)} onSave={(v) => handleSaveWholeExtent('S', v)} className="font-mono" />{", "}
+                        <EditableCell value={calculation.result_data.whole_forest_extent.E} displayValue={"E: " + calculation.result_data.whole_forest_extent.E.toFixed(7)} onSave={(v) => handleSaveWholeExtent('E', v)} className="font-mono" />{", "}
+                        <EditableCell value={calculation.result_data.whole_forest_extent.W} displayValue={"W: " + calculation.result_data.whole_forest_extent.W.toFixed(7)} onSave={(v) => handleSaveWholeExtent('W', v)} className="font-mono" />
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Elevation */}
+                  {calculation.result_data?.elevation_mean_m !== undefined && calculation.result_data?.elevation_mean_m !== null && calculation.result_data?.elevation_mean_m > -32000 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Elevation</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.elevation_mean_m} displayValue={calculation.result_data.elevation_mean_m.toFixed(1) + " m (mean)"} onSave={(v) => handleSaveWholeForest('elevation_mean_m', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Min: <EditableCell value={calculation.result_data.elevation_min_m} displayValue={calculation.result_data.elevation_min_m?.toFixed(0)} onSave={(v) => handleSaveWholeForest('elevation_min_m', v)} />{" m, Max: "}
+                        <EditableCell value={calculation.result_data.elevation_max_m} displayValue={calculation.result_data.elevation_max_m?.toFixed(0)} onSave={(v) => handleSaveWholeForest('elevation_max_m', v)} />{" m"}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Slope */}
+                  {calculation.result_data?.slope_dominant_class && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Slope</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.slope_dominant_class} onSave={(v) => handleSaveWholeForest('slope_dominant_class', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.slope_percentages &&
+                          Object.entries(calculation.result_data.slope_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                            <span key={cls}>
+                              {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('slope_percentages', cls, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.slope_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Aspect */}
+                  {calculation.result_data?.aspect_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Aspect (Orientation)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize font-semibold">
+                        <EditableCell value={calculation.result_data.aspect_dominant} onSave={(v) => handleSaveWholeForest('aspect_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.aspect_percentages &&
+                          Object.entries(calculation.result_data.aspect_percentages).map(([dir, pct]: [string, any], idx: number) => (
+                            <span key={dir}>
+                              {dir}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('aspect_percentages', dir, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.aspect_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Canopy Height */}
+                  {calculation.result_data?.canopy_dominant_class && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Canopy Structure</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.canopy_dominant_class} onSave={(v) => handleSaveWholeForest('canopy_dominant_class', v)} />
+                        {calculation.result_data?.canopy_mean_m !== undefined && (
+                          <span className="text-xs text-gray-500 ml-2">
+                            (<EditableCell value={calculation.result_data.canopy_mean_m} displayValue={calculation.result_data.canopy_mean_m.toFixed(1)} onSave={(v) => handleSaveWholeForest('canopy_mean_m', v)} />m avg)
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.canopy_percentages &&
+                          Object.entries(calculation.result_data.canopy_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                            <span key={cls}>
+                              {cls.replace('_', ' ')}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('canopy_percentages', cls, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.canopy_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Above Ground Biomass */}
+                  {calculation.result_data?.agb_total_mg !== undefined && calculation.result_data?.agb_total_mg !== null && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Above Ground Biomass (AGB)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.agb_total_mg} displayValue={calculation.result_data.agb_total_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveWholeForest('agb_total_mg', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        <EditableCell value={calculation.result_data.agb_mean_mg_ha} displayValue={calculation.result_data.agb_mean_mg_ha?.toFixed(2)} onSave={(v) => handleSaveWholeForest('agb_mean_mg_ha', v)} /> Mg/ha (mean per hectare)
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Carbon Stock */}
+                  {calculation.result_data?.carbon_stock_mg !== undefined && calculation.result_data?.carbon_stock_mg !== null && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.carbon_stock_mg} displayValue={calculation.result_data.carbon_stock_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveWholeForest('carbon_stock_mg', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        50% of total biomass
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Health */}
+                  {calculation.result_data?.forest_health_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Health</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.forest_health_dominant} onSave={(v) => handleSaveWholeForest('forest_health_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.forest_health_percentages &&
+                          Object.entries(calculation.result_data.forest_health_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                            <span key={cls}>
+                              {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('forest_health_percentages', cls, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.forest_health_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Type */}
+                  {calculation.result_data?.forest_type_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Type</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.forest_type_dominant} onSave={(v) => handleSaveWholeForest('forest_type_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.forest_type_percentages &&
+                          Object.entries(calculation.result_data.forest_type_percentages).map(([type, pct]: [string, any], idx: number) => (
+                            <span key={type}>
+                              {type}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('forest_type_percentages', type, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.forest_type_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Potential Tree Species */}
+                  {calculation.result_data?.potential_species && calculation.result_data.potential_species.length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Potential Tree Species</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        <div className="flex flex-wrap gap-2">
+                          {calculation.result_data.potential_species.slice(0, 10).map((species: any, idx: number) => (
+                            <div key={idx} className="inline-flex items-center bg-gray-100 rounded-md px-2 py-1 text-xs">
+                              <span className="font-semibold">{species.local_name}</span>
+                              <span className="text-gray-500 ml-1">({species.scientific_name})</span>
+                              {species.economic_value === 'High' && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-green-200 text-green-800 rounded text-xs">High Value</span>
+                              )}
+                              {species.economic_value === 'Medium' && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">Med Value</span>
+                              )}
+                              <span className="ml-1 text-gray-400 text-xs">| {species.role}</span>
+                            </div>
+                          ))}
+                          {calculation.result_data.potential_species.length > 10 && (
+                            <div className="text-xs text-gray-500 italic">
+                              +{calculation.result_data.potential_species.length - 10} more species
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-2">
+                          Total: {calculation.result_data.species_count || calculation.result_data.potential_species.length} potential species
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Land Cover 1984 (Historical) */}
+                  {calculation.result_data?.landcover_1984_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (1984)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.landcover_1984_dominant} onSave={(v) => handleSaveWholeForest('landcover_1984_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.landcover_1984_percentages &&
+                          Object.entries(calculation.result_data.landcover_1984_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                            <span key={cover}>
+                              {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('landcover_1984_percentages', cover, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.landcover_1984_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Hansen 2000 Forest Classification */}
+                  {calculation.result_data?.hansen2000_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Status (2000)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.hansen2000_dominant} onSave={(v) => handleSaveWholeForest('hansen2000_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.hansen2000_percentages &&
+                          Object.entries(calculation.result_data.hansen2000_percentages).map(([forestClass, pct]: [string, any], idx: number) => (
+                            <span key={forestClass}>
+                              {forestClass}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('hansen2000_percentages', forestClass, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.hansen2000_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Land Cover (Current) */}
+                  {calculation.result_data?.landcover_dominant && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (Current)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                        <EditableCell value={calculation.result_data.landcover_dominant} onSave={(v) => handleSaveWholeForest('landcover_dominant', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.landcover_percentages &&
+                          Object.entries(calculation.result_data.landcover_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                            <span key={cover}>
+                              {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('landcover_percentages', cover, v)} className="inline" />
+                              {idx < Object.keys(calculation.result_data.landcover_percentages).length - 1 && ', '}
+                            </span>
+                          ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Loss */}
+                  {calculation.result_data?.forest_loss_hectares !== undefined && calculation.result_data?.forest_loss_hectares !== null && calculation.result_data?.forest_loss_hectares >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Loss (2001-2023)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.forest_loss_hectares} displayValue={calculation.result_data.forest_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveWholeForest('forest_loss_hectares', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.forest_loss_by_year &&
+                          Object.entries(calculation.result_data.forest_loss_by_year)
+                            .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                            .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                              <span key={year}>
+                                {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveWholePercentages('forest_loss_by_year', year, v)} className="inline" />
+                                {idx < arr.length - 1 && ', '}
+                              </span>
+                            ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Forest Gain */}
+                  {calculation.result_data?.forest_gain_hectares !== undefined && calculation.result_data?.forest_gain_hectares !== null && calculation.result_data?.forest_gain_hectares >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Gain (2000-2012)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.forest_gain_hectares} displayValue={calculation.result_data.forest_gain_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveWholeForest('forest_gain_hectares', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Net forest gain over 12-year period
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Fire Loss */}
+                  {calculation.result_data?.fire_loss_hectares !== undefined && calculation.result_data?.fire_loss_hectares !== null && calculation.result_data?.fire_loss_hectares >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Fire Loss (2001-2023)</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.fire_loss_hectares} displayValue={calculation.result_data.fire_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveWholeForest('fire_loss_hectares', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {calculation.result_data?.fire_loss_by_year &&
+                          Object.entries(calculation.result_data.fire_loss_by_year)
+                            .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                            .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                              <span key={year}>
+                                {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveWholePercentages('fire_loss_by_year', year, v)} className="inline" />
+                                {idx < arr.length - 1 && ', '}
+                              </span>
+                            ))
+                        }
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Temperature */}
+                  {calculation.result_data?.temperature_mean_c !== undefined && calculation.result_data?.temperature_mean_c !== null && calculation.result_data?.temperature_mean_c > -100 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Temperature</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.temperature_mean_c} displayValue={calculation.result_data.temperature_mean_c.toFixed(1) + " °C (mean)"} onSave={(v) => handleSaveWholeForest('temperature_mean_c', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Min (coldest month): <EditableCell value={calculation.result_data.temperature_min_c} displayValue={calculation.result_data.temperature_min_c?.toFixed(1)} onSave={(v) => handleSaveWholeForest('temperature_min_c', v)} />{" °C"}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Precipitation */}
+                  {calculation.result_data?.precipitation_mean_mm !== undefined && calculation.result_data?.precipitation_mean_mm !== null && calculation.result_data?.precipitation_mean_mm >= 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Precipitation</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                        <EditableCell value={calculation.result_data.precipitation_mean_mm} displayValue={calculation.result_data.precipitation_mean_mm.toFixed(0) + " mm/year"} onSave={(v) => handleSaveWholeForest('precipitation_mean_mm', v)} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        Annual total precipitation
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Soil Analysis */}
+                  {calculation.result_data?.soil_texture && (
+                    <>
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          <EditableCell value={calculation.result_data.soil_texture} onSave={(v) => handleSaveWholeForest('soil_texture', v)} />
+                          {calculation.result_data.soil_texture_system && (
+                            <span className="text-xs text-gray-500 ml-2">({calculation.result_data.soil_texture_system})</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {calculation.result_data?.soil_properties &&
+                            Object.entries(calculation.result_data?.soil_properties)
+                              .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
+                              .join(', ')
+                          }
+                        </td>
+                      </tr>
+                      {calculation.result_data.carbon_stock_t_ha && (
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell
+                              value={calculation.result_data.carbon_stock_t_ha}
+                              displayValue={`${calculation.result_data.carbon_stock_t_ha} t/ha`}
+                              onSave={(v) => handleSaveWholeForest('carbon_stock_t_ha', v)}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            Topsoil (0-30cm) organic carbon stock
+                          </td>
+                        </tr>
+                      )}
+                      {calculation.result_data.fertility_class && (
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Fertility</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                              calculation.result_data.fertility_class === 'Very High' ? 'bg-green-100 text-green-800' :
+                              calculation.result_data.fertility_class === 'High' ? 'bg-green-50 text-green-700' :
+                              calculation.result_data.fertility_class === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                              calculation.result_data.fertility_class === 'Low' ? 'bg-orange-100 text-orange-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {calculation.result_data.fertility_class}
+                            </span>
+                            {calculation.result_data.fertility_score && (
+                              <span className="text-xs text-gray-500 ml-2">(Score: {calculation.result_data.fertility_score}/100)</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {calculation.result_data.limiting_factors && calculation.result_data.limiting_factors.length > 0 &&
+                              calculation.result_data.limiting_factors.join('; ')}
+                          </td>
+                        </tr>
+                      )}
+                      {calculation.result_data.compaction_status && (
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Compaction Status</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                              calculation.result_data.compaction_status === 'Not compacted' ? 'bg-green-100 text-green-800' :
+                              calculation.result_data.compaction_status === 'Slight compaction' ? 'bg-yellow-100 text-yellow-800' :
+                              calculation.result_data.compaction_status === 'Moderate compaction' ? 'bg-orange-100 text-orange-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {calculation.result_data.compaction_status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {calculation.result_data.compaction_alert || 'No action needed'}
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )}
+
+                  {/* Administrative Location */}
+                  <tr className="bg-gray-100">
+                    <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                      Administrative Location
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Province</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_province} onSave={(v) => handleSaveWholeForest('whole_province', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">District</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_district} onSave={(v) => handleSaveWholeForest('whole_district', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Municipality</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_municipality} onSave={(v) => handleSaveWholeForest('whole_municipality', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Ward</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_ward} onSave={(v) => handleSaveWholeForest('whole_ward', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Watershed</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_watershed} onSave={(v) => handleSaveWholeForest('whole_watershed', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Major River Basin</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <EditableCell value={calculation.result_data?.whole_major_river_basin} onSave={(v) => handleSaveWholeForest('whole_major_river_basin', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600"></td>
+                  </tr>
+
+                  {/* Geology */}
+                  {calculation.result_data?.whole_geology_percentages && Object.keys(calculation.result_data.whole_geology_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Geology</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_geology_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                          <span key={cls}>
+                            {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveWholePercentages('whole_geology_percentages', cls, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_geology_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Physiography */}
+                  {calculation.result_data?.whole_physiography_percentages && Object.keys(calculation.result_data.whole_physiography_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Physiography</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_physiography_percentages).map(([zone, pct]: [string, any], idx: number) => (
+                          <span key={zone}>
+                            {zone}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveWholePercentages('whole_physiography_percentages', zone, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_physiography_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Ecoregion */}
+                  {calculation.result_data?.whole_ecoregion_percentages && Object.keys(calculation.result_data.whole_ecoregion_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Ecoregion</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_ecoregion_percentages).map(([eco, pct]: [string, any], idx: number) => (
+                          <span key={eco}>
+                            {eco}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveWholePercentages('whole_ecoregion_percentages', eco, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_ecoregion_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* NASA Forest 2020 */}
+                  {calculation.result_data?.whole_nasa_forest_2020_percentages && Object.keys(calculation.result_data.whole_nasa_forest_2020_percentages).length > 0 && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">NASA Forest 2020</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        {Object.entries(calculation.result_data.whole_nasa_forest_2020_percentages).map(([type, pct]: [string, any], idx: number) => (
+                          <span key={type}>
+                            <span className="capitalize">{type.replace(/_/g, ' ')}</span>: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveWholePercentages('whole_nasa_forest_2020_percentages', type, v)} className="inline" />
+                            {idx < Object.keys(calculation.result_data.whole_nasa_forest_2020_percentages).length - 1 && ', '}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Access */}
+                  {calculation.result_data?.whole_access_info && (
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">Access</td>
+                      <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                        <EditableCell value={calculation.result_data.whole_access_info} onSave={(v) => handleSaveWholeForest('whole_access_info', v)} />
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Nearby Features */}
+                  <tr className="bg-gray-100">
+                    <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                      Natural Features (within 100m)
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features North</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_north || ''} onSave={(v) => handleSaveWholeForest('whole_features_north', v)} />
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features East</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_east || ''} onSave={(v) => handleSaveWholeForest('whole_features_east', v)} />
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features South</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_south || ''} onSave={(v) => handleSaveWholeForest('whole_features_south', v)} />
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Features West</td>
+                    <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                      <EditableCell value={calculation.result_data?.whole_features_west || ''} onSave={(v) => handleSaveWholeForest('whole_features_west', v)} />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </div>
+        )}
+
+        {/* Detailed Block-wise Analysis */}
+        {activeTab === 'analysis' && blocks.length > 0 && (
+          <div className="p-6 border-t border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Detailed Block-wise Analysis</h2>
+            <div className="space-y-6">
+              {blocks.map((block: any, index: number) => (
+                <div key={index} className="border border-gray-300 rounded-lg bg-white shadow-sm">
+                  {/* Block Header */}
+                  <div className="bg-gradient-to-r from-green-50 to-green-100 px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <span>Block #{index + 1}:</span>
+                      {renamingBlockId === (block.block_id || `detail-${index}`) ? (
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameBlock(block)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleRenameBlock(block); if (e.key === 'Escape') { setRenamingBlockId(null); setRenameValue(''); } }}
+                          className="w-48 px-2 py-0.5 text-base border border-green-400 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+                          autoFocus
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <>
+                          <span>{block.block_name}</span>
+                          <button
+                            onClick={() => { setRenamingBlockId(block.block_id || `detail-${index}`); setRenameValue(block.block_name); }}
+                            className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                            title="Rename block"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Area: {parseFloat(block.area_hectares || 0).toFixed(2)} hectares
+                      {block.excluded_area_hectares > 0 && (
+                        <span className="text-red-600">
+                          {' '}(Net: {parseFloat(block.effective_area_hectares || 0).toFixed(2)} ha, Excluded: {parseFloat(block.excluded_area_hectares || 0).toFixed(2)} ha)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Block Analysis Table */}
+                  <div className="p-6">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {/* Extent */}
+                        {block.extent && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Extent</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono" colSpan={2}>
+                              <EditableCell value={block.extent.N} displayValue={"N: " + block.extent.N.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'N', v)} className="font-mono" />{", "}
+                              <EditableCell value={block.extent.S} displayValue={"S: " + block.extent.S.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'S', v)} className="font-mono" />{", "}
+                              <EditableCell value={block.extent.E} displayValue={"E: " + block.extent.E.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'E', v)} className="font-mono" />{", "}
+                              <EditableCell value={block.extent.W} displayValue={"W: " + block.extent.W.toFixed(7)} onSave={(v) => handleSaveBlockExtent(index, 'W', v)} className="font-mono" />
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Elevation */}
+                        {block.elevation_mean_m !== undefined && block.elevation_mean_m !== null && block.elevation_mean_m > -32000 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Elevation</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.elevation_mean_m} displayValue={block.elevation_mean_m.toFixed(1) + " m (mean)"} onSave={(v) => handleSaveBlock(index, 'elevation_mean_m', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Min: <EditableCell value={block.elevation_min_m} displayValue={block.elevation_min_m?.toFixed(0)} onSave={(v) => handleSaveBlock(index, 'elevation_min_m', v)} />{" m, Max: "}
+                              <EditableCell value={block.elevation_max_m} displayValue={block.elevation_max_m?.toFixed(0)} onSave={(v) => handleSaveBlock(index, 'elevation_max_m', v)} />{" m"}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Slope */}
+                        {block.slope_dominant_class && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Slope</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.slope_dominant_class} onSave={(v) => handleSaveBlock(index, 'slope_dominant_class', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.slope_percentages &&
+                                Object.entries(block.slope_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                  <span key={cls}>
+                                    {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'slope_percentages', cls, v)} className="inline" />
+                                    {idx < Object.keys(block.slope_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Aspect */}
+                        {block.aspect_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Aspect</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize font-semibold">
+                              <EditableCell value={block.aspect_dominant} onSave={(v) => handleSaveBlock(index, 'aspect_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.aspect_percentages &&
+                                Object.entries(block.aspect_percentages).map(([dir, pct]: [string, any], idx: number) => (
+                                  <span key={dir}>
+                                    {dir}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'aspect_percentages', dir, v)} className="inline" />
+                                    {idx < Object.keys(block.aspect_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Canopy Height */}
+                        {block.canopy_dominant_class && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Canopy Structure</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.canopy_dominant_class} onSave={(v) => handleSaveBlock(index, 'canopy_dominant_class', v)} />
+                              {block.canopy_mean_m !== undefined && (
+                                <span className="text-xs text-gray-500 ml-2">
+                                  (<EditableCell value={block.canopy_mean_m} displayValue={block.canopy_mean_m.toFixed(1)} onSave={(v) => handleSaveBlock(index, 'canopy_mean_m', v)} />m avg)
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.canopy_percentages &&
+                                Object.entries(block.canopy_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                  <span key={cls}>
+                                    {cls.replace('_', ' ')}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'canopy_percentages', cls, v)} className="inline" />
+                                    {idx < Object.keys(block.canopy_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Above Ground Biomass */}
+                        {block.agb_total_mg !== undefined && block.agb_total_mg !== null && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Above Ground Biomass</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.agb_total_mg} displayValue={block.agb_total_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveBlock(index, 'agb_total_mg', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              <EditableCell value={block.agb_mean_mg_ha} displayValue={block.agb_mean_mg_ha?.toFixed(2)} onSave={(v) => handleSaveBlock(index, 'agb_mean_mg_ha', v)} /> Mg/ha (mean per hectare)
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Carbon Stock */}
+                        {block.carbon_stock_mg !== undefined && block.carbon_stock_mg !== null && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.carbon_stock_mg} displayValue={block.carbon_stock_mg.toLocaleString() + " Mg"} onSave={(v) => handleSaveBlock(index, 'carbon_stock_mg', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              50% of total biomass
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Health */}
+                        {block.forest_health_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Health</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.forest_health_dominant} onSave={(v) => handleSaveBlock(index, 'forest_health_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.forest_health_percentages &&
+                                Object.entries(block.forest_health_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                  <span key={cls}>
+                                    {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'forest_health_percentages', cls, v)} className="inline" />
+                                    {idx < Object.keys(block.forest_health_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Type */}
+                        {block.forest_type_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Type</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.forest_type_dominant} onSave={(v) => handleSaveBlock(index, 'forest_type_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.forest_type_percentages &&
+                                Object.entries(block.forest_type_percentages).map(([type, pct]: [string, any], idx: number) => (
+                                  <span key={type}>
+                                    {type}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'forest_type_percentages', type, v)} className="inline" />
+                                    {idx < Object.keys(block.forest_type_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Potential Tree Species */}
+                        {block.potential_species && block.potential_species.length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Potential Tree Species</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              <div className="flex flex-wrap gap-2">
+                                {(() => {
+                                  // Use expandedBlocks state to track which blocks are expanded
+                                  const blockKey = `block-${index}`;
+                                  const isExpanded = expandedBlocks.has(blockKey);
+                                  const speciesToShow = isExpanded ? block.potential_species : block.potential_species.slice(0, 8);
+
+                                  return (
+                                    <>
+                                      {speciesToShow.map((species: any, speciesIdx: number) => {
+                                        // NEW: Pass block.block_name for block-specific confirmation
+                                        const isConfirmed = getConfirmedStatus(species, block.block_name);
+                                        const optimisticKey = `${block.block_name}:${species.scientific_name}`;
+                                        const isConfirming = confirmingSpecies.has(optimisticKey);
+
+                                        return (
+                                          <div
+                                            key={speciesIdx}
+                                            onClick={() => !isConfirming && handleToggleSpeciesConfirmation(species, block.block_name)}
+                                            className={`inline-flex items-center rounded-md px-2 py-1 text-xs transition-all cursor-pointer ${
+                                              isConfirmed
+                                                ? 'bg-green-100 border-2 border-green-500 opacity-100'
+                                                : 'bg-gray-100 border-2 border-dashed border-gray-400 opacity-60'
+                                            } ${isConfirming ? 'opacity-50 cursor-wait' : 'hover:opacity-90'}`}
+                                            title={isConfirmed ? `Click to unconfirm in ${block.block_name}` : `Click to confirm in ${block.block_name}`}
+                                          >
+                                            <span className="font-semibold">{species.local_name}</span>
+                                            <span className={`ml-1 text-xs ${isConfirmed ? 'text-green-700' : 'text-gray-500'}`}>
+                                              ({species.scientific_name})
+                                            </span>
+                                            {species.economic_value === 'High' && (
+                                              <span className="ml-1 px-1 py-0.5 bg-green-200 text-green-800 rounded text-xs">$$</span>
+                                            )}
+                                            {species.economic_value === 'Medium' && (
+                                              <span className="ml-1 px-1 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">$</span>
+                                            )}
+                                            {isConfirming && <span className="ml-1">⏳</span>}
+                                          </div>
+                                        );
+                                      })}
+                                      {block.potential_species.length > 8 && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedBlocks(prev => {
+                                              const newSet = new Set(prev);
+                                              if (isExpanded) {
+                                                newSet.delete(blockKey);
+                                              } else {
+                                                newSet.add(blockKey);
+                                              }
+                                              return newSet;
+                                            });
+                                          }}
+                                          className="text-xs text-blue-600 hover:text-blue-800 underline cursor-pointer italic"
+                                        >
+                                          {isExpanded
+                                            ? '▲ Show less'
+                                            : `▼ +${block.potential_species.length - 8} more species`}
+                                        </button>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Land Cover 1984 (Historical) */}
+                        {block.landcover_1984_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (1984)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.landcover_1984_dominant} onSave={(v) => handleSaveBlock(index, 'landcover_1984_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.landcover_1984_percentages &&
+                                Object.entries(block.landcover_1984_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                                  <span key={cover}>
+                                    {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'landcover_1984_percentages', cover, v)} className="inline" />
+                                    {idx < Object.keys(block.landcover_1984_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Hansen 2000 Forest Classification */}
+                        {block.hansen2000_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Status (2000)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.hansen2000_dominant} onSave={(v) => handleSaveBlock(index, 'hansen2000_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.hansen2000_percentages &&
+                                Object.entries(block.hansen2000_percentages).map(([forestClass, pct]: [string, any], idx: number) => (
+                                  <span key={forestClass}>
+                                    {forestClass}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'hansen2000_percentages', forestClass, v)} className="inline" />
+                                    {idx < Object.keys(block.hansen2000_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Land Cover (Current) */}
+                        {block.landcover_dominant && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Land Cover (Current)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              <EditableCell value={block.landcover_dominant} onSave={(v) => handleSaveBlock(index, 'landcover_dominant', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.landcover_percentages &&
+                                Object.entries(block.landcover_percentages).map(([cover, pct]: [string, any], idx: number) => (
+                                  <span key={cover}>
+                                    {cover}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'landcover_percentages', cover, v)} className="inline" />
+                                    {idx < Object.keys(block.landcover_percentages).length - 1 && ', '}
+                                  </span>
+                                ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Loss */}
+                        {block.forest_loss_hectares !== undefined && block.forest_loss_hectares !== null && block.forest_loss_hectares >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Loss (2001-2023)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.forest_loss_hectares} displayValue={block.forest_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveBlock(index, 'forest_loss_hectares', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.forest_loss_by_year &&
+                                Object.entries(block.forest_loss_by_year)
+                                  .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                                  .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                                    <span key={year}>
+                                      {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveBlockPercentages(index, 'forest_loss_by_year', year, v)} className="inline" />
+                                      {idx < arr.length - 1 && ', '}
+                                    </span>
+                                  ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Forest Gain */}
+                        {block.forest_gain_hectares !== undefined && block.forest_gain_hectares !== null && block.forest_gain_hectares >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Forest Gain (2000-2012)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.forest_gain_hectares} displayValue={block.forest_gain_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveBlock(index, 'forest_gain_hectares', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Net forest gain over 12-year period
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Fire Loss */}
+                        {block.fire_loss_hectares !== undefined && block.fire_loss_hectares !== null && block.fire_loss_hectares >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Fire Loss (2001-2023)</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.fire_loss_hectares} displayValue={block.fire_loss_hectares.toFixed(2) + " ha"} onSave={(v) => handleSaveBlock(index, 'fire_loss_hectares', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {block.fire_loss_by_year &&
+                                Object.entries(block.fire_loss_by_year)
+                                  .sort(([yearA], [yearB]) => parseInt(yearA) - parseInt(yearB))
+                                  .map(([year, ha]: [string, any], idx: number, arr: any[]) => (
+                                    <span key={year}>
+                                      {year}: <EditableCell value={ha} displayValue={ha.toFixed(2) + " ha"} onSave={(v) => handleSaveBlockPercentages(index, 'fire_loss_by_year', year, v)} className="inline" />
+                                      {idx < arr.length - 1 && ', '}
+                                    </span>
+                                  ))
+                              }
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Temperature */}
+                        {block.temperature_mean_c !== undefined && block.temperature_mean_c !== null && block.temperature_mean_c > -100 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Temperature</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.temperature_mean_c} displayValue={block.temperature_mean_c.toFixed(1) + " °C (mean)"} onSave={(v) => handleSaveBlock(index, 'temperature_mean_c', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Min (coldest month): <EditableCell value={block.temperature_min_c} displayValue={block.temperature_min_c?.toFixed(1)} onSave={(v) => handleSaveBlock(index, 'temperature_min_c', v)} />{" °C"}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Precipitation */}
+                        {block.precipitation_mean_mm !== undefined && block.precipitation_mean_mm !== null && block.precipitation_mean_mm >= 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Precipitation</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 font-mono">
+                              <EditableCell value={block.precipitation_mean_mm} displayValue={block.precipitation_mean_mm.toFixed(0) + " mm/year"} onSave={(v) => handleSaveBlock(index, 'precipitation_mean_mm', v)} />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              Annual total precipitation
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Soil Analysis */}
+                        {block.soil_texture && (
+                          <>
+                            <tr className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Texture</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">
+                                <EditableCell value={block.soil_texture} onSave={(v) => handleSaveBlock(index, 'soil_texture', v)} />
+                                {block.soil_texture_system && (
+                                  <span className="text-xs text-gray-500 ml-2">({block.soil_texture_system})</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {block.soil_properties &&
+                                  Object.entries(block.soil_properties)
+                                    .map(([prop, val]: [string, any]) => `${prop}: ${val}`)
+                                    .join(', ')
+                                }
+                              </td>
+                            </tr>
+                            {block.carbon_stock_t_ha && (
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">Carbon Stock</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <EditableCell
+                                    value={block.carbon_stock_t_ha}
+                                    displayValue={`${block.carbon_stock_t_ha} t/ha`}
+                                    onSave={(v) => handleSaveBlock(index, 'carbon_stock_t_ha', v)}
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  Topsoil (0-30cm) organic carbon stock
+                                </td>
+                              </tr>
+                            )}
+                            {block.fertility_class && (
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">Soil Fertility</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                                    block.fertility_class === 'Very High' ? 'bg-green-100 text-green-800' :
+                                    block.fertility_class === 'High' ? 'bg-green-50 text-green-700' :
+                                    block.fertility_class === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                                    block.fertility_class === 'Low' ? 'bg-orange-100 text-orange-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {block.fertility_class}
+                                  </span>
+                                  {block.fertility_score && (
+                                    <span className="text-xs text-gray-500 ml-2">(Score: {block.fertility_score}/100)</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  {block.limiting_factors && block.limiting_factors.length > 0 &&
+                                    block.limiting_factors.join('; ')}
+                                </td>
+                              </tr>
+                            )}
+                            {block.compaction_status && (
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">Compaction Status</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded ${
+                                    block.compaction_status === 'Not compacted' ? 'bg-green-100 text-green-800' :
+                                    block.compaction_status === 'Slight compaction' ? 'bg-yellow-100 text-yellow-800' :
+                                    block.compaction_status === 'Moderate compaction' ? 'bg-orange-100 text-orange-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {block.compaction_status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  {block.compaction_alert || 'No action needed'}
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        )}
+
+                        {/* Administrative Location */}
+                        <tr className="bg-gray-100">
+                          <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                            Administrative Location
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Province</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.province} onSave={(v) => handleSaveBlock(index, 'province', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">District</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.district} onSave={(v) => handleSaveBlock(index, 'district', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Municipality</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.municipality} onSave={(v) => handleSaveBlock(index, 'municipality', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Ward</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.ward} onSave={(v) => handleSaveBlock(index, 'ward', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Watershed</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.watershed} onSave={(v) => handleSaveBlock(index, 'watershed', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Major River Basin</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <EditableCell value={block.major_river_basin} onSave={(v) => handleSaveBlock(index, 'major_river_basin', v)} />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600"></td>
+                        </tr>
+
+                        {/* Geology */}
+                        {block.geology_percentages && Object.keys(block.geology_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Geology</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.geology_percentages).map(([cls, pct]: [string, any], idx: number) => (
+                                <span key={cls}>
+                                  {cls}: <EditableCell value={pct} displayValue={pct.toFixed(1) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'geology_percentages', cls, v)} className="inline" />
+                                  {idx < Object.keys(block.geology_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Physiography */}
+                        {block.physiography_percentages && Object.keys(block.physiography_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Physiography</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.physiography_percentages).map(([zone, pct]: [string, any], idx: number) => (
+                                <span key={zone}>
+                                  {zone}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'physiography_percentages', zone, v)} className="inline" />
+                                  {idx < Object.keys(block.physiography_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Ecoregion */}
+                        {block.ecoregion_percentages && Object.keys(block.ecoregion_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Ecoregion</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.ecoregion_percentages).map(([eco, pct]: [string, any], idx: number) => (
+                                <span key={eco}>
+                                  {eco}: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'ecoregion_percentages', eco, v)} className="inline" />
+                                  {idx < Object.keys(block.ecoregion_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* NASA Forest 2020 */}
+                        {block.nasa_forest_2020_percentages && Object.keys(block.nasa_forest_2020_percentages).length > 0 && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">NASA Forest 2020</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              {Object.entries(block.nasa_forest_2020_percentages).map(([type, pct]: [string, any], idx: number) => (
+                                <span key={type}>
+                                  <span className="capitalize">{type.replace(/_/g, ' ')}</span>: <EditableCell value={pct} displayValue={pct.toFixed(2) + "%"} onSave={(v) => handleSaveBlockPercentages(index, 'nasa_forest_2020_percentages', type, v)} className="inline" />
+                                  {idx < Object.keys(block.nasa_forest_2020_percentages).length - 1 && ', '}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Access */}
+                        {block.access_info && (
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">Access</td>
+                            <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                              <EditableCell value={block.access_info} onSave={(v) => handleSaveBlock(index, 'access_info', v)} />
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Nearby Features */}
+                        <tr className="bg-gray-100">
+                          <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-900">
+                            Natural Features (within 100m)
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features North</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_north || ''} onSave={(v) => handleSaveBlock(index, 'features_north', v)} />
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features East</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_east || ''} onSave={(v) => handleSaveBlock(index, 'features_east', v)} />
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features South</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_south || ''} onSave={(v) => handleSaveBlock(index, 'features_south', v)} />
+                          </td>
+                        </tr>
+
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">Features West</td>
+                          <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
+                            <EditableCell value={block.features_west || ''} onSave={(v) => handleSaveBlock(index, 'features_west', v)} />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Additional Information */}
+        {activeTab === 'analysis' && (
+          <div className="px-6 pb-6">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-3">
+            <div>
+              <dt className="text-sm font-medium text-gray-500">Status</dt>
+              <dd className="mt-1">
+                <span
+                  className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadge(
+                    calculation.status
+                  )}`}
+                >
+                  {calculation.status}
+                </span>
+              </dd>
+            </div>
+
+            {calculation.processing_time_seconds && (
+              <div>
+                <dt className="text-sm font-medium text-gray-500">Processing Time</dt>
+                <dd className="mt-1 text-sm text-gray-900">
+                  {calculation.processing_time_seconds} seconds
+                </dd>
+              </div>
+            )}
+
+            {calculation.completed_at && (
+              <div>
+                <dt className="text-sm font-medium text-gray-500">Completed At</dt>
+                <dd className="mt-1 text-sm text-gray-900">
+                  {formatDate(calculation.completed_at)}
+                </dd>
+              </div>
+            )}
+
+            {calculation.error_message && (
+              <div className="sm:col-span-3">
+                <dt className="text-sm font-medium text-gray-500">Error Message</dt>
+                <dd className="mt-1 text-sm text-red-600">{calculation.error_message}</dd>
+              </div>
+            )}
+          </dl>
+          </div>
+        )}
+
+        {/* Geometry Error Warning */}
+        {activeTab === 'analysis' && geometryError && (
+          <div className="px-6 pb-4">
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">
+                    <strong>Map Display Issue:</strong> {geometryError}
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-1">
+                    The analysis data is still available above, but the boundary map cannot be displayed. This can happen with certain KML file formats. All other features (sampling, fieldbook, tree models) will work normally.
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-2">
+                    <strong>Recommendation:</strong> If you need the map, try re-uploading the boundary as a GeoJSON or Shapefile format instead.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Map Section */}
+        {activeTab === 'analysis' && calculation.geometry && !geometryError && (
+          <div className="px-6 pb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Boundary Map (A5 - {mapOrientation === 'portrait' ? 'Portrait' : 'Landscape'})
+              </h2>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Base Map:</span>
+                  <select
+                    value={basemap}
+                    onChange={(e) => setBasemap(e.target.value as 'satellite' | 'osm' | 'terrain' | 'none')}
+                    className="px-3 py-1.5 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="satellite">Satellite</option>
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="terrain">Terrain</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={boundaryVisible}
+                    onChange={(e) => setBoundaryVisible(e.target.checked)}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Show Forest Boundary</span>
+                </label>
+                <button
+                  onClick={handleZoomToLayer}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors shadow-sm"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                  </svg>
+                  Zoom to Layer
+                </button>
+              </div>
+            </div>
+            <div
+              className="rounded-lg overflow-hidden border-2 border-gray-400 shadow-lg mx-auto relative"
+              style={{
+                width: mapOrientation === 'portrait' ? '900px' : '1200px',
+                height: mapOrientation === 'portrait' ? '1200px' : '900px'
+              }}
+            >
+              <MapContainer
+                center={[27.7, 85.3]}
+                zoom={7}
+                style={{ height: '100%', width: '100%' }}
+                zoomControl={true}
+                attributionControl={true}
+              >
+                {basemap === 'satellite' && (
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                )}
+                {basemap === 'osm' && (
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    maxZoom={19}
+                  />
+                )}
+                {basemap === 'terrain' && (
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
+                    url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+                    maxZoom={17}
+                  />
+                )}
+                {boundaryVisible && calculation.geometry && isValidGeoJSON(calculation.geometry) && (
+                  <GeoJSON
+                    key={JSON.stringify(calculation.geometry)}
+                    data={calculation.geometry}
+                    style={{
+                      color: '#059669',
+                      weight: 3,
+                      fillColor: '#34d399',
+                      fillOpacity: 0
+                    }}
+                  />
+                )}
+                {/* Render blocks from result_data */}
+                {blocks.length > 0 && blocks.map((block: any, index: number) => (
+                  block.geometry && (
+                    <GeoJSON
+                      key={`block-${index}-${block.block_name || index}`}
+                      data={block.geometry}
+                      style={{
+                        color: '#2563eb',
+                        weight: 2,
+                        fillColor: '#3b82f6',
+                        fillOpacity: 0.1
+                      }}
+                    />
+                  )
+                ))}
+                {/* Render sub-areas from result_data */}
+                {calculation.result_data?.sub_areas && calculation.result_data.sub_areas.map((subArea: any, index: number) => (
+                  subArea.geometry && (
+                    <GeoJSON
+                      key={`subarea-${index}-${subArea.name || index}`}
+                      data={subArea.geometry}
+                      style={{
+                        color: subArea.isExcluded ? '#dc2626' : '#7c3aed',
+                        weight: 2,
+                        fillColor: subArea.isExcluded ? '#fca5a5' : '#c4b5fd',
+                        fillOpacity: 0.3
+                      }}
+                    />
+                  )
+                ))}
+                <ZoomToLayer
+                  geometry={calculation.geometry}
+                  setMapInstance={setMapInstance}
+                  orientation={mapOrientation}
+                />
+                <RasterLayerControl calculationId={calculation.id} calculation={calculation} />
+                <RasterClickInfo calculationId={calculation.id} boundaryGeometry={calculation.geometry} />
+              </MapContainer>
+              <NorthArrow />
+            </div>
+            <div className="mt-3 text-center">
+              <p className="text-sm text-gray-500">
+                A5 Map Size: {mapOrientation === 'portrait' ? '560px × 794px (148mm × 210mm)' : '794px × 560px (210mm × 148mm)'} at 96 DPI
+                {totalBlocks > 1 && (
+                  <span className="block mt-1 italic">
+                    Map shows all {totalBlocks} blocks combined
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Processing Info Section - Only show if partitioned */}
+        {activeTab === 'analysis' && processingInfo.partitioned && (
+          <div className="px-6 pb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Processing Information</h2>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+                <div className="flex-1">
+                  <p className="text-sm text-blue-800 font-medium">Compartment Boundary Partitioning Applied</p>
+                  <p className="mt-1 text-sm text-blue-700">
+                    The outer boundary was partitioned using {processingInfo.partition_info?.division_lines_used || 0} division lines,
+                    creating {processingInfo.partition_info?.blocks_created || 0} separate forest blocks.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Re-analysis Modal */}
+      {showReanalysisModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Re-run Analysis</h2>
+              <button
+                onClick={() => setShowReanalysisModal(false)}
+                disabled={reanalyzing}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <div className="mb-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start">
+                    <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium">Re-run analysis without re-uploading your boundary file</p>
+                      <p className="mt-1">
+                        Select which analyses you want to run. Your existing results will be preserved and only new analyses will be added.
+                        This is useful if you want to add more analyses that you didn't run initially.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <AnalysisOptionsPanel
+                options={reanalysisOptions}
+                onChange={setReanalysisOptions}
+                disabled={reanalyzing}
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex items-center justify-between">
+              <button
+                onClick={() => setShowReanalysisModal(false)}
+                disabled={reanalyzing}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReanalyze}
+                disabled={reanalyzing}
+                className="inline-flex items-center px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {reanalyzing ? (
+                  <>
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Re-analyzing...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Re-run Analysis
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Map Editor Modal */}
+      {showMapEditor && calculation && (
+        <MapEditor
+          calculationId={id!}
+          initialGeometry={calculation.geometry}
+          initialSubAreas={subAreas}
+          initialBlocks={calculation.result_data?.blocks || []}
+          onSave={async (newGeometry, newSubAreas) => {
+            // Don't close - user will click "Done" button when ready
+            // Reload calculation to get updated data
+            await loadCalculation();
+            // Also reload sub-areas to ensure they are fresh
+            if (id) {
+              const subAreaData = await forestApi.listSubAreas(id);
+              setSubAreas(subAreaData.sub_areas || []);
+            }
+            // Trigger Table 5 refresh
+            setSubAreaRefreshKey(k => k + 1);
+          }}
+          onCancel={() => setShowMapEditor(false)}
+        />
+      )}
+    </div>
+  );
+}

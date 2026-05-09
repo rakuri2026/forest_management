@@ -1,0 +1,568 @@
+import React, { useState, useEffect } from 'react';
+import { Table, Button, Select, Input, message, Alert, Space, Popconfirm, Card, Progress, Tag, Collapse } from 'antd';
+import { PlusOutlined, DeleteOutlined, SaveOutlined, WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { userGroupApi } from '../../services/api';
+
+const { Option } = Select;
+const { Panel } = Collapse;
+
+interface CommitteeMember {
+  id?: string;
+  serial_no: number;
+  name: string;
+  address: string;
+  mobile?: string;
+}
+
+interface MainCommitteeMember extends CommitteeMember {
+  gender: string;
+  position: string;
+  caste_category: string;
+}
+
+interface CommitteeData {
+  main_committee: MainCommitteeMember[];
+  advisory_committee: CommitteeMember[];
+  financial_committee: CommitteeMember[];
+  summary?: {
+    main_committee_size: number;
+    main_committee_women: number;
+    main_committee_men: number;
+    women_percentage: number;
+    meets_50_percent_rule: boolean;
+    positions_filled: { [key: string]: string };
+    positions_unfilled: string[];
+    key_position_warnings: string[];
+    validation_warnings: string[];
+    advisory_committee_size: number;
+    financial_committee_size: number;
+  };
+}
+
+interface CommitteeManagementProps {
+  calculationId: string;
+}
+
+const GENDERS = ['महिला', 'पुरूष'];
+const POSITIONS = ['अध्यक्ष', 'उपाध्यक्ष', 'कोषाध्यक्ष', 'सह कोषाध्यक्ष', 'सचिव', 'सह सचिव', 'सदस्य'];
+const CASTE_CATEGORIES = ['जनजाती', 'आदिवासी', 'दलित', 'सिमान्तकृत', 'अन्य'];
+
+const CommitteeManagement: React.FC<CommitteeManagementProps> = ({ calculationId }) => {
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [data, setData] = useState<CommitteeData>({
+    main_committee: [],
+    advisory_committee: [],
+    financial_committee: [],
+  });
+
+  const [editingKey, setEditingKey] = useState<string>('');
+
+  useEffect(() => {
+    loadCommittees();
+  }, [calculationId]);
+
+  const loadCommittees = async () => {
+    setLoading(true);
+    try {
+      const response = await userGroupApi.getAllCommittees(calculationId);
+      setData(response);
+    } catch (error: any) {
+      if (error.response?.status !== 404) {
+        console.error('Error loading committees:', error);
+        message.error('Failed to load committee data');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        main_committee: data.main_committee.map(({ id, ...rest }) => rest),
+        advisory_committee: data.advisory_committee.map(({ id, ...rest }) => rest),
+        financial_committee: data.financial_committee.map(({ id, ...rest }) => rest),
+      };
+
+      await userGroupApi.createCommitteesBulk(calculationId, payload);
+      message.success('Committee data saved successfully');
+      loadCommittees();
+    } catch (error: any) {
+      console.error('Error saving committees:', error);
+      const errorDetail = error.response?.data?.detail;
+      const errorMsg = typeof errorDetail === 'string'
+        ? errorDetail
+        : Array.isArray(errorDetail)
+        ? errorDetail.map((e: any) => e.msg || JSON.stringify(e)).join(', ')
+        : 'Failed to save committee data';
+      message.error(errorMsg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addMainMember = () => {
+    if (data.main_committee.length >= 15) {
+      message.warning('Main committee cannot exceed 15 members');
+      return;
+    }
+
+    const newMember: MainCommitteeMember = {
+      serial_no: data.main_committee.length + 1,
+      gender: 'महिला',
+      position: 'सदस्य',
+      caste_category: 'अन्य',
+      name: '',
+      address: '',
+      mobile: '',
+    };
+
+    setData({
+      ...data,
+      main_committee: [...data.main_committee, newMember],
+    });
+  };
+
+  const addAdvisoryMember = () => {
+    if (data.advisory_committee.length >= 10) {
+      message.warning('Advisory committee cannot exceed 10 members');
+      return;
+    }
+
+    const newMember: CommitteeMember = {
+      serial_no: data.advisory_committee.length + 1,
+      name: '',
+      address: '',
+      mobile: '',
+    };
+
+    setData({
+      ...data,
+      advisory_committee: [...data.advisory_committee, newMember],
+    });
+  };
+
+  const addFinancialMember = () => {
+    if (data.financial_committee.length >= 10) {
+      message.warning('Financial committee cannot exceed 10 members');
+      return;
+    }
+
+    const newMember: CommitteeMember = {
+      serial_no: data.financial_committee.length + 1,
+      name: '',
+      address: '',
+      mobile: '',
+    };
+
+    setData({
+      ...data,
+      financial_committee: [...data.financial_committee, newMember],
+    });
+  };
+
+  const deleteMainMember = (index: number) => {
+    const newMembers = data.main_committee.filter((_, i) => i !== index);
+    // Renumber serial_no
+    newMembers.forEach((member, i) => {
+      member.serial_no = i + 1;
+    });
+    setData({ ...data, main_committee: newMembers });
+  };
+
+  const deleteAdvisoryMember = (index: number) => {
+    const newMembers = data.advisory_committee.filter((_, i) => i !== index);
+    newMembers.forEach((member, i) => {
+      member.serial_no = i + 1;
+    });
+    setData({ ...data, advisory_committee: newMembers });
+  };
+
+  const deleteFinancialMember = (index: number) => {
+    const newMembers = data.financial_committee.filter((_, i) => i !== index);
+    newMembers.forEach((member, i) => {
+      member.serial_no = i + 1;
+    });
+    setData({ ...data, financial_committee: newMembers });
+  };
+
+  const updateMainMember = (index: number, field: keyof MainCommitteeMember, value: any) => {
+    const newMembers = [...data.main_committee];
+    newMembers[index] = { ...newMembers[index], [field]: value };
+    setData({ ...data, main_committee: newMembers });
+  };
+
+  const updateAdvisoryMember = (index: number, field: keyof CommitteeMember, value: any) => {
+    const newMembers = [...data.advisory_committee];
+    newMembers[index] = { ...newMembers[index], [field]: value };
+    setData({ ...data, advisory_committee: newMembers });
+  };
+
+  const updateFinancialMember = (index: number, field: keyof CommitteeMember, value: any) => {
+    const newMembers = [...data.financial_committee];
+    newMembers[index] = { ...newMembers[index], [field]: value };
+    setData({ ...data, financial_committee: newMembers });
+  };
+
+  // Main Committee Columns
+  const mainColumns = [
+    {
+      title: 'सि.नं.',
+      dataIndex: 'serial_no',
+      key: 'serial_no',
+      width: 70,
+      align: 'center' as const,
+    },
+    {
+      title: 'लिङ्ग',
+      dataIndex: 'gender',
+      key: 'gender',
+      width: 120,
+      render: (text: string, record: MainCommitteeMember, index: number) => (
+        <Select
+          value={text}
+          onChange={(value) => updateMainMember(index, 'gender', value)}
+          style={{ width: '100%' }}
+        >
+          {GENDERS.map((g) => (
+            <Option key={g} value={g}>
+              {g}
+            </Option>
+          ))}
+        </Select>
+      ),
+    },
+    {
+      title: 'पद',
+      dataIndex: 'position',
+      key: 'position',
+      width: 150,
+      render: (text: string, record: MainCommitteeMember, index: number) => (
+        <Select
+          value={text}
+          onChange={(value) => updateMainMember(index, 'position', value)}
+          style={{ width: '100%' }}
+        >
+          {POSITIONS.map((p) => (
+            <Option key={p} value={p}>
+              {p}
+            </Option>
+          ))}
+        </Select>
+      ),
+    },
+    {
+      title: 'जातिय वर्ग',
+      dataIndex: 'caste_category',
+      key: 'caste_category',
+      width: 150,
+      render: (text: string, record: MainCommitteeMember, index: number) => (
+        <Select
+          value={text}
+          onChange={(value) => updateMainMember(index, 'caste_category', value)}
+          style={{ width: '100%' }}
+        >
+          {CASTE_CATEGORIES.map((c) => (
+            <Option key={c} value={c}>
+              {c}
+            </Option>
+          ))}
+        </Select>
+      ),
+    },
+    {
+      title: 'नाम',
+      dataIndex: 'name',
+      key: 'name',
+      width: 200,
+      render: (text: string, record: MainCommitteeMember, index: number) => (
+        <Input
+          value={text}
+          onChange={(e) => updateMainMember(index, 'name', e.target.value)}
+          placeholder="नाम"
+        />
+      ),
+    },
+    {
+      title: 'ठेगाना',
+      dataIndex: 'address',
+      key: 'address',
+      width: 200,
+      render: (text: string, record: MainCommitteeMember, index: number) => (
+        <Input
+          value={text}
+          onChange={(e) => updateMainMember(index, 'address', e.target.value)}
+          placeholder="ठेगाना"
+        />
+      ),
+    },
+    {
+      title: 'मोवाइल नंवर',
+      dataIndex: 'mobile',
+      key: 'mobile',
+      width: 150,
+      render: (text: string, record: MainCommitteeMember, index: number) => (
+        <Input
+          value={text}
+          onChange={(e) => updateMainMember(index, 'mobile', e.target.value)}
+          placeholder="9841234567"
+          maxLength={10}
+        />
+      ),
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 80,
+      fixed: 'right' as const,
+      render: (_: any, record: MainCommitteeMember, index: number) => (
+        <Popconfirm
+          title="Delete this member?"
+          onConfirm={() => deleteMainMember(index)}
+          okText="Yes"
+          cancelText="No"
+        >
+          <Button type="link" danger icon={<DeleteOutlined />} size="small" />
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  // Advisory/Financial Committee Columns
+  const simpleColumns = (
+    updateFn: (index: number, field: string, value: any) => void,
+    deleteFn: (index: number) => void
+  ) => [
+    {
+      title: 'सि.नं.',
+      dataIndex: 'serial_no',
+      key: 'serial_no',
+      width: 70,
+      align: 'center' as const,
+    },
+    {
+      title: 'नाम',
+      dataIndex: 'name',
+      key: 'name',
+      width: 250,
+      render: (text: string, record: CommitteeMember, index: number) => (
+        <Input
+          value={text}
+          onChange={(e) => updateFn(index, 'name', e.target.value)}
+          placeholder="नाम"
+        />
+      ),
+    },
+    {
+      title: 'ठेगाना',
+      dataIndex: 'address',
+      key: 'address',
+      width: 250,
+      render: (text: string, record: CommitteeMember, index: number) => (
+        <Input
+          value={text}
+          onChange={(e) => updateFn(index, 'address', e.target.value)}
+          placeholder="ठेगाना"
+        />
+      ),
+    },
+    {
+      title: 'मोवाइल नंवर',
+      dataIndex: 'mobile',
+      key: 'mobile',
+      width: 150,
+      render: (text: string, record: CommitteeMember, index: number) => (
+        <Input
+          value={text}
+          onChange={(e) => updateFn(index, 'mobile', e.target.value)}
+          placeholder="9841234567"
+          maxLength={10}
+        />
+      ),
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 80,
+      fixed: 'right' as const,
+      render: (_: any, record: CommitteeMember, index: number) => (
+        <Popconfirm
+          title="Delete this member?"
+          onConfirm={() => deleteFn(index)}
+          okText="Yes"
+          cancelText="No"
+        >
+          <Button type="link" danger icon={<DeleteOutlined />} size="small" />
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  const hasData = data.main_committee.length > 0 || data.advisory_committee.length > 0 || data.financial_committee.length > 0;
+
+  return (
+    <div style={{ padding: '20px' }}>
+      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2>Forest User Committee Information</h2>
+        <Space>
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={handleSave}
+            loading={saving}
+            disabled={!hasData}
+          >
+            Save All Changes
+          </Button>
+        </Space>
+      </div>
+
+      {/* Validation Summary */}
+      {data.summary && data.summary.validation_warnings.length > 0 && (
+        <Alert
+          message="Validation Warnings"
+          description={
+            <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+              {data.summary.validation_warnings.map((warning, idx) => (
+                <li key={idx}>{typeof warning === 'string' ? warning : JSON.stringify(warning)}</li>
+              ))}
+            </ul>
+          }
+          type="warning"
+          icon={<WarningOutlined />}
+          showIcon
+          style={{ marginBottom: 20 }}
+        />
+      )}
+
+      {/* Gender Ratio Indicator */}
+      {data.main_committee.length > 0 && (
+        <Card size="small" style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ marginBottom: 5 }}>
+                <strong>Women Representation:</strong> {data.main_committee.filter(m => m.gender === 'महिला').length} / {data.main_committee.length} members
+              </div>
+              <Progress
+                percent={Math.round((data.main_committee.filter(m => m.gender === 'महिला').length / data.main_committee.length) * 100)}
+                status={(data.main_committee.filter(m => m.gender === 'महिला').length / data.main_committee.length) >= 0.5 ? 'success' : 'exception'}
+                format={(percent) => `${percent}%`}
+              />
+              <div style={{ fontSize: 12, color: '#888', marginTop: 5 }}>
+                Requirement: At least 50% women (महिला)
+              </div>
+            </div>
+            {(data.main_committee.filter(m => m.gender === 'महिला').length / data.main_committee.length) >= 0.5 ? (
+              <Tag color="success" icon={<CheckCircleOutlined />}>
+                Meets Requirement
+              </Tag>
+            ) : (
+              <Tag color="warning" icon={<WarningOutlined />}>
+                Below 50%
+              </Tag>
+            )}
+          </div>
+        </Card>
+      )}
+
+      <Collapse defaultActiveKey={['1', '2', '3']} style={{ marginBottom: 20 }}>
+        {/* Main Committee */}
+        <Panel
+          header={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 'bold' }}>
+                सामुदायिक वन उपभोक्ता समिति (Main Committee) - {data.main_committee.length}/15 members
+              </span>
+            </div>
+          }
+          key="1"
+        >
+          <div style={{ marginBottom: 10 }}>
+            <Button type="dashed" onClick={addMainMember} icon={<PlusOutlined />} disabled={data.main_committee.length >= 15}>
+              Add Member
+            </Button>
+          </div>
+          <Table
+            columns={mainColumns}
+            dataSource={data.main_committee}
+            rowKey={(_, index) => `main-${index}`}
+            pagination={false}
+            loading={loading}
+            scroll={{ x: 1200 }}
+            size="small"
+            bordered
+          />
+        </Panel>
+
+        {/* Advisory Committee */}
+        <Panel
+          header={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 'bold' }}>
+                सल्लाहाकार समिति (Advisory Committee) - {data.advisory_committee.length}/10 members
+              </span>
+            </div>
+          }
+          key="2"
+        >
+          <div style={{ marginBottom: 10 }}>
+            <Button type="dashed" onClick={addAdvisoryMember} icon={<PlusOutlined />} disabled={data.advisory_committee.length >= 10}>
+              Add Member
+            </Button>
+          </div>
+          <Table
+            columns={simpleColumns(updateAdvisoryMember, deleteAdvisoryMember)}
+            dataSource={data.advisory_committee}
+            rowKey={(_, index) => `advisory-${index}`}
+            pagination={false}
+            loading={loading}
+            scroll={{ x: 800 }}
+            size="small"
+            bordered
+          />
+        </Panel>
+
+        {/* Financial Committee */}
+        <Panel
+          header={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 'bold' }}>
+                आर्थिक समिति (Financial Committee) - {data.financial_committee.length}/10 members
+              </span>
+            </div>
+          }
+          key="3"
+        >
+          <div style={{ marginBottom: 10 }}>
+            <Button type="dashed" onClick={addFinancialMember} icon={<PlusOutlined />} disabled={data.financial_committee.length >= 10}>
+              Add Member
+            </Button>
+          </div>
+          <Table
+            columns={simpleColumns(updateFinancialMember, deleteFinancialMember)}
+            dataSource={data.financial_committee}
+            rowKey={(_, index) => `financial-${index}`}
+            pagination={false}
+            loading={loading}
+            scroll={{ x: 800 }}
+            size="small"
+            bordered
+          />
+        </Panel>
+      </Collapse>
+
+      {!hasData && !loading && (
+        <Alert
+          message="No Committee Data"
+          description="No committee information has been entered yet. You can add members using the 'Add Member' buttons above, or upload data via the Excel template in the Upload tab."
+          type="info"
+          showIcon
+        />
+      )}
+    </div>
+  );
+};
+
+export default CommitteeManagement;

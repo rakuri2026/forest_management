@@ -1,0 +1,157 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+token.txt
+
+# Database
+*.db
+*.sqlite
+
+# Archives
+*.rar
+*.zip
+
+# Uploads and exports
+uploads/*
+!uploads/.gitkeep
+exports/*
+!exports/.gitkeep
+backups/
+outputs/
+
+# GIS raster files (large)
+*.tif
+*.tiff
+
+# GeoPackage export files (generated artifacts)
+*.gpkg
+
+# Test Data (large files)
+testData/
+tests/
+dumping_files/
+docs/
+migrations/
+
+# Development documentation (progress notes)
+*_COMPLETE.md
+*_FIX.md
+*_IMPLEMENTATION.md
+*_PROGRESS.md
+*_STATUS.md
+*_PLAN.md
+*_SUMMARY.md
+*_REPORT.md
+*_GUIDE.md
+*_TESTING.md
+*_VERIFICATION.md
+*_CONFIRMATION.md
+*_ANALYSIS.md
+*_METHODOLOGY.md
+QUICK_*.md
+DEBUGGING_*.md
+HOW_TO_*.md
+TEST_*.md
+IMPLEMENTATION_*.md
+TOMORROW_*.md
+current_context.md
+session*.txt
+*.md
+
+# Backup files
+*.backup
+
+# Temporary/text files
+Report_Generation.txt
+map_prompt.txt
+mock_unified_mapping_ui.html
+
+# Batch files (except system files)
+*.bat
+
+# Temporary scripts
+add_*.py
+check_*.py
+create_*.py
+diagnose_*.py
+fix_*.py
+implement_*.py
+install_*.py
+optimize_*.py
+quick_*.py
+reanalyze_*.py
+run_*.py
+test_*.py
+update_*.py
+verify_*.py
+apply_*.py
+assign_*.py
+compare_*.py
+complete_*.py
+export_*.py
+extract_*.py
+generate_*.py
+get_*.py
+insert_*.py
+wait_*.py
+SAFETY_*.py
+
+# Batch files (environment-specific - except system files)
+!start_all.bat
+!stop_all.bat
+!restart_all.bat
+
+# CSV/Excel data files
+*.csv
+*.xlsx
+!testData/spp_database/tree_species_coefficients*.csv
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic
+alembic/versions/*.pyc
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+
+# Claude Code
+.claude/settings.local.json
