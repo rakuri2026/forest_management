@@ -506,23 +506,45 @@ export default function CalculationDetail() {
   // Handle block rename
   const handleRenameBlock = async (block: any) => {
     if (!renameValue.trim() || !renamingBlockId) return;
+    const newName = renameValue.trim();
+    const oldName = block.block_name;
+    const blockId = block.block_id;
     try {
-      const blockId = block.block_id;
       if (blockId) {
-        await forestApi.updateBlock(calculation.id, blockId, renameValue.trim());
+        await forestApi.updateBlock(calculation.id, blockId, newName);
       }
-      // Also update local state for result_data blocks (even without block_id)
+      // Update local blocks array
       const updatedBlocks = [...blocks];
       const idx = updatedBlocks.findIndex((b: any) =>
         b.block_id ? b.block_id === renamingBlockId : b.block_name === renamingBlockId
       );
       if (idx >= 0) {
-        updatedBlocks[idx] = { ...updatedBlocks[idx], block_name: renameValue.trim() };
+        updatedBlocks[idx] = { ...updatedBlocks[idx], block_name: newName };
       }
-      setCalculation(prev => prev ? {
-        ...prev,
-        result_data: { ...prev.result_data, blocks: updatedBlocks }
-      } : prev);
+      // Sync sub-areas that reference this block (match by ID or name)
+      const renameInSubArea = (sa: any) => {
+        let updated = { ...sa };
+        const matchBlock = (ref: any) =>
+          (blockId && ref.blockId === blockId) || ref.blockName === oldName || ref.block_name === oldName;
+        if (matchBlock(sa)) {
+          if (sa.blockId === blockId || sa.blockName === oldName) updated.blockName = newName;
+          if (sa.block_name === oldName) updated.block_name = newName;
+        }
+        if (sa.blockBreakdown) {
+          updated.blockBreakdown = sa.blockBreakdown.map((bb: any) =>
+            matchBlock(bb) ? { ...bb, blockName: newName, block_name: newName } : bb
+          );
+        }
+        return updated;
+      };
+      setCalculation(prev => {
+        if (!prev) return prev;
+        const rd = { ...prev.result_data, blocks: updatedBlocks };
+        if (rd.sub_areas) rd.sub_areas = rd.sub_areas.map(renameInSubArea);
+        return { ...prev, result_data: rd };
+      });
+      setSubAreas(prev => prev.map(renameInSubArea));
+      setSubAreaRefreshKey(k => k + 1);
     } catch (err: any) {
       console.error('Failed to rename block:', err);
     }
