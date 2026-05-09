@@ -269,3 +269,122 @@
   border-radius: 8px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
+
+/* Activity Matrix Overview */
+.activity-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.matrix-program-group {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.matrix-program-header {
+  padding: 10px 16px;
+  background: #f0f5ff;
+  border-bottom: 1px solid #d6e4ff;
+}
+
+.matrix-program-group .ant-table-wrapper {
+  margin: 0;
+}
+
+.matrix-program-group .ant-table {
+  font-size: 12px;
+}
+
+.matrix-program-group .ant-table-thead > tr > th {
+  background: #fafafa;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.matrix-program-group .ant-table-tbody > tr > td {
+  padding: 6px 8px;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+.matrix-program-group .ant-table-tbody > tr:hover > td {
+  background: #e6f7ff !important;
+}
+
+.matrix-program-group .ant-table-tbody > tr > td:first-child {
+  font-weight: 500;
+}
+
+/* Dimmed rows for chosen activities */
+.matrix-program-group .ant-table-tbody > tr.matrix-row-chosen > td {
+  background: #f8f8f8;
+  color: #aaa;
+}
+
+.matrix-program-group .ant-table-tbody > tr.matrix-row-chosen:hover > td {
+  background: #f0f0f0 !important;
+}
+
+.matrix-program-group .ant-table-tbody > tr.matrix-row-chosen .ant-tag {
+  opacity: 0.7;
+}
+
+.matrix-program-group .ant-table-tbody > tr.matrix-row-chosen td:first-child {
+  font-weight: 400;
+  color: #bbb;
+}
+
+/* Embedded Activity Card (inside Drawer) */
+.activity-card-embedded {
+  padding: 0;
+}
+
+.activity-card-embedded .card-content {
+  padding-top: 0;
+}
+
+.activity-card-embedded .card-footer {
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+/* Drawer overrides */
+.ant-drawer-body {
+  overflow-y: auto;
+}
+
+.ant-drawer-body .year-budget-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  background: #fafafa;
+  border-radius: 4px;
+}
+
+.ant-drawer-body .year-budget-item {
+  min-width: 100px;
+}
+
+.ant-drawer-body .drawing-panel {
+  height: 350px;
+}
+
+.ant-drawer-body .checkbox-list {
+  max-height: 200px;
+}
+
+.ant-drawer-body .content-section {
+  margin-bottom: 20px;
+}
+
+.ant-drawer-body .card-content {
+  padding-top: 8px;
+}
