@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 
 revision = '016'
-down_revision = '015'
+down_revision = '015_add_slope_aspect_columns'
 branch_labels = None
 depends_on = None
 

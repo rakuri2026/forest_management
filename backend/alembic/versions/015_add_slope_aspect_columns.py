@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision = '015_add_slope_aspect_columns'
-down_revision = None  # Set based on your latest migration
+down_revision = '014'
 branch_labels = None
 depends_on = None
 

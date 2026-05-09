@@ -17,14 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add needs_compartment_assignment flag to inventory_calculations
-    op.add_column(
-        'inventory_calculations',
-        sa.Column('needs_compartment_assignment', sa.Boolean(), nullable=False, server_default='false'),
-        schema='public'
-    )
+    conn = op.get_bind()
+    from sqlalchemy import inspect
+    inspector = inspect(conn)
+    existing_columns = {col['name'] for col in inspector.get_columns('inventory_calculations', schema='public')}
+
+    if 'needs_compartment_assignment' not in existing_columns:
+        op.add_column(
+            'inventory_calculations',
+            sa.Column('needs_compartment_assignment', sa.Boolean(), nullable=False, server_default='false'),
+            schema='public'
+        )
 
 
 def downgrade() -> None:
-    # Drop needs_compartment_assignment column
     op.drop_column('inventory_calculations', 'needs_compartment_assignment', schema='public')

@@ -17,33 +17,21 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add indexes for common query patterns
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_forest_blocks_calculation 
-        ON forest_blocks (calculation_id)
-    """)
-    
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_forest_blocks_parent 
-        ON forest_blocks (parent_block_id)
-    """)
-    
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_forest_blocks_is_compartment 
-        ON forest_blocks (is_compartment)
-    """)
-    
-    # Spatial index for geometry queries
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_forest_blocks_geometry 
-        ON forest_blocks USING GIST (geometry)
-    """)
-    
-    # Composite index for common query pattern
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_forest_blocks_calc_compartment 
-        ON forest_blocks (calculation_id, is_compartment)
-    """)
+    conn = op.get_bind()
+    from sqlalchemy import inspect
+    inspector = inspect(conn)
+    existing_indexes = {idx['name'] for idx in inspector.get_indexes('forest_blocks', schema='public')}
+
+    if 'idx_forest_blocks_calculation' not in existing_indexes:
+        op.create_index('idx_forest_blocks_calculation', 'forest_blocks', ['calculation_id'], schema='public')
+    if 'idx_forest_blocks_parent' not in existing_indexes:
+        op.create_index('idx_forest_blocks_parent', 'forest_blocks', ['parent_block_id'], schema='public')
+    if 'idx_forest_blocks_is_compartment' not in existing_indexes:
+        op.create_index('idx_forest_blocks_is_compartment', 'forest_blocks', ['is_compartment'], schema='public')
+    if 'idx_forest_blocks_geometry' not in existing_indexes:
+        op.create_index('idx_forest_blocks_geometry', 'forest_blocks', ['geometry'], schema='public', postgresql_using='gist')
+    if 'idx_forest_blocks_calc_compartment' not in existing_indexes:
+        op.create_index('idx_forest_blocks_calc_compartment', 'forest_blocks', ['calculation_id', 'is_compartment'], schema='public')
 
 
 def downgrade() -> None:
