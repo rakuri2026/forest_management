@@ -44,8 +44,8 @@ from ..core.config import settings
 MIN_DBH_CM = 10.0          # Commercial inventory threshold
 MIN_HEIGHT_M = 5.0         # Minimum tree height
 MAX_TREES_PER_HA = 500     # Upper cap on density
-CANOPY_HEIGHT_PIXEL_SIZE = 30  # meters
-PIXEL_AREA_HA = 0.09       # 900m² = 0.09 hectares
+CANOPY_HEIGHT_PIXEL_SIZE = 5   # meters (5m resolution canopy height)
+PIXEL_AREA_HA = 0.0025     # 25m² = 0.0025 hectares (no longer used in generation, kept for reference)
 
 
 # Tree Density Lookup Tables (trees per hectare by canopy height)
@@ -581,10 +581,7 @@ def assign_block_names_to_trees(
     result_data: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     """
-    Assign correct block names to trees via spatial join.
-
-    Uses blocks from result_data['blocks'] with WKT geometries.
-    Block name priority: block['name'] if exists, otherwise use index (Block_1, Block_2, etc.)
+    Assign correct block names to trees via spatial join (uses STRtree index).
 
     Args:
         trees: List of tree dictionaries with geometry (x, y)
@@ -595,50 +592,40 @@ def assign_block_names_to_trees(
     """
     from shapely import wkt
 
-    # Extract blocks from result_data
     blocks_data = result_data.get('blocks', [])
     if not blocks_data:
-        return trees  # No blocks defined - keep existing block_name
+        return trees
 
-    # Parse block polygons and names
     from shapely.geometry import shape
+    from shapely import STRtree
 
-    block_polygons = []
+    block_geoms = []
+    block_names = []
     for idx, block in enumerate(blocks_data):
-        # Get geometry from GeoJSON format (stored in result_data)
         block_geojson = block.get('geometry')
         if not block_geojson:
             continue
-
         try:
-            # Convert GeoJSON to Shapely geometry
             block_geom = shape(block_geojson)
-
-            # Use block['block_name'] if exists (from database), otherwise use index
             block_name = block.get('block_name', f"Block_{idx+1}")
-
-            block_polygons.append({
-                'geometry': block_geom,
-                'name': block_name,
-                'index': idx
-            })
+            block_geoms.append(block_geom)
+            block_names.append(block_name)
         except Exception as e:
             print(f"Warning: Could not parse block {idx}: {e}")
             continue
 
-    if not block_polygons:
-        return trees  # No valid block geometries
+    if not block_geoms:
+        return trees
 
-    # Spatial join: Assign block names to trees
+    tree_idx = STRtree(block_geoms)
+
     for tree in trees:
         tree_point = Point(tree['geometry'])
-
-        # Check which block contains this tree
-        for block in block_polygons:
-            if block['geometry'].contains(tree_point):
-                tree['block_name'] = block['name']
+        indices = tree_idx.query(tree_point)
+        for idx in indices:
+            if block_geoms[int(idx)].contains(tree_point):
+                tree['block_name'] = block_names[int(idx)]
                 break
-        # If no block contains tree, keep existing block_name
 
     return trees
 
@@ -650,82 +637,58 @@ def assign_sample_plots_to_trees(
     db: Session
 ) -> List[Dict[str, Any]]:
     """
-    Assign sample plot numbers to trees and KEEP ONLY trees within plot buffers.
+    Assign sample plot numbers to trees using STRtree spatial index.
 
-    Trees outside all plot buffers are discarded (not exported).
-    This is because field teams only measure trees within sample plots.
+    Keeps only trees within at least one plot buffer (discards outside trees).
 
     Args:
         trees: List of tree dictionaries with geometry (x, y)
         sampling_design: SamplingDesign object with sample points
-        buffer_meters: Buffer distance around each plot (default: 25m)
+        buffer_meters: Buffer distance around each plot
         db: Database session
 
     Returns:
-        FILTERED trees list - only trees within plot buffers, with sample_plot_number assigned
+        FILTERED trees list with sample_plot_number assigned
     """
     from geoalchemy2.shape import to_shape
+    from shapely import STRtree
 
-    # Extract sample plot points from sampling design
     if not sampling_design.points_geometry:
-        # No points - return trees unchanged
         return trees
 
-    # Get sample plot points as Shapely geometry
     sample_points_geom = to_shape(sampling_design.points_geometry)
-
-    # Get plot assignments (if available)
     plot_assignments = sampling_design.points_block_assignment or []
+    buffer_deg = buffer_meters / 111320.0
 
-    # Create list of plot geometries with their plot numbers
     plot_buffers = []
+    plot_numbers = []
 
     if hasattr(sample_points_geom, 'geoms'):
-        # MultiPoint - iterate through individual points
         for idx, point in enumerate(sample_points_geom.geoms):
-            # Try to get plot number from assignments, otherwise use index+1
             plot_info = next(
                 (p for p in plot_assignments if p.get('point_index') == idx),
                 None
             )
             plot_number = plot_info.get('plot_number', idx + 1) if plot_info else idx + 1
-
-            # Create buffer around point (in degrees, approximate)
-            # For better accuracy, should convert to UTM, but this is acceptable for 25m
-            buffer_deg = buffer_meters / 111320.0  # Rough conversion: 1 degree ≈ 111.32 km
-            buffered_plot = point.buffer(buffer_deg)
-
-            plot_buffers.append({
-                'plot_number': plot_number,
-                'geometry': buffered_plot
-            })
+            plot_buffers.append(point.buffer(buffer_deg))
+            plot_numbers.append(plot_number)
     else:
-        # Single Point
-        buffer_deg = buffer_meters / 111320.0
-        buffered_plot = sample_points_geom.buffer(buffer_deg)
-        plot_buffers.append({
-            'plot_number': 1,
-            'geometry': buffered_plot
-        })
+        plot_buffers.append(sample_points_geom.buffer(buffer_deg))
+        plot_numbers.append(1)
 
-    # Assign plot numbers to each tree AND filter to keep only trees within buffers
+    buffer_tree = STRtree(plot_buffers)
     filtered_trees = []
 
     for tree in trees:
         tree_point = Point(tree['geometry'])
+        indices = buffer_tree.query(tree_point)
         intersecting_plots = []
-
-        # Check which plot buffers this tree intersects
-        for plot in plot_buffers:
-            if plot['geometry'].contains(tree_point):
-                intersecting_plots.append(str(plot['plot_number']))
-
-        # Only keep trees that fall within at least one plot buffer
+        for idx in indices:
+            if plot_buffers[int(idx)].contains(tree_point):
+                intersecting_plots.append(str(plot_numbers[int(idx)]))
         if intersecting_plots:
-            # Multiple plots: comma-separated
             tree['sample_plot_number'] = ','.join(intersecting_plots)
             filtered_trees.append(tree)
-        # Trees outside all plot buffers are discarded (not added to filtered_trees)
 
     return filtered_trees
 
@@ -1620,10 +1583,6 @@ def generate_synthetic_trees(
     if not calculation:
         raise ValueError(f"Calculation {calculation_id} not found")
 
-    # Get boundary geometry
-    boundary_shape = to_shape(calculation.boundary_geom)
-    boundary_wkt = boundary_shape.wkt
-
     # Get species list from result_data
     result_data = calculation.result_data or {}
     species_list = result_data.get('potential_species', [])
@@ -1690,45 +1649,73 @@ def generate_synthetic_trees(
             "Please create a sampling design first from the Sampling tab."
         )
 
-    # Step 2: Extract canopy height pixels
-    report(20, "Extracting canopy height data")
-    pixels = extract_canopy_pixels(boundary_wkt, db)
+    # Step 1.6: Extract plot centers and plot numbers from sampling design
+    from geoalchemy2.shape import to_shape
 
-    if not pixels:
-        raise ValueError("No canopy height data found within boundary")
+    report(15, "Extracting sample plot centers")
+    sample_points_geom = to_shape(sampling_design.points_geometry)
+    plot_assignments = sampling_design.points_block_assignment or []
+    buffer_deg = config['plot_buffer_meters'] / 111320.0
+    plot_area_ha = (3.14159 * (config['plot_buffer_meters'] ** 2)) / 10000.0
 
-    # Step 3: Generate trees
-    report(30, "Generating individual trees")
+    plot_centers = []
+    if hasattr(sample_points_geom, 'geoms'):
+        for idx, point in enumerate(sample_points_geom.geoms):
+            plot_info = next((p for p in plot_assignments if p.get('point_index') == idx), None)
+            plot_number = plot_info.get('plot_number', idx + 1) if plot_info else idx + 1
+            plot_centers.append({
+                'plot_number': str(plot_number),
+                'center': (point.x, point.y),
+                'buffer': point.buffer(buffer_deg)
+            })
+    else:
+        plot_centers.append({
+            'plot_number': '1',
+            'center': (sample_points_geom.x, sample_points_geom.y),
+            'buffer': sample_points_geom.buffer(buffer_deg)
+        })
+
+    # Step 2: Sample canopy height at each plot center from local TIFF
+    report(20, "Sampling canopy height from raster")
+    import rasterio
+    from rasterio.sample import sample_gen
+
+    tiff_path = r"D:\forest_management\canopy_height5m.tif"
+    coords = [(pc['center'][0], pc['center'][1]) for pc in plot_centers]
+
+    with rasterio.open(tiff_path) as src:
+        values = list(sample_gen(src, coords))
+
+    active_plots = []
+    for pc, val in zip(plot_centers, values):
+        height = float(val[0]) if val and val[0] is not None else 0
+        if height > 0:
+            pc['height'] = height
+            active_plots.append(pc)
+
+    if not active_plots:
+        raise ValueError("No canopy height data found at sample plot locations")
+
+    # Step 3: Generate trees per plot (within plot buffer area)
+    report(30, f"Generating trees for {len(active_plots)} plots")
     trees = []
     tree_id = 1
 
-    for idx, pixel in enumerate(pixels):
-        # Progress update every 10% of pixels
-        if idx % max(1, len(pixels) // 5) == 0:
-            progress = 30 + int((idx / len(pixels)) * 50)
-            report(progress, f"Processing pixel {idx+1}/{len(pixels)}")
-
-        canopy_height = pixel['height']
-
-        # Determine trees per hectare (use user's configured max density)
+    for idx, pc in enumerate(active_plots):
+        canopy_height = pc['height']
         trees_per_ha = get_tree_density(canopy_height, forest_type, config['max_trees_per_ha'])
         if trees_per_ha == 0:
-            continue  # Skip pixels with no trees (below threshold)
+            continue
 
-        # Calculate trees in this pixel
-        num_trees = int(trees_per_ha * PIXEL_AREA_HA)
+        num_trees = int(trees_per_ha * plot_area_ha)
         if num_trees == 0:
             continue
 
-        # Generate trees in this pixel
         for _ in range(num_trees):
-            # Generate random point
-            x, y = generate_random_point_in_pixel(pixel['bounds'])
-
-            # ✅ Ensure point is actually within boundary polygon (double-check)
-            tree_point = Point(x, y)
-            if not boundary_shape.contains(tree_point):
-                continue  # Skip points outside boundary
+            angle = random.uniform(0, 2 * 3.14159)
+            dist = random.uniform(0, buffer_deg)
+            x = pc['center'][0] + dist * math.cos(angle)
+            y = pc['center'][1] + dist * math.sin(angle)
 
             # Select species
             species = weighted_random_choice(species_list)
@@ -1760,7 +1747,7 @@ def generate_synthetic_trees(
                     species_coefficients=species_coefficients[scientific_name]
                 )
 
-            # Create tree record
+            # Create tree record (with pre-assigned plot number)
             trees.append({
                 'tree_id': tree_id,
                 'geometry': (x, y),
@@ -1777,7 +1764,7 @@ def generate_synthetic_trees(
                 'generated_date': datetime.now().isoformat(),
                 'model_version': config['algorithm_version'],
                 'notes': 'SYNTHETIC DATA - Not ground survey',
-                'sample_plot_number': None,  # Will be assigned later
+                'sample_plot_number': pc['plot_number'],
                 # Volume calculations (Forest Regulation 2079)
                 'stem_volume': volumes['stem_volume'],
                 'branch_volume': volumes['branch_volume'],
@@ -1795,19 +1782,8 @@ def generate_synthetic_trees(
     report(75, "Assigning block names via spatial join")
     trees = assign_block_names_to_trees(trees, result_data)
 
-    # Step 4: Assign sample plot numbers to trees and FILTER (keep only trees within buffers)
-    report(80, "Filtering trees to sample plots")
     total_trees_generated = len(trees)
-
-    trees = assign_sample_plots_to_trees(
-        trees=trees,
-        sampling_design=sampling_design,
-        buffer_meters=config['plot_buffer_meters'],
-        db=db
-    )
-
-    trees_in_plots = len(trees)
-    report(85, f"Kept {trees_in_plots} trees from {total_trees_generated} generated (within plot buffers)")
+    report(80, f"Generated {total_trees_generated} trees across {len(active_plots)} plots")
 
     # Step 4.5: Generate regeneration entries (1-10 cm DBH) for each sample plot
     report(87, "Generating regeneration entries")
