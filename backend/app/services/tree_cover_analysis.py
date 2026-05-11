@@ -773,7 +773,8 @@ def calculate_block_area_details(
                     'block_name': block_name, 'total_area_ha': total_area_ha,
                     'tree_cover_area_ha': 0.0, 'other_landcover_area_ha': 0.0,
                     'protected_area_ha': 0.0, 'private_land_area_ha': 0.0,
-                    'effective_area_ha': 0.0, 'error': 'No geometry'
+                    'effective_area_ha': 0.0, 'official_area_ha': 0.0,
+                    'error': 'No geometry'
                 })
                 continue
 
@@ -789,7 +790,8 @@ def calculate_block_area_details(
                     'block_name': block_name, 'total_area_ha': total_area_ha,
                     'tree_cover_area_ha': 0.0, 'other_landcover_area_ha': 0.0,
                     'protected_area_ha': 0.0, 'private_land_area_ha': 0.0,
-                    'effective_area_ha': 0.0, 'error': 'Invalid geometry type'
+                    'effective_area_ha': 0.0, 'official_area_ha': 0.0,
+                    'error': 'Invalid geometry type'
                 })
                 continue
 
@@ -945,7 +947,8 @@ def calculate_block_area_details(
                 'other_landcover_area_ha': round(other_landcover_area_ha, 4),
                 'protected_area_ha': round(protected_area_ha, 4),
                 'private_land_area_ha': round(private_land_area_ha, 4),
-                'effective_area_ha': round(effective_area_ha, 4)
+                'effective_area_ha': round(effective_area_ha, 4),
+                'official_area_ha': round(total_area_ha - private_land_area_ha, 4)
             }
 
             results.append(block_result)
@@ -967,6 +970,7 @@ def calculate_block_area_details(
                 'protected_area_ha': 0.0,
                 'private_land_area_ha': 0.0,
                 'effective_area_ha': 0.0,
+                'official_area_ha': 0.0,
                 'error': str(e)
             })
 

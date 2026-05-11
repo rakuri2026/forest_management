@@ -3,6 +3,7 @@ import { fieldInventoryApi, forestApi } from '../services/api';
 
 interface TotalInventoryTabProps {
   calculationId: string;
+  refreshKey?: number;
 }
 
 interface TreeCoverArea {
@@ -15,7 +16,7 @@ interface TreeCoverArea {
   tree_cover_ratio: number;
 }
 
-export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculationId }) => {
+export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculationId, refreshKey = 0 }) => {
   const [loading, setLoading] = useState(false);
   const [treeCoverLoading, setTreeCoverLoading] = useState(false);
   const [treeCoverError, setTreeCoverError] = useState<string | null>(null);
@@ -25,20 +26,16 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
   const [treeCoverAreas, setTreeCoverAreas] = useState<Record<string, TreeCoverArea>>({});
   const [totalData, setTotalData] = useState<any>(null);
   const [customMultipliers, setCustomMultipliers] = useState<Record<string, number>>({});
-  const [areasManuallyChanged, setAreasManuallyChanged] = useState(false);
   const [initialCalculationDone, setInitialCalculationDone] = useState(false);
 
   useEffect(() => {
-    // Reset states when calculation changes
     setInitialCalculationDone(false);
-    setAreasManuallyChanged(false);
     setTotalData(null);
 
     loadFieldInventory();
     loadTreeCoverAreas();
-  }, [calculationId]);
+  }, [calculationId, refreshKey]);
 
-  // Auto-calculate totals immediately when both field inventory and tree cover areas are loaded
   useEffect(() => {
     if (
       fieldInventory?.id &&
@@ -47,12 +44,12 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
       !initialCalculationDone &&
       !loading
     ) {
-      // Check if all areas are populated (non-zero)
       const allAreasPopulated = Object.values(blockAreas).every(area => area > 0);
       if (allAreasPopulated) {
         console.log('Auto-calculating totals with tree cover areas...');
-        handleCalculateTotals(false); // Silent auto-calculation (no alerts)
-        setInitialCalculationDone(true);
+        handleCalculateTotals(false).then(() => {
+          setInitialCalculationDone(true);
+        });
       }
     }
   }, [fieldInventory, treeCoverAreas, blockAreas, initialCalculationDone, loading]);
@@ -71,22 +68,38 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
         return;
       }
 
-      // Convert array to map for easy lookup
       const treeCoverMap: Record<string, TreeCoverArea> = {};
       response.tree_cover_areas?.forEach((area: TreeCoverArea) => {
         treeCoverMap[area.block_name] = area;
       });
-
       setTreeCoverAreas(treeCoverMap);
 
-      // Auto-populate block areas with effective tree cover areas
-      const areas: Record<string, number> = {};
-      response.tree_cover_areas?.forEach((area: TreeCoverArea) => {
-        areas[area.block_name] = area.effective_area_ha;
-      });
-      setBlockAreas(areas);
+      let effectiveAreas: Record<string, number> = {};
+      try {
+        console.log('Fetching block-area-detail for calculation:', calculationId);
+        const blockDetail = await forestApi.getBlockAreaDetail(calculationId);
+        console.log('Block-area-detail response:', blockDetail);
+        if (blockDetail?.block_details && blockDetail.block_details.length > 0) {
+          blockDetail.block_details.forEach((bd: any) => {
+            effectiveAreas[bd.block_name] = bd.effective_area_ha || 0;
+          });
+          console.log('Using effective areas from block-area-detail:', effectiveAreas);
+        } else {
+          console.warn('Block-area-detail returned no block_details');
+        }
+      } catch (bdErr: any) {
+        console.warn('Failed to load block area details:', bdErr?.response?.data || bdErr.message || bdErr);
+      }
 
-      console.log('Tree cover areas loaded successfully:', treeCoverMap);
+      if (Object.keys(effectiveAreas).length === 0) {
+        console.log('Falling back to tree_cover_areas effective_area_ha');
+        response.tree_cover_areas?.forEach((area: TreeCoverArea) => {
+          effectiveAreas[area.block_name] = area.effective_area_ha;
+        });
+      }
+
+      console.log('Setting blockAreas to:', effectiveAreas);
+      setBlockAreas(effectiveAreas);
 
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
@@ -117,16 +130,6 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
     }
   };
 
-  const handleBlockAreaChange = (blockName: string, value: string) => {
-    const numValue = parseFloat(value);
-    setBlockAreas({
-      ...blockAreas,
-      [blockName]: isNaN(numValue) ? 0 : numValue
-    });
-    // Mark that user has manually changed areas
-    setAreasManuallyChanged(true);
-  };
-
   const handleCalculateTotals = async (showAlerts: boolean = true) => {
     if (!fieldInventory?.id) {
       if (showAlerts) {
@@ -135,7 +138,6 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
       return;
     }
 
-    // Check if all areas are entered
     const missingAreas = Object.entries(blockAreas).filter(([_, area]) => area === 0);
     if (missingAreas.length > 0) {
       if (showAlerts) {
@@ -153,7 +155,7 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
         customMultipliers
       );
       setTotalData(result);
-      console.log('Total inventory calculated successfully');
+      console.log('Total inventory calculated successfully:', result);
     } catch (err) {
       console.error('Error calculating total inventory:', err);
       if (showAlerts) {
@@ -174,12 +176,14 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
     );
   }
 
+  const treeCoverList = Object.values(treeCoverAreas);
+
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-2 border-blue-300 p-6">
         <h3 className="text-xl font-bold text-blue-900 mb-2">Total Inventory - Absolute Quantities</h3>
         <p className="text-sm text-gray-600">
-          Enter block areas to calculate total quantities (trees, volumes, biomass) for your forest.
+          Block areas auto-populated from effective forest cover (excludes barren land, water bodies, etc.).
         </p>
       </div>
 
@@ -211,70 +215,76 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
               <p className="font-medium">Tree Cover Areas Auto-Populated</p>
               <p className="text-xs mt-1">
                 Areas below show effective forest cover (excludes barren land, water bodies, etc.).
-                You can manually adjust if needed.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {summary?.blocks?.map((block: any) => {
-                const treeCoverInfo = treeCoverAreas[block.block_name];
+              {treeCoverList.map((treeCoverInfo) => {
+                const effectiveArea = blockAreas[treeCoverInfo.block_name] ?? treeCoverInfo.effective_area_ha;
                 return (
-                  <div key={block.block_name} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <label className="font-semibold text-gray-900 mb-2 block">{block.block_name}</label>
+                <div key={treeCoverInfo.block_name} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <label className="font-semibold text-gray-900 mb-2 block">{treeCoverInfo.block_name}</label>
 
-                    <div className="flex items-center gap-2 mb-2">
-                      <input
-                        type="number"
-                        value={blockAreas[block.block_name] || ''}
-                        onChange={(e) => handleBlockAreaChange(block.block_name, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="0.00"
-                        min="0"
-                        step="0.01"
-                      />
-                      <span className="text-sm font-medium text-gray-600">ha</span>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex-1 px-3 py-2 bg-gray-100 border border-gray-300 rounded-md text-gray-700 font-medium">
+                      {effectiveArea.toFixed(2)}
                     </div>
-
-                    {treeCoverInfo && (
-                      <div className="text-xs text-gray-600 space-y-1 bg-white p-2 rounded border border-gray-200">
-                        <div className="flex justify-between">
-                          <span>Total Boundary:</span>
-                          <span className="font-medium">{treeCoverInfo.total_area_ha.toFixed(2)} ha</span>
-                        </div>
-                        <div className="flex justify-between text-green-700 font-medium">
-                          <span>Forest Cover:</span>
-                          <span>{treeCoverInfo.effective_area_ha.toFixed(2)} ha ({treeCoverInfo.tree_cover_percentage.toFixed(1)}%)</span>
-                        </div>
-                      </div>
-                    )}
+                    <span className="text-sm font-medium text-gray-600">ha</span>
                   </div>
-                );
-              })}
-            </div>
 
-            {areasManuallyChanged && (
-              <div className="mt-4 p-3 bg-amber-50 rounded-md border border-amber-200">
-                <p className="text-sm text-amber-800 mb-2">
-                  You have modified area values. Click the button below to recalculate.
-                </p>
-                <button
-                  onClick={() => {
-                    handleCalculateTotals();
-                    setAreasManuallyChanged(false);
-                  }}
-                  disabled={loading}
-                  className="px-6 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:bg-gray-400 font-medium"
-                >
-                  {loading ? 'Recalculating...' : 'Recalculate Total Inventory'}
-                </button>
-              </div>
-            )}
+                  <div className="text-xs text-gray-600 space-y-1 bg-white p-2 rounded border border-gray-200">
+                    <div className="flex justify-between">
+                      <span>Total Boundary:</span>
+                      <span className="font-medium">{treeCoverInfo.total_area_ha.toFixed(2)} ha</span>
+                    </div>
+                    <div className="flex justify-between text-green-700 font-medium">
+                      <span>Forest Cover:</span>
+                      <span>{treeCoverInfo.effective_area_ha.toFixed(2)} ha ({treeCoverInfo.tree_cover_percentage.toFixed(1)}%)</span>
+                    </div>
+                  </div>
+                </div>
+              ); })}
+            </div>
           </>
         )}
       </div>
 
+      {/* Manual calculate trigger (fallback if auto-calc didn't run) */}
+      {treeCoverList.length > 0 && !totalData && !loading && (
+        <div className="text-center">
+          <button
+            onClick={() => handleCalculateTotals(true)}
+            disabled={loading}
+            className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 font-medium"
+          >
+            {loading ? 'Calculating...' : 'Calculate Total Inventory'}
+          </button>
+        </div>
+      )}
+
+      {/* Loading indicator */}
+      {loading && !totalData && (
+        <div className="text-center py-8">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <p className="text-sm text-gray-600 mt-2">Calculating total inventory...</p>
+        </div>
+      )}
+
+      {/* No matching blocks warning */}
+      {totalData && (!totalData.forest_totals || Object.keys(totalData.forest_totals).length === 0) && (
+        <div className="p-4 bg-red-50 rounded-md border border-red-200">
+          <p className="text-sm text-red-800 font-medium">No matching blocks found</p>
+          <p className="text-xs text-red-700 mt-1">
+            Block names from tree cover ({Object.keys(blockAreas).join(', ')}) do not match block names in field inventory data.
+          </p>
+          <p className="text-xs text-red-600 mt-1">
+            Try re-uploading the field inventory CSV with matching block names.
+          </p>
+        </div>
+      )}
+
       {/* Total Inventory Results */}
-      {totalData && (
+      {totalData && totalData.forest_totals && Object.keys(totalData.forest_totals).length > 0 && (
         <>
           {/* Forest-Wide Totals Summary */}
           <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border-2 border-green-400 p-6 shadow-lg">
@@ -282,54 +292,55 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               <div className="bg-white rounded-lg p-4 shadow-md">
                 <div className="text-xs text-gray-500 mb-1">Total Area</div>
-                <div className="text-2xl font-bold text-green-700">{totalData.forest_totals.total_area_ha.toLocaleString()} ha</div>
+                <div className="text-2xl font-bold text-green-700">{(totalData.forest_totals.total_area_ha || 0).toLocaleString()} ha</div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md">
                 <div className="text-xs text-gray-500 mb-1">Total Trees</div>
                 <div className="text-2xl font-bold text-blue-700">
-                  {(totalData.forest_totals.total_pole + totalData.forest_totals.total_tree).toLocaleString()}
+                  {((totalData.forest_totals.total_pole || 0) + (totalData.forest_totals.total_tree || 0)).toLocaleString()}
                 </div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md">
                 <div className="text-xs text-gray-500 mb-1">Growing Stock</div>
                 <div className="text-xl font-bold text-amber-700">
-                  {totalData.forest_totals.total_growing_stock_m3.toLocaleString()} m³
+                  {(totalData.forest_totals.total_growing_stock_m3 || 0).toLocaleString()} m³
                 </div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md">
                 <div className="text-xs text-gray-500 mb-1">MAI/Year</div>
                 <div className="text-xl font-bold text-purple-700">
-                  {totalData.forest_totals.total_mai_m3_per_year.toLocaleString()} m³
+                  {(totalData.forest_totals.total_mai_m3_per_year || 0).toLocaleString()} m³
                 </div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md bg-amber-50">
                 <div className="text-xs text-gray-600 mb-1 font-medium">AAH/Year</div>
                 <div className="text-2xl font-bold text-amber-800">
-                  {totalData.forest_totals.total_aah_m3_per_year.toLocaleString()} m³
+                  {(totalData.forest_totals.total_aah_m3_per_year || 0).toLocaleString()} m³
                 </div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md">
                 <div className="text-xs text-gray-500 mb-1">Total Biomass</div>
                 <div className="text-xl font-bold text-teal-700">
-                  {totalData.forest_totals.total_biomass_tonnes.toLocaleString()} t
+                  {(totalData.forest_totals.total_biomass_tonnes || 0).toLocaleString()} t
                 </div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md">
                 <div className="text-xs text-gray-500 mb-1">Carbon Stock</div>
                 <div className="text-xl font-bold text-teal-700">
-                  {totalData.forest_totals.total_carbon_tc.toLocaleString()} tC
+                  {(totalData.forest_totals.total_carbon_tc || 0).toLocaleString()} tC
                 </div>
               </div>
               <div className="bg-white rounded-lg p-4 shadow-md bg-teal-50">
                 <div className="text-xs text-gray-600 mb-1 font-medium">CO₂ Equivalent</div>
                 <div className="text-xl font-bold text-teal-800">
-                  {totalData.forest_totals.total_co2_tco2.toLocaleString()} tCO₂
+                  {(totalData.forest_totals.total_co2_tco2 || 0).toLocaleString()} tCO₂
                 </div>
               </div>
             </div>
           </div>
 
           {/* Block-wise Totals Table */}
+          {totalData.blocks && totalData.blocks.length > 0 && (
           <div className="bg-white rounded-lg shadow p-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">Block-wise Total Inventory</h4>
             <div className="overflow-x-auto">
@@ -358,36 +369,45 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
                   {totalData.blocks.map((block: any, index: number) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{block.block_name}</td>
-                      <td className="px-3 py-3 text-sm text-center border-r border-gray-200">{block.area_ha.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_regeneration.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_sapling.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_pole.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{block.total_tree.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_growing_stock_m3.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_mai_m3.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right border-r border-gray-200 font-semibold text-amber-700">{block.total_aah_m3.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_biomass_tonnes.toLocaleString()}</td>
-                      <td className="px-2 py-3 text-sm text-right">{block.total_co2_tco2.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-sm text-center border-r border-gray-200">{(block.area_ha || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_regeneration || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_sapling || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_pole || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{(block.total_tree || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_growing_stock_m3 || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_mai_m3 || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right border-r border-gray-200 font-semibold text-amber-700">{(block.total_aah_m3 || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_biomass_tonnes || 0).toLocaleString()}</td>
+                      <td className="px-2 py-3 text-sm text-right">{(block.total_co2_tco2 || 0).toLocaleString()}</td>
                     </tr>
                   ))}
-                  {/* Totals Row */}
                   <tr className="bg-green-100 font-bold">
                     <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">Total Forest</td>
-                    <td className="px-3 py-3 text-sm text-center border-r border-gray-200">{totalData.forest_totals.total_area_ha.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_regeneration.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_sapling.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_pole.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{totalData.forest_totals.total_tree.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_growing_stock_m3.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_mai_m3_per_year.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right border-r border-gray-200 text-amber-900">{totalData.forest_totals.total_aah_m3_per_year.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_biomass_tonnes.toLocaleString()}</td>
-                    <td className="px-2 py-3 text-sm text-right">{totalData.forest_totals.total_co2_tco2.toLocaleString()}</td>
+                    <td className="px-3 py-3 text-sm text-center border-r border-gray-200">{(totalData.forest_totals.total_area_ha || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_regeneration || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_sapling || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_pole || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{(totalData.forest_totals.total_tree || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_growing_stock_m3 || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_mai_m3_per_year || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right border-r border-gray-200 text-amber-900">{(totalData.forest_totals.total_aah_m3_per_year || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_biomass_tonnes || 0).toLocaleString()}</td>
+                    <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_co2_tco2 || 0).toLocaleString()}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
+          )}
+
+          {/* Show warning if some blocks couldn't be matched */}
+          {totalData.missing_areas && totalData.missing_areas.length > 0 && (
+            <div className="p-4 bg-amber-50 rounded-md border border-amber-200">
+              <p className="text-sm text-amber-800 font-medium">Blocks with missing area data:</p>
+              <p className="text-xs text-amber-700 mt-1">{totalData.missing_areas.join(', ')}</p>
+              <p className="text-xs text-amber-600 mt-1">Block names in field inventory may not match current calculation blocks.</p>
+            </div>
+          )}
         </>
       )}
     </div>

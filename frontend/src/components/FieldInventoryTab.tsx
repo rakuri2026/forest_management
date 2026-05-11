@@ -3,9 +3,10 @@ import { fieldInventoryApi } from '../services/api';
 
 interface FieldInventoryTabProps {
   calculationId: string;
+  blocks?: any[];
 }
 
-export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
+export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventoryTabProps) {
   const [fieldInventory, setFieldInventory] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [speciesBreakdown, setSpeciesBreakdown] = useState<any>(null);
@@ -390,6 +391,18 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
     );
   }
 
+  // Map field-inventory block names to current calculation block names
+  const blockNameMap: Record<string, string> = {};
+  if (summary?.blocks && blocks.length > 0) {
+    summary.blocks.forEach((sb: any, idx: number) => {
+      const current = blocks[idx];
+      if (current && current.block_name !== sb.block_name) {
+        blockNameMap[sb.block_name] = current.block_name;
+      }
+    });
+  }
+  const displayBlockName = (name: string): string => blockNameMap[name] || name;
+
   if (loading && !initialized) {
     return (
       <div className="flex flex-col justify-center items-center py-12">
@@ -677,7 +690,7 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
 
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{block.block_name}</td>
+                            <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{displayBlockName(block.block_name)}</td>
                             <td className="px-3 py-3 text-sm text-gray-700 border-r border-gray-200">{block.total_sample_plots}</td>
 
                             {/* Trees per hectare */}
@@ -820,7 +833,7 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
 
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-3 py-3 text-sm text-gray-700 border-r border-gray-200">{species.block_name}</td>
+                            <td className="px-3 py-3 text-sm text-gray-700 border-r border-gray-200">{displayBlockName(species.block_name)}</td>
                             <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200 italic">{species.species_scientific}</td>
                             <td className="px-3 py-3 text-sm text-gray-700 border-r border-gray-200">{species.species_local || '-'}</td>
 
@@ -992,7 +1005,7 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {maiAahData?.mai_blocks && Array.isArray(maiAahData.mai_blocks) && maiAahData.mai_blocks.map((mai: any, index: number) => (
                           <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{mai.block_name}</td>
+                            <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{displayBlockName(mai.block_name)}</td>
                             <td className="px-2 py-3 text-sm text-right">{mai.pole_per_ha?.toLocaleString() || 0}</td>
                             <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{mai.tree_per_ha?.toLocaleString() || 0}</td>
                             <td className="px-2 py-3 text-sm text-right">{mai.pole_timber_m3_per_ha.toFixed(2)}</td>
@@ -1055,7 +1068,7 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
                           const block = summary?.blocks?.find((b: any) => b.block_name === aah.block_name);
                           return (
                             <tr key={index} className="hover:bg-gray-50">
-                              <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{aah.block_name}</td>
+                              <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{displayBlockName(aah.block_name)}</td>
                               <td className="px-2 py-3 text-sm text-right">{aah.pole_per_ha?.toLocaleString() || 0}</td>
                               <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{aah.tree_per_ha?.toLocaleString() || 0}</td>
                               <td className={`px-3 py-3 text-sm text-center font-semibold border-r border-gray-200 ${
@@ -1156,7 +1169,7 @@ export function FieldInventoryTab({ calculationId }: FieldInventoryTabProps) {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
               <h3 className="text-lg font-bold text-gray-900 mb-4">
-                Edit AAH Multiplier - {modalBlock.block_name}
+                Edit AAH Multiplier - {displayBlockName(modalBlock.block_name)}
               </h3>
 
               <div className="space-y-4">

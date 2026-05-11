@@ -107,10 +107,10 @@ class InventoryTreeResponse(BaseModel):
     latitude: Optional[float]
 
     # Block and Sub-area
-    block_id: Optional[UUID]
-    block_name: Optional[str]
-    sub_area_id: Optional[UUID]
-    sub_area_name: Optional[str]
+    block_id: Optional[UUID] = None
+    block_name: Optional[str] = None
+    sub_area_id: Optional[UUID] = None
+    sub_area_name: Optional[str] = None
 
     class Config:
         from_attributes = True

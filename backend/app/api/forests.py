@@ -17,6 +17,7 @@ from ..models.forest_manager import ForestManager
 from ..models.calculation import Calculation, CalculationStatus
 from ..models.forest_block import ForestBlock
 from ..models.synthetic_tree_model import SyntheticTreeModel
+from ..models.field_inventory import FieldInventoryCalculation, FieldInventoryBlockSummary, FieldInventorySamplePlot
 from ..schemas.forest import (
     CommunityForestResponse,
     ForestManagerCreate,
@@ -4332,6 +4333,25 @@ async def update_block(
 
     calculation.result_data = result_data
     flag_modified(calculation, "result_data")
+
+    # Sync field inventory block names so Field Inventory tab stays in sync
+    try:
+        field_inv = db.query(FieldInventoryCalculation).filter(
+            FieldInventoryCalculation.calculation_id == calculation_id
+        ).first()
+        if field_inv:
+            db.query(FieldInventoryBlockSummary).filter(
+                FieldInventoryBlockSummary.field_inventory_calculation_id == field_inv.id,
+                FieldInventoryBlockSummary.block_name == old_name
+            ).update({"block_name": name})
+            # Also update sample plot block names (used by species breakdown query)
+            db.query(FieldInventorySamplePlot).filter(
+                FieldInventorySamplePlot.field_inventory_calculation_id == field_inv.id,
+                FieldInventorySamplePlot.block_name == old_name
+            ).update({"block_name": name})
+    except Exception as e:
+        print(f"[update_block] Failed to sync field inventory block name: {e}")
+
     db.commit()
     db.refresh(block)
 
@@ -4855,6 +4875,7 @@ async def get_block_area_detail(
         protected_area_ha=round(sum(b['protected_area_ha'] for b in block_details), 4),
         private_land_area_ha=round(sum(b['private_land_area_ha'] for b in block_details), 4),
         effective_area_ha=round(sum(b['effective_area_ha'] for b in block_details), 4),
+        official_area_ha=round(sum(b['official_area_ha'] for b in block_details), 4),
     )
 
     return BlockAreaDetailResponse(

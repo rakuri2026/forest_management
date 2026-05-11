@@ -696,8 +696,19 @@ class InventoryService:
             )
             print(f"[INVENTORY] Step 7/7: Identified {mother_tree_count} mother trees")
 
-            # 8. Calculate summary statistics from database
-            print(f"[INVENTORY] Step 7/7: Calculating summary statistics...")
+            # 8. Resolve spatial relationships (block, sub-area, compartment hierarchy)
+            print(f"[INVENTORY] Step 8/8: Resolving spatial relationships...")
+            if inventory.calculation_id:
+                spatial_count = await self._update_tree_spatial_relationships(
+                    inventory_id,
+                    inventory.calculation_id
+                )
+                print(f"[INVENTORY] Step 8/8: Updated {spatial_count} spatial relationships")
+            else:
+                print(f"[INVENTORY] Step 8/8: Skipped - no calculation_id")
+
+            # 9. Calculate summary statistics from database
+            print(f"[INVENTORY] Step 9/9: Calculating summary statistics...")
             summary = await self._calculate_summary_from_db(inventory_id)
             print(f"[INVENTORY] Step 7/7: Summary calculated")
 
@@ -815,6 +826,13 @@ class InventoryService:
                     except (KeyError, TypeError):
                         class_val = None
 
+                # Resolve block_name from polygon_boundary column if available
+                tree_block_name = row.get('polygon_boundary', None)
+                if isinstance(tree_block_name, float) and pd.isna(tree_block_name):
+                    tree_block_name = None
+                elif tree_block_name is not None:
+                    tree_block_name = str(tree_block_name)
+
                 tree = InventoryTree(
                     inventory_calculation_id=inventory_id,
                     species=species,
@@ -832,10 +850,11 @@ class InventoryService:
                     firewood_chatta=float(row['firewood_chatta']),
                     remark=row['remark'],
                     grid_cell_id=int(row['grid_cell_id']) if pd.notna(row['grid_cell_id']) else None,
-                    stand_type=row.get('stand_type'),  # NEW: Simple classification
-                    dbh_class=row.get('dbh_class'),    # NEW: Detailed classification
+                    stand_type=row.get('stand_type'),
+                    dbh_class=row.get('dbh_class'),
                     local_name=local_name,
-                    row_number=idx + 2,  # +2 for header and 0-indexing
+                    block_name=tree_block_name,
+                    row_number=idx + 2,
                     extra_columns=extra_cols if extra_cols else None
                 )
 
@@ -1132,6 +1151,131 @@ class InventoryService:
             'total_firewood_chatta': round(float(result[8]), 3) if result[8] is not None else 0.0
         }
 
+    async def _update_tree_spatial_relationships(
+        self,
+        inventory_id: UUID,
+        calculation_id: UUID
+    ) -> int:
+        """
+        Resolve block, sub-area, and compartment hierarchy for all trees
+        using spatial intersection with forest_blocks and forest_sub_areas.
+
+        This stores the resolved info directly on the InventoryTree records
+        so export can read them without expensive spatial re-computation.
+
+        Returns:
+            Number of trees updated
+        """
+        inv_id_str = str(inventory_id)
+        calc_id_str = str(calculation_id)
+        total_updated = 0
+
+        try:
+            # 0. Clean up non-object extra_columns (e.g. list from previous bad merge)
+            self.db.execute(text("""
+                UPDATE public.inventory_trees
+                SET extra_columns = NULL
+                WHERE inventory_calculation_id = :inv_id
+                  AND extra_columns IS NOT NULL
+                  AND jsonb_typeof(extra_columns) != 'object'
+            """), {"inv_id": inv_id_str})
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            print(f"[SPATIAL] Warning: cleanup step failed (non-critical): {e}")
+
+        # 1. Resolve block info (division_level = 0) for trees missing block_name
+        blocks_updated = 0
+        try:
+            block_result = self.db.execute(text("""
+                UPDATE public.inventory_trees t
+                SET block_id = fb.id,
+                    block_name = fb.name
+                FROM public.forest_blocks fb
+                WHERE t.inventory_calculation_id = :inv_id
+                  AND fb.calculation_id = :calc_id
+                  AND fb.division_level = 0
+                  AND ST_Intersects(t.location::geometry, fb.geometry)
+                  AND (t.block_id IS NULL OR t.block_name IS NULL)
+            """), {"inv_id": inv_id_str, "calc_id": calc_id_str})
+            blocks_updated = block_result.rowcount
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            print(f"[SPATIAL] Warning: block resolution failed: {e}")
+        print(f"[SPATIAL] Updated {blocks_updated} trees with block info")
+        total_updated += blocks_updated
+
+        # 2. Resolve sub-area info from calculation.result_data using jsonb_array_elements
+        subareas_updated = 0
+        try:
+            result = self.db.execute(text("""
+                UPDATE public.inventory_trees t
+                SET sub_area_name = sa.value->>'name'
+                FROM public.calculations c
+                CROSS JOIN jsonb_array_elements(c.result_data->'sub_areas') sa
+                WHERE c.id = :calc_id
+                  AND t.inventory_calculation_id = :inv_id
+                  AND t.sub_area_name IS NULL
+                  AND ST_Intersects(
+                      t.location::geometry,
+                      ST_SetSRID(ST_GeomFromGeoJSON(sa.value->>'geometry'), 4326)
+                  )
+            """), {"calc_id": calc_id_str, "inv_id": inv_id_str})
+            self.db.commit()
+            subareas_updated = result.rowcount
+        except Exception as e:
+            self.db.rollback()
+            print(f"[SPATIAL] Warning: sub-area resolution failed: {e}")
+        print(f"[SPATIAL] Updated {subareas_updated} trees with sub-area info")
+        total_updated += subareas_updated
+
+        # 3. Resolve compartment hierarchy info into extra_columns
+        comps_updated = 0
+        try:
+            comp_result = self.db.execute(text("""
+                UPDATE public.inventory_trees t
+                SET extra_columns = CASE
+                    WHEN t.extra_columns IS NULL OR jsonb_typeof(t.extra_columns) = 'object'
+                    THEN COALESCE(t.extra_columns, '{}'::jsonb) || jsonb_build_object(
+                        'compartment_name', comp.name,
+                        'sub_compartment_name', comp.sub_compartment_code,
+                        'parent_compartment_name', comp.parent_name
+                    )
+                    ELSE jsonb_build_object(
+                        'compartment_name', comp.name,
+                        'sub_compartment_name', comp.sub_compartment_code,
+                        'parent_compartment_name', comp.parent_name
+                    )
+                END
+                FROM (
+                    SELECT DISTINCT ON (it.id)
+                        it.id AS tree_id,
+                        fb.name,
+                        fb.compartment_code AS sub_compartment_code,
+                        parent.name AS parent_name
+                    FROM public.inventory_trees it
+                    JOIN public.forest_blocks fb ON ST_Intersects(it.location::geometry, fb.geometry)
+                    LEFT JOIN public.forest_blocks parent ON fb.parent_block_id = parent.id
+                    WHERE it.inventory_calculation_id = :inv_id
+                      AND fb.calculation_id = :calc_id
+                      AND fb.is_compartment = TRUE
+                    ORDER BY it.id, fb.division_level DESC
+                ) comp
+                WHERE t.id = comp.tree_id
+                  AND t.inventory_calculation_id = :inv_id
+            """), {"inv_id": inv_id_str, "calc_id": calc_id_str})
+            comps_updated = comp_result.rowcount
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            print(f"[SPATIAL] Warning: compartment resolution failed: {e}")
+        print(f"[SPATIAL] Updated {comps_updated} trees with compartment hierarchy info")
+        total_updated += comps_updated
+
+        print(f"[SPATIAL] Spatial relationship update complete for inventory {inventory_id}")
+        return total_updated
+
     async def export_inventory(
         self,
         inventory_id: UUID,
@@ -1147,7 +1291,7 @@ class InventoryService:
         Returns:
             Tuple of (file_content, filename)
         """
-        # Get trees from database
+        # Get trees from database (including extra_columns for compartment info)
         trees = self.db.query(InventoryTree).filter(
             InventoryTree.inventory_calculation_id == inventory_id
         ).all()
@@ -1155,7 +1299,36 @@ class InventoryService:
         if not trees:
             raise ValueError("No trees found for this inventory")
 
-        # Create DataFrame
+        inventory = self.db.query(InventoryCalculation).filter(
+            InventoryCalculation.id == inventory_id
+        ).first()
+        calculation_id = inventory.calculation_id if inventory else None
+
+        print(f"[EXPORT] Exporting {len(trees)} trees for inventory {inventory_id}")
+
+        # Resolve missing sub-area names on-the-fly using calculation's result_data
+        if calculation_id:
+            try:
+                result = self.db.execute(text("""
+                    UPDATE public.inventory_trees t
+                    SET sub_area_name = sa.value->>'name'
+                    FROM public.calculations c
+                    CROSS JOIN jsonb_array_elements(c.result_data->'sub_areas') sa
+                    WHERE c.id = :calc_id
+                      AND t.inventory_calculation_id = :inv_id
+                      AND t.sub_area_name IS NULL
+                      AND ST_Intersects(
+                          t.location::geometry,
+                          ST_SetSRID(ST_GeomFromGeoJSON(sa.value->>'geometry'), 4326)
+                      )
+                """), {"calc_id": str(calculation_id), "inv_id": str(inventory_id)})
+                self.db.commit()
+                print(f"[EXPORT] Resolved {result.rowcount} sub-area assignments")
+            except Exception as e:
+                self.db.rollback()
+                print(f"[EXPORT] Sub-area resolution skipped: {e}")
+
+        # Create DataFrame directly from stored values
         data = []
         extra_cols_found = 0
         for tree in trees:
@@ -1167,16 +1340,31 @@ class InventoryService:
 
             lon, lat = result[0], result[1]
 
+            # Read compartment info from extra_columns if available
+            compartment_name = None
+            sub_compartment_name = None
+            parent_compartment_name = None
+            extra_cols = tree.extra_columns
+            if extra_cols and isinstance(extra_cols, dict):
+                compartment_name = extra_cols.get('compartment_name')
+                sub_compartment_name = extra_cols.get('sub_compartment_name')
+                parent_compartment_name = extra_cols.get('parent_compartment_name')
+
             row_data = {
                 'species': tree.species,
                 'local_name': tree.local_name,
                 'dia_cm': tree.dia_cm,
                 'height_m': tree.height_m,
                 'tree_class': tree.tree_class,
-                'stand_type': tree.stand_type,      # NEW: Simple classification
-                'dbh_class': tree.dbh_class,        # NEW: Detailed classification
+                'stand_type': tree.stand_type,
+                'dbh_class': tree.dbh_class,
                 'longitude': lon,
                 'latitude': lat,
+                'block_name': tree.block_name,
+                'sub_area_name': tree.sub_area_name,
+                'compartment_name': compartment_name,
+                'sub_compartment_name': sub_compartment_name,
+                'parent_compartment_name': parent_compartment_name,
                 'stem_volume': tree.stem_volume,
                 'branch_volume': tree.branch_volume,
                 'tree_volume': tree.tree_volume,
@@ -1189,12 +1377,13 @@ class InventoryService:
                 'grid_cell_id': tree.grid_cell_id
             }
 
-            # Add extra columns if they exist
-            if tree.extra_columns:
-                row_data.update(tree.extra_columns)
-                extra_cols_found += 1
-                if extra_cols_found == 1:
-                    print(f"[EXPORT] First tree with extra columns: {tree.extra_columns}")
+            # Add extra columns if they exist (excluding already-used compartment keys)
+            if extra_cols and isinstance(extra_cols, dict):
+                extra_for_row = {k: v for k, v in extra_cols.items()
+                                 if k not in ('compartment_name', 'sub_compartment_name', 'parent_compartment_name')}
+                if extra_for_row:
+                    row_data.update(extra_for_row)
+                    extra_cols_found += 1
 
             data.append(row_data)
 
@@ -1230,6 +1419,11 @@ class InventoryService:
                         'tree_class': row['tree_class'],
                         'stand_type': row['stand_type'],      # NEW: Simple classification
                         'dbh_class': row['dbh_class'],        # NEW: Detailed classification
+                        'block_name': row['block_name'],
+                        'sub_area_name': row['sub_area_name'],
+                        'compartment_name': row['compartment_name'],
+                        'sub_compartment_name': row['sub_compartment_name'],
+                        'parent_compartment_name': row['parent_compartment_name'],
                         'stem_volume': float(row['stem_volume']) if pd.notna(row['stem_volume']) else None,
                         'branch_volume': float(row['branch_volume']) if pd.notna(row['branch_volume']) else None,
                         'tree_volume': float(row['tree_volume']) if pd.notna(row['tree_volume']) else None,

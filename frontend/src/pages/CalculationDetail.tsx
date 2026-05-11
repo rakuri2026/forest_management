@@ -167,6 +167,7 @@ export default function CalculationDetail() {
   // Block rename state
   const [renamingBlockId, setRenamingBlockId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [fieldInvRefreshKey, setFieldInvRefreshKey] = useState(0);
 
   // Map editor state
   const [showMapEditor, setShowMapEditor] = useState(false);
@@ -545,6 +546,7 @@ export default function CalculationDetail() {
       });
       setSubAreas(prev => prev.map(renameInSubArea));
       setSubAreaRefreshKey(k => k + 1);
+      setFieldInvRefreshKey(k => k + 1);
     } catch (err: any) {
       console.error('Failed to rename block:', err);
     }
@@ -933,11 +935,14 @@ export default function CalculationDetail() {
                                 <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">अन्यले ढाकेको<br/><span className="font-normal text-gray-400">(Other Landcover ha)</span></th>
                                 <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">संरक्षित क्षेत्र<br/><span className="font-normal text-gray-400">(Protected ha)</span></th>
                                 <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">निजि आवादी<br/><span className="font-normal text-gray-400">(Private Land ha)</span></th>
+                                <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">ब्लकको क्षेत्रफल<br/><span className="font-normal text-gray-400">(Official Area ha)</span></th>
                                 <th className="px-2 py-2 text-right font-medium text-gray-500 uppercase">प्रभावित क्षेत्र<br/><span className="font-normal text-gray-400">(Effective ha)</span></th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                              {blockAreaDetails.map((detail: any, idx: number) => (
+                              {blockAreaDetails.map((detail: any, idx: number) => {
+                                const officialArea = (detail.total_area_ha || 0) - (detail.private_land_area_ha || 0);
+                                return (
                                 <tr key={idx} className="hover:bg-gray-50">
                                   <td className="px-2 py-2 text-sm font-medium text-gray-900">{detail.block_name}</td>
                                   <td className="px-2 py-2 text-sm text-gray-900 text-right">{detail.total_area_ha?.toFixed(2)}</td>
@@ -945,11 +950,13 @@ export default function CalculationDetail() {
                                   <td className="px-2 py-2 text-sm text-gray-600 text-right">{detail.other_landcover_area_ha?.toFixed(2)}</td>
                                   <td className="px-2 py-2 text-sm text-orange-600 text-right">{detail.protected_area_ha?.toFixed(2)}</td>
                                   <td className="px-2 py-2 text-sm text-red-600 text-right">{detail.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-purple-700 font-semibold text-right">{officialArea.toFixed(2)}</td>
                                   <td className={`px-2 py-2 text-sm font-semibold text-right ${(detail.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
                                     {detail.effective_area_ha?.toFixed(2)}
                                   </td>
                                 </tr>
-                              ))}
+                                );
+                              })}
                               {/* TOTAL row */}
                               {blockAreaTotals && (
                                 <tr className="bg-gray-100 font-semibold">
@@ -959,6 +966,7 @@ export default function CalculationDetail() {
                                   <td className="px-2 py-2 text-sm text-gray-800 text-right">{blockAreaTotals.other_landcover_area_ha?.toFixed(2)}</td>
                                   <td className="px-2 py-2 text-sm text-orange-700 text-right">{blockAreaTotals.protected_area_ha?.toFixed(2)}</td>
                                   <td className="px-2 py-2 text-sm text-red-700 text-right">{blockAreaTotals.private_land_area_ha?.toFixed(2)}</td>
+                                  <td className="px-2 py-2 text-sm text-purple-800 font-bold text-right">{(blockAreaTotals.total_area_ha - (blockAreaTotals.private_land_area_ha || 0)).toFixed(2)}</td>
                                   <td className={`px-2 py-2 text-sm font-bold text-right ${(blockAreaTotals.effective_area_ha || 0) < 0 ? 'text-red-700' : 'text-blue-700'}`}>
                                     {blockAreaTotals.effective_area_ha?.toFixed(2)}
                                   </td>
@@ -1104,13 +1112,13 @@ export default function CalculationDetail() {
 
         {activeTab === 'fieldinventory' && (
           <div className="p-6">
-            <FieldInventoryTab calculationId={calculation.id} />
+            <FieldInventoryTab key={fieldInvRefreshKey} calculationId={calculation.id} blocks={blocks} />
           </div>
         )}
 
         {activeTab === 'totalinventory' && (
           <div className="p-6">
-            <TotalInventoryTab calculationId={calculation.id} />
+            <TotalInventoryTab calculationId={calculation.id} refreshKey={subAreaRefreshKey} />
           </div>
         )}
 

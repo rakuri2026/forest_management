@@ -11,8 +11,16 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
+  const getErrorDetail = (err: any): string => {
+    const detail = err?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return detail.map((d: any) => d.msg).join('; ');
+    if (err?.message) return err.message;
+    return 'An unexpected error occurred';
+  };
+
   // Generation settings
-  const [interpolationDistance, setInterpolationDistance] = useState(100);
+  const [interpolationDistance, setInterpolationDistance] = useState(0);
   const [extractElevation, setExtractElevation] = useState(true);
 
   // Topographic features toggle (default: OFF for performance)
@@ -58,7 +66,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       }
     } catch (err: any) {
       if (err.response?.status !== 404) {
-        setError(err.response?.data?.detail || 'Failed to load fieldbook');
+        setError(getErrorDetail(err));
       }
     } finally {
       setLoading(false);
@@ -66,8 +74,22 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   };
 
   const handleGenerate = async () => {
-    if (!confirm('Generate fieldbook? This will delete any existing fieldbook for this calculation.')) {
-      return;
+    // Auto-delete stale empty fieldbook (0 points) before generating
+    if (fieldbook && fieldbook.total_count === 0) {
+      try {
+        await fieldbookApi.delete(calculationId);
+      } catch (e) {
+        // Ignore — fieldbook may not exist on server
+      }
+    } else if (fieldbook && fieldbook.total_count > 0) {
+      if (!confirm('Generate fieldbook? This will delete any existing fieldbook for this calculation.')) {
+        return;
+      }
+      try {
+        await fieldbookApi.delete(calculationId);
+      } catch (e) {
+        // Ignore
+      }
     }
 
     setGenerating(true);
@@ -76,7 +98,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       const result = await fieldbookApi.generate(calculationId, {
         interpolation_distance_meters: interpolationDistance,
         extract_elevation: extractElevation,
-        calculate_reference: false,  // Deprecated - features calculated during export
+        calculate_reference: false,
       });
 
       alert(`Fieldbook generated successfully!\n\nTotal points: ${result.total_points}\nVertices: ${result.total_vertices}\nInterpolated: ${result.interpolated_points}\nPerimeter: ${parseFloat(result.total_perimeter_meters).toFixed(2)}m`);
@@ -86,7 +108,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       sessionStorage.removeItem(cacheKey);
       await loadFieldbook(true); // Skip cache, fetch fresh
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to generate fieldbook');
+      setError(getErrorDetail(err));
     } finally {
       setGenerating(false);
     }
@@ -107,7 +129,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       setFieldbook(null);
       alert('Fieldbook deleted successfully');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete fieldbook');
+      setError(getErrorDetail(err));
     }
   };
 
@@ -129,7 +151,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err: any) {
-      alert(err.response?.data?.detail || `Failed to export ${format}`);
+      alert(getErrorDetail(err));
     }
   };
 
@@ -146,23 +168,26 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       {/* Generation Form */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold mb-4">
-          {fieldbook ? 'Fieldbook Generated' : 'Generate Fieldbook'}
+          {fieldbook && fieldbook.total_count > 0 ? 'Fieldbook Generated' : 'Generate Fieldbook'}
         </h3>
 
-        {!fieldbook && (
+        {(!fieldbook || fieldbook.total_count === 0) && (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Interpolation Distance (meters)
               </label>
-              <input
-                type="number"
-                min="5"
-                max="200"
+              <select
                 value={interpolationDistance}
                 onChange={(e) => setInterpolationDistance(parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+              >
+                <option value={0}>0 — No interpolation (vertices only)</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={150}>150</option>
+                <option value={200}>200</option>
+              </select>
               <p className="text-xs text-gray-500 mt-1">
                 Distance between interpolated points along boundary edges
               </p>
@@ -206,7 +231,7 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
           </div>
         )}
 
-        {fieldbook && (
+        {fieldbook && fieldbook.total_count > 0 && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>

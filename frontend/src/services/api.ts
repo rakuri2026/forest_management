@@ -724,6 +724,12 @@ exportInventory: async (id: string, format: "csv" | "geojson" | "excel"): Promis
     return response.data;
   },
 
+  // Update block/sub-area via spatial intersection
+  updateTreeBlockSubarea: async (inventoryId: string): Promise<any> => {
+    const response = await api.post(`/api/inventory/${inventoryId}/update-block-subarea`);
+    return response.data;
+  },
+
   // Get grid cells for a specific inventory calculation
   getGridCells: async (inventoryId: string): Promise<any> => {
     const response = await api.get(`/api/inventory/${inventoryId}/grid-cells`);

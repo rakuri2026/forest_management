@@ -334,6 +334,7 @@ class BlockAreaDetailItem(BaseModel):
     protected_area_ha: float
     private_land_area_ha: float
     effective_area_ha: float
+    official_area_ha: float = 0.0
 
 
 class BlockAreaDetailResponse(BaseModel):

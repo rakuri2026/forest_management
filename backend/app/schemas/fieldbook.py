@@ -52,10 +52,10 @@ class FieldbookPoint(FieldbookPointBase):
 class FieldbookGenerateRequest(BaseModel):
     """Request schema for generating fieldbook"""
     interpolation_distance_meters: int = Field(
-        default=20,
-        ge=5,
-        le=100,
-        description="Distance for interpolating points between vertices (meters)"
+        default=0,
+        ge=0,
+        le=200,
+        description="Distance for interpolating points between vertices (meters). 0 = vertices only."
     )
     extract_elevation: bool = Field(
         default=True,

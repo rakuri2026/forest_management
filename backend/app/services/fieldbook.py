@@ -418,7 +418,7 @@ def generate_fieldbook_points(
                 point_number += 1
 
                 # Interpolate points along this edge
-                if edge_distance > interpolation_distance:
+                if interpolation_distance > 0 and edge_distance > interpolation_distance:
                     num_intervals = int(edge_distance / interpolation_distance)
                     for j in range(1, num_intervals + 1):
                         fraction = (j * interpolation_distance) / edge_distance
@@ -486,7 +486,7 @@ def generate_fieldbook_points(
                 point_number += 1
 
                 # Interpolate points along this edge
-                if edge_distance > interpolation_distance:
+                if interpolation_distance > 0 and edge_distance > interpolation_distance:
                     num_intervals = int(edge_distance / interpolation_distance)
                     for j in range(1, num_intervals + 1):
                         fraction = (j * interpolation_distance) / edge_distance
@@ -540,7 +540,7 @@ def generate_fieldbook_points(
             point_number += 1
 
             # Interpolate points
-            if edge_distance > interpolation_distance:
+            if interpolation_distance > 0 and edge_distance > interpolation_distance:
                 num_intervals = int(edge_distance / interpolation_distance)
                 for j in range(1, num_intervals + 1):
                     fraction = (j * interpolation_distance) / edge_distance
@@ -551,8 +551,8 @@ def generate_fieldbook_points(
                             'point_type': 'interpolated',
                             'longitude': lon_interp,
                             'latitude': lat_interp,
-                            'block_number': 1,
-                            'block_name': block_name,
+                            'block_number': None,
+                            'block_name': None,
                         })
                         interpolated_count += 1
                         point_number += 1
@@ -598,7 +598,7 @@ def generate_fieldbook_points(
                 point_number += 1
 
                 # Interpolate points along this edge
-                if edge_distance > interpolation_distance:
+                if interpolation_distance > 0 and edge_distance > interpolation_distance:
                     num_intervals = int(edge_distance / interpolation_distance)
                     for j in range(1, num_intervals + 1):
                         fraction = (j * interpolation_distance) / edge_distance

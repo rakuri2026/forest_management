@@ -1032,6 +1032,10 @@ async def list_inventory_trees(
             firewood_chatta=tree.firewood_chatta,
             remark=tree.remark,
             grid_cell_id=tree.grid_cell_id,
+            block_id=tree.block_id,
+            block_name=tree.block_name,
+            sub_area_id=tree.sub_area_id,
+            sub_area_name=tree.sub_area_name,
             longitude=lon,
             latitude=lat
         ))
@@ -1452,3 +1456,46 @@ async def accept_corrections(
         'summary': corrections_data['summary'],
         'next_step': 'POST /api/inventory/{inventory_id}/process with corrected file'
     }
+
+
+@router.post("/{inventory_id}/update-block-subarea")
+async def update_tree_block_subarea(
+    inventory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Resolve block, sub-area, and compartment hierarchy for all trees
+    in the inventory using spatial intersection.
+
+    This:
+    1. Matches each tree to its containing forest block (division_level=0)
+    2. Matches each tree to its containing sub-area (if any)
+    3. Matches each tree to its containing compartment/sub-compartment (if any)
+    4. Stores the resolved info on each InventoryTree record
+
+    Call this before exporting CSV to ensure block/sub-area/compartment fields are populated.
+    """
+    inventory = db.query(InventoryCalculation).filter(
+        InventoryCalculation.id == inventory_id,
+        InventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not inventory:
+        raise HTTPException(status_code=404, detail="Inventory not found")
+
+    if not inventory.calculation_id:
+        raise HTTPException(status_code=400, detail="Inventory has no associated calculation")
+
+    service = InventoryService(db)
+    try:
+        updated_count = await service._update_tree_spatial_relationships(
+            inventory_id,
+            inventory.calculation_id
+        )
+        return {
+            'message': 'Block/Sub-area updated successfully',
+            'trees_updated': updated_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -418,11 +418,11 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
     if (!treeMapping?.id) return;
 
     try {
-      const blob = await inventoryApi.exportInventory(treeMapping.id, format);
-      const url = window.URL.createObjectURL(blob);
+      const result = await inventoryApi.exportInventory(treeMapping.id, format);
+      const url = window.URL.createObjectURL(result.blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `tree_mapping_${calculationId}.${format === 'geojson' ? 'geojson' : 'csv'}`;
+      a.download = result.filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
