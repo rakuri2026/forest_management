@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { samplingApi, forestApi } from '../services/api';
 import { SamplingMapView } from './SamplingMapView';
 import { AccessibleForestPreview } from './AccessibleForestPreview';
+import { downloadFromApi } from '../utils/download';
 
 interface SamplingTabProps {
   calculationId: string;
@@ -295,17 +296,13 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
   const handleExport = async (designId: string, format: 'csv' | 'gpx' | 'geojson' | 'kml') => {
     try {
-      const blob = await samplingApi.export(designId, format);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sampling_${designId.substring(0, 8)}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await downloadFromApi(
+        `/api/sampling/${designId}/points`,
+        `sampling_${designId.substring(0, 8)}.${format}`,
+        { format }
+      );
     } catch (err: any) {
-      alert(err.response?.data?.detail || `Failed to export ${format}`);
+      alert(err.message || `Failed to export ${format}`);
     }
   };
 

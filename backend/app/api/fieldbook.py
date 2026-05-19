@@ -114,31 +114,40 @@ async def list_fieldbook_points(
     if not calculation:
         raise HTTPException(status_code=404, detail="Calculation not found")
 
+    from app.utils.file_export import build_disposition
+
     # Handle export formats
     if format:
         try:
+            forest_name = calculation.forest_name
+            ext_map = {"csv": "csv", "excel": "xlsx", "gpx": "gpx", "geojson": "geojson"}
+            ext = ext_map.get(format, format)
+
             if format == "csv":
                 csv_data = export_fieldbook_csv(db, calculation_id)
+                _, disposition = build_disposition(forest_name, "Fieldbook", "FieldData", "csv")
                 return StreamingResponse(
                     io.BytesIO(csv_data),
                     media_type="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename=fieldbook_{calculation_id}.csv"}
+                    headers={"Content-Disposition": disposition}
                 )
 
             elif format == "excel":
                 excel_data = export_fieldbook_excel(db, calculation_id)
+                _, disposition = build_disposition(forest_name, "Fieldbook", "FieldData", "xlsx")
                 return StreamingResponse(
                     io.BytesIO(excel_data),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": f"attachment; filename=fieldbook_{calculation_id}.xlsx"}
+                    headers={"Content-Disposition": disposition}
                 )
 
             elif format == "gpx":
                 gpx_data = export_fieldbook_gpx(db, calculation_id)
+                _, disposition = build_disposition(forest_name, "Fieldbook", "FieldData", "gpx")
                 return StreamingResponse(
                     io.BytesIO(gpx_data),
                     media_type="application/gpx+xml",
-                    headers={"Content-Disposition": f"attachment; filename=fieldbook_{calculation_id}.gpx"}
+                    headers={"Content-Disposition": disposition}
                 )
 
             elif format == "geojson":

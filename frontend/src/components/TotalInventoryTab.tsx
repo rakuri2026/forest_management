@@ -166,6 +166,28 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
     }
   };
 
+  const DBH_CLASS_CONFIG = [
+    { key: '10_20', label: '10-20 Sm.Pole' },
+    { key: '20_30', label: '20-30 Lg.Pole' },
+    { key: '30_40', label: '30-40 Sm.Tree' },
+    { key: '40_50', label: '40-50 Med.Tree' },
+    { key: '50_60', label: '50-60 Lg.Tree' },
+  ];
+
+  const computeBlockSubtotal = (block: any, field: string, isPerHa: boolean): number => {
+    const data = isPerHa ? block.dbh_class_per_ha : block.dbh_class_totals;
+    if (!data) return 0;
+    return DBH_CLASS_CONFIG.reduce((sum, { key }) => {
+      const d = data[key];
+      return sum + (d ? Number(d[field] || 0) : 0);
+    }, 0);
+  };
+
+  const fmt = (v: any, decimals: number = 2): string => {
+    const n = Number(v || 0);
+    return n.toFixed(decimals);
+  };
+
   if (!fieldInventory) {
     return (
       <div className="p-6 bg-yellow-50 rounded-lg border border-yellow-200">
@@ -354,7 +376,7 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
                     <th colSpan={2} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">Total Carbon</th>
                   </tr>
                   <tr>
-                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Regen</th>
+                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Seedling</th>
                     <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Sapling</th>
                     <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Pole</th>
                     <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Tree</th>
@@ -393,6 +415,90 @@ export const TotalInventoryTab: React.FC<TotalInventoryTabProps> = ({ calculatio
                     <td className="px-2 py-3 text-sm text-right border-r border-gray-200 text-amber-900">{(totalData.forest_totals.total_aah_m3_per_year || 0).toLocaleString()}</td>
                     <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_biomass_tonnes || 0).toLocaleString()}</td>
                     <td className="px-2 py-3 text-sm text-right">{(totalData.forest_totals.total_co2_tco2 || 0).toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          )}
+
+          {/* DBH Class-wise Growing Stock per Hectare (Table 1 - Per-ha reference) */}
+          {totalData.blocks && totalData.blocks.length > 0 && totalData.blocks[0].dbh_class_per_ha && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">DBH Class-wise Growing Stock per Hectare</h4>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Block</th>
+                    <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">DBH Class</th>
+                    <th colSpan={4} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-blue-50 border-r border-gray-300">Per Hectare</th>
+                  </tr>
+                  <tr>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Count</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Timber (m&sup3;)</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Firewood (m&sup3;)</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Volume (m&sup3;)</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {totalData.blocks.map((block: any, bi: number) => {
+                    const perHa = block.dbh_class_per_ha || {};
+                    const rows = DBH_CLASS_CONFIG.flatMap(({ key, label }) => {
+                      const d = perHa[key];
+                      if (!d) return [];
+                      return [{
+                        key, label,
+                        isSubtotal: false,
+                        count: d.count_per_ha,
+                        timber: d.timber_m3_per_ha,
+                        firewood: d.firewood_m3_per_ha,
+                        volume: d.tree_volume_m3_per_ha,
+                      }];
+                    });
+                    if (rows.length === 0) return null;
+                    const subtotal = {
+                      count: computeBlockSubtotal(block, 'count_per_ha', true),
+                      timber: computeBlockSubtotal(block, 'timber_m3_per_ha', true),
+                      firewood: computeBlockSubtotal(block, 'firewood_m3_per_ha', true),
+                      volume: computeBlockSubtotal(block, 'tree_volume_m3_per_ha', true),
+                    };
+                    return [
+                      ...rows.map((r, ri) => (
+                        <tr key={`${bi}_${ri}`} className={ri === 0 ? 'border-t border-gray-200' : ''}>
+                          {ri === 0 && (
+                            <td rowSpan={rows.length + 1} className="px-3 py-2 text-sm font-medium text-gray-900 border-r border-gray-200 align-top">{block.block_name}</td>
+                          )}
+                          <td className="px-3 py-2 text-sm text-gray-700 border-r border-gray-200">{r.label}</td>
+                          <td className="px-2 py-2 text-sm text-right">{fmt(r.count, 2)}</td>
+                          <td className="px-2 py-2 text-sm text-right">{fmt(r.timber, 2)}</td>
+                          <td className="px-2 py-2 text-sm text-right">{fmt(r.firewood, 2)}</td>
+                          <td className="px-2 py-2 text-sm text-right border-r border-gray-300">{fmt(r.volume, 2)}</td>
+                        </tr>
+                      )),
+                      <tr key={`${bi}_sub`} className="bg-blue-50 font-semibold">
+                        <td className="px-3 py-2 text-sm text-gray-900 border-r border-gray-200">{block.block_name} Total</td>
+                        <td className="px-2 py-2 text-sm text-right">{fmt(subtotal.count, 2)}</td>
+                        <td className="px-2 py-2 text-sm text-right">{fmt(subtotal.timber, 2)}</td>
+                        <td className="px-2 py-2 text-sm text-right">{fmt(subtotal.firewood, 2)}</td>
+                        <td className="px-2 py-2 text-sm text-right border-r border-gray-300">{fmt(subtotal.volume, 2)}</td>
+                      </tr>,
+                    ];
+                  })}
+                  <tr className="bg-green-100 font-bold">
+                    <td colSpan={2} className="px-3 py-3 text-sm text-gray-900 border-r border-gray-200">Grand Total</td>
+                    <td className="px-2 py-3 text-sm text-right">
+                      {fmt(totalData.blocks.reduce((s: number, b: any) => s + computeBlockSubtotal(b, 'count_per_ha', true), 0), 2)}
+                    </td>
+                    <td className="px-2 py-3 text-sm text-right">
+                      {fmt(totalData.blocks.reduce((s: number, b: any) => s + computeBlockSubtotal(b, 'timber_m3_per_ha', true), 0), 2)}
+                    </td>
+                    <td className="px-2 py-3 text-sm text-right">
+                      {fmt(totalData.blocks.reduce((s: number, b: any) => s + computeBlockSubtotal(b, 'firewood_m3_per_ha', true), 0), 2)}
+                    </td>
+                    <td className="px-2 py-3 text-sm text-right border-r border-gray-300">
+                      {fmt(totalData.blocks.reduce((s: number, b: any) => s + computeBlockSubtotal(b, 'tree_volume_m3_per_ha', true), 0), 2)}
+                    </td>
                   </tr>
                 </tbody>
               </table>

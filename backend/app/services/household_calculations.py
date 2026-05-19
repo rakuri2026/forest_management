@@ -15,8 +15,8 @@ class HouseholdCalculations:
     All calculations are on yearly basis
     """
 
-    # Conversion constant: 1 भारी = 25 kg
-    BHARI_TO_KG = Decimal('25')
+    # Conversion constant: 1 भारी = 30 kg (Forest Regulation 2079)
+    BHARI_TO_KG = Decimal('30')
 
     # Fodder consumption rates (kg/day)
     COW_OX_GRASS_KG_PER_DAY = Decimal('20')
@@ -50,7 +50,7 @@ class HouseholdCalculations:
         - बाख्रा भेडा (goat/sheep): 5 kg/day
 
         Total kg = (cow_ox × 20 × 365) + (buffalo × 30 × 365) + (goat_sheep × 5 × 365)
-        Result in भारी = Total kg ÷ 25
+        Result in भारी = Total kg ÷ 30
 
         Args:
             cow_ox_count: Number of cows/oxen
@@ -83,7 +83,7 @@ class HouseholdCalculations:
         Daily needs: 10 kg/day per cattle
 
         Total kg = (cow_ox + buffalo) × 10 × 365
-        Result in भारी = Total kg ÷ 25
+        Result in भारी = Total kg ÷ 30
 
         Args:
             cow_ox_count: Number of cows/oxen
@@ -115,7 +115,7 @@ class HouseholdCalculations:
 
         Total population = female_count + male_count
         Total kg = (Total population × 250) + ((cow_ox + buffalo) × 600)
-        Result in भारी = Total kg ÷ 25
+        Result in भारी = Total kg ÷ 30
 
         Args:
             female_count: Number of females

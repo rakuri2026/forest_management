@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import api from '../services/api';
+import { downloadBlob } from '../utils/download';
 
 interface Species {
   scientific_name: string;
@@ -22,6 +23,7 @@ interface Species {
 interface SpeciesTableProps {
   species: Species[];
   calculationId: string;
+  forestName?: string;
   removedSpecies?: string[];
   onSpeciesToggle?: (speciesName: string, enabled: boolean) => void;
   onAddSpecies?: () => void;
@@ -38,6 +40,7 @@ interface SpeciesTableProps {
 const SpeciesTable: React.FC<SpeciesTableProps> = ({
   species,
   calculationId,
+  forestName = 'Forest',
   removedSpecies = [],
   onSpeciesToggle,
   onAddSpecies,
@@ -320,7 +323,7 @@ const SpeciesTable: React.FC<SpeciesTableProps> = ({
   };
 
   // Export to CSV
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     const csvContent = [
       // Header
       ['Local Name', 'Scientific Name', 'Role', 'Economic Value', 'Altitude Range', 'Growth Rate', 'Main Uses', 'N-Fixing', 'Family', 'Rarity Status'].join(','),
@@ -339,11 +342,9 @@ const SpeciesTable: React.FC<SpeciesTableProps> = ({
       ].map(v => `"${v}"`).join(','))
     ].join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `species_list_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const name = forestName.replace(/\s+/g, '_');
+    downloadBlob(blob, `${name}_Species_List_${dateStr}.csv`);
   };
 
   return (

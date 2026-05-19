@@ -158,6 +158,7 @@ export function createTabGroups(_unifiedMappingEnabled: boolean = false): TabGro
         { id: 'usergroup', label: 'User Group Map' },
         { id: 'fieldinventory', label: 'Field Inventory' },
         { id: 'totalinventory', label: 'Total Inventory' },
+        { id: 'mgmtplan', label: 'Operational Plan' },
       ]
     },
   ];

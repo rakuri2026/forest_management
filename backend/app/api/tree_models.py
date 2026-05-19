@@ -343,16 +343,19 @@ async def download_tree_model(
             detail="GPKG file not found"
         )
 
-    # Return file with proper Unicode filename encoding (RFC 5987)
-    from urllib.parse import quote
-    encoded_filename = quote(model.gpkg_filename)
+    # Get forest name from calculation for live filename generation
+    calc = db.query(Calculation).filter(Calculation.id == model.calculation_id).first()
+    forest_name = calc.forest_name if calc and calc.forest_name else "forest"
+
+    from app.utils.file_export import build_disposition
+    _, disposition = build_disposition(forest_name, "TreeModel", "SyntheticTrees", "gpkg")
 
     return FileResponse(
         path=model.file_path,
         filename=model.gpkg_filename,
         media_type="application/geopackage+sqlite3",
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            "Content-Disposition": disposition
         }
     )
 
@@ -409,16 +412,19 @@ async def download_tree_model_excel(
             detail="Excel file not found"
         )
 
-    # Return file with proper Unicode filename encoding (RFC 5987)
-    from urllib.parse import quote
-    encoded_filename = quote(model.excel_filename)
+    # Get forest name from calculation for live filename generation
+    calc = db.query(Calculation).filter(Calculation.id == model.calculation_id).first()
+    forest_name = calc.forest_name if calc and calc.forest_name else "forest"
+
+    from app.utils.file_export import build_disposition
+    _, disposition = build_disposition(forest_name, "TreeModel", "SyntheticTrees", "xlsx")
 
     return FileResponse(
         path=model.excel_path,
         filename=model.excel_filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            "Content-Disposition": disposition
         }
     )
 

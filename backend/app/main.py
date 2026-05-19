@@ -7,16 +7,30 @@ import sys
 
 # Set PROJ_LIB environment variable for PROJ database
 # This must be set before importing any libraries that use PROJ (pyproj, rasterio, etc.)
-if not os.environ.get('PROJ_LIB'):
-    # Get the path to the venv site-packages
-    venv_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    proj_data_path = os.path.join(venv_path, 'venv', 'Lib', 'site-packages', 'pyproj', 'proj_dir', 'share', 'proj')
+_current_proj = os.environ.get('PROJ_LIB', '')
+if not _current_proj or not os.path.exists(os.path.join(_current_proj, 'proj.db')):
+    candidates = []
 
-    if os.path.exists(os.path.join(proj_data_path, 'proj.db')):
-        os.environ['PROJ_LIB'] = proj_data_path
-        print(f"Set PROJ_LIB to: {proj_data_path}")
+    # 1. User site-packages rasterio (most compatible with rasterio version)
+    try:
+        import site
+        candidates.append(os.path.join(site.getusersitepackages(), 'rasterio', 'proj_data'))
+        # 2. User site-packages pyproj
+        candidates.append(os.path.join(site.getusersitepackages(), 'pyproj', 'proj_dir', 'share', 'proj'))
+    except Exception:
+        pass
+
+    # 3. Venv pyproj path
+    venv_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    candidates.append(os.path.join(venv_path, 'venv', 'Lib', 'site-packages', 'pyproj', 'proj_dir', 'share', 'proj'))
+
+    for p in candidates:
+        if os.path.exists(os.path.join(p, 'proj.db')):
+            os.environ['PROJ_LIB'] = p
+            print(f"Set PROJ_LIB to: {p}")
+            break
     else:
-        print(f"Warning: Could not find proj.db at {proj_data_path}")
+        print(f"Warning: Could not find proj.db in any candidate path")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +44,8 @@ from .api import auth_router, forests_router, inventory_router, species_router, 
 from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
 from .api import location_search, tiles, user_group, household_info, forest_committee, yearly_activities
 from .api import compartments
+from .api.operational_plans import router as operational_plans_router
+from .api.op_table_catalog import router as op_table_catalog_router
 
 # Debug: Print router info
 print(f"DEBUG: Species router loaded with prefix: {species_router.prefix}")
@@ -241,6 +257,20 @@ app.include_router(
 app.include_router(
     compartments.router,
     tags=["Compartments"]
+)
+
+# Include operational plan router
+app.include_router(
+    operational_plans_router,
+    prefix="/api/operational-plans",
+    tags=["Operational Plans"]
+)
+
+# Include OP table catalog router
+app.include_router(
+    op_table_catalog_router,
+    prefix="/api",
+    tags=["OP Table Catalog"]
 )
 
 

@@ -498,18 +498,17 @@ def download_report(job_id: str, format: str = "docx"):
             include_images=job.get("include_images", True),
         )
 
+        from app.utils.file_export import build_disposition
+
         forest_name = job["metadata"].get("forest_name", "Community_Forest")
-        # Sanitize filename to ASCII only (latin-1 compatible)
-        safe_name = "".join(c if ord(c) < 128 else "_" for c in forest_name)
-        safe_name = safe_name.replace(" ", "_")[:50]
-        filename = f"{safe_name}_Report.docx"
+        _, disposition = build_disposition(forest_name, "OperationalPlan", "Report", "docx")
         doc_size = doc_buffer.tell()
         print(f"[REPORT] Document generated: {doc_size} bytes")
 
         return StreamingResponse(
             iter([doc_buffer.getvalue()]),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": disposition},
         )
 
     except Exception as e:

@@ -4,6 +4,7 @@ import { inventoryApi } from '../services/api';
 import { CorrectionPreviewDialog } from './CorrectionPreviewDialog';
 import ColumnMappingPreview from './ColumnMappingPreview';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { downloadFromApi } from '../utils/download';
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -158,15 +159,7 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
 
   const handleDownloadTemplate = async () => {
     try {
-      const blob = await inventoryApi.downloadTemplate();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'TreeMapping_Template.csv';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await downloadFromApi('/api/inventory/template', 'TreeMapping_Template.csv');
     } catch (err: any) {
       setError('Failed to download template');
     }
@@ -418,15 +411,11 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
     if (!treeMapping?.id) return;
 
     try {
-      const result = await inventoryApi.exportInventory(treeMapping.id, format);
-      const url = window.URL.createObjectURL(result.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await downloadFromApi(
+        `/api/inventory/${treeMapping.id}/export`,
+        `TreeMapping_Data.${format}`,
+        { format, module: 'TreeMapping' }
+      );
     } catch (err: any) {
       setError(`Failed to export ${format.toUpperCase()}`);
     }

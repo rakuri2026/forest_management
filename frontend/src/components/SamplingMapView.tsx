@@ -199,33 +199,45 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
     });
   };
 
-  // Function to calculate polygon centroid
-  const getPolygonCentroid = (coordinates: any): [number, number] | null => {
-    try {
-      // Handle different GeoJSON geometry types
-      let coords = coordinates;
-      if (coordinates[0] && Array.isArray(coordinates[0][0])) {
-        // Polygon or MultiPolygon - use first ring
-        coords = coordinates[0];
-      }
-
-      let sumLat = 0;
-      let sumLon = 0;
-      let count = 0;
-
-      coords.forEach((coord: number[]) => {
-        sumLon += coord[0];
-        sumLat += coord[1];
-        count++;
-      });
-
-      if (count === 0) return null;
-      return [sumLat / count, sumLon / count];
-    } catch (error) {
-      console.error('Error calculating centroid:', error);
-      return null;
+// Function to calculate polygon centroid
+const getPolygonCentroid = (coordinates: any): [number, number] | null => {
+  try {
+    // Handle different GeoJSON geometry types
+    let coords = coordinates;
+    if (coordinates[0] && Array.isArray(coordinates[0][0])) {
+      // Polygon or MultiPolygon - use first ring
+      coords = coordinates[0];
     }
-  };
+
+    let sumLat = 0;
+    let sumLon = 0;
+    let count = 0;
+
+    coords.forEach((coord: number[]) => {
+      const lon = Number(coord[0]);
+      const lat = Number(coord[1]);
+      if (!isNaN(lon) && !isNaN(lat)) {
+        sumLon += lon;
+        sumLat += lat;
+        count++;
+      }
+    });
+
+    if (count === 0) return null;
+    return [sumLat / count, sumLon / count];
+  } catch (error) {
+    console.error('Error calculating centroid:', error);
+    return null;
+  }
+};
+
+// Recursive check for NaN/null in coordinate arrays
+const hasInvalidCoords = (value: any): boolean => {
+  if (value == null) return true;
+  if (typeof value === 'number') return isNaN(value);
+  if (Array.isArray(value)) return value.some(v => hasInvalidCoords(v));
+  return false;
+};
 
   // Get unique categories from sub-areas
   const uniqueCategories = [...new Set(subAreas.map(sa => sa.category))];
@@ -472,8 +484,10 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
 
         {/* Sub-Area Layers with Labels */}
         {subAreas.map((subArea, index) => {
+          if (!subArea.geometry?.coordinates) return null;
+          if (hasInvalidCoords(subArea.geometry.coordinates)) return null;
+          const centroid = getPolygonCentroid(subArea.geometry.coordinates);
           const style = getSubAreaStyle(subArea.category, subArea.isExcluded);
-          const centroid = getPolygonCentroid(subArea.geometry?.coordinates);
           const info = CATEGORY_COLORS[subArea.category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
           
           return (
@@ -512,12 +526,15 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
         {mapLayers.sampling_points && mapLayers.sampling_points.features && (
           mapLayers.sampling_points.features.map((feature: any, index: number) => {
             const coords = feature.geometry.coordinates;
+            const lon = Number(coords[0]);
+            const lat = Number(coords[1]);
+            if (isNaN(lon) || isNaN(lat)) return null;
             const plotNumber = feature.properties.plot_number || (index + 1);
 
             return (
               <Marker
                 key={index}
-                position={[coords[1], coords[0]]}
+                position={[lat, lon]}
                 icon={createNumberedIcon(plotNumber)}
               >
                 <Popup>

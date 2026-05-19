@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { inventoryApi } from '../services/api';
 import ColumnMappingPreview from '../components/ColumnMappingPreview';
+import { downloadFromApi } from '../utils/download';
 
 export default function InventoryUpload() {
   const navigate = useNavigate();
@@ -26,15 +27,7 @@ export default function InventoryUpload() {
 
   const handleDownloadTemplate = async () => {
     try {
-      const blob = await inventoryApi.downloadTemplate();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'TreeInventory_Template.csv';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await downloadFromApi('/api/inventory/template', 'TreeInventory_Template.csv');
     } catch (err: any) {
       setError('Failed to download template');
     }

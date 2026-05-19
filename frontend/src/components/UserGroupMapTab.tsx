@@ -3,6 +3,7 @@ import { Upload, Settings, Download, Play, Image, Users, Map } from 'lucide-reac
 import { Tabs } from 'antd';
 import { ExtentUploadSection } from './UserGroup/ExtentUploadSection';
 import { AutoBufferSection } from './UserGroup/AutoBufferSection';
+import { downloadFromApi } from '../utils/download';
 import { UserGroupMapVisualization } from './UserGroup/UserGroupMapVisualization';
 import { SettlementStatistics } from './UserGroup/SettlementStatistics';
 import { LandCoverAnalysis } from './UserGroup/LandCoverAnalysis';
@@ -124,23 +125,14 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
     }
 
     try {
-      const response = await api.get(`/api/user-group/${extentId}/export`, {
-        params: { format },
-        responseType: 'blob'
-      });
-
-      // Download file
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `user_group_map.${format}`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      await downloadFromApi(
+        `/api/user-group/${extentId}/export`,
+        `user_group_map.${format}`,
+        { format }
+      );
     } catch (error: any) {
       console.error('Export failed:', error);
-      const errorMsg = error.response?.data?.detail || 'Export failed. Please try again.';
-      alert(errorMsg);
+      alert(error.message || 'Export failed. Please try again.');
     }
   };
 

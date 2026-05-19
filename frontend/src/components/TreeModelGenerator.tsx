@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Download, Trash2, AlertCircle, CheckCircle, Clock, Loader } from 'lucide-react';
 import api from '../services/api';
+import { downloadFromApi } from '../utils/download';
 
 interface TreeModelConfig {
   min_dbh_cm: number;
@@ -129,44 +130,18 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
   };
 
   // Download model (GPKG)
-  const handleDownload = async (modelId: string, filename: string) => {
+  const handleDownload = async (modelId: string) => {
     try {
-      const response = await api.get(`/api/tree-models/${modelId}/download`, {  // Fixed: Added /api prefix
-        responseType: 'blob'
-      });
-
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-
+      await downloadFromApi(`/api/tree-models/${modelId}/download`, 'tree_model.gpkg');
     } catch (err: any) {
       alert('Failed to download file: ' + (err.response?.data?.detail || err.message));
     }
   };
 
   // Download Excel
-  const handleDownloadExcel = async (modelId: string, filename: string) => {
+  const handleDownloadExcel = async (modelId: string) => {
     try {
-      const response = await api.get(`/api/tree-models/${modelId}/download-excel`, {
-        responseType: 'blob'
-      });
-
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-
+      await downloadFromApi(`/api/tree-models/${modelId}/download-excel`, 'tree_model.xlsx');
     } catch (err: any) {
       alert('Failed to download Excel file: ' + (err.response?.data?.detail || err.message));
     }
@@ -554,7 +529,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                                     )}
                                     {blockData.dbh_per_ha?.regeneration_1_4cm > 0 && (
                                       <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
-                                        Regen (1-4cm): {blockData.dbh_per_ha.regeneration_1_4cm.toLocaleString()}
+                                        Seedling (1-4cm): {blockData.dbh_per_ha.regeneration_1_4cm.toLocaleString()}
                                       </span>
                                     )}
                                     {blockData.dbh_per_ha?.sapling_4_10cm > 0 && (
@@ -592,7 +567,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                     <div className="flex items-center gap-2 flex-wrap">
                       {model.status === 'completed' && model.gpkg_filename && (
                         <button
-                          onClick={() => handleDownload(model.id, model.gpkg_filename!)}
+                          onClick={() => handleDownload(model.id)}
                           className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2 text-sm"
                         >
                           <Download className="w-4 h-4" />
@@ -602,7 +577,7 @@ const TreeModelGenerator: React.FC<TreeModelGeneratorProps> = ({ calculationId }
                       )}
                       {model.status === 'completed' && model.excel_filename && (
                         <button
-                          onClick={() => handleDownloadExcel(model.id, model.excel_filename!)}
+                          onClick={() => handleDownloadExcel(model.id)}
                           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm"
                         >
                           <Download className="w-4 h-4" />

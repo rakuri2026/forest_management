@@ -128,6 +128,10 @@ class FieldInventoryService:
             await self._calculate_mai(block_summaries, field_inventory_id)
             logger.info(f"[FIELD_INVENTORY] MAI calculated")
 
+            # 6.5. Calculate DBH class breakdown
+            await self._calculate_dbh_class_breakdown(field_inventory_id, field_inventory, block_summaries)
+            logger.info(f"[FIELD_INVENTORY] DBH class breakdown calculated")
+
             # 7. Update summary statistics
             field_inventory.total_sample_plots = len(sample_plots)
             field_inventory.total_blocks = len(block_summaries)
@@ -423,6 +427,11 @@ class FieldInventoryService:
         if dbh_cm:
             dbh_class = DiameterClassifier.classify_detailed(dbh_cm)
 
+        # Calculate basal area (m²) from DBH (cm): BA = π × (DBH/200)²
+        basal_area_m2 = None
+        if dbh_cm:
+            basal_area_m2 = round(math.pi * (dbh_cm / 200.0) ** 2, 6)
+
         measurement = FieldInventoryMeasurement(
             sample_plot_id=sample_plot_id,
             stand_type=stand_type,
@@ -435,6 +444,7 @@ class FieldInventoryService:
             tree_class=tree_class,
             count=count,
             dbh_class=dbh_class,
+            basal_area_m2=basal_area_m2,
             # Use pre-calculated volumes if available
             stem_volume=precalc_volumes.get('stem_volume'),
             branch_volume=precalc_volumes.get('branch_volume'),
@@ -683,6 +693,11 @@ class FieldInventoryService:
             tree_timber_per_ha = (tree_stats['net_volume'] / tree_area) * 10000 if tree_stats['net_volume'] > 0 else 0
             tree_firewood_per_ha = (tree_stats['firewood'] / tree_area) * 10000 if tree_stats['firewood'] > 0 else 0
 
+            # Extrapolate basal area (m²/ha) - Pole and Tree only
+            pole_basal_per_ha = (pole_stats['basal_area'] / pole_area) * 10000 if pole_stats['basal_area'] > 0 else 0
+            tree_basal_per_ha = (tree_stats['basal_area'] / tree_area) * 10000 if tree_stats['basal_area'] > 0 else 0
+            total_basal_area_m2_per_ha = pole_basal_per_ha + tree_basal_per_ha
+
             # Total growing stock (timber only)
             total_growing_stock = pole_timber_per_ha + tree_timber_per_ha
 
@@ -716,6 +731,7 @@ class FieldInventoryService:
                 tree_timber_m3_per_ha=round(tree_timber_per_ha, 6),
                 tree_firewood_m3_per_ha=round(tree_firewood_per_ha, 6),
                 total_growing_stock_m3_per_ha=round(total_growing_stock, 6),
+                basal_area_m2_per_ha=round(total_basal_area_m2_per_ha, 6),
                 satellite_volume_m3_per_ha=satellite_volume,
                 # Carbon metrics
                 weighted_wood_density=carbon_metrics['weighted_density'],
@@ -743,22 +759,25 @@ class FieldInventoryService:
         ).all()
 
         if not measurements:
-            return {'count': 0, 'net_volume': 0, 'firewood': 0}
+            return {'count': 0, 'net_volume': 0, 'firewood': 0, 'basal_area': 0}
 
         # Sum counts and volumes
         total_count = sum(m.count for m in measurements)
         total_net_volume = sum(float(m.net_volume or 0) for m in measurements)
         total_firewood = sum(float(m.firewood_m3 or 0) for m in measurements)
+        total_basal_area = sum(float(m.basal_area_m2 or 0) * m.count for m in measurements)
 
         # Calculate averages per plot
         avg_count = total_count / total_plots
         avg_net_volume = total_net_volume / total_plots
         avg_firewood = total_firewood / total_plots
+        avg_basal_area = total_basal_area / total_plots
 
         return {
             'count': avg_count,
             'net_volume': avg_net_volume,
-            'firewood': avg_firewood
+            'firewood': avg_firewood,
+            'basal_area': avg_basal_area
         }
 
     def _calculate_carbon_metrics(
@@ -899,18 +918,18 @@ class FieldInventoryService:
                 return None
 
             # Query AGB raster for this block geometry
+            # NOTE: ST_Union all intersecting tiles before clipping (LIMIT 1 would miss data)
             agb_query = text("""
                 SELECT
                     (stats).mean as agb_mean
                 FROM (
                     SELECT ST_SummaryStats(
-                        ST_Clip(rast, 1, ST_GeomFromText(:wkt, 4326)),
-                        1,  -- band 1
-                        true  -- exclude nodata
+                        ST_Clip(ST_Union(rast), 1, ST_GeomFromText(:wkt, 4326)),
+                        1,
+                        true
                     ) as stats
                     FROM rasters.agb_2022_nepal
                     WHERE ST_Intersects(rast, ST_GeomFromText(:wkt, 4326))
-                    LIMIT 1
                 ) as subquery
             """)
 
@@ -1011,6 +1030,170 @@ class FieldInventoryService:
 
         self.db.commit()
         logger.info("[MAI] MAI calculation complete")
+
+    def _classify_dbh(self, dbh: Optional[float], stand_type: str) -> str:
+        """Classify a DBH measurement into a DBH class key."""
+        if dbh is not None:
+            dbh = float(dbh)
+            if dbh < 4:
+                cls = '0_4'
+            elif dbh < 10:
+                cls = '4_10'
+            elif dbh < 20:
+                cls = '10_20'
+            elif dbh < 30:
+                cls = '20_30'
+            elif dbh < 40:
+                cls = '30_40'
+            elif dbh < 50:
+                cls = '40_50'
+            elif dbh < 60:
+                cls = '50_60'
+            else:
+                cls = '60_plus'
+        else:
+            cls = {
+                'Regeneration': '0_4',
+                'Sapling': '4_10',
+                'Pole': '10_20',
+                'Tree': '30_40',
+            }.get(stand_type, '0_4')
+
+        if stand_type == 'Pole' and cls not in ('10_20', '20_30'):
+            cls = '20_30'
+        elif stand_type == 'Tree' and cls not in ('30_40', '40_50', '50_60', '60_plus'):
+            cls = '30_40'
+        elif stand_type == 'Regeneration':
+            cls = '0_4'
+        elif stand_type == 'Sapling':
+            cls = '4_10'
+
+        return cls
+
+    async def _calculate_dbh_class_breakdown(
+        self,
+        field_inventory_id: UUID,
+        field_inventory: FieldInventoryCalculation,
+        block_summaries: List[FieldInventoryBlockSummary]
+    ):
+        """Calculate 8-class DBH breakdown per block (count, timber, firewood)
+
+        Uses per-plot averaging (same method as _calculate_per_hectare/_calculate_stand_averages)
+        to ensure DBH sub-class totals are consistent with block-wise per-hectare values.
+
+        For each block:
+          1. Get all sample plots (including empty ones)
+          2. Group measurements by (stand_type, dbh_class) per plot
+          3. Sum values per class across all plots
+          4. Average across all plots
+          5. Expand to per-hectare: (avg / plot_area_sqm) * 10000
+        """
+        DBH_CLASSES = [
+            ('0_4',    'Seedling',       'बिरुवा'),
+            ('4_10',   'Sapling',        'लाथ्रा'),
+            ('10_20',  'Small Pole',     'सानो खाँवा'),
+            ('20_30',  'Large Pole',     'ठुलो खाँवा'),
+            ('30_40',  'Small Tree',     'सानो रुख'),
+            ('40_50',  'Medium Tree',    'मझौला रुख'),
+            ('50_60',  'Large Tree',     'ठुलो रुख'),
+            ('60_plus','Very Large Tree','अति ठुलो रुख'),
+        ]
+
+        plot_areas = {
+            'Regeneration': float(field_inventory.regeneration_area_sqm),
+            'Sapling': float(field_inventory.sapling_area_sqm),
+            'Pole': float(field_inventory.pole_area_sqm),
+            'Tree': float(field_inventory.tree_area_sqm),
+        }
+
+        # Get all plot IDs grouped by block
+        plots_query = text("""
+            SELECT id, block_name
+            FROM public.field_inventory_sample_plots
+            WHERE field_inventory_calculation_id = :fid
+        """)
+        all_plots = self.db.execute(plots_query, {"fid": str(field_inventory_id)}).fetchall()
+
+        block_all_plots: Dict[str, List[UUID]] = {}
+        for p in all_plots:
+            blk = str(p.block_name).strip()
+            if blk not in block_all_plots:
+                block_all_plots[blk] = []
+            block_all_plots[blk].append(p.id)
+
+        # Get all measurements
+        meas_query = text("""
+            SELECT sp.block_name, sp.id as plot_id, m.stand_type,
+                   m.dbh_cm, m.count, m.net_volume, m.firewood_m3
+            FROM public.field_inventory_measurements m
+            JOIN public.field_inventory_sample_plots sp ON m.sample_plot_id = sp.id
+            WHERE sp.field_inventory_calculation_id = :fid
+        """)
+        meas_rows = self.db.execute(meas_query, {"fid": str(field_inventory_id)}).fetchall()
+
+        # Group measurements by (block, stand_type, dbh_class) — sum across plots
+        grouped: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
+        for row in meas_rows:
+            blk = str(row.block_name).strip()
+            st = str(row.stand_type).strip()
+            dbh_v = row.dbh_cm
+            cnt = float(row.count or 0)
+            net_vol = float(row.net_volume or 0)
+            firewood = float(row.firewood_m3 or 0)
+
+            cls = self._classify_dbh(dbh_v, st)
+
+            if blk not in grouped:
+                grouped[blk] = {}
+            if st not in grouped[blk]:
+                grouped[blk][st] = {}
+            if cls not in grouped[blk][st]:
+                grouped[blk][st][cls] = {'count': 0.0, 'net': 0.0, 'fw': 0.0}
+
+            grouped[blk][st][cls]['count'] += cnt
+            grouped[blk][st][cls]['net'] += net_vol
+            grouped[blk][st][cls]['fw'] += firewood
+
+        for block in block_summaries:
+            blk = block.block_name.strip()
+            plot_ids = block_all_plots.get(blk, [])
+            total_plots = len(plot_ids)
+
+            breakdown_init = {k: {'count': 0.0, 'timber': 0.0, 'firewood': 0.0} for k, en, np in DBH_CLASSES}
+
+            if total_plots > 0 and blk in grouped:
+                for st, classes in grouped[blk].items():
+                    plot_area = plot_areas.get(st, 100)
+                    for cls, vals in classes.items():
+                        if cls not in breakdown_init:
+                            continue
+                        avg_cnt = vals['count'] / total_plots
+                        avg_net = vals['net'] / total_plots
+                        avg_fw = vals['fw'] / total_plots
+
+                        per_ha_cnt = (avg_cnt / plot_area) * 10000
+                        per_ha_net = (avg_net / plot_area) * 10000
+                        per_ha_fw = (avg_fw / plot_area) * 10000
+
+                        breakdown_init[cls]['count'] += per_ha_cnt
+                        breakdown_init[cls]['timber'] += per_ha_net
+                        breakdown_init[cls]['firewood'] += per_ha_fw
+
+            breakdown = {}
+            for key, en, np in DBH_CLASSES:
+                vals = breakdown_init[key]
+                breakdown[key] = {
+                    "count_per_ha": round(vals['count'], 2),
+                    "timber_m3_per_ha": round(vals['timber'], 2),
+                    "firewood_m3_per_ha": round(vals['firewood'], 2),
+                    "label_en": en,
+                    "label_np": np,
+                }
+
+            block.dbh_class_breakdown = breakdown
+
+        self.db.flush()
+        logger.info("[DBH_CLASS_BREAKDOWN] DBH class breakdown complete (per-plot averaging)")
 
     async def _get_dominant_growth_rate(self, field_inventory_id: UUID, block_name: str) -> str:
         """Get dominant growth rate for species in this block"""

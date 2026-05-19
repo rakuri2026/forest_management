@@ -100,6 +100,8 @@ class FieldInventoryMeasurementResponse(BaseModel):
     firewood_chatta: Optional[Decimal]
 
     dbh_class: Optional[str]
+    basal_area_m2: Optional[Decimal] = None
+
     created_at: datetime
 
     class Config:
@@ -137,6 +139,12 @@ class FieldInventoryBlockSummaryResponse(BaseModel):
     # MAI
     mai_percent: Optional[Decimal]
     dominant_growth_rate: Optional[str]
+
+    # Basal area
+    basal_area_m2_per_ha: Optional[Decimal] = Field(None, description="Basal area (m²/ha)")
+
+    # DBH class breakdown (8-class system)
+    dbh_class_breakdown: Optional[Dict[str, Any]] = Field(None, description="DBH class breakdown with per-hectare counts")
 
     # Carbon and biomass metrics (IPCC/REDD+)
     weighted_wood_density: Optional[Decimal] = Field(None, description="Volume-weighted wood density (t/m³)")
@@ -209,6 +217,9 @@ class FieldInventorySummaryResponse(BaseModel):
     overall_regeneration_condition: Optional[str] = None
     overall_growth_rate: Optional[str] = None
     average_mai_percent: Optional[Decimal] = None
+
+    # Average basal area
+    average_basal_area_m2_per_ha: Optional[Decimal] = None
 
     # Carbon & biomass averages
     average_wood_density: Optional[Decimal] = None

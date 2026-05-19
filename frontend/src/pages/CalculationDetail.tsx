@@ -16,6 +16,8 @@ import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
 import { UserGroupMapTab } from '../components/UserGroupMapTab';
 import { TotalInventoryTab } from '../components/TotalInventoryTab';
 import { FieldInventoryTab } from '../components/FieldInventoryTab';
+import { ManagementPlanTab } from '../components/ManagementPlanTab';
+import OperationalPlanPage from './OperationalPlanPage';
 import { CompartmentTab } from '../components/Compartment';
 import YearlyActivitiesPage from '../components/YearlyActivities/YearlyActivitiesPage';
 import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
@@ -148,7 +150,7 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
   const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities'>(
+  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities' | 'mgmtplan'>(
     'analysis'
   );
 
@@ -1112,14 +1114,15 @@ export default function CalculationDetail() {
 
         {activeTab === 'fieldinventory' && (
           <div className="p-6">
-            <FieldInventoryTab key={fieldInvRefreshKey} calculationId={calculation.id} blocks={blocks} />
+            <FieldInventoryTab key={fieldInvRefreshKey} calculationId={calculation.id} blocks={blocks} forestName={calculation.forest_name} />
           </div>
         )}
 
         {activeTab === 'totalinventory' && (
-          <div className="p-6">
-            <TotalInventoryTab calculationId={calculation.id} refreshKey={subAreaRefreshKey} />
-          </div>
+          <TotalInventoryTab calculationId={calculation.id} />
+        )}
+        {activeTab === 'mgmtplan' && (
+          <OperationalPlanPage calculationId={calculation.id} />
         )}
 
         {activeTab === 'compartments' && (

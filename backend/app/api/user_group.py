@@ -249,7 +249,17 @@ async def export_user_group_map(
     """
     Export user group map and statistics
     """
+    from app.utils.file_export import build_disposition
+    from app.models.calculation import Calculation
+    from app.models.user_group import UserGroupExtent
+
     try:
+        extent = db.query(UserGroupExtent).filter(UserGroupExtent.id == extent_id).first()
+        forest_name = None
+        if extent:
+            calc = db.query(Calculation).filter(Calculation.id == extent.calculation_id).first()
+            forest_name = calc.forest_name if calc else None
+
         service = UserGroupAnalysisService(db)
 
         if format == "pdf":
@@ -267,11 +277,15 @@ async def export_user_group_map(
         else:
             raise HTTPException(status_code=400, detail="Invalid format")
 
+        _, disposition = build_disposition(forest_name, "UserGroup", "Map", format)
         return FileResponse(
             file_path,
             media_type=media_type,
-            filename=f"user_group_map.{format}"
+            filename=_.replace(" ", "_"),
+            headers={"Content-Disposition": disposition}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error exporting user group map: {e}")
         raise HTTPException(status_code=500, detail="Export failed")

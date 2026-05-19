@@ -28,6 +28,7 @@ from .household_information import HouseholdInformation
 from .caste_classification import CasteClassification
 from .forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialCommittee
 from .compartment import CompartmentSplitHistory
+from .op_table import OPTableDefinition, OPTableData
 
 __all__ = [
     "User",
@@ -63,4 +64,6 @@ __all__ = [
     "AdvisoryCommittee",
     "FinancialCommittee",
     "CompartmentSplitHistory",
+    "OPTableDefinition",
+    "OPTableData",
 ]

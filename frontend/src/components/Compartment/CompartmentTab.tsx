@@ -13,7 +13,7 @@ import { generateExportFileName, CONTENT_TYPES } from '../../utils/fileNaming';
 
 // DBH Class colors and sizes (1/3 of original)
 const DBH_CLASS_CONFIG: Record<string, { color: string; fillColor: string; radius: number; label: string }> = {
-  'Regeneration (0.1-4)': { color: '#8b5cf6', fillColor: '#a78bfa', radius: 1, label: 'पुनरोत्पादन' },
+  'Seedling (0.1-4)': { color: '#8b5cf6', fillColor: '#a78bfa', radius: 1, label: 'पुनरोत्पादन' },
   'Sapling (4-10)': { color: '#3b82f6', fillColor: '#60a5fa', radius: 1, label: 'बोटविरुवा' },
   'Small pole (10-20)': { color: '#22c55e', fillColor: '#4ade80', radius: 1.5, label: 'सानो खाँट' },
   'Large pole (20-30)': { color: '#eab308', fillColor: '#facc15', radius: 2, label: 'ठूलो खाँट' },
@@ -603,7 +603,7 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
     try {
       setError(null);
       setDownloading(true);
-      await compartmentApi.exportGpkg(calculationId, forestName);
+      await compartmentApi.exportGpkg(calculationId);
       console.log('[CompartmentTab] GPKG download completed');
     } catch (err: any) {
       console.error('[CompartmentTab] GPKG download error:', err);
@@ -619,7 +619,7 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
     try {
       setError(null);
       setDownloading(true);
-      await compartmentApi.exportKml(calculationId, forestName);
+      await compartmentApi.exportKml(calculationId);
       console.log('[CompartmentTab] KML download completed');
     } catch (err: any) {
       console.error('[CompartmentTab] KML download error:', err);

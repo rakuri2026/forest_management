@@ -52,6 +52,11 @@ class TreeSpeciesCoefficient(Base):
     wood_density_source = Column(Text, nullable=True)
     genus = Column(String(100), nullable=True)
 
+    # Full stem merchantable (added 2026-05-15)
+    # If TRUE, entire stem is merchantable (no top deduction, 100% recovery).
+    # Per Regulation 2079, Khair (Acacia catechu) qualifies.
+    full_stem_merchantable = Column(Boolean, default=False, nullable=False)
+
     def __repr__(self):
         return f"<TreeSpeciesCoefficient(id={self.id}, name='{self.scientific_name}')>"
 

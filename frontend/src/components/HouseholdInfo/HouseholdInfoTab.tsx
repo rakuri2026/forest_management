@@ -9,10 +9,11 @@ import {
   UploadOutlined,
   TableOutlined,
   BarChartOutlined,
-  DeleteOutlined,
-  ReloadOutlined,
   TeamOutlined,
+  ReloadOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
+import { downloadFromApi } from '../../utils/download';
 import * as api from '../../services/api';
 import type { HouseholdInfo, HouseholdSummary } from '../../types/household';
 import TemplateDownloadSection from './TemplateDownloadSection';
@@ -98,19 +99,14 @@ const HouseholdInfoTab: React.FC<HouseholdInfoTabProps> = ({
   // Handle export
   const handleExport = async () => {
     try {
-      const blob = await api.userGroupApi.exportHouseholdAnalysis(calculationId);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `household_analysis_${new Date().toISOString().split('T')[0]}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      await downloadFromApi(
+        `/api/household/calculations/${calculationId}/excel`,
+        `household_analysis_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.xlsx`
+      );
       message.success('Analysis exported successfully');
     } catch (error) {
       console.error('Error exporting analysis:', error);
-      message.error('Failed to export analysis');
+      message.error(error.message || 'Failed to export analysis');
     }
   };
 

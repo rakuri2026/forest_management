@@ -133,6 +133,9 @@ class FieldInventoryMeasurement(Base):
     # DBH classification
     dbh_class = Column(String(50), nullable=True)
 
+    # Basal area (computed from DBH)
+    basal_area_m2 = Column(Numeric(15, 6), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
@@ -179,6 +182,12 @@ class FieldInventoryBlockSummary(Base):
 
     # Satellite-derived volume (from AGB raster - added 2026-03-23)
     satellite_volume_m3_per_ha = Column(Numeric(15, 6), nullable=True)  # Volume from AGB 2022 Nepal raster
+
+    # Basal area (computed from pole/tree DBH)
+    basal_area_m2_per_ha = Column(Numeric(15, 6), nullable=True)
+
+    # DBH class breakdown (8-class system)
+    dbh_class_breakdown = Column(JSONB, nullable=True)
 
     # Forest condition assessment
     regeneration_condition = Column(String(20), nullable=True)  # 'Good', 'Moderate', 'Weak'

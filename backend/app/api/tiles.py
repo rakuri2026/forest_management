@@ -77,13 +77,10 @@ async def get_raster_tile(
         tile_service = get_tile_service(db)
 
         # Use cached version for better performance
-        png_bytes = tile_service.get_tile_cached(
-            calculation_id=calculation_id,
+        png_bytes = tile_service.get_tile(
+            calculation_id=str(calculation_id),
             layer_name=layer_name,
-            z=z,
-            x=x,
-            y=y,
-            alpha=alpha
+            z=z, x=x, y=y, alpha=alpha,
         )
 
         return Response(

@@ -8,6 +8,8 @@ import type {
   MyForestsResponse,
   Calculation,
 } from '../types';
+import { downloadFromApi } from '../utils/download';
+import { downloadFromApi } from '../utils/download';
 
 export const API_BASE_URL = 'http://localhost:8001';
 
@@ -870,6 +872,109 @@ export const fieldInventoryApi = {
     }
 
     const response = await api.get(`/api/field-inventory/${fieldInventoryId}/total-inventory`, { params });
+    return response.data;
+  },
+
+  exportExcel: async (
+    fieldInventoryId: string,
+    aahGood: number = 75,
+    aahModerate: number = 60,
+    aahWeak: number = 40,
+    customMultipliers?: Record<string, number>
+  ): Promise<Blob> => {
+    const params: any = {
+      aah_good: aahGood,
+      aah_moderate: aahModerate,
+      aah_weak: aahWeak
+    };
+
+    if (customMultipliers && Object.keys(customMultipliers).length > 0) {
+      params.custom_multipliers = JSON.stringify(customMultipliers);
+    }
+
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/export-excel`, {
+      params,
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  exportDfoSummary: async (
+    fieldInventoryId: string,
+    calculationId: string,
+    aahGood: number = 75,
+    aahModerate: number = 60,
+    aahWeak: number = 40,
+  ): Promise<Blob> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/export-dfo-summary`, {
+      params: {
+        calculation_id: calculationId,
+        aah_good: aahGood,
+        aah_moderate: aahModerate,
+        aah_weak: aahWeak,
+      },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  getManagementPlanData: async (
+    fieldInventoryId: string,
+    calculationId: string,
+    aahGood?: number,
+    aahModerate?: number,
+    aahWeak?: number,
+  ): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/management-plan-data`, {
+      params: {
+        calculation_id: calculationId,
+        aah_good: aahGood,
+        aah_moderate: aahModerate,
+        aah_weak: aahWeak,
+      },
+    });
+    return response.data;
+  },
+
+  exportManagementPlanDocx: async (
+    fieldInventoryId: string,
+    calculationId: string,
+    aahGood?: number,
+    aahModerate?: number,
+    aahWeak?: number,
+  ): Promise<Blob> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/export-management-plan-docx`, {
+      params: {
+        calculation_id: calculationId,
+        aah_good: aahGood,
+        aah_moderate: aahModerate,
+        aah_weak: aahWeak,
+      },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  export10yrPlanDocx: async (
+    fieldInventoryId: string,
+    calculationId: string,
+    aahGood?: number,
+    aahModerate?: number,
+    aahWeak?: number,
+    includeMaps?: boolean,
+    includeCharts?: boolean,
+  ): Promise<Blob> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/export-10yr-plan-docx`, {
+      params: {
+        calculation_id: calculationId,
+        aah_good: aahGood,
+        aah_moderate: aahModerate,
+        aah_weak: aahWeak,
+        include_maps: includeMaps,
+        include_charts: includeCharts,
+      },
+      responseType: 'blob'
+    });
     return response.data;
   },
 };
@@ -1766,30 +1871,10 @@ export const yearlyActivitiesApi = {
    */
   exportSpatialFeaturesKml: async (activityId: string): Promise<void> => {
     try {
-      const response = await api.get(
+      await downloadFromApi(
         `/api/yearly-activities/proposed-activities/${activityId}/export/kml`,
-        { responseType: 'blob' }
+        'spatial.kml'
       );
-      const blob = new Blob([response.data], { type: 'application/vnd.google-earth.kml+xml' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      // Use filename from Content-Disposition header if available
-      const contentDisposition = response.headers?.['content-disposition'];
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^"]+)"?/);
-        if (match) {
-          link.setAttribute('download', match[1]);
-        } else {
-          link.setAttribute('download', 'spatial.kml');
-        }
-      } else {
-        link.setAttribute('download', 'spatial.kml');
-      }
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
     } catch (error: any) {
       console.error('KML export error:', error);
       const errorMsg = error.response?.data?.detail || 'Failed to export KML';
@@ -1802,30 +1887,10 @@ export const yearlyActivitiesApi = {
    */
   exportSpatialFeaturesGpkg: async (activityId: string): Promise<void> => {
     try {
-      const response = await api.get(
+      await downloadFromApi(
         `/api/yearly-activities/proposed-activities/${activityId}/export/gpkg`,
-        { responseType: 'blob' }
+        'spatial.gpkg'
       );
-      const blob = new Blob([response.data], { type: 'application/octet-stream' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      // Use filename from Content-Disposition header if available
-      const contentDisposition = response.headers?.['content-disposition'];
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^"]+)"?/);
-        if (match) {
-          link.setAttribute('download', match[1]);
-        } else {
-          link.setAttribute('download', 'spatial.gpkg');
-        }
-      } else {
-        link.setAttribute('download', 'spatial.gpkg');
-      }
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
     } catch (error: any) {
       console.error('GPKG export error:', error);
       const errorMsg = error.response?.data?.detail || 'Failed to export GPKG';
@@ -1993,52 +2058,18 @@ export const compartmentApi = {
     return response.data;
   },
 
-  exportGpkg: async (calculationId: string, forestName?: string): Promise<void> => {
-    const token = localStorage.getItem('access_token');
-    const response = await fetch(`/api/compartments/calculation/${calculationId}/export-gpkg`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Export failed: ${response.status}`);
-    }
-    
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', forestName ? `${forestName}_compartments.gpkg` : 'compartments.gpkg');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+  exportGpkg: async (calculationId: string): Promise<void> => {
+    await downloadFromApi(
+      `/api/compartments/calculation/${calculationId}/export-gpkg`,
+      'compartments.gpkg'
+    );
   },
 
-  exportKml: async (calculationId: string, forestName?: string): Promise<void> => {
-    const token = localStorage.getItem('access_token');
-    const response = await fetch(`/api/compartments/calculation/${calculationId}/export-kml`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Export failed: ${response.status}`);
-    }
-    
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', forestName ? `${forestName}_compartments.kml` : 'compartments.kml');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+  exportKml: async (calculationId: string): Promise<void> => {
+    await downloadFromApi(
+      `/api/compartments/calculation/${calculationId}/export-kml`,
+      'compartments.kml'
+    );
   },
 
   /**
@@ -2071,6 +2102,123 @@ export const compartmentApi = {
     }
   ): Promise<any> => {
     const response = await api.post(`/api/compartments/blocks/${blockId}/sub-divide`, config);
+    return response.data;
+  },
+};
+
+export const operationalPlanApi = {
+  create: async (calculationId: string, forestName?: string): Promise<any> => {
+    const response = await api.post('/api/operational-plans', { calculation_id: calculationId, forest_name: forestName });
+    return response.data;
+  },
+
+  getByCalculation: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/calculation/${calculationId}`);
+    return response.data;
+  },
+
+  update: async (planId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/${planId}`, data);
+    return response.data;
+  },
+
+  autoPopulate: async (planId: string): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/${planId}/auto-populate`);
+    return response.data;
+  },
+
+  getTree: async (planId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/${planId}/tree`);
+    return response.data;
+  },
+
+  addNode: async (planId: string, data: any): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/${planId}/tree/nodes`, data);
+    return response.data;
+  },
+
+  updateNode: async (planId: string, nodeId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/${planId}/tree/nodes/${nodeId}`, data);
+    return response.data;
+  },
+
+  deleteNode: async (planId: string, nodeId: string): Promise<any> => {
+    const response = await api.delete(`/api/operational-plans/${planId}/tree/nodes/${nodeId}`);
+    return response.data;
+  },
+
+  reorderTree: async (planId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/${planId}/tree/reorder`, data);
+    return response.data;
+  },
+
+  getMetadataForm: async (planId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/${planId}/metadata-form`);
+    return response.data;
+  },
+
+  updateMetadataForm: async (planId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/${planId}/metadata-form`, data);
+    return response.data;
+  },
+
+  listVariables: async (params?: { category?: string; search?: string }): Promise<any> => {
+    const response = await api.get('/api/operational-plans/variables', { params });
+    return response.data;
+  },
+
+  getVariable: async (key: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/variables/${key}`);
+    return response.data;
+  },
+
+  listTables: async (): Promise<any> => {
+    const response = await api.get('/api/op-tables');
+    return response.data;
+  },
+
+  getTableData: async (tableId: string, calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/op-tables/${tableId}/data`, { params: { calculation_id: calculationId } });
+    return response.data;
+  },
+
+  updateTableData: async (tableId: string, calculationId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/op-tables/${tableId}/data?calculation_id=${calculationId}`, data);
+    return response.data;
+  },
+
+  autoPopulateTable: async (tableId: string, calculationId: string): Promise<any> => {
+    const response = await api.post(`/api/op-tables/${tableId}/auto-populate?calculation_id=${calculationId}`);
+    return response.data;
+  },
+
+  exportDocx: async (planId: string, forestName: string): Promise<void> => {
+    await downloadFromApi(
+      `/api/operational-plans/${planId}/export`,
+      `${forestName}_OP_DOCX.docx`
+    );
+  },
+
+  previewOperationalPlan: async (planId: string): Promise<string> => {
+    const response = await api.get(`/api/operational-plans/${planId}/preview`, {
+      responseType: 'text',
+    });
+    return response.data;
+  },
+
+  getChartData: async (planId: string, chartType: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/${planId}/chart-data/${chartType}`);
+    return response.data;
+  },
+
+  getMapGeojson: async (planId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/${planId}/map-geojson`);
+    return response.data;
+  },
+
+  clearMapCache: async (planId: string, layer?: string): Promise<any> => {
+    const params = layer ? `?layer=${encodeURIComponent(layer)}` : '';
+    const response = await api.post(`/api/operational-plans/${planId}/clear-map-cache${params}`);
     return response.data;
   },
 };

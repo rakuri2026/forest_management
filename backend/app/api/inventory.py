@@ -31,6 +31,7 @@ from ..utils.auth import get_current_active_user
 from ..services.inventory_validator import InventoryValidator
 from ..services.inventory import InventoryService
 from ..utils.column_mapper import ColumnMapper
+from ..models.calculation import Calculation
 from ..utils.column_mapping_helpers import (
     merge_auto_mapping_with_preferences,
     save_user_column_preferences,
@@ -1055,6 +1056,7 @@ async def list_inventory_trees(
 async def export_inventory(
     inventory_id: UUID,
     format: str = Query('csv', regex="^(csv|geojson)$"),
+    module: str = Query('TreeInventory', description="Module name for filename"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1073,17 +1075,28 @@ async def export_inventory(
     # Get inventory service
     service = InventoryService(db)
 
-    try:
-        content, filename = await service.export_inventory(inventory_id, format)
+    from app.utils.file_export import build_disposition
 
+    try:
+        content, _ = await service.export_inventory(inventory_id, format)
+
+        inventory = db.query(InventoryCalculation).filter(
+            InventoryCalculation.id == inventory_id,
+            InventoryCalculation.user_id == current_user.id
+        ).first()
+        forest_name = None
+        if inventory and inventory.calculation_id:
+            calc = db.query(Calculation).filter(Calculation.id == inventory.calculation_id).first()
+            forest_name = calc.forest_name if calc else None
+
+        ext = "csv" if format == "csv" else "geojson"
+        _, disposition = build_disposition(forest_name, module, "Data", ext)
         media_type = "text/csv" if format == "csv" else "application/geo+json"
 
         return StreamingResponse(
             io.BytesIO(content),
             media_type=media_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}"
-            }
+            headers={"Content-Disposition": disposition}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

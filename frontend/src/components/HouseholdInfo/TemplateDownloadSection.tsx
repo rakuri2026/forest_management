@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { Button, Card, Radio, Checkbox, Alert, Space, message } from 'antd';
 import { DownloadOutlined, FileExcelOutlined } from '@ant-design/icons';
 import * as api from '../../services/api';
+import { downloadFromApi } from '../../utils/download';
 
 interface TemplateDownloadSectionProps {
   calculationId: string;
@@ -23,25 +24,17 @@ const TemplateDownloadSection: React.FC<TemplateDownloadSectionProps> = ({
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      const blob = await api.userGroupApi.downloadHouseholdTemplate(calculationId, {
-        land_unit: landUnit,
-        include_coordinates: includeCoordinates,
-      });
-
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `household_template_${landUnit}_${new Date().toISOString().split('T')[0]}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
+      const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+      await downloadFromApi(
+        `/api/household/calculations/${calculationId}/template`,
+        `household_template_${landUnit}_${dateStr}.xlsx`,
+        undefined,
+        { method: 'POST', body: { land_unit: landUnit, include_coordinates: includeCoordinates } }
+      );
       message.success('Template downloaded successfully');
     } catch (error) {
       console.error('Error downloading template:', error);
-      message.error('Failed to download template');
+      message.error(error.message || 'Failed to download template');
     } finally {
       setDownloading(false);
     }

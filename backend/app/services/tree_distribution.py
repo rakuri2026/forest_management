@@ -858,9 +858,9 @@ def export_to_gpkg(
         except Exception as e:
             print(f"Warning: Could not retrieve forest name: {e}")
 
-    # Generate filename with new format: forest_name_inventory_data_entry_date
+    # Generate filename with new format: forest_name_TreeModel_SyntheticTrees_date
     timestamp = datetime.now().strftime("%Y%m%d")
-    filename = f"{forest_name}_inventory_data_entry_{timestamp}.gpkg"
+    filename = f"{forest_name}_TreeModel_SyntheticTrees_{timestamp}.gpkg"
     filepath = os.path.join(output_dir, filename)
 
     # Create list of records - REGULATION FORMAT (16 columns)
@@ -1059,9 +1059,9 @@ def export_to_excel(
         except Exception as e:
             print(f"Warning: Could not retrieve forest name: {e}")
 
-    # Generate filename with new format: forest_name_inventory_data_entry_date
+    # Generate filename with new format: forest_name_TreeModel_SyntheticTrees_date
     timestamp = datetime.now().strftime("%Y%m%d")
-    filename = f"{forest_name}_inventory_data_entry_{timestamp}.xlsx"
+    filename = f"{forest_name}_TreeModel_SyntheticTrees_{timestamp}.xlsx"
     filepath = os.path.join(output_dir, filename)
 
     # Get sample plot center coordinates from sampling design

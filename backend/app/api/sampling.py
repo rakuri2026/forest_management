@@ -300,36 +300,47 @@ async def get_sampling_points(
     if not calculation:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    from app.utils.file_export import build_disposition
+
     # Handle export formats
     if format:
         try:
+            forest_name = calculation.forest_name
+
             if format == "csv":
                 csv_data = export_sampling_csv(db, design_id)
+                _, disposition = build_disposition(forest_name, "Sampling", "SamplePoints", "csv")
                 return StreamingResponse(
                     io.BytesIO(csv_data),
                     media_type="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename=sampling_{design_id}.csv"}
+                    headers={"Content-Disposition": disposition}
                 )
 
             elif format == "gpx":
                 gpx_data = export_sampling_gpx(db, design_id)
+                _, disposition = build_disposition(forest_name, "Sampling", "SamplePoints", "gpx")
                 return StreamingResponse(
                     io.BytesIO(gpx_data),
                     media_type="application/gpx+xml",
-                    headers={"Content-Disposition": f"attachment; filename=sampling_{design_id}.gpx"}
+                    headers={"Content-Disposition": disposition}
                 )
 
             elif format == "kml":
                 kml_data = export_sampling_kml(db, design_id)
+                _, disposition = build_disposition(forest_name, "Sampling", "SamplePoints", "kml")
                 return StreamingResponse(
                     io.BytesIO(kml_data),
                     media_type="application/vnd.google-earth.kml+xml",
-                    headers={"Content-Disposition": f"attachment; filename=sampling_{design_id}.kml"}
+                    headers={"Content-Disposition": disposition}
                 )
 
             elif format == "geojson":
                 geojson_data = get_sampling_points_geojson(db, design_id)
-                return JSONResponse(content=geojson_data)
+                _, disposition = build_disposition(forest_name, "Sampling", "SamplePoints", "geojson")
+                return JSONResponse(
+                    content=geojson_data,
+                    headers={"Content-Disposition": disposition}
+                )
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")

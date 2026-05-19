@@ -453,9 +453,11 @@ export function MapExportPanel({
   const downloadImage = () => {
     if (!exportedImage) return;
 
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const name = (forestName || 'Forest').replace(/\s+/g, '_');
     const link = document.createElement('a');
     link.href = exportedImage;
-    link.download = `user_group_map_${Date.now()}.png`;
+    link.download = `${name}_UserGroup_Map_${dateStr}.png`;
     link.click();
   };
 

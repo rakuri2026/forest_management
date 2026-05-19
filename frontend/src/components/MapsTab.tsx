@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../services/api';
+import { downloadFromApi } from '../utils/download';
 
 interface MapsTabProps {
   calculationId: string;
@@ -11,11 +12,12 @@ interface MapCardProps {
   description: string;
   mapType: 'boundary' | 'slope' | 'aspect' | 'landcover' | 'topographic' | 'forest_type' | 'canopy_height' | 'soil' | 'forest_health';
   calculationId: string;
+  forestName?: string;
   onGenerate?: () => Promise<void>;
   triggerGenerate?: boolean;
 }
 
-const MapCard: React.FC<MapCardProps> = ({ title, description, mapType, calculationId, onGenerate, triggerGenerate }) => {
+const MapCard: React.FC<MapCardProps> = ({ title, description, mapType, calculationId, forestName, onGenerate, triggerGenerate }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -78,24 +80,13 @@ const MapCard: React.FC<MapCardProps> = ({ title, description, mapType, calculat
 
   const handleDownload = async () => {
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(mapUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to download map');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${mapType}_map_${calculationId}.png`;
-      link.click();
-      URL.revokeObjectURL(url);
+      const typeLabel = mapType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/\s/g, '');
+      const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+      const name = (forestName || 'Forest').replace(/\s+/g, '_');
+      await downloadFromApi(
+        mapUrl,
+        `${name}_Map_${typeLabel}_${dateStr}.png`
+      );
     } catch (err) {
       alert('Failed to download map');
     }
@@ -329,6 +320,7 @@ const MapsTab: React.FC<MapsTabProps> = ({ calculationId, forestName }) => {
             description={map.description}
             mapType={map.mapType}
             calculationId={calculationId}
+            forestName={forestName}
             onGenerate={async () => handleMapGenerated(index)}
             triggerGenerate={isGeneratingAll && currentGeneratingIndex === index}
           />

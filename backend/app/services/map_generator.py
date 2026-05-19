@@ -1043,12 +1043,11 @@ class MapGenerator:
         """
         Generate a slope map from raster data with color-coded slope classes.
 
-        Slope Classes:
-        - 0-5°: Flat (green)
-        - 5-15°: Gentle (yellow-green)
-        - 15-30°: Moderate (yellow)
-        - 30-45°: Steep (orange)
-        - >45°: Very Steep (red)
+        Slope Classes (CATEGORICAL CODES from rasters.slope):
+        - Code 1: 1-19° (Flat/Normal) → Green
+        - Code 2: 19-30° (Slope) → Yellow
+        - Code 3: 30-45° (Steep) → Orange
+        - Code 4: >45° (Very Steep) → Red
 
         Args:
             geometry: GeoJSON dict with type and coordinates
@@ -1089,50 +1088,48 @@ class MapGenerator:
         min_x, min_y, max_x, max_y = bounds
 
         # Query slope raster data within boundary
-        # Uses pre-computed slope raster for speed and consistency with Analysis tab
+        # rasters.slope stores CATEGORICAL CODES (1-4), not degree values
         try:
             query = text("""
                 WITH slope_pixels AS (
                     SELECT
-                        (ST_PixelAsPolygons(ST_Clip(rast, 1, ST_GeomFromText(:geom_wkt, 4326)))).val as slope_degrees,
+                        (ST_PixelAsPolygons(ST_Clip(rast, 1, ST_GeomFromText(:geom_wkt, 4326)))).val as slope_code,
                         (ST_PixelAsPolygons(ST_Clip(rast, 1, ST_GeomFromText(:geom_wkt, 4326)))).geom as geom
                     FROM rasters.slope
                     WHERE ST_Intersects(rast, ST_GeomFromText(:geom_wkt, 4326))
                 )
                 SELECT
-                    slope_degrees,
+                    slope_code,
                     ST_AsText(geom) as geom_wkt
                 FROM slope_pixels
-                WHERE slope_degrees IS NOT NULL AND slope_degrees >= 0
+                WHERE slope_code IS NOT NULL AND slope_code > 0
             """)
 
             result = db_session.execute(query, {"geom_wkt": geom_wkt})
 
-            # Collect pixels and classify
+            # Collect pixels and classify by categorical code
             pixels = []
             for row in result:
-                slope_val = float(row[0])
+                slope_code = int(row[0])
                 pixel_geom_wkt = row[1]
 
-                # Classify slope
-                if slope_val < 5:
-                    slope_class = 'Flat (0-5°)'
+                if slope_code == 1:
+                    slope_class = 'Flat/Normal (1-19\u00b0)'
                     color = '#2ECC71'  # Green
-                elif slope_val < 15:
-                    slope_class = 'Gentle (5-15°)'
+                elif slope_code == 2:
+                    slope_class = 'Slope (19-30\u00b0)'
                     color = '#F1C40F'  # Yellow
-                elif slope_val < 30:
-                    slope_class = 'Moderate (15-30°)'
+                elif slope_code == 3:
+                    slope_class = 'Steep (30-45\u00b0)'
                     color = '#E67E22'  # Orange
-                elif slope_val < 45:
-                    slope_class = 'Steep (30-45°)'
-                    color = '#E74C3C'  # Red-Orange
+                elif slope_code == 4:
+                    slope_class = 'Very Steep (>45\u00b0)'
+                    color = '#E74C3C'  # Red
                 else:
-                    slope_class = 'Very Steep (>45°)'
-                    color = '#C0392B'  # Dark Red
+                    continue
 
                 pixels.append({
-                    'slope': slope_val,
+                    'code': slope_code,
                     'class': slope_class,
                     'color': color,
                     'geom_wkt': pixel_geom_wkt
@@ -1206,11 +1203,10 @@ class MapGenerator:
         # Add slope class legend
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#2ECC71', edgecolor='black', label='Flat (0-5°)'),
-            Patch(facecolor='#F1C40F', edgecolor='black', label='Gentle (5-15°)'),
-            Patch(facecolor='#E67E22', edgecolor='black', label='Moderate (15-30°)'),
-            Patch(facecolor='#E74C3C', edgecolor='black', label='Steep (30-45°)'),
-            Patch(facecolor='#C0392B', edgecolor='black', label='Very Steep (>45°)'),
+            Patch(facecolor='#2ECC71', edgecolor='black', label='Flat/Normal (1-19\u00b0)'),
+            Patch(facecolor='#F1C40F', edgecolor='black', label='Slope (19-30\u00b0)'),
+            Patch(facecolor='#E67E22', edgecolor='black', label='Steep (30-45\u00b0)'),
+            Patch(facecolor='#E74C3C', edgecolor='black', label='Very Steep (>45\u00b0)'),
         ]
         fig.legend(
             handles=legend_elements,

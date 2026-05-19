@@ -82,24 +82,7 @@ class TileService:
     def __init__(self, db: Session):
         self.db = db
 
-    @lru_cache(maxsize=1000)  # Cache 1000 most recent tiles in memory
-    def get_tile_cached(
-        self,
-        calculation_id: str,
-        layer_name: str,
-        z: int,
-        x: int,
-        y: int,
-        alpha: int = 128
-    ) -> bytes:
-        """
-        Cached version of get_tile - uses LRU cache for fast repeated access
-
-        Cache key: (calculation_id, layer_name, z, x, y, alpha)
-        Cache size: 1000 tiles (~30-50MB memory)
-        """
-        return self.get_tile(calculation_id, layer_name, z, x, y, alpha=alpha)
-
+    @lru_cache(maxsize=2000)
     def get_tile(
         self,
         calculation_id: str,
@@ -108,24 +91,15 @@ class TileService:
         x: int,
         y: int,
         tile_size: int = 256,
-        alpha: int = 128  # 50% transparency (0-255)
+        alpha: int = 128
     ) -> bytes:
         """
-        Generate a tile for the given layer and coordinates
-
-        Args:
-            calculation_id: UUID of forest boundary
-            layer_name: Layer identifier (slope, aspect, dem, etc.)
-            z: Zoom level
-            x: Tile X coordinate
-            y: Tile Y coordinate
-            tile_size: Output image size (default 256×256)
-            alpha: Transparency (0=transparent, 255=opaque, default 128=50%)
+        Generate a tile for the given layer and coordinates.
+        Cached by (calculation_id, layer_name, z, x, y) — alpha not part of cache key.
 
         Returns:
             PNG image bytes
         """
-        print(f"[TILE] Generating tile: layer={layer_name}, z={z}, x={x}, y={y}, calc_id={calculation_id[:8]}...")
 
         # 1. Get tile bounds in lat/lon
         bounds = self.xyz_to_bounds(x, y, z)

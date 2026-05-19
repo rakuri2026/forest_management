@@ -32,6 +32,10 @@ python-dateutil==2.8.2
 aiofiles==23.2.1
 pandas==2.1.3
 
+# Document export
+python-docx==1.1.0
+contextily>=1.6.0
+
 # Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1

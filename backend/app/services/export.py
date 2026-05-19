@@ -17,6 +17,18 @@ from app.models.sampling import SamplingDesign
 # Fieldbook Export Functions
 # ===========================
 
+def _safe_string(val) -> str:
+    s = str(val or '').strip()
+    try:
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+        s = ILLEGAL_CHARACTERS_RE.sub('', s)
+    except ImportError:
+        import re
+        s = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', s)
+    if s.startswith(('=', '+', '-')):
+        s = f"'{s}"
+    return s
+
 def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
     """
     Export fieldbook to CSV format with topographic features.
@@ -148,27 +160,27 @@ def export_fieldbook_csv(db: Session, calculation_id: UUID) -> bytes:
                 logger.warning(f"Failed to find topographic feature for point {point.point_number}: {e}")
 
         writer.writerow([
-            'YES',  # DEBUG marker - proves new code is running
-            f'P{point.point_number}',
-            point.point_type,
-            point.block_number if point.block_number else '',
-            point.block_name if point.block_name else '',
-            point.sub_area_name if point.sub_area_name else '',
-            'Yes' if point.is_excluded else 'No' if point.sub_area_name else '',
+            'YES',
+            _safe_string(f'P{point.point_number}'),
+            _safe_string(point.point_type),
+            _safe_string(point.block_number),
+            _safe_string(point.block_name),
+            _safe_string(point.sub_area_name),
+            _safe_string('Yes' if point.is_excluded else 'No' if point.sub_area_name else ''),
             f'{point.latitude:.7f}' if point.latitude else '',
             f'{point.longitude:.7f}' if point.longitude else '',
             f'{point.easting_utm:.2f}' if point.easting_utm else '',
             f'{point.northing_utm:.2f}' if point.northing_utm else '',
-            point.utm_zone if point.utm_zone else '',
+            _safe_string(point.utm_zone),
             f'{point.azimuth_to_next:.2f}' if point.azimuth_to_next else '',
             f'{point.distance_to_next:.2f}' if point.distance_to_next else '',
             f'{point.elevation:.2f}' if point.elevation else '',
-            feature_name,
-            feature_type,
+            _safe_string(feature_name),
+            _safe_string(feature_type),
             feature_distance,
-            feature_direction,
-            'Yes' if point.is_verified else 'No',
-            point.remarks if point.remarks else ''
+            _safe_string(feature_direction),
+            _safe_string('Yes' if point.is_verified else 'No'),
+            _safe_string(point.remarks)
         ])
 
     return output.getvalue().encode('utf-8')
@@ -327,26 +339,26 @@ def export_fieldbook_excel(db: Session, calculation_id: UUID) -> bytes:
             except Exception as e:
                 logger.warning(f"Failed to find topographic feature for point {point.point_number}: {e}")
 
-        ws_points.cell(row=row, column=1, value=f'P{point.point_number}')
-        ws_points.cell(row=row, column=2, value=point.point_type)
-        ws_points.cell(row=row, column=3, value=point.block_number if point.block_number else '')
-        ws_points.cell(row=row, column=4, value=point.block_name if point.block_name else '')
-        ws_points.cell(row=row, column=5, value=point.sub_area_name if point.sub_area_name else '')
-        ws_points.cell(row=row, column=6, value='Yes' if point.is_excluded else 'No' if point.sub_area_name else '')
+        ws_points.cell(row=row, column=1, value=_safe_string(f'P{point.point_number}'))
+        ws_points.cell(row=row, column=2, value=_safe_string(point.point_type))
+        ws_points.cell(row=row, column=3, value=_safe_string(point.block_number))
+        ws_points.cell(row=row, column=4, value=_safe_string(point.block_name))
+        ws_points.cell(row=row, column=5, value=_safe_string(point.sub_area_name))
+        ws_points.cell(row=row, column=6, value=_safe_string('Yes' if point.is_excluded else 'No' if point.sub_area_name else ''))
         ws_points.cell(row=row, column=7, value=round(point.latitude, 7) if point.latitude else '')
         ws_points.cell(row=row, column=8, value=round(point.longitude, 7) if point.longitude else '')
         ws_points.cell(row=row, column=9, value=round(point.easting_utm, 2) if point.easting_utm else '')
         ws_points.cell(row=row, column=10, value=round(point.northing_utm, 2) if point.northing_utm else '')
-        ws_points.cell(row=row, column=11, value=point.utm_zone if point.utm_zone else '')
+        ws_points.cell(row=row, column=11, value=_safe_string(point.utm_zone))
         ws_points.cell(row=row, column=12, value=round(point.azimuth_to_next, 2) if point.azimuth_to_next else '')
         ws_points.cell(row=row, column=13, value=round(point.distance_to_next, 2) if point.distance_to_next else '')
         ws_points.cell(row=row, column=14, value=round(point.elevation, 2) if point.elevation else '')
-        ws_points.cell(row=row, column=15, value=feature_name)
-        ws_points.cell(row=row, column=16, value=feature_type)
+        ws_points.cell(row=row, column=15, value=_safe_string(feature_name))
+        ws_points.cell(row=row, column=16, value=_safe_string(feature_type))
         ws_points.cell(row=row, column=17, value=feature_distance)
-        ws_points.cell(row=row, column=18, value=feature_direction)
-        ws_points.cell(row=row, column=19, value='Yes' if point.is_verified else 'No')
-        ws_points.cell(row=row, column=20, value=point.remarks if point.remarks else '')
+        ws_points.cell(row=row, column=18, value=_safe_string(feature_direction))
+        ws_points.cell(row=row, column=19, value=_safe_string('Yes' if point.is_verified else 'No'))
+        ws_points.cell(row=row, column=20, value=_safe_string(point.remarks))
 
         # Highlight verified points
         if point.is_verified:

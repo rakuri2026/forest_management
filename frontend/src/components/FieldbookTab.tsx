@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fieldbookApi } from '../services/api';
+import { downloadFromApi } from '../utils/download';
 
 interface FieldbookTabProps {
   calculationId: string;
@@ -135,23 +136,13 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
 
   const handleExport = async (format: 'csv' | 'excel' | 'gpx' | 'geojson') => {
     try {
-      const blob = await fieldbookApi.export(calculationId, format);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-
-      // Set appropriate file extension
-      let extension = format;
-      if (format === 'excel') extension = 'xlsx';
-      else if (format === 'geojson') extension = 'geojson';
-
-      a.download = `fieldbook_${calculationId}.${extension}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await downloadFromApi(
+        `/api/calculations/${calculationId}/fieldbook`,
+        `fieldbook_${calculationId}.${format === 'excel' ? 'xlsx' : format === 'geojson' ? 'geojson' : format}`,
+        { format }
+      );
     } catch (err: any) {
-      alert(getErrorDetail(err));
+      alert(err.message || getErrorDetail(err));
     }
   };
 

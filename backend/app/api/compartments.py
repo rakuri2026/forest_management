@@ -299,15 +299,17 @@ async def export_blocks_gpkg(
         if not all_blocks:
             raise HTTPException(status_code=404, detail="No blocks found for this calculation")
 
+        from app.utils.file_export import build_disposition
+
         # Get forest name for filename
         from app.models.calculation import Calculation
         calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
-        forest_name = calculation.forest_name.replace(' ', '_') if calculation else "forest"
+        forest_name = calculation.forest_name if calculation else None
 
         # Create temporary directory
         temp_dir = tempfile.mkdtemp()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{forest_name}_compartments_{timestamp}.gpkg"
+        _, disposition = build_disposition(forest_name, "Compartment", "Spatial", "gpkg")
+        filename = _.replace(" ", "_")  # use the filename from build_disposition
         filepath = os.path.join(temp_dir, filename)
 
         # Prepare features
@@ -526,24 +528,27 @@ async def export_blocks_gpkg(
             
         except ImportError as e:
             logger.warning(f"Fiona not available: {e}. Exporting as GeoJSON instead.")
-            filepath = os.path.join(temp_dir, f"{forest_name}_compartments_{timestamp}.geojson")
+            filename = filename.replace('.gpkg', '.geojson')
+            filepath = os.path.join(temp_dir, filename)
             import json
             with open(filepath, 'w') as f:
                 json.dump({"type": "FeatureCollection", "features": features}, f)
-            filename = filename.replace('.gpkg', '.geojson')
+            _, disposition = build_disposition(forest_name, "Compartment", "Spatial", "geojson")
             
         except Exception as gpkg_err:
             logger.warning(f"GPKG export failed: {gpkg_err}. Exporting as GeoJSON instead.")
-            filepath = os.path.join(temp_dir, f"{forest_name}_compartments_{timestamp}.geojson")
+            filename = filename.replace('.gpkg', '.geojson')
+            filepath = os.path.join(temp_dir, filename)
             import json
             with open(filepath, 'w') as f:
                 json.dump({"type": "FeatureCollection", "features": features}, f)
-            filename = filename.replace('.gpkg', '.geojson')
+            _, disposition = build_disposition(forest_name, "Compartment", "Spatial", "geojson")
         
         return FileResponse(
             filepath,
             media_type='application/octet-stream',
-            filename=filename
+            filename=filename,
+            headers={"Content-Disposition": disposition}
         )
 
     except HTTPException:
@@ -734,9 +739,11 @@ async def export_blocks_kml(
         if not features_data:
             raise HTTPException(status_code=500, detail="Failed to process any blocks. Check backend logs.")
 
+        from app.utils.file_export import build_disposition
+
         # Generate KML
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{forest_name.replace(' ', '_')}_compartments_{timestamp}.kml"
+        _, disposition = build_disposition(forest_name, "Compartment", "Spatial", "kml")
+        filename = _.replace(" ", "_")  # use the filename from build_disposition
         
         kml_content = '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -821,7 +828,8 @@ async def export_blocks_kml(
         return FileResponse(
             filepath,
             media_type='application/vnd.google-earth.kml+xml',
-            filename=filename
+            filename=filename,
+            headers={"Content-Disposition": disposition}
         )
 
     except HTTPException:

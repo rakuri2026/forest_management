@@ -18,6 +18,7 @@ import FieldbookList from './pages/FieldbookList';
 import SamplingList from './pages/SamplingList';
 import DraftResume from './pages/DraftResume';
 import YearlyActivitiesPage from './components/YearlyActivities/YearlyActivitiesPage';
+import OperationalPlanPage from './pages/OperationalPlanPage';
 
 const App: React.FC = () => {
   return (
@@ -47,6 +48,7 @@ const App: React.FC = () => {
             <Route path="calculations/:id" element={<CalculationDetail />} />
             <Route path="calculations/:id/block-naming" element={<BlockNaming />} />
             <Route path="calculations/:id/yearly-activities" element={<YearlyActivitiesPage />} />
+            <Route path="calculations/:id/operational-plan" element={<OperationalPlanPage />} />
             <Route path="forests" element={<Forests />} />
             <Route path="forests/:id" element={<ForestDetail />} />
 

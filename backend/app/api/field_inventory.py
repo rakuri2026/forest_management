@@ -265,6 +265,9 @@ async def get_summary(
         avg_tree_firewood = sum(float(b.tree_firewood_m3_per_ha or 0) for b in blocks) / total_blocks
         avg_growing_stock = sum(float(b.total_growing_stock_m3_per_ha or 0) for b in blocks) / total_blocks
 
+        # Average basal area
+        avg_basal_area = sum(float(b.basal_area_m2_per_ha or 0) for b in blocks) / total_blocks
+
         # Average carbon metrics
         avg_wood_density = sum(float(b.weighted_wood_density or 0) for b in blocks) / total_blocks
         avg_agb = sum(float(b.agb_t_per_ha or 0) for b in blocks) / total_blocks
@@ -310,6 +313,7 @@ async def get_summary(
         "total_tree_timber_m3_per_ha": round(avg_tree_timber, 2),
         "total_tree_firewood_m3_per_ha": round(avg_tree_firewood, 2),
         "total_growing_stock_m3_per_ha": round(avg_growing_stock, 2),
+        "average_basal_area_m2_per_ha": round(avg_basal_area, 2),
 
         # Overall assessments
         "overall_forest_condition": overall_condition,
@@ -389,7 +393,8 @@ async def get_species_breakdown(
                 COUNT(DISTINCT sp.id) as total_plots_in_block,
                 SUM(m.count) as total_count,
                 SUM(COALESCE(m.net_volume, 0)) as total_timber,
-                SUM(COALESCE(m.firewood_m3, 0)) as total_firewood
+                SUM(COALESCE(m.firewood_m3, 0)) as total_firewood,
+                SUM(COALESCE(m.basal_area_m2, 0) * m.count) as total_basal_area
             FROM public.field_inventory_sample_plots sp
             JOIN public.field_inventory_measurements m ON m.sample_plot_id = sp.id
             WHERE sp.field_inventory_calculation_id = :field_inventory_id
@@ -403,6 +408,8 @@ async def get_species_breakdown(
             SUM(CASE WHEN stand_type = 'Sapling' THEN total_count ELSE 0 END) as sapling_count,
             SUM(CASE WHEN stand_type = 'Pole' THEN total_count ELSE 0 END) as pole_count,
             SUM(CASE WHEN stand_type = 'Tree' THEN total_count ELSE 0 END) as tree_count,
+            SUM(CASE WHEN stand_type = 'Pole' THEN total_basal_area ELSE 0 END) as pole_basal_area,
+            SUM(CASE WHEN stand_type = 'Tree' THEN total_basal_area ELSE 0 END) as tree_basal_area,
             SUM(CASE WHEN stand_type = 'Pole' THEN total_timber ELSE 0 END) as pole_timber,
             SUM(CASE WHEN stand_type = 'Pole' THEN total_firewood ELSE 0 END) as pole_firewood,
             SUM(CASE WHEN stand_type = 'Tree' THEN total_timber ELSE 0 END) as tree_timber,
@@ -450,6 +457,11 @@ async def get_species_breakdown(
         growing_stock = pole_timber_per_ha + tree_timber_per_ha
         total_volume = pole_timber_per_ha + pole_firewood_per_ha + tree_timber_per_ha + tree_firewood_per_ha
 
+        # Calculate per-hectare basal area
+        pole_basal_per_ha = (float(row.pole_basal_area or 0) / total_plots / pole_area) * 10000 if row.pole_basal_area else 0
+        tree_basal_per_ha = (float(row.tree_basal_area or 0) / total_plots / tree_area) * 10000 if row.tree_basal_area else 0
+        basal_area_m2_per_ha = pole_basal_per_ha + tree_basal_per_ha
+
         # Carbon calculations
         wood_density = species_densities.get(row.species_scientific, 0.65)  # Default to 0.65 t/m³ if not found
         agb_t_per_ha = growing_stock * wood_density * BEF
@@ -472,6 +484,7 @@ async def get_species_breakdown(
             "tree_firewood_m3_per_ha": round(tree_firewood_per_ha, 2),
             "growing_stock_m3_per_ha": round(growing_stock, 2),
             "total_volume_m3_per_ha": round(total_volume, 2),
+            "basal_area_m2_per_ha": round(basal_area_m2_per_ha, 2),
             # Carbon metrics (IPCC/REDD+)
             "wood_density_t_m3": round(wood_density, 3),
             "agb_t_per_ha": round(agb_t_per_ha, 2),
@@ -763,6 +776,157 @@ async def delete_field_inventory(
     return {"message": "Field inventory deleted successfully"}
 
 
+@router.get("/{field_inventory_id}/export-excel")
+async def export_field_inventory_excel(
+    field_inventory_id: UUID,
+    aah_good: float = 75.0,
+    aah_moderate: float = 60.0,
+    aah_weak: float = 40.0,
+    custom_multipliers: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Export field inventory as a measurement-level Excel file.
+    One row = one tree/plant measurement with all calculated volume metrics,
+    block-level per-hectare aggregates, and MAI/AAH rates repeated per row.
+    Ideal for further analysis, pivot tables, and custom calculations.
+    """
+    from ..services.field_inventory_excel_export import generate_field_inventory_excel
+
+    field_inventory = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.id == field_inventory_id,
+        FieldInventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not field_inventory:
+        raise HTTPException(status_code=404, detail="Field inventory not found")
+
+    custom_mult_dict = {}
+    if custom_multipliers:
+        try:
+            custom_mult_dict = json.loads(custom_multipliers)
+        except json.JSONDecodeError:
+            pass
+
+    from ..models.calculation import Calculation
+    from datetime import datetime
+    from urllib.parse import quote
+
+    # Pre-check: ensure there are measurements before calling the generator
+    has_measurements = db.query(FieldInventoryMeasurement).join(
+        FieldInventorySamplePlot,
+        FieldInventoryMeasurement.sample_plot_id == FieldInventorySamplePlot.id
+    ).filter(
+        FieldInventorySamplePlot.field_inventory_calculation_id == field_inventory_id
+    ).first()
+    if not has_measurements:
+        raise HTTPException(
+            status_code=400,
+            detail="No measurements found in this field inventory. Please upload and process measurement data first."
+        )
+
+    try:
+        excel_bytes = generate_field_inventory_excel(
+            db=db,
+            field_inventory_id=field_inventory_id,
+            aah_good=aah_good,
+            aah_moderate=aah_moderate,
+            aah_weak=aah_weak,
+            custom_multipliers=custom_mult_dict,
+        )
+
+        calc = db.query(Calculation).filter(Calculation.id == field_inventory.calculation_id).first()
+        forest_name = calc.forest_name.replace(" ", "_") if calc and calc.forest_name else "Forest"
+        date_str = datetime.now().strftime("%Y%m%d")
+        filename = f"{forest_name}_Field_Inventory_Report_{date_str}.xlsx"
+
+        ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+        encoded = quote(filename)
+
+        return StreamingResponse(
+            io.BytesIO(excel_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}',
+                "Content-Length": str(len(excel_bytes)),
+            }
+        )
+    except ValueError as e:
+        detail = str(e)
+        if "No measurements found" in detail:
+            detail = "No measurements found in this field inventory. Please upload and process measurement data first."
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        logger.error(f"Excel export failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Excel export failed: {str(e)}")
+
+
+@router.get("/{field_inventory_id}/export-dfo-summary")
+async def export_field_inventory_dfo_summary(
+    field_inventory_id: UUID,
+    calculation_id: UUID,
+    aah_good: float = 75.0,
+    aah_moderate: float = 60.0,
+    aah_weak: float = 40.0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Export DFO-format Nepali block-wise + species-wise summary Excel.
+    15 sheets: 6 base (Species×Block, Block Aggregate, Carbon, DBH, Regen, Descriptions)
+    + 9 management plan sheets (Species Comp, Block Comparison, Harvest Plan,
+    Forest Condition, DBH Volume, Carbon Block, Growth Rate, Stand Structure,
+    Productivity).
+    """
+    from ..services.field_inventory_dfo_export import generate_field_inventory_dfo_summary
+
+    field_inventory = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.id == field_inventory_id,
+        FieldInventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not field_inventory:
+        raise HTTPException(status_code=404, detail="Field inventory not found")
+
+    try:
+        excel_bytes = generate_field_inventory_dfo_summary(
+            db=db,
+            field_inventory_id=field_inventory_id,
+            calculation_id=calculation_id,
+            aah_good=aah_good,
+            aah_moderate=aah_moderate,
+            aah_weak=aah_weak,
+        )
+
+        from ..models.calculation import Calculation
+        from datetime import datetime
+        from urllib.parse import quote
+
+        calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+        forest_name = calc.forest_name.replace(" ", "_") if calc and calc.forest_name else "Forest"
+        date_str = datetime.now().strftime("%Y%m%d")
+        filename = f"{forest_name}_FieldInventory_DFOSummary_{date_str}.xlsx"
+
+        ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+        encoded = quote(filename)
+
+        return StreamingResponse(
+            io.BytesIO(excel_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}',
+                "Content-Length": str(len(excel_bytes)),
+            }
+        )
+    except ValueError as e:
+        detail = str(e)
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        logger.error(f"DFO summary export failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DFO summary export failed: {str(e)}")
+
+
 @router.get("/{field_inventory_id}/total-inventory")
 async def get_total_inventory(
     field_inventory_id: UUID,
@@ -817,6 +981,9 @@ async def get_total_inventory(
             "missing_areas": []
         }
 
+    # DBH class keys for implementation plan (Pole + Tree volume-carrying classes)
+    DBH_CLASS_KEYS = ['10_20', '20_30', '30_40', '40_50', '50_60']
+
     # Calculate totals for each block
     total_blocks = []
     missing_areas = []
@@ -835,6 +1002,16 @@ async def get_total_inventory(
     forest_total_biomass = 0
     forest_total_carbon = 0
     forest_total_co2 = 0
+
+    # Forest-wide DBH class accumulators
+    forest_dbh_class_totals = {}
+    for cls_key in DBH_CLASS_KEYS:
+        forest_dbh_class_totals[cls_key] = {
+            "total_count": 0,
+            "total_timber_m3": 0.0,
+            "total_firewood_m3": 0.0,
+            "total_tree_volume_m3": 0.0
+        }
 
     for block in blocks:
         block_name = block.block_name
@@ -903,6 +1080,41 @@ async def get_total_inventory(
         total_carbon = carbon_per_ha * area_ha
         total_co2 = co2_per_ha * area_ha
 
+        # Compute DBH class breakdown for this block
+        dbh_class_per_ha = {}
+        dbh_class_totals = {}
+        if block.dbh_class_breakdown:
+            for cls_key in DBH_CLASS_KEYS:
+                cls_data = block.dbh_class_breakdown.get(cls_key, {})
+                if cls_data:
+                    cpk = float(cls_data.get('count_per_ha', 0) or 0)
+                    tpk = float(cls_data.get('timber_m3_per_ha', 0) or 0)
+                    fpk = float(cls_data.get('firewood_m3_per_ha', 0) or 0)
+                    tvpk = tpk + fpk
+
+                    dbh_class_per_ha[cls_key] = {
+                        "count_per_ha": round(cpk, 2),
+                        "timber_m3_per_ha": round(tpk, 2),
+                        "firewood_m3_per_ha": round(fpk, 2),
+                        "tree_volume_m3_per_ha": round(tvpk, 2),
+                        "label_en": cls_data.get('label_en', ''),
+                        "label_np": cls_data.get('label_np', '')
+                    }
+
+                    dbh_class_totals[cls_key] = {
+                        "total_count": int(round(cpk * area_ha)),
+                        "total_timber_m3": round(tpk * area_ha, 2),
+                        "total_firewood_m3": round(fpk * area_ha, 2),
+                        "total_tree_volume_m3": round(tvpk * area_ha, 2)
+                    }
+
+                    # Accumulate forest-wide DBH totals
+                    fct = forest_dbh_class_totals[cls_key]
+                    fct["total_count"] += int(round(cpk * area_ha))
+                    fct["total_timber_m3"] += round(tpk * area_ha, 2)
+                    fct["total_firewood_m3"] += round(fpk * area_ha, 2)
+                    fct["total_tree_volume_m3"] += round(tvpk * area_ha, 2)
+
         # Accumulate forest totals
         forest_total_area += area_ha
         forest_total_regeneration += total_regeneration
@@ -951,6 +1163,10 @@ async def get_total_inventory(
             "total_biomass_tonnes": round(total_biomass, 2),
             "total_carbon_tc": round(total_carbon, 2),
             "total_co2_tco2": round(total_co2, 2),
+
+            # DBH class breakdown
+            "dbh_class_per_ha": dbh_class_per_ha,
+            "dbh_class_totals": dbh_class_totals,
         })
 
     # Forest-wide totals
@@ -969,6 +1185,17 @@ async def get_total_inventory(
         "total_biomass_tonnes": round(forest_total_biomass, 2),
         "total_carbon_tc": round(forest_total_carbon, 2),
         "total_co2_tco2": round(forest_total_co2, 2),
+
+        # Forest-wide DBH class totals
+        "dbh_class_totals": {
+            cls_key: {
+                "total_count": int(v["total_count"]),
+                "total_timber_m3": round(v["total_timber_m3"], 2),
+                "total_firewood_m3": round(v["total_firewood_m3"], 2),
+                "total_tree_volume_m3": round(v["total_tree_volume_m3"], 2)
+            }
+            for cls_key, v in forest_dbh_class_totals.items()
+        },
     }
 
     return {
@@ -976,3 +1203,164 @@ async def get_total_inventory(
         "forest_totals": forest_totals,
         "missing_areas": missing_areas
     }
+
+
+@router.get("/{field_inventory_id}/management-plan-data")
+async def get_management_plan_data_endpoint(
+    field_inventory_id: UUID,
+    calculation_id: UUID,
+    aah_good: float = 75.0,
+    aah_moderate: float = 60.0,
+    aah_weak: float = 40.0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Get management plan summary data (all 9 datasets) for frontend charts.
+    """
+    from ..services.field_inventory_mgmt_data import get_management_plan_data
+
+    fi = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.id == field_inventory_id,
+        FieldInventoryCalculation.user_id == current_user.id
+    ).first()
+    if not fi:
+        raise HTTPException(status_code=404, detail="Field inventory not found")
+
+    try:
+        data = get_management_plan_data(
+            db=db,
+            field_inventory_id=field_inventory_id,
+            calculation_id=calculation_id,
+            aah_good=aah_good,
+            aah_moderate=aah_moderate,
+            aah_weak=aah_weak,
+        )
+        return data
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{field_inventory_id}/export-management-plan-docx")
+async def export_management_plan_docx(
+    field_inventory_id: UUID,
+    calculation_id: UUID,
+    aah_good: float = 75.0,
+    aah_moderate: float = 60.0,
+    aah_weak: float = 40.0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Export 10-Year Management Plan DOCX with 12 chapters, embedded maps,
+    charts, block-wise 10-year schedule, and data tables.
+    Replaces the previous flat maps+charts export.
+    """
+    from ..services.management_plan_docx import generate_10yr_management_plan_docx
+
+    fi = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.id == field_inventory_id,
+        FieldInventoryCalculation.user_id == current_user.id
+    ).first()
+    if not fi:
+        raise HTTPException(status_code=404, detail="Field inventory not found")
+
+    try:
+        docx_bytes = generate_10yr_management_plan_docx(
+            db=db,
+            field_inventory_id=field_inventory_id,
+            calculation_id=calculation_id,
+            aah_good=aah_good,
+            aah_moderate=aah_moderate,
+            aah_weak=aah_weak,
+        )
+
+        from ..models.calculation import Calculation
+        from urllib.parse import quote
+        from datetime import datetime
+
+        calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+        forest_name = calc.forest_name.replace(" ", "_") if calc and calc.forest_name else "Forest"
+        date_str = datetime.now().strftime("%Y%m%d")
+        filename = f"{forest_name}_ManagementPlan_10Yr_{date_str}.docx"
+
+        ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+        encoded = quote(filename)
+
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}',
+                "Content-Length": str(len(docx_bytes)),
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Management plan DOCX export failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Management plan DOCX export failed: {str(e)}")
+
+@router.get("/{field_inventory_id}/export-10yr-plan-docx")
+async def export_10yr_plan_docx(
+    field_inventory_id: UUID,
+    calculation_id: UUID,
+    aah_good: float = 75.0,
+    aah_moderate: float = 60.0,
+    aah_weak: float = 40.0,
+    include_maps: bool = True,
+    include_charts: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Export 10-Year Management Plan DOCX with full chapter structure.
+    Same as export-management-plan-docx but with additional options
+    for including/excluding maps and charts.
+    """
+    from ..services.management_plan_docx import generate_10yr_management_plan_docx
+
+    fi = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.id == field_inventory_id,
+        FieldInventoryCalculation.user_id == current_user.id
+    ).first()
+    if not fi:
+        raise HTTPException(status_code=404, detail="Field inventory not found")
+
+    try:
+        docx_bytes = generate_10yr_management_plan_docx(
+            db=db,
+            field_inventory_id=field_inventory_id,
+            calculation_id=calculation_id,
+            aah_good=aah_good,
+            aah_moderate=aah_moderate,
+            aah_weak=aah_weak,
+            include_maps=include_maps,
+            include_charts=include_charts,
+        )
+
+        from ..models.calculation import Calculation
+        from urllib.parse import quote
+        from datetime import datetime
+
+        calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+        forest_name = calc.forest_name.replace(" ", "_") if calc and calc.forest_name else "Forest"
+        date_str = datetime.now().strftime("%Y%m%d")
+        filename = f"{forest_name}_10Yr_ManagementPlan_{date_str}.docx"
+
+        ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+        encoded = quote(filename)
+
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}',
+                "Content-Length": str(len(docx_bytes)),
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"10-Year plan DOCX export failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"10-Year plan DOCX export failed: {str(e)}")

@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { fieldInventoryApi } from '../services/api';
+import { downloadFromApi, downloadBlob } from '../utils/download';
 
 interface FieldInventoryTabProps {
   calculationId: string;
   blocks?: any[];
+  forestName?: string;
 }
 
-export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventoryTabProps) {
+export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Forest' }: FieldInventoryTabProps) {
   const [fieldInventory, setFieldInventory] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [speciesBreakdown, setSpeciesBreakdown] = useState<any>(null);
@@ -325,6 +327,46 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
     }
   };
 
+  const handleExportExcel = async () => {
+    if (!fieldInventory?.id) return;
+    try {
+      const params: Record<string, string> = {
+        aah_good: String(aahMultipliers.good),
+        aah_moderate: String(aahMultipliers.moderate),
+        aah_weak: String(aahMultipliers.weak),
+      };
+      if (Object.keys(customMultipliers).length > 0) {
+        params.custom_multipliers = JSON.stringify(customMultipliers);
+      }
+      await downloadFromApi(
+        `/api/field-inventory/${fieldInventory.id}/export-excel`,
+        `field_inventory_${fieldInventory.id}.xlsx`,
+        params
+      );
+    } catch (err: any) {
+      console.error('Excel export failed:', err);
+      setError('Failed to export Excel: ' + err.message);
+    }
+  };
+
+  const handleDfoExport = async () => {
+    if (!fieldInventory?.id || !calculationId) return;
+    try {
+      const blob = await fieldInventoryApi.exportDfoSummary(
+        fieldInventory.id,
+        calculationId,
+        aahMultipliers.good,
+        aahMultipliers.moderate,
+        aahMultipliers.weak,
+      );
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      downloadBlob(blob, `${forestName}_FieldInventory_DFOSummary_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error('DFO summary export failed:', err);
+      setError('Failed to export DFO summary: ' + err.message);
+    }
+  };
+
   const handleDelete = async () => {
     if (!fieldInventory?.id) return;
 
@@ -432,6 +474,20 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
             </div>
             <div className="flex gap-2">
               <button
+                onClick={handleExportExcel}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 text-sm flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                Download Excel
+              </button>
+              <button
+                onClick={handleDfoExport}
+                className="px-4 py-2 bg-blue-800 text-white rounded-md hover:bg-blue-900 text-sm flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                नेपाली DFO सारांश
+              </button>
+              <button
                 onClick={handleDelete}
                 disabled={deleting}
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm disabled:bg-gray-400"
@@ -441,6 +497,14 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
             </div>
           </div>
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-sm text-red-700">{error}</p>
+            <button onClick={() => setError(null)} className="mt-1 text-xs text-red-500 hover:text-red-700">Dismiss</button>
+          </div>
+        )}
 
         {/* Summary Statistics */}
         {summary && (
@@ -492,7 +556,7 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-blue-200">
-                    <div className="text-xs text-gray-500 mb-1 font-medium">Regeneration/ha</div>
+                    <div className="text-xs text-gray-500 mb-1 font-medium">Seedling/ha</div>
                     <div className="text-2xl font-bold text-blue-700">
                       {summary.total_regeneration_per_ha ? summary.total_regeneration_per_ha.toLocaleString() : 0}
                     </div>
@@ -524,6 +588,14 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                     <div className="text-xl font-bold text-amber-700">
                       {summary.total_growing_stock_m3_per_ha ? Number(summary.total_growing_stock_m3_per_ha).toFixed(2) : '0.00'}
                       <span className="text-sm font-normal"> m³/ha</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg p-4 shadow-md border border-emerald-200">
+                    <div className="text-xs text-gray-500 mb-1 font-medium">Basal Area</div>
+                    <div className="text-xl font-bold text-emerald-700">
+                      {summary.average_basal_area_m2_per_ha ? Number(summary.average_basal_area_m2_per_ha).toFixed(2) : '0.00'}
+                      <span className="text-sm font-normal"> m²/ha</span>
                     </div>
                   </div>
 
@@ -647,36 +719,37 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Block Name</th>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Plots</th>
-                        <th colSpan={4} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-blue-50">Trees per Hectare</th>
-                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-green-50">Pole Volume (m³/ha)</th>
-                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-amber-50">Tree Volume (m³/ha)</th>
-                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-purple-50">Growing Stock (Timber m³/ha)</th>
-                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-indigo-50">Total Volume (All m³/ha)</th>
-                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-bold italic text-blue-800 uppercase border-r-2 border-blue-400 bg-blue-100 shadow-sm">Total Volume (All m³/ha) (from satellite)</th>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Regen Cond.</th>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Forest Cond.</th>
-                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300">MAI %</th>
-                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">Carbon & Biomass (IPCC/REDD+)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">ब्लकको नाम</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">नमुना प्लटको संख्या</th>
+                        <th colSpan={4} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-blue-50">रूख/हेक्टर</th>
+                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-green-50">खाँवा आयतन (घ.मी./हे.)</th>
+                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-amber-50">रूख आयतन (घ.मी./हे.)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-purple-50">वृद्धि मौज्दात काठ (घ.मी./हे.)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-indigo-50">वृद्धि मौज्दात जम्मा (घ.मी./हे.)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-emerald-50">बेसल एरिया (ब.मी./हे.)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-bold italic text-blue-800 uppercase border-r-2 border-blue-400 bg-blue-100 shadow-sm">भू उपग्रहिय इमेजको आधारमा जम्मा आयतन</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">पुनरोत्पादनको अवस्था</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">वनको अवस्था</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300">औसत वार्षिक वृद्धि%</th>
+                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">(IPCC/REDD+) कार्बन र बायोमास</th>
                       </tr>
                       <tr>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">Regen</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">Sapling</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">Pole</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50 border-r border-gray-300">Tree</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">Timber</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">Firewood</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50 border-r border-gray-300">Total</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">Timber</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">Firewood</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50 border-r border-gray-300">Total</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">Wood Density (t/m³)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">AGB (t/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">BGB (t/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">Total Biomass (t/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">Carbon (tC/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">CO₂e (tCO₂/ha)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">विरुवा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">लाथ्रा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">खाँवा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50 border-r border-gray-300">रूख</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">काठ</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">दाउरा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50 border-r border-gray-300">जम्मा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">काठ</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">दाउरा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50 border-r border-gray-300">जम्मा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">काठ घनत्व (टन/घ.मी.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">जमिन माथिको बायोमास (टन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">जमिन मुनिको बायोमास (टन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">जम्मा बायोमास (टन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">कार्बन (टन कार्बन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">CO₂ समतुल्य (टन CO₂/हे.)</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -739,6 +812,11 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                               {(poleTotal + treeTotal).toFixed(2)}
                             </td>
 
+                            {/* Basal area */}
+                            <td className="px-3 py-3 text-sm text-right text-emerald-700 font-bold border-r border-gray-200 bg-emerald-50">
+                              {block.basal_area_m2_per_ha ? Number(block.basal_area_m2_per_ha).toFixed(2) : '-'}
+                            </td>
+
                             {/* Satellite-derived volume */}
                             <td className="px-3 py-3 text-sm text-right text-blue-900 font-bold italic border-r-2 border-blue-400 bg-blue-100 shadow-sm">
                               {block.satellite_volume_m3_per_ha ? Number(block.satellite_volume_m3_per_ha).toFixed(2) : '-'}
@@ -785,41 +863,104 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
               </div>
             )}
 
+            {/* DBH Class Breakdown Section */}
+            {summary?.blocks && Array.isArray(summary.blocks) && summary.blocks.length > 0 && (
+              <div className="mt-8">
+                <h4 className="text-md font-semibold text-gray-900 mb-3">ब्यास क्लास अनुसार प्रति हेक्टर मौज्दात</h4>
+                <div className="overflow-x-auto" style={{ maxWidth: '100%' }}>
+                  <table className="min-w-full divide-y divide-gray-200 text-sm" style={{ minWidth: '1600px' }}>
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th rowSpan={2} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-gray-100 sticky left-0" style={{position:'sticky',left:0,background:'#f9fafb',zIndex:2}}>ब्लकको नाम</th>
+                        <th rowSpan={2} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-gray-100">नमुना प्लट संख्या</th>
+                        {[
+                          {range:'०-४', name:'बिरुवा'},
+                          {range:'४-१०', name:'लाथ्रा'},
+                          {range:'१०-२०', name:'सानो खाँवा'},
+                          {range:'२०-३०', name:'ठुलो खाँवा'},
+                          {range:'३०-४०', name:'सानो रुख'},
+                          {range:'४०-५०', name:'मझौला रुख'},
+                          {range:'५०-६०', name:'ठुलो रुख'},
+                          {range:'≥६०', name:'अति ठुलो रुख'},
+                        ].map((item, i) => (
+                          <th key={i} colSpan={3} className={`px-1 py-1 text-center text-xs font-medium border-r border-gray-300 ${i < 2 ? 'bg-orange-50' : i < 4 ? 'bg-yellow-50' : 'bg-green-50'}`}>
+                            {item.range} ({item.name})
+                          </th>
+                        ))}
+                      </tr>
+                      <tr>
+                        {Array(8).fill(0).flatMap((_, i) => [
+                          <th key={`cnt_${i}`} className={`px-1 py-1 text-right text-[10px] font-medium ${i < 2 ? 'bg-orange-50' : i < 4 ? 'bg-yellow-50' : 'bg-green-50'} border-r border-gray-200`}>संख्या</th>,
+                          <th key={`tim_${i}`} className={`px-1 py-1 text-right text-[10px] font-medium ${i < 2 ? 'bg-orange-50' : i < 4 ? 'bg-yellow-50' : 'bg-green-50'} border-r border-gray-200`}>काठ</th>,
+                          <th key={`fw_${i}`} className={`px-1 py-1 text-right text-[10px] font-medium ${i < 2 ? 'bg-orange-50' : i < 4 ? 'bg-yellow-50' : 'bg-green-50'} ${i === 7 ? '' : 'border-r border-gray-300'}`}>दाउरा</th>
+                        ])}
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {summary.blocks.map((block: any, idx: number) => {
+                        const bd = block.dbh_class_breakdown || {};
+                        const keys = ['0_4','4_10','10_20','20_30','30_40','40_50','50_60','60_plus'];
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-sm font-medium text-gray-900 border-r border-gray-200 sticky left-0 bg-white" style={{position:'sticky',left:0,zIndex:1}}>{displayBlockName(block.block_name)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-700 border-r border-gray-200">{block.total_sample_plots}</td>
+                            {keys.flatMap((k, i) => {
+                              const d = bd[k];
+                              const cnt = d?.count_per_ha ?? '-';
+                              const tim = d?.timber_m3_per_ha ?? '-';
+                              const fw = d?.firewood_m3_per_ha ?? '-';
+                              return [
+                                <td key={`${k}_cnt`} className={`px-1 py-2 text-sm text-right border-r border-gray-200 ${i < 2 ? '' : 'font-medium'}`}>{cnt}</td>,
+                                <td key={`${k}_tim`} className={`px-1 py-2 text-sm text-right border-r border-gray-200 ${i < 2 ? 'text-gray-300' : ''}`}>{i < 2 ? '-' : tim}</td>,
+                                <td key={`${k}_fw`} className={`px-1 py-2 text-sm text-right ${i < 2 ? 'text-gray-300' : ''} ${i === 7 ? '' : 'border-r border-gray-300'}`}>{i < 2 ? '-' : fw}</td>,
+                              ];
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">Count = trees per hectare; Timber & Firewood in m³/ha</p>
+              </div>
+            )}
+
             {/* Species-wise Breakdown */}
             {speciesBreakdown && speciesBreakdown.species_breakdown && Array.isArray(speciesBreakdown.species_breakdown) && speciesBreakdown.species_breakdown.length > 0 && (
               <div className="mt-8">
-                <h4 className="text-md font-semibold text-gray-900 mb-3">Species-wise Breakdown by Block</h4>
+                <h4 className="text-md font-semibold text-gray-900 mb-3">प्रजाति अनुसार बिभाजन (ब्लक अनुसार)</h4>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Block Name</th>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Species (Scientific)</th>
-                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Local Name</th>
-                        <th colSpan={4} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-blue-50">Trees per Hectare</th>
-                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-green-50">Pole Volume (m³/ha)</th>
-                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-amber-50">Tree Volume (m³/ha)</th>
-                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-purple-50">Growing Stock</th>
-                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-indigo-50">Total Volume</th>
-                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">Carbon & Biomass (IPCC/REDD+)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">ब्लकको नाम</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">प्रजाति (वैज्ञानिक)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">स्थानीय नाम</th>
+                        <th colSpan={4} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-blue-50">रूख/हेक्टर</th>
+                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-green-50">खाँवा आयतन (घ.मी./हे.)</th>
+                        <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-amber-50">रूख आयतन (घ.मी./हे.)</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-purple-50">वृद्धि मौज्दात काठ</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-indigo-50">जम्मा आयतन</th>
+                        <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-emerald-50">बेसल एरिया (ब.मी./हे.)</th>
+                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">(IPCC/REDD+) कार्बन र बायोमास</th>
                       </tr>
                       <tr>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">Regen</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">Sapling</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">Pole</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50 border-r border-gray-300">Tree</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">Timber</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">Firewood</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50 border-r border-gray-300">Total</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">Timber</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">Firewood</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50 border-r border-gray-300">Total</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">Wood Density (t/m³)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">AGB (t/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">BGB (t/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">Total Biomass (t/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">Carbon (tC/ha)</th>
-                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">CO₂e (tCO₂/ha)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">विरुवा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">लाथ्रा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">खाँवा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50 border-r border-gray-300">रूख</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">काठ</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50">दाउरा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-green-50 border-r border-gray-300">जम्मा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">काठ</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50">दाउरा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-amber-50 border-r border-gray-300">जम्मा</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">काठ घनत्व (टन/घ.मी.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">जमिन माथिको बायोमास (टन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">जमिन मुनिको बायोमास (टन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">जम्मा बायोमास (टन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">कार्बन (टन कार्बन/हे.)</th>
+                        <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-teal-50">CO₂ समतुल्य (टन CO₂/हे.)</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -879,6 +1020,11 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                             </td>
                             <td className="px-3 py-3 text-sm text-right text-indigo-700 font-bold border-r border-gray-200 bg-indigo-50">
                               {Number(species.total_volume_m3_per_ha || 0).toFixed(2)}
+                            </td>
+
+                            {/* Basal area */}
+                            <td className="px-3 py-3 text-sm text-right text-emerald-700 font-bold border-r border-gray-200 bg-emerald-50">
+                              {species.basal_area_m2_per_ha ? Number(species.basal_area_m2_per_ha).toFixed(2) : '-'}
                             </td>
 
                             {/* Carbon & Biomass (IPCC/REDD+) */}
@@ -980,26 +1126,26 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
 
                 {/* MAI Table */}
                 <div className="mt-8">
-                  <h4 className="text-md font-semibold text-gray-900 mb-3">MAI Table (Mean Annual Increment - m³/ha/year)</h4>
+                  <h4 className="text-md font-semibold text-gray-900 mb-3">वार्षिक वृद्धि तालिका (m³/ha/year)</h4>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-purple-50">
                         <tr>
-                          <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Block Name</th>
-                          <th colSpan={2} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Trees per Hectare</th>
-                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Pole Volume (MAI)</th>
-                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Tree Volume (MAI)</th>
-                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-purple-100">Total MAI</th>
+                          <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">ब्लकको नाम</th>
+                          <th colSpan={2} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">रूख/हेक्टर</th>
+                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">खाँवा आयतन (वार्षिक वृद्धि)</th>
+                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">रूख आयतन (वार्षिक वृद्धि)</th>
+                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-purple-100">जम्मा वार्षिक वृद्धि</th>
                         </tr>
                         <tr>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Pole</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Tree</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Timber</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Firewood</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Total</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Timber</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Firewood</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Total</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">खाँवा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">रूख</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">काठ</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">दाउरा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">जम्मा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">काठ</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">दाउरा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">जम्मा</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1020,7 +1166,7 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                         {/* Overall Row */}
                         {maiAahData?.mai_overall && (
                           <tr className="bg-purple-100 font-bold">
-                            <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">Overall Forest</td>
+                            <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">जम्मा वन</td>
                             <td className="px-2 py-3 text-sm text-right">{maiAahData.mai_overall.pole_per_ha?.toLocaleString() || 0}</td>
                             <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{maiAahData.mai_overall.tree_per_ha?.toLocaleString() || 0}</td>
                             <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.mai_overall.pole_timber_m3_per_ha || 0).toFixed(2)}</td>
@@ -1039,28 +1185,28 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
 
                 {/* AAH Table */}
                 <div className="mt-8">
-                  <h4 className="text-md font-semibold text-gray-900 mb-3">AAH Table (Annual Allowable Harvest - m³/ha/year)</h4>
+                  <h4 className="text-md font-semibold text-gray-900 mb-3">वार्षिक स्वीकार्य कटान तालिका (m³/ha/year)</h4>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-amber-50">
                         <tr>
-                          <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Block Name</th>
-                          <th colSpan={2} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Trees per Hectare</th>
-                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Condition</th>
-                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Multiplier</th>
-                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Pole Volume (AAH)</th>
-                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Tree Volume (AAH)</th>
-                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-amber-100">Total AAH</th>
+                          <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">ब्लकको नाम</th>
+                          <th colSpan={2} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">रूख/हेक्टर</th>
+                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">अवस्था</th>
+                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">वार्षिक वृद्धिको कटान प्रतिशत</th>
+                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">खाँवा आयतन (वा.स्वी.कटान)</th>
+                          <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">रूख आयतन (वा.स्वी.कटान)</th>
+                          <th rowSpan={2} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-amber-100">जम्मा वा.स्वी.कटान</th>
                         </tr>
                         <tr>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Pole</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Tree</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Timber</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Firewood</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Total</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Timber</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">Firewood</th>
-                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">Total</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">खाँवा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">रूख</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">काठ</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">दाउरा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">जम्मा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">काठ</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase">दाउरा</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase border-r border-gray-300">जम्मा</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1106,17 +1252,17 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                                         className={`cursor-pointer hover:bg-gray-100 px-2 py-1 rounded ${
                                           aah.is_custom ? 'text-orange-600 font-semibold' : 'text-gray-900'
                                         }`}
-                                        title={aah.is_custom ? `Custom (Default: ${aah.default_multiplier_percent}%)` : 'Click to edit'}
+                                        title={aah.is_custom ? `आफ्नै (पूर्वनिर्धारित: ${aah.default_multiplier_percent}%)` : 'सम्पादन गर्न क्लिक गर्नुहोस्'}
                                       >
                                         {aah.aah_multiplier_percent.toFixed(0)}%
                                       </span>
                                       {aah.is_custom && (
-                                        <span className="text-orange-500 text-xs font-bold" title="Custom multiplier">⚠️</span>
+                                        <span className="text-orange-500 text-xs font-bold" title="आफ्नै कटान प्रतिशत">⚠️</span>
                                       )}
                                       <button
                                         onClick={() => handleOpenModal(aah)}
                                         className="text-blue-500 hover:text-blue-700 text-xs"
-                                        title="Open detailed editor"
+                                        title="विस्तृत सम्पादक खोल्नुहोस्"
                                       >
                                         ℹ️
                                       </button>
@@ -1137,7 +1283,7 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                         {/* Overall Row */}
                         {maiAahData?.aah_overall && (
                           <tr className="bg-amber-100 font-bold">
-                            <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">Overall Forest</td>
+                            <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">जम्मा वन</td>
                             <td className="px-2 py-3 text-sm text-right">{maiAahData.aah_overall.pole_per_ha?.toLocaleString() || 0}</td>
                             <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{maiAahData.aah_overall.tree_per_ha?.toLocaleString() || 0}</td>
                             <td className={`px-3 py-3 text-sm text-center font-bold border-r border-gray-200 ${
@@ -1169,46 +1315,52 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
               <h3 className="text-lg font-bold text-gray-900 mb-4">
-                Edit AAH Multiplier - {displayBlockName(modalBlock.block_name)}
+                वार्षिक वृद्धिको कटान प्रतिशत - {displayBlockName(modalBlock.block_name)}
               </h3>
 
               <div className="space-y-4">
                 {/* Forest Condition */}
                 <div className="bg-gray-50 rounded-lg p-3">
-                  <div className="text-sm text-gray-600">Forest Condition</div>
+                  <div className="text-sm text-gray-600">वनको अवस्था</div>
                   <div className={`text-xl font-bold ${
                     modalBlock.forest_condition === 'Good' ? 'text-green-600' :
                     modalBlock.forest_condition === 'Moderate' ? 'text-yellow-600' :
                     'text-red-600'
                   }`}>
-                    {modalBlock.forest_condition}
+                    {modalBlock.forest_condition === 'Good' ? 'राम्रो' :
+                     modalBlock.forest_condition === 'Moderate' ? 'मध्यम' :
+                     modalBlock.forest_condition === 'Weak' ? 'कमजोर' :
+                     modalBlock.forest_condition}
                   </div>
                 </div>
 
                 {/* Default Multiplier */}
                 <div className="bg-blue-50 rounded-lg p-3">
-                  <div className="text-sm text-gray-600">Default Multiplier (System)</div>
+                  <div className="text-sm text-gray-600">पूर्वनिर्धारित कटान प्रतिशत (प्रणाली)</div>
                   <div className="text-xl font-bold text-blue-700">
                     {modalBlock.default_multiplier_percent}%
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Based on {modalBlock.forest_condition} condition
+                    {modalBlock.forest_condition === 'Good' ? 'राम्रो' :
+                     modalBlock.forest_condition === 'Moderate' ? 'मध्यम' :
+                     modalBlock.forest_condition === 'Weak' ? 'कमजोर' :
+                     modalBlock.forest_condition} अवस्थाको आधारमा
                   </div>
                 </div>
 
                 {/* Current Multiplier */}
                 <div className={`rounded-lg p-3 ${modalBlock.is_custom ? 'bg-orange-50' : 'bg-gray-50'}`}>
-                  <div className="text-sm text-gray-600">Current Multiplier</div>
+                  <div className="text-sm text-gray-600">हालको कटान प्रतिशत</div>
                   <div className={`text-xl font-bold ${modalBlock.is_custom ? 'text-orange-600' : 'text-gray-700'}`}>
                     {modalBlock.aah_multiplier_percent.toFixed(0)}%
-                    {modalBlock.is_custom && <span className="text-sm ml-2">(Custom)</span>}
+                    {modalBlock.is_custom && <span className="text-sm ml-2">(आफ्नै)</span>}
                   </div>
                 </div>
 
                 {/* Custom Multiplier Input */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Set Custom Multiplier (%)
+                    आफ्नै कटान प्रतिशत सेट गर्नुहोस् (%)
                   </label>
                   <input
                     type="number"
@@ -1223,18 +1375,18 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                     step="1"
                   />
                   <div className="text-xs text-gray-500 mt-1">
-                    ℹ️ Recommended range: 40-80%
+                    ℹ️ सिफारिस गरिएको दायरा: ४०-८०%
                   </div>
                 </div>
 
                 {/* Guidance */}
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                  <div className="text-xs font-semibold text-yellow-800 mb-1">Management Guidelines</div>
+                  <div className="text-xs font-semibold text-yellow-800 mb-1">व्यवस्थापन मार्गनिर्देशन</div>
                   <ul className="text-xs text-yellow-700 space-y-1">
-                    <li>• Good forests: Higher multiplier (70-80%)</li>
-                    <li>• Moderate forests: Medium multiplier (55-65%)</li>
-                    <li>• Weak forests: Lower multiplier (35-45%)</li>
-                    <li>• Consider local factors: accessibility, regeneration, biodiversity</li>
+                    <li>• राम्रो वन: उच्च कटान प्रतिशत (७०-८०%)</li>
+                    <li>• मध्यम वन: मध्यम कटान प्रतिशत (५५-६५%)</li>
+                    <li>• कमजोर वन: कम कटान प्रतिशत (३५-४५%)</li>
+                    <li>• स्थानीय कारकहरू विचार गर्नुहोस्: पहुँच, पुनरोत्पादन, जैविक विविधता</li>
                   </ul>
                 </div>
               </div>
@@ -1248,13 +1400,13 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                   }}
                   className="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
                 >
-                  Use Default
+                  पूर्वनिर्धारित प्रयोग गर्नुहोस्
                 </button>
                 <button
                   onClick={handleCloseModal}
                   className="px-4 py-2 text-sm bg-gray-500 text-white rounded-md hover:bg-gray-600"
                 >
-                  Cancel
+                  रद्द गर्नुहोस्
                 </button>
                 <button
                   onClick={(e) => {
@@ -1264,7 +1416,7 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
                   }}
                   className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
                 >
-                  Apply
+                  लागू गर्नुहोस्
                 </button>
               </div>
             </div>
@@ -1311,7 +1463,7 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
           <h4 className="text-sm font-semibold text-gray-700 mb-3">Sample Plot Sizes (in square meters)</h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm text-gray-600 mb-1">Regeneration (m²)</label>
+              <label className="block text-sm text-gray-600 mb-1">Seedling (m²)</label>
               <input
                 type="number"
                 value={sampleSizes.regeneration_area_sqm}
@@ -1391,10 +1543,9 @@ export function FieldInventoryTab({ calculationId, blocks = [] }: FieldInventory
           <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
             <li>Block Name, Sample Plot Number</li>
             <li>Latitude, Longitude</li>
-            <li>4 Species Columns: Regen, Sapling, Pole, Tree</li>
-            <li>4 DBH Columns: Regen (&lt;4cm), Sapling (4-10cm), Pole (10-30cm), Tree (≥30cm)</li>
-            <li>2 Height Columns: Pole, Tree (optional - will be estimated if missing)</li>
-            <li>2 Count Columns: Regen Count, Sapling Count</li>
+            <li>4 Species Columns: Seedling, Sapling, Pole, Tree</li>
+            <li>4 DBH Columns: Seedling (&lt;4cm), Sapling (4-10cm), Pole (10-30cm), Tree (≥30cm)</li>
+            <li>2 Count Columns: Seedling Count, Sapling Count</li>
           </ul>
         </div>
       </div>

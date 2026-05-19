@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { inventoryApi } from '../services/api';
+import { downloadFromApi } from '../utils/download';
 
 export default function InventoryDetail() {
   const { id } = useParams<{ id: string }>();
@@ -33,17 +34,13 @@ export default function InventoryDetail() {
 
   const handleExport = async (format: 'csv' | 'geojson') => {
     try {
-      const blob = await inventoryApi.exportInventory(id!, format);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `inventory_${id}.${format === 'geojson' ? 'geojson' : 'csv'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await downloadFromApi(
+        `/api/inventory/${id}/export`,
+        `TreeInventory_Data.${format}`,
+        { format, module: 'TreeInventory' }
+      );
     } catch (err: any) {
-      setError('Failed to export inventory');
+      setError(err.message || 'Failed to export inventory');
     }
   };
 

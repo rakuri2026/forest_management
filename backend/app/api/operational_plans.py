@@ -1,11 +1,11 @@
 """
-Operational Plan API endpoints
+Operational Plan API endpoints — Tree Document Model
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from uuid import UUID
 from datetime import datetime
 
@@ -13,23 +13,53 @@ from ..core.database import get_db
 from ..models.user import User, UserRole
 from ..models.calculation import Calculation
 from ..models.operational_plan import OperationalPlan
+from ..models.forest_block import ForestBlock
+from ..models.op_table import OPTableData
 from ..schemas.operational_plan import (
     OperationalPlanCreate,
     OperationalPlanUpdate,
     OperationalPlanSectionUpdate,
+    OperationalPlanResponse,
+    TreeNodeCreate,
+    TreeNodeUpdate,
+    TreeNodeReorder,
+    TreeNodeSchema,
+    VariableDefResponse,
 )
 from ..utils.auth import get_current_active_user
+from ..services.operational_plan.tree_models import TreeNode, TreeOperations, DocumentTree
+from ..services.operational_plan.auto_numbering import recompute_numbers
+from ..services.operational_plan.seed_data import get_full_seed_document
+from ..services.operational_plan.variable_registry import (
+    VARIABLE_REGISTRY,
+    get_variable,
+    get_variables_by_category,
+    search_variables,
+    get_all_variables,
+)
+from ..services.operational_plan.variable_resolver import VariableResolver
+from ..services.operational_plan.op_docx_builder import build_op_document
+from ..utils.file_export import build_disposition
 
 router = APIRouter(tags=["operational-plans"])
 
 
+def _tree_to_dict_list(tree: list) -> list:
+    return [n.model_dump() for n in tree]
+
+
+def _dict_list_to_tree(data: list) -> list:
+    return [TreeNode.from_dict(n) if isinstance(n, dict) else n for n in data]
+
+
 def plan_to_dict(plan: OperationalPlan) -> Dict[str, Any]:
-    """Convert OperationalPlan to dict to avoid Pydantic validation issues"""
+    tree_data = plan.sections.get("tree", []) if plan.sections else []
     return {
         "id": str(plan.id),
         "calculation_id": str(plan.calculation_id),
         "forest_name": plan.forest_name,
         "sections": plan.sections or {},
+        "tree": tree_data,
         "plan_metadata": plan.plan_metadata or {},
         "status": plan.status,
         "created_at": plan.created_at.isoformat() if plan.created_at else None,
@@ -39,40 +69,62 @@ def plan_to_dict(plan: OperationalPlan) -> Dict[str, Any]:
     }
 
 
+def _check_calc_access(calculation_id: UUID, current_user: User, db: Session) -> Calculation:
+    calculation = db.execute(
+        select(Calculation).where(Calculation.id == calculation_id)
+    ).scalar_one_or_none()
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+    if calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return calculation
+
+
+def _check_plan_access(plan_id: UUID, current_user: User, db: Session) -> OperationalPlan:
+    plan = db.execute(
+        select(OperationalPlan).where(OperationalPlan.id == plan_id)
+    ).scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Operational plan not found")
+    _check_calc_access(plan.calculation_id, current_user, db)
+    return plan
+
+
+def _save_tree(plan: OperationalPlan, tree: list, db: Session) -> None:
+    sections = plan.sections or {}
+    sections["tree"] = _tree_to_dict_list(tree)
+    plan.sections = dict(sections)
+    flag_modified(plan, "sections")
+    plan.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(plan)
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_operational_plan(
     plan_data: OperationalPlanCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Create a new operational plan for a calculation"""
-    # Check if calculation exists
-    calculation = db.execute(
-        select(Calculation).where(Calculation.id == plan_data.calculation_id)
-    ).scalar_one_or_none()
+    calculation = _check_calc_access(plan_data.calculation_id, current_user, db)
 
-    if not calculation:
-        raise HTTPException(status_code=404, detail="Calculation not found")
-
-    # Check if user owns the calculation or is super admin
-    if calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Check if plan already exists
     existing_plan = db.execute(
         select(OperationalPlan).where(OperationalPlan.calculation_id == plan_data.calculation_id)
     ).scalar_one_or_none()
-
     if existing_plan:
         raise HTTPException(status_code=400, detail="Operational plan already exists for this calculation")
 
-    # Create new plan with TOC template
+    seed_tree = get_full_seed_document()
+    recompute_numbers(seed_tree, language="NP")
+
+    sections = {"tree": _tree_to_dict_list(seed_tree)}
+
     plan = OperationalPlan(
         calculation_id=plan_data.calculation_id,
         forest_name=plan_data.forest_name or calculation.forest_name,
         created_by=current_user.id,
-        sections=get_toc_template(),
-        plan_metadata={"version": "1.0", "auto_populated": False}
+        sections=sections,
+        plan_metadata={"version": "2.0", "language": "NP", "auto_populated": False}
     )
 
     db.add(plan)
@@ -88,80 +140,24 @@ async def get_operational_plan_by_calculation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Get operational plan for a calculation"""
     plan = db.execute(
         select(OperationalPlan).where(OperationalPlan.calculation_id == calculation_id)
     ).scalar_one_or_none()
-
     if not plan:
         raise HTTPException(status_code=404, detail="Operational plan not found")
+    _check_calc_access(calculation_id, current_user, db)
 
-    # Check access
-    calculation = db.execute(
-        select(Calculation).where(Calculation.id == calculation_id)
-    ).scalar_one_or_none()
-
-    if not calculation or (calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Ensure all template sections exist (toc_*, section_*, etc.)
     sections = plan.sections or {}
-    template = get_toc_template()
-
-    print(f"DEBUG: Plan {plan.id} has {len(sections)} sections before update")
-    print(f"DEBUG: Current sections: {list(sections.keys())}")
-
-    updated = False
-
-    # Migrate old 'toc' format to new 'toc_*' format if needed
-    if 'toc' in sections and isinstance(sections['toc'], dict) and 'items' in sections['toc']:
-        print(f"DEBUG: Migrating old 'toc' format to new 'toc_*' format")
-        old_toc_items = sections['toc'].get('items', [])
-        print(f"DEBUG: Old TOC items: {old_toc_items}")
-
-        # Map old items to new format
-        toc_mapping = {
-            'कबुलियतनामा': 'toc_kabuliyat',
-            'शव्दावली परिचय': 'toc_shabdawali',
-            'वन कार्ययोजना स्वीकृति': 'toc_approval',
-            'प्रस्तावना': 'toc_intro',
-            'कार्ययोजनाको सारांश': 'toc_summary'
-        }
-
-        for item in old_toc_items:
-            key = toc_mapping.get(item)
-            if key and key not in sections:
-                sections[key] = template[key]
-                updated = True
-                print(f"DEBUG: Migrated '{item}' to '{key}'")
-
-        # Remove old 'toc' key
-        del sections['toc']
-        updated = True
-        print(f"DEBUG: Removed old 'toc' key")
-
-    # Add any missing template sections
-    for key, value in template.items():
-        if key not in sections:
-            sections[key] = value
-            updated = True
-            print(f"DEBUG: Added missing section: {key}")
-
-    if updated:
-        # Force JSONB update by creating a new dict
+    if not sections.get("tree"):
+        seed_tree = get_full_seed_document()
+        recompute_numbers(seed_tree, language="NP")
+        sections["tree"] = _tree_to_dict_list(seed_tree)
         plan.sections = dict(sections)
-        flag_modified(plan, "sections")  # Tell SQLAlchemy the JSONB changed
+        flag_modified(plan, "sections")
         db.commit()
-        print(f"DEBUG: Committed plan with {len(sections)} sections")
         db.refresh(plan)
-        print(f"DEBUG: After refresh, sections keys: {list(plan.sections.keys())}")
 
-    # Convert to dict
-    result = plan_to_dict(plan)
-    print(f"DEBUG: Returning plan with {len(result.get('sections', {}))} sections")
-    print(f"DEBUG: Section keys: {list((result.get('sections', {}) or {}).keys())}")
-
-    return result
+    return plan_to_dict(plan)
 
 
 @router.put("/{plan_id}")
@@ -171,32 +167,24 @@ async def update_operational_plan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Update operational plan"""
-    plan = db.execute(
-        select(OperationalPlan).where(OperationalPlan.id == plan_id)
-    ).scalar_one_or_none()
+    plan = _check_plan_access(plan_id, current_user, db)
 
-    if not plan:
-        raise HTTPException(status_code=404, detail="Operational plan not found")
+    if plan_data.tree is not None:
+        tree = _dict_list_to_tree([t.model_dump() for t in plan_data.tree])
+        recompute_numbers(tree, language=(plan.plan_metadata or {}).get("language", "NP"))
+        _save_tree(plan, tree, db)
 
-    # Check access
-    calculation = db.execute(
-        select(Calculation).where(Calculation.id == plan.calculation_id)
-    ).scalar_one_or_none()
-
-    if not calculation or (calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Update fields
     if plan_data.sections is not None:
         plan.sections = plan_data.sections
+
     if plan_data.status is not None:
         plan.status = plan_data.status
-        if plan_data.status == 'submitted' and not plan.submitted_at:
+        if plan_data.status == "submitted" and not plan.submitted_at:
             plan.submitted_at = datetime.utcnow()
-        elif plan_data.status == 'approved' and not plan.approved_at:
+        elif plan_data.status == "approved" and not plan.approved_at:
             plan.approved_at = datetime.utcnow()
             plan.approved_by = current_user.id
+
     if plan_data.plan_metadata is not None:
         plan.plan_metadata = plan_data.plan_metadata
 
@@ -207,59 +195,117 @@ async def update_operational_plan(
     return plan_to_dict(plan)
 
 
-@router.put("/{plan_id}/sections/{section_key}")
-async def update_section(
+# ═══════════════════════════════════════════════════════════
+# Tree CRUD Endpoints
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/{plan_id}/tree")
+async def get_tree(
     plan_id: UUID,
-    section_key: str,
-    section_data: OperationalPlanSectionUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Update a specific section (परिच्छेद)"""
-    plan = db.execute(
-        select(OperationalPlan).where(OperationalPlan.id == plan_id)
-    ).scalar_one_or_none()
-
-    if not plan:
-        raise HTTPException(status_code=404, detail="Operational plan not found")
-
-    # Check access
-    calculation = db.execute(
-        select(Calculation).where(Calculation.id == plan.calculation_id)
-    ).scalar_one_or_none()
-
-    if not calculation or (calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Update section
+    plan = _check_plan_access(plan_id, current_user, db)
     sections = plan.sections or {}
-    if section_key not in sections:
-        raise HTTPException(status_code=404, detail=f"Section {section_key} not found")
+    tree_data = sections.get("tree", [])
+    return {"tree": tree_data}
 
-    sections[section_key]["content"] = section_data.content
-    sections[section_key]["last_modified"] = datetime.utcnow().isoformat()
 
-    if section_data.auto_data is not None:
-        sections[section_key]["auto_data"] = section_data.auto_data
+@router.post("/{plan_id}/tree/nodes", status_code=status.HTTP_201_CREATED)
+async def add_tree_node(
+    plan_id: UUID,
+    node_data: TreeNodeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
 
-    # Force JSONB update - create new dict and flag as modified
-    plan.sections = dict(sections)
-    flag_modified(plan, "sections")
-    plan.updated_at = datetime.utcnow()
+    new_node = TreeNode(
+        type=node_data.type,
+        title_ne=node_data.title_ne,
+        title_en=node_data.title_en or node_data.title_ne,
+        content=node_data.content,
+        content_type=node_data.content_type,
+        chart_type=node_data.chart_type,
+        table_id=node_data.table_id,
+    )
 
-    print(f"DEBUG: Saving section '{section_key}' with content length: {len(section_data.content)}")
-    db.commit()
-    print(f"DEBUG: Committed successfully")
+    tree_list = TreeOperations.add_node(tree_list, node_data.parent_id, new_node, node_data.position)
+    recompute_numbers(tree_list, language=(plan.plan_metadata or {}).get("language", "NP"))
+    _save_tree(plan, tree_list, db)
 
-    # Re-fetch to confirm save
-    plan = db.execute(
-        select(OperationalPlan).where(OperationalPlan.id == plan_id)
-    ).scalar_one_or_none()
-    saved_content = plan.sections.get(section_key, {}).get('content', '')
-    print(f"DEBUG: Verified saved content length: {len(saved_content)}")
+    return {"node": new_node.model_dump(), "tree": _tree_to_dict_list(tree_list)}
 
-    return plan_to_dict(plan)
 
+@router.put("/{plan_id}/tree/nodes/{node_id}")
+async def update_tree_node(
+    plan_id: UUID,
+    node_id: str,
+    node_data: TreeNodeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
+
+    updates = {k: v for k, v in node_data.model_dump(exclude_none=True).items()}
+    tree_list = TreeOperations.update_node(tree_list, node_id, updates)
+    _save_tree(plan, tree_list, db)
+
+    updated = TreeOperations.find_node(tree_list, node_id)
+    return {"node": updated.model_dump() if updated else None}
+
+
+@router.delete("/{plan_id}/tree/nodes/{node_id}")
+async def delete_tree_node(
+    plan_id: UUID,
+    node_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
+
+    try:
+        tree_list = TreeOperations.delete_node(tree_list, node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    recompute_numbers(tree_list, language=(plan.plan_metadata or {}).get("language", "NP"))
+    _save_tree(plan, tree_list, db)
+
+    return {"tree": _tree_to_dict_list(tree_list)}
+
+
+@router.put("/{plan_id}/tree/reorder")
+async def reorder_tree(
+    plan_id: UUID,
+    reorder_data: TreeNodeReorder,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
+
+    try:
+        tree_list = TreeOperations.move_node(tree_list, reorder_data.node_id, reorder_data.new_parent_id, reorder_data.new_position)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    recompute_numbers(tree_list, language=(plan.plan_metadata or {}).get("language", "NP"))
+    _save_tree(plan, tree_list, db)
+
+    return {"tree": _tree_to_dict_list(tree_list)}
+
+
+# ═══════════════════════════════════════════════════════════
+# Auto-Populate Endpoint
+# ═══════════════════════════════════════════════════════════
 
 @router.post("/{plan_id}/auto-populate")
 async def auto_populate_sections(
@@ -267,28 +313,27 @@ async def auto_populate_sections(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Auto-populate sections with system data"""
-    plan = db.execute(
-        select(OperationalPlan).where(OperationalPlan.id == plan_id)
-    ).scalar_one_or_none()
+    plan = _check_plan_access(plan_id, current_user, db)
 
-    if not plan:
-        raise HTTPException(status_code=404, detail="Operational plan not found")
+    resolver = VariableResolver(db, plan.calculation_id, plan)
+    resolved = resolver.resolve_all()
 
-    # Check access
-    calculation = db.execute(
-        select(Calculation).where(Calculation.id == plan.calculation_id)
-    ).scalar_one_or_none()
-
-    if not calculation or (calculation.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Auto-populate from system
     sections = plan.sections or {}
-    sections = auto_populate_from_system(sections, calculation, db)
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
 
-    plan.sections = sections
-    plan.plan_metadata = {**(plan.plan_metadata or {}), "auto_populated": True, "auto_populated_at": datetime.utcnow().isoformat()}
+    for node in TreeOperations.flatten(tree_list):
+        if node.content:
+            node.content = resolver.resolve_node_content(node.content)
+
+    sections["tree"] = _tree_to_dict_list(tree_list)
+    plan.sections = dict(sections)
+    plan.plan_metadata = {
+        **(plan.plan_metadata or {}),
+        "auto_populated": True,
+        "auto_populated_at": datetime.utcnow().isoformat(),
+        "resolved_variables": {k: v for k, v in resolved.items() if isinstance(v, (str, int, float, bool))},
+    }
+    flag_modified(plan, "sections")
     plan.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(plan)
@@ -296,223 +341,570 @@ async def auto_populate_sections(
     return plan_to_dict(plan)
 
 
-def get_toc_template() -> Dict[str, Any]:
-    """Return the TOC template with all sections (परिच्छेद)"""
+# ═══════════════════════════════════════════════════════════
+# Variable Registry Endpoints
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/variables")
+async def list_variables(
+    category: Optional[str] = Query(None, description="Filter by category (A-F)"),
+    search: Optional[str] = Query(None, description="Search by name or label"),
+):
+    if search:
+        vars_list = search_variables(search)
+    elif category:
+        vars_list = get_variables_by_category(category.upper())
+    else:
+        vars_list = get_all_variables()
+
     return {
-        # TOC Items (editable sections)
-        "toc_kabuliyat": {
-            "section_number": "कबुलियतनामा",
-            "title": "कबुलियतनामा",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "toc_shabdawali": {
-            "section_number": "शब्दावली परिचय",
-            "title": "शब्दावली परिचय",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "toc_approval": {
-            "section_number": "वन कार्ययोजना स्वीकृति",
-            "title": "वन कार्ययोजना स्वीकृति",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "toc_intro": {
-            "section_number": "प्रस्तावना",
-            "title": "प्रस्तावना",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "toc_summary": {
-            "section_number": "कार्ययोजनाको सारांश",
-            "title": "कार्ययोजनाको सारांश",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_1": {
-            "section_number": "१",
-            "title": "परिचय",
-            "subsections": ["१.१ संक्षिप्त नाम र प्रारम्भ", "१.२ परिभाषा"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_2": {
-            "section_number": "२",
-            "title": "सामुदायिक वन र समूहको भौगोलिक अवस्थिति",
-            "subsections": ["२.१ समुहको परिचय", "२.२ वनको भौगोलिक अवस्था", "२.३ वनको ऐतिहासिक पृष्ठभूमि", "२.४ सामुदायिक वनको सिमाना (चारकिल्ला)", "२.५ वनको क्षेत्रफल र नक्सा", "२.६ भू-उपयोग"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": True
-        },
-        "section_3": {
-            "section_number": "३",
-            "title": "वनको किसिम र मुख्य प्रजाती",
-            "subsections": ["३.१ वन श्रोत मापन विधी", "३.२ कम्पार्टमेण्ट अनुसारको वनको मौज्दात", "३.३ वार्षिक रूपमा उत्पादन हुने काठ दाउराको परिमाण", "३.४ व्यवस्थापनको हिसाबले मुख्य प्रजातीहरु"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": True
-        },
-        "section_4": {
-            "section_number": "४",
-            "title": "वन पैदावरको माग र अपुर्तीको अवस्था",
-            "subsections": ["४.१ वन पैदावारको माग र आपुर्ति आँकलन विधि", "४.२ वन पैदावारको माग तथा आपूर्तिको अवस्था", "४.२.१ सन्तुलनका उपायहरु"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_5": {
-            "section_number": "५",
-            "title": "समुहको आर्थिक तथा सामाजिक अवस्था",
-            "subsections": ["५.१ समूहको सामाजिक र आर्थिक अवस्था"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_6": {
-            "section_number": "६",
-            "title": "विगतका वन व्यवस्थापन कार्ययोजनाको समीक्षा",
-            "subsections": ["६.१ वन श्रोतको अवस्था विश्लेषण", "६.२ पुरानो कार्ययोजनाको अवधिमा हासिल गरेका प्रमुख उपलब्धिहरु", "६.३ आर्थिक विश्लेषण", "६.४ सकरात्मक पक्षहरु", "६.५ चुनौतीहरु", "६.६ सुधार गर्नुपर्ने पक्षहरु", "६.७ वन व्यवस्थापनको संक्षिप्त समिक्षा"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_7": {
-            "section_number": "७",
-            "title": "वनस्रोत सर्वेक्षण, विश्लेषण, वन संवर्द्धन प्रणाली तथा व्यवस्थापन",
-            "subsections": ["७.१ भू-उपयोग", "७.२ ब्लक/कम्पार्टमेण्ट विभाजन", "७.३ वन संवर्द्धन प्रणाली छनोटको आधार", "७.४ वन संवर्द्धन प्रणाली तथा क्रियाकलाप", "७.५ वन पैदावार सङ्कलन चक्र तथा पुनरोत्पादन तरिका"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": True
-        },
-        "section_8": {
-            "section_number": "८",
-            "title": "वन पैदावार उत्पादन र आपूर्तिको तरिका",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": True
-        },
-        "section_9": {
-            "section_number": "९",
-            "title": "संरक्षण तथा संवर्द्धन कार्य व्यवस्थापन",
-            "subsections": ["९.१ वन डढेलो तथा चरिचरन नियन्त्रण", "९.२ एकीकृत रोग किरा तथा मिचाहा प्रजाति नियन्त्रण", "९.३ वन अतिक्रमण, चोरी शिकार तथा कटानी नियन्त्रण", "९.४ वन्यजन्तु तथा जैविक मार्ग संरक्षण", "९.५ वातावरणीय सेवा मूलप्रवाहीकरण", "९.६ पानीका मुहान, खोला किनार, सिमसार, जलाधार संरक्षण", "९.७ जलवायुजन्य जोखिम न्यूनीकरण", "९.८ वन संवर्द्धनका क्रियाकलापहरू", "९.९ वन सम्बन्धी परम्परागत ज्ञान"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_10": {
-            "section_number": "१०",
-            "title": "वन पैदावारमा आधारित आय-आर्जन, सिप विकास, उद्योग तथा पर्यापर्यटन सम्बन्धी व्यवस्था",
-            "subsections": ["१०.१ सामाजिक तथा आर्थिक विकासका कार्यक्रम", "१०.२ सामुदायिक विकास कार्यक्रम", "१०.३ वैकल्पिक उर्जा प्रवर्द्धन कार्यक्रम", "१०.४ संस्थागत तथा मानविय विकास", "१०.५ वनमा आधारित उद्यम विकास कार्यक्रम", "१०.६ पर्या-पर्यटन सम्बन्धी व्यवस्था"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_11": {
-            "section_number": "११",
-            "title": "वार्षिक बजेट तथा कार्यक्रम तर्जुमा, कार्यान्वयन, अनुगमन र प्रतिवेदन सम्बन्धी व्यवस्था",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_12": {
-            "section_number": "१२",
-            "title": "व्यवस्थापन कार्ययोजना अवधिको लागि वार्षिक क्रियाकलाप तथा बजेट",
-            "subsections": ["१२.१ दश वर्षे कार्यक्रम"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_13": {
-            "section_number": "१३",
-            "title": "छिमेकी समूहसँग सहकार्य तथा साझेदारीको व्यवस्था",
-            "subsections": ["१३.१ छिमेकी समूहलाई वन पैदावर उपलब्ध गराउने व्यवस्था", "१३.२ समुह बाहिर लिलाम बिक्री गर्दा पुरा गर्नु पर्ने प्रक्रियाहरु"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_14": {
-            "section_number": "१४",
-            "title": "व्यवस्थापन कार्ययोजनाको वित्तीय विश्लेषण",
-            "subsections": ["१४.१ वित्तिय विश्लेषणको अवस्था"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": True
-        },
-        "section_15": {
-            "section_number": "१५",
-            "title": "व्यवस्थापन कार्ययोजनाको पुनरावलोकन, अनुगमन, मूल्याङ्कन",
-            "subsections": ["१५.१ स्वःअनूगमन तथा मूल्यांकन", "१५.२ सार्वजनिक सुनुवाई/सार्वजनिक लेखापरिक्षण", "१५.३ लेखापरिक्षण", "१५.४ अनुगमन र लेखापरिक्षण", "१५.५ समिक्षा", "१५.६ सम्बन्धीत कार्यालयहरुबाट गरिने अनुगमनमा सहयोग", "१५.७ भत्ता सम्बन्धीत व्यवस्था"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_16": {
-            "section_number": "१६",
-            "title": "सामुदायिक वनमा निषेधित कार्यहरु",
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_17": {
-            "section_number": "१७",
-            "title": "वन अपराध र दण्ड जरिवाना",
-            "subsections": ["१७.१ वन अपराध र दण्ड जरिवाना सम्बन्धी व्यवस्था", "१७.२ दण्ड जरिवाना"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        },
-        "section_18": {
-            "section_number": "१८",
-            "title": "विविध",
-            "subsections": ["१८.१ विविध जानकारी", "१८.२ सोच तालिका (Logical Framework)"],
-            "content": "",
-            "auto_data": {},
-            "is_auto_generated": False
-        }
+        "total": len(vars_list),
+        "variables": [
+            VariableDefResponse(
+                key=v.key,
+                category=v.category,
+                label_ne=v.label_ne,
+                label_en=v.label_en,
+                var_type=v.var_type,
+                source=v.source,
+                auto_populate=v.auto_populate,
+                description=v.description,
+            )
+            for v in vars_list
+        ],
     }
 
 
-def auto_populate_from_system(sections: Dict[str, Any], calculation: Calculation, db: Session) -> Dict[str, Any]:
-    """Auto-populate sections with data from the system"""
-    # Section 2: Geographic info - area from calculation
-    if "section_2" in sections:
-        area_ha = 0
-        if calculation.result_data and "area_hectares" in calculation.result_data:
-            area_ha = calculation.result_data["area_hectares"]
+@router.get("/variables/{key}")
+async def get_variable_detail(key: str):
+    var = get_variable(key)
+    if not var:
+        raise HTTPException(status_code=404, detail=f"Variable '{key}' not found")
+    return VariableDefResponse(
+        key=var.key,
+        category=var.category,
+        label_ne=var.label_ne,
+        label_en=var.label_en,
+        var_type=var.var_type,
+        source=var.source,
+        auto_populate=var.auto_populate,
+        description=var.description,
+    )
 
-        sections["section_2"]["auto_data"] = {
-            "forest_name": calculation.forest_name,
-            "area_hectares": area_ha,
-            "boundary_info": "Auto-populated from system"
-        }
-        sections["section_2"]["content"] = f"यस सामुदायिक वनको क्षेत्रफल {area_ha:.2f} हेक्टर रहेको छ।"
 
-    # Section 3: Species info - from inventory
-    if "section_3" in sections:
-        sections["section_3"]["auto_data"] = {
-            "species_count": 0,
-            "main_species": []
-        }
+# ═══════════════════════════════════════════════════════════
+# Metadata Form Endpoint (Phase 2 stub)
+# ═══════════════════════════════════════════════════════════
 
-    # Section 7: Block/compartment info
-    if "section_7" in sections:
-        sections["section_7"]["auto_data"] = {
-            "blocks": [],
-            "compartments": []
-        }
+@router.get("/{plan_id}/metadata-form")
+async def get_metadata_form(
+    plan_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    user_inputs = (plan.plan_metadata or {}).get("user_inputs", {})
+    hybrid_overrides = (plan.plan_metadata or {}).get("hybrid_overrides", {})
 
-    # Section 14: Financial analysis
-    if "section_14" in sections:
-        sections["section_14"]["auto_data"] = {
-            "budget": {},
-            "expenses": {}
-        }
+    return {
+        "user_inputs": user_inputs,
+        "hybrid_overrides": hybrid_overrides,
+    }
 
-    return sections
+
+@router.put("/{plan_id}/metadata-form")
+async def update_metadata_form(
+    plan_id: UUID,
+    form_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+
+    import re
+    errors = []
+
+    user_inputs = form_data.get("user_inputs", {})
+    hybrid = form_data.get("hybrid_overrides", {})
+
+    for phone_key in ("contact_phone", "ranger_phone"):
+        val = user_inputs.get(phone_key, "")
+        if val and not re.match(r"^\d{7,15}$", str(val)):
+            errors.append(f"{phone_key}: must be 7-15 digits")
+
+    for date_key in ("registration_date", "cf_handover_date"):
+        val = user_inputs.get(date_key, "")
+        if val and not re.match(r"^\d{4}-\d{2}-\d{2}$", str(val)):
+            errors.append(f"{date_key}: must be YYYY-MM-DD format")
+
+    for year_key in ("plan_year_start", "plan_year_end"):
+        val = user_inputs.get(year_key)
+        if val is not None and (not isinstance(val, int) or val < 1900 or val > 2200):
+            errors.append(f"{year_key}: must be a year between 1900-2200")
+
+    if errors:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail=errors)
+
+    metadata = plan.plan_metadata or {}
+    metadata["user_inputs"] = user_inputs
+    metadata["hybrid_overrides"] = hybrid
+    plan.plan_metadata = metadata
+    plan.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(plan)
+
+    return {"status": "ok", "plan_metadata": plan.plan_metadata}
+
+
+# ═══════════════════════════════════════════════════════════
+# HTML Preview Endpoint
+# ═══════════════════════════════════════════════════════════
+
+from fastapi.responses import HTMLResponse
+from app.services.operational_plan.op_docx_builder import _walk_tree_html
+
+@router.get("/{plan_id}/preview")
+async def preview_operational_plan(
+    plan_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
+    resolver = VariableResolver(db, plan.calculation_id, plan)
+
+    for node in TreeOperations.flatten(tree_list):
+        if node.content:
+            node.content = resolver.resolve_node_content(node.content)
+
+    raw_data = resolver.get_raw_data()
+    all_tables = db.query(OPTableData).filter(
+        OPTableData.calculation_id == plan.calculation_id
+    ).all()
+    table_cache = {t.table_id: t for t in all_tables}
+    body_html = _walk_tree_html(tree_list, plan.calculation_id, raw_data, db, table_cache)
+    metadata = plan.plan_metadata or {}
+    user_inputs = metadata.get("user_inputs", {})
+
+    html = f"""<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8">
+<title>{plan.forest_name or 'CF'} — Operational Plan Preview</title>
+<style>
+  body {{ font-family: 'Noto Sans', 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 40px 20px; line-height: 1.7; color: #222; }}
+  h1 {{ color: #006400; border-bottom: 2px solid #006400; padding-bottom: 8px; }}
+  h2 {{ color: #006400; margin-top: 24px; }}
+  h3 {{ color: #333; }}
+  .cover {{ text-align: center; margin-bottom: 40px; page-break-after: always; }}
+  .cover h1 {{ font-size: 28px; border: none; }}
+  .cover .subtitle {{ color: #666; font-size: 16px; }}
+  .cover table {{ margin: 20px auto; border-collapse: collapse; }}
+  .cover td {{ padding: 6px 12px; border: 1px solid #ddd; text-align: left; font-size: 12px; }}
+  .cover td:first-child {{ font-weight: bold; background: #f9f9f9; white-space: nowrap; }}
+  .toc {{ margin-bottom: 30px; }}
+  .toc a {{ color: #006400; text-decoration: none; }}
+  .section {{ margin-bottom: 20px; }}
+  .section-content {{ white-space: pre-wrap; font-size: 13px; }}
+  .chart-placeholder {{ background: #f5f5f5; border: 2px dashed #ccc; border-radius: 8px; padding: 20px; text-align: center; margin: 12px 0; color: #999; }}
+  .table-preview {{ overflow-x: auto; margin: 12px 0; }}
+  table.data {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
+  table.data th {{ background: #006400; color: white; padding: 6px 8px; text-align: center; }}
+  table.data td {{ padding: 4px 8px; border: 1px solid #ddd; }}
+  table.data tr:nth-child(even) {{ background: #f9f9f9; }}
+  .hidden {{ display: none; }}
+</style>
+</head>
+<body>
+<div class="cover">
+  <h1>सामुदायिक वन कार्य योजना</h1>
+  <div class="subtitle">COMMUNITY FOREST OPERATIONAL PLAN</div>
+  <table>
+    <tr><td>वनको नाम</td><td>{plan.forest_name or user_inputs.get('forest_name', '')}</td></tr>
+    <tr><td>क्रम संख्या</td><td>{user_inputs.get('serial_number', '')}</td></tr>
+    <tr><td>समूहको नाम</td><td>{user_inputs.get('user_group_name', '')}</td></tr>
+    <tr><td>ठेगाना</td><td>{user_inputs.get('address', '')}</td></tr>
+  </table>
+  <div style="margin-top:20px;font-weight:bold;">आ.व. {user_inputs.get('plan_year_start', '')} देखि {user_inputs.get('plan_year_end', '')} सम्म</div>
+</div>
+<h2>विषय सूची</h2>
+<div class="toc">{_build_toc_html(tree_list)}</div>
+<hr>
+{body_html}
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+def _build_toc_html(tree: List[TreeNode]) -> str:
+    lines = []
+    for node in tree:
+        if node.hidden_in_export:
+            continue
+        num = f"{node.number}. " if node.number else ""
+        lines.append(f'<div style="padding-left:{node.level * 20}px"><a href="#{node.id}">{num}{node.title_ne}</a></div>')
+        if node.children:
+            lines.append(_build_toc_html(node.children))
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════
+# DOCX Export Endpoint
+# ═══════════════════════════════════════════════════════════
+
+from fastapi.responses import StreamingResponse, JSONResponse
+
+# ═══════════════════════════════════════════════════════════
+# Chart Data Endpoint (for live Chart.js preview)
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/{plan_id}/chart-data/{chart_type}")
+async def get_chart_data(
+    plan_id: UUID,
+    chart_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+    resolver = VariableResolver(db, plan.calculation_id, plan)
+    raw_data = resolver.get_raw_data()
+    forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
+
+    chart_configs = {
+        "species_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Species Composition (Top 8)",
+            "get_data": lambda rd: _chart_species_pie(rd, forest_name),
+        },
+        "forest_type_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Forest Type Distribution",
+            "get_data": lambda rd: _chart_forest_type_pie(rd, forest_name),
+        },
+        "block_area_bar": {
+            "chart_type": "bar",
+            "title": f"{forest_name} - Block-wise Area",
+            "get_data": lambda rd: _chart_block_area_bar(rd, forest_name),
+        },
+        "dbh_histogram": {
+            "chart_type": "bar",
+            "title": f"{forest_name} - DBH Class Distribution",
+            "get_data": lambda rd: _chart_dbh_histogram(rd, forest_name),
+        },
+        "biomass_bar": {
+            "chart_type": "bar",
+            "title": f"{forest_name} - Biomass & Carbon Stock",
+            "get_data": lambda rd: _chart_biomass_bar(rd, forest_name),
+        },
+        "slope_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Slope Classification",
+            "get_data": lambda rd: _chart_slope_pie(rd, forest_name),
+        },
+        "canopy_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Canopy Cover",
+            "get_data": lambda rd: _chart_canopy_pie(rd, forest_name),
+        },
+        "landcover_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Land Cover Distribution",
+            "get_data": lambda rd: _chart_landcover_pie(rd, forest_name),
+        },
+    }
+
+    if chart_type not in chart_configs:
+        raise HTTPException(status_code=404, detail=f"Unknown chart type: {chart_type}")
+
+    config = chart_configs[chart_type]
+    result = config["get_data"](raw_data)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No data available for chart: {chart_type}")
+
+    return {
+        "chart_type": config["chart_type"],
+        "title": config["title"],
+        "labels": result["labels"],
+        "datasets": result["datasets"],
+    }
+
+
+def _chart_species_pie(raw: dict, forest_name: str) -> dict:
+    species = raw.get("species", {})
+    if isinstance(species, dict):
+        species = species.get("species_list", [])
+    if isinstance(species, dict):
+        species = species.get("species_list", [])
+    if not species or not isinstance(species, list):
+        return None
+    sorted_sp = sorted(species, key=lambda x: x.get("availability_rank", 999))[:8]
+    labels = [s.get("scientific_name", "Unknown")[:25] for s in sorted_sp]
+    colors = ["#2ecc71", "#3498db", "#e67e22", "#9b59b6", "#f1c40f", "#1abc9c", "#e74c3c", "#95a5a6"]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Species Composition",
+            "data": [1] * len(labels),
+            "backgroundColor": colors[:len(labels)],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_forest_type_pie(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    ft = ra.get("forest_type", {}).get("percentages", {})
+    if not ft:
+        return None
+    labels = list(ft.keys())
+    values = list(ft.values())
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Forest Type",
+            "data": values,
+            "backgroundColor": ["#1a5c2e", "#27ae60", "#82e0aa", "#d5f5e3", "#2ecc71"],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_block_area_bar(raw: dict, forest_name: str) -> dict:
+    blocks = raw.get("blocks", {}).get("blocks", [])
+    if not blocks:
+        return None
+    labels = [b.get("name", f"Block {i+1}")[:15] for i, b in enumerate(blocks)]
+    values = [b.get("area_hectares", 0) for b in blocks]
+    colors = ["#2ecc71", "#3498db", "#e67e22", "#e74c3c", "#9b59b6", "#f1c40f", "#1abc9c"]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Area (hectares)",
+            "data": values,
+            "backgroundColor": colors[:len(blocks)],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_dbh_histogram(raw: dict, forest_name: str) -> dict:
+    inv = raw.get("inventory", {})
+    dbh = inv.get("dbh_summary", {}) or inv.get("dbh_distribution", {})
+    if not dbh or not isinstance(dbh, dict):
+        return None
+    labels = list(dbh.keys())
+    values = list(dbh.values())
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Number of Trees",
+            "data": values,
+            "backgroundColor": "#3498db",
+            "borderColor": "#2980b9",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_biomass_bar(raw: dict, forest_name: str) -> dict:
+    bi = raw.get("basic_info", {})
+    agb = bi.get("above_ground_biomass_tons", 0) or bi.get("agb_total", 0)
+    carbon = bi.get("carbon_stock_tc", 0) or bi.get("carbon_stock", 0)
+    if not agb and not carbon:
+        return None
+    return {
+        "labels": ["Above Ground\nBiomass (tons)", "Carbon Stock\n(tons)"],
+        "datasets": [{
+            "label": "Amount (tons)",
+            "data": [float(agb or 0), float(carbon or 0)],
+            "backgroundColor": ["#27ae60", "#2980b9"],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_slope_pie(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    sp = ra.get("slope", {}).get("percentages", {})
+    if not sp:
+        return None
+    labels = list(sp.keys())
+    values = list(sp.values())
+    color_map = {
+        "Flat": "#27ae60", "Gentle": "#f1c40f", "Moderate": "#e67e22",
+        "Steep": "#e74c3c", "Very Steep": "#c0392b",
+    }
+    colors = [color_map.get(l, "#95a5a6") for l in labels]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Slope Classification",
+            "data": values,
+            "backgroundColor": colors,
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_canopy_pie(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    cp = ra.get("canopy", {}).get("percentages", {})
+    if not cp:
+        return None
+    labels = list(cp.keys())
+    values = list(cp.values())
+    color_map = {"Open": "#d5f5e3", "Medium": "#82e0aa", "Dense": "#27ae60", "Very Dense": "#1a5c2e"}
+    colors = [color_map.get(l, "#95a5a6") for l in labels]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Canopy Cover",
+            "data": values,
+            "backgroundColor": colors,
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_landcover_pie(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    lc = ra.get("landcover", {}).get("percentages", {})
+    if not lc or not isinstance(lc, dict):
+        return None
+    sorted_lc = sorted(lc.items(), key=lambda x: x[1], reverse=True)[:6]
+    labels = [x[0] for x in sorted_lc]
+    values = [x[1] for x in sorted_lc]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Land Cover",
+            "data": values,
+            "backgroundColor": ["#27ae60", "#3498db", "#f39c12", "#e74c3c", "#95a5a6", "#9b59b6"],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+# Map GeoJSON Endpoint (for live Leaflet preview)
+# ═══════════════════════════════════════════════════════════
+
+from geoalchemy2.shape import to_shape
+from shapely.geometry import mapping
+
+@router.get("/{plan_id}/map-geojson")
+async def get_map_geojson(
+    plan_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+
+    calculation = db.query(Calculation).filter(Calculation.id == plan.calculation_id).first()
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    features = []
+
+    # Forest boundary
+    if calculation.boundary_geom:
+        try:
+            shape = to_shape(calculation.boundary_geom)
+            boundary_geojson = mapping(shape)
+            features.append({
+                "type": "Feature",
+                "properties": {"name": "Forest Boundary", "type": "boundary", "color": "#27ae60"},
+                "geometry": boundary_geojson,
+            })
+        except Exception:
+            pass
+
+    # Blocks
+    blocks = db.query(ForestBlock).filter(
+        ForestBlock.calculation_id == plan.calculation_id
+    ).order_by(ForestBlock.index).all()
+
+    block_colors = ["#2ecc71", "#3498db", "#e67e22", "#e74c3c", "#9b59b6", "#f1c40f", "#1abc9c", "#e91e63"]
+    for i, block in enumerate(blocks):
+        try:
+            shape = to_shape(block.geometry)
+            block_geojson = mapping(shape)
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "name": block.name,
+                    "type": "block",
+                    "area_hectares": block.area_hectares,
+                    "color": block_colors[i % len(block_colors)],
+                },
+                "geometry": block_geojson,
+            })
+        except Exception:
+            pass
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "forest_name": calculation.forest_name or plan.forest_name or "CF",
+    }
+
+
+@router.post("/{plan_id}/clear-map-cache")
+async def clear_plan_map_cache(
+    plan_id: UUID,
+    layer: Optional[str] = Query(None, description="Specific layer or all"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    from app.services.management_plan_docx.plan_map_service import clear_map_cache
+    plan = _check_plan_access(plan_id, current_user, db)
+    clear_map_cache(calculation_id=plan.calculation_id, layer_name=layer)
+    return {"message": f"Map cache cleared for {layer or 'all layers'}"}
+
+
+@router.get("/{plan_id}/export")
+async def export_operational_plan(
+    plan_id: UUID,
+    refresh_cache: bool = Query(False, description="Regenerate all cached maps"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    from app.services.management_plan_docx.plan_map_service import clear_map_cache
+
+    plan = _check_plan_access(plan_id, current_user, db)
+    if refresh_cache:
+        clear_map_cache(calculation_id=plan.calculation_id)
+
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
+    resolver = VariableResolver(db, plan.calculation_id, plan)
+
+    for node in TreeOperations.flatten(tree_list):
+        if node.content:
+            node.content = resolver.resolve_node_content(node.content)
+
+    buffer = build_op_document(
+        plan=plan_to_dict(plan),
+        tree=tree_list,
+        resolver=resolver,
+        calculation_id=plan.calculation_id,
+        db=db,
+    )
+
+    forest_name = plan.forest_name or "CF"
+    filename, disposition = build_disposition(forest_name, "OP", "DOCX", "docx")
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": disposition},
+    )

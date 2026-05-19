@@ -35,6 +35,7 @@ import {
 import { yearlyActivitiesApi, forestApi } from '../../services/api';
 import DrawingCanvas from './DrawingCanvas';
 import './YearlyActivitiesPage.css';
+import { downloadBlob } from '../../utils/download';
 
 const { Text, Title } = Typography;
 const { Panel } = Collapse;
@@ -534,7 +535,7 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
   };
 
   // Export to CSV
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     const headers = [
       'S.No',
       'Activity',
@@ -609,13 +610,9 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
     ].join('\n');
     
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${forestName}_yearly_activities_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const name = forestName.replace(/\s+/g, '_');
+    downloadBlob(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }), `${name}_YearlyActivity_Plan_${dateStr}.csv`);
     message.success('CSV exported successfully');
   };
 
