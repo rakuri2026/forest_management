@@ -194,6 +194,109 @@ import re
 
 _VARIABLE_PATTERN = re.compile(r"\{\{(\w+:?\w+)\}\}")
 
+# Alias mapping to look up unresolved list/dict variables from raw_data
+_VAR_LOOKUP = {
+    "uc_members": ("committees", "user_committee.members"),
+    "ac_members": ("committees", "advisory_committee.members"),
+    "fc_members": ("committees", "financial_committee.members"),
+    "species_list": ("species", "species_list"),
+    "bio_vegetation": ("biodiversity", "vegetation"),
+    "bio_animals": ("biodiversity", "animals"),
+    "activities_list": ("activities", "activities"),
+    "ug_buildings": ("user_group", "buildings"),
+    "hh_prosperity_distribution": ("households", "prosperity_distribution"),
+    "hh_caste_distribution": ("households", "caste_distribution"),
+    "inventory_species_summary": ("inventory", "species_summary"),
+    "inventory_block_summary": ("inventory", "block_summary"),
+}
+
+def _deep_get(data, path):
+    if not path:
+        return None
+    current = data
+    for key in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, (list, tuple)):
+            try:
+                idx = int(key)
+                current = current[idx] if 0 <= idx < len(current) else None
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+        if current is None:
+            return None
+    return current
+
+def _resolve_var_from_raw(var_name: str, raw_data: dict) -> any:
+    lookup = _VAR_LOOKUP.get(var_name)
+    if lookup:
+        section, path = lookup
+        section_data = raw_data.get(section, {})
+        return _deep_get(section_data, path)
+    for section_key in ("basic_info", "raster_analysis", "boundary", "blocks",
+                        "species", "inventory", "field_inventory", "sampling",
+                        "households", "committees", "biodiversity", "activities", "user_group"):
+        section_data = raw_data.get(section_key, {})
+        if var_name in section_data:
+            return section_data[var_name]
+    return None
+
+def _render_list_value_as_text(val: any, var_name: str = "") -> str:
+    if not val:
+        return ""
+    if isinstance(val, list):
+        if all(isinstance(v, str) for v in val):
+            return ", ".join(val)
+        if all(isinstance(v, dict) for v in val):
+            lines = []
+            for i, item in enumerate(val, 1):
+                parts = [str(item.get(k, "")) for k in ("name", "position", "gender") if k in item]
+                clean = " — ".join(p for p in parts if p.strip())
+                if clean:
+                    lines.append(f"{i}. {clean}")
+            return "\n".join(lines)
+        return "\n".join(f"• {v}" for v in val if v)
+    if isinstance(val, dict):
+        return "\n".join(f"{k}: {v}" for k, v in val.items() if v)
+    return str(val)
+
+def _add_list_table(doc: Document, val: list, var_name: str = ""):
+    if not val or not isinstance(val, list):
+        return None
+    if all(isinstance(v, str) for v in val):
+        for v in val:
+            p = doc.add_paragraph(f"• {v}")
+            p.paragraph_format.space_after = Pt(2)
+        return True
+    if all(isinstance(v, dict) for v in val):
+        headers = list(val[0].keys())
+        num_cols = len(headers)
+        num_rows = len(val) + 1
+        tbl = doc.add_table(rows=num_rows, cols=num_cols)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        tbl.style = "Table Grid"
+        for ci, h in enumerate(headers):
+            cell = tbl.cell(0, ci)
+            cell.text = h.replace("_", " ").title()
+            for p in cell.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9)
+                    r.font.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+            _set_cell_shading(cell, "006400")
+        for ri, row in enumerate(val, 1):
+            for ci, h in enumerate(headers):
+                cell = tbl.cell(ri, ci)
+                cell.text = str(row.get(h, ""))
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        r.font.size = Pt(9)
+        doc.add_paragraph()
+        return True
+    return None
+
 def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db: Session = None, raw_data: dict = None, table_cache: dict = None):
     parts = re.split(r"(\{\{chart:\w+\}\}|\{\{map:\w+\}\}|\{\{table:\w+\}\})", text)
     for part in parts:
@@ -212,6 +315,21 @@ def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db:
         elif table_match and calculation_id:
             _add_table_inline(doc, table_match.group(1), table_cache)
         else:
+            var_match = re.match(r"^\{\{(\w+:?\w+)\}\}$", part)
+            if var_match and raw_data:
+                var_name = var_match.group(1)
+                if not var_name.startswith("chart:") and not var_name.startswith("map:") and not var_name.startswith("table:"):
+                    var_val = _resolve_var_from_raw(var_name, raw_data)
+                    if isinstance(var_val, list):
+                        if _add_list_table(doc, var_val, var_name):
+                            continue
+                    if var_val is not None and not isinstance(var_val, (dict, list)):
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_after = Pt(6)
+                        run = p.add_run(str(var_val))
+                        run.font.size = Pt(11)
+                        continue
+
             for para_text in part.split("\n"):
                 para_text = para_text.strip()
                 if not para_text:
@@ -616,14 +734,14 @@ def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
                raw_data: Dict[str, Any], db: Session,
                table_cache: dict = None, calc_cache: dict = None):
     for node in nodes:
-        if node.hidden_in_export:
+        if node.hidden_in_export or node.deleted:
             continue
 
         has_content = node.content_type == "richtext" and node.content and node.content.strip()
         is_chart = node.content_type == "chart" and node.chart_type
         is_table = node.content_type == "table" and node.table_id
         is_map = node.content_type == "map"
-        has_children = any(not c.hidden_in_export for c in node.children)
+        has_children = any((not c.hidden_in_export and not c.deleted) for c in node.children)
 
         if has_content or is_chart or is_table or is_map or has_children:
             _add_heading(doc, node)
@@ -656,13 +774,13 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
                     table_cache: dict = None) -> str:
     parts = []
     for node in nodes:
-        if node.hidden_in_export:
+        if node.hidden_in_export or node.deleted:
             continue
         has_content = node.content_type == "richtext" and node.content and node.content.strip()
         is_chart = node.content_type == "chart" and node.chart_type
         is_table = node.content_type == "table" and node.table_id
         is_map = node.content_type == "map"
-        has_children = any(not c.hidden_in_export for c in node.children)
+        has_children = any((not c.hidden_in_export and not c.deleted) for c in node.children)
         if not (has_content or is_chart or is_table or is_map or has_children):
             continue
 
@@ -688,6 +806,7 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
                 r'<div class="chart-placeholder">📋 \1<br><small>Rendered as table in DOCX</small></div>',
                 escaped
             )
+            escaped = _render_html_list_vars(escaped, raw_data)
             parts.append(f'<div class="section-content">{escaped}</div>')
 
         if is_chart:
@@ -745,6 +864,35 @@ def _add_table_html(parts: List[str], node: TreeNode, table_cache: dict = None):
 def _html_escape(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _render_html_list_vars(text: str, raw_data: dict) -> str:
+    def _replace_var(m):
+        var_name = m.group(1)
+        if var_name.startswith("chart:") or var_name.startswith("map:") or var_name.startswith("table:"):
+            return m.group(0)
+        var_val = _resolve_var_from_raw(var_name, raw_data)
+        if var_val is None:
+            return m.group(0)
+        if isinstance(var_val, list):
+            if all(isinstance(v, str) for v in var_val):
+                items = "".join(f"<li>{_html_escape(v)}</li>" for v in var_val if v)
+                return f"<ul>{items}</ul>" if items else m.group(0)
+            if all(isinstance(v, dict) for v in var_val):
+                headers = list(var_val[0].keys())
+                header_row = "".join(f"<th>{_html_escape(h.replace('_', ' ').title())}</th>" for h in headers)
+                data_rows = ""
+                for row in var_val:
+                    cells = "".join(f"<td>{_html_escape(str(row.get(h, '')))}</td>" for h in headers)
+                    data_rows += f"<tr>{cells}</tr>"
+                return f'<div class="table-preview"><table class="data"><thead><tr>{header_row}</tr></thead><tbody>{data_rows}</tbody></table></div>'
+            items = "".join(f"<li>{_html_escape(str(v))}</li>" for v in var_val if v)
+            return f"<ul>{items}</ul>" if items else m.group(0)
+        if isinstance(var_val, dict):
+            items = "".join(f"<li><b>{_html_escape(k)}</b>: {_html_escape(str(v))}</li>" for k, v in var_val.items() if v)
+            return f"<ul>{items}</ul>" if items else m.group(0)
+        return _html_escape(str(var_val))
+    return re.sub(r"\{\{(\w+:?\w+)\}\}", _replace_var, text)
 
 
 # ═══════════════════════════════════════════════════════

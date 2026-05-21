@@ -384,16 +384,21 @@ async def get_species_breakdown(
 
     # Query to get species-wise breakdown by block
     query = text("""
-        WITH plot_species AS (
+        WITH block_total_plots AS (
+            SELECT block_name, COUNT(DISTINCT id) as total_plots
+            FROM public.field_inventory_sample_plots
+            WHERE field_inventory_calculation_id = :field_inventory_id
+            GROUP BY block_name
+        ),
+        species_data AS (
             SELECT
                 sp.block_name,
                 m.species_scientific,
                 m.species_local,
                 m.stand_type,
-                COUNT(DISTINCT sp.id) as total_plots_in_block,
                 SUM(m.count) as total_count,
-                SUM(COALESCE(m.net_volume, 0)) as total_timber,
-                SUM(COALESCE(m.firewood_m3, 0)) as total_firewood,
+                SUM(COALESCE(m.stem_volume, 0)) as total_timber,
+                SUM(COALESCE(m.branch_volume, 0)) as total_firewood,
                 SUM(COALESCE(m.basal_area_m2, 0) * m.count) as total_basal_area
             FROM public.field_inventory_sample_plots sp
             JOIN public.field_inventory_measurements m ON m.sample_plot_id = sp.id
@@ -401,23 +406,24 @@ async def get_species_breakdown(
             GROUP BY sp.block_name, m.species_scientific, m.species_local, m.stand_type
         )
         SELECT
-            block_name,
-            species_scientific,
-            species_local,
-            SUM(CASE WHEN stand_type = 'Regeneration' THEN total_count ELSE 0 END) as regen_count,
-            SUM(CASE WHEN stand_type = 'Sapling' THEN total_count ELSE 0 END) as sapling_count,
-            SUM(CASE WHEN stand_type = 'Pole' THEN total_count ELSE 0 END) as pole_count,
-            SUM(CASE WHEN stand_type = 'Tree' THEN total_count ELSE 0 END) as tree_count,
-            SUM(CASE WHEN stand_type = 'Pole' THEN total_basal_area ELSE 0 END) as pole_basal_area,
-            SUM(CASE WHEN stand_type = 'Tree' THEN total_basal_area ELSE 0 END) as tree_basal_area,
-            SUM(CASE WHEN stand_type = 'Pole' THEN total_timber ELSE 0 END) as pole_timber,
-            SUM(CASE WHEN stand_type = 'Pole' THEN total_firewood ELSE 0 END) as pole_firewood,
-            SUM(CASE WHEN stand_type = 'Tree' THEN total_timber ELSE 0 END) as tree_timber,
-            SUM(CASE WHEN stand_type = 'Tree' THEN total_firewood ELSE 0 END) as tree_firewood,
-            MAX(total_plots_in_block) as total_plots
-        FROM plot_species
-        GROUP BY block_name, species_scientific, species_local
-        ORDER BY block_name, species_scientific
+            sd.block_name,
+            sd.species_scientific,
+            sd.species_local,
+            btp.total_plots,
+            SUM(CASE WHEN sd.stand_type = 'Regeneration' THEN sd.total_count ELSE 0 END) as regen_count,
+            SUM(CASE WHEN sd.stand_type = 'Sapling' THEN sd.total_count ELSE 0 END) as sapling_count,
+            SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_count ELSE 0 END) as pole_count,
+            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_count ELSE 0 END) as tree_count,
+            SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_basal_area ELSE 0 END) as pole_basal_area,
+            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_basal_area ELSE 0 END) as tree_basal_area,
+            SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_timber ELSE 0 END) as pole_timber,
+            SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_firewood ELSE 0 END) as pole_firewood,
+            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_timber ELSE 0 END) as tree_timber,
+            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_firewood ELSE 0 END) as tree_firewood
+        FROM species_data sd
+        JOIN block_total_plots btp ON btp.block_name = sd.block_name
+        GROUP BY sd.block_name, sd.species_scientific, sd.species_local, btp.total_plots
+        ORDER BY sd.block_name, sd.species_scientific
     """)
 
     results = db.execute(query, {"field_inventory_id": str(field_inventory_id)}).fetchall()

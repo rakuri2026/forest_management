@@ -29,6 +29,7 @@ from .caste_classification import CasteClassification
 from .forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialCommittee
 from .compartment import CompartmentSplitHistory
 from .op_table import OPTableDefinition, OPTableData
+from .op_template import OPTemplate
 
 __all__ = [
     "User",
@@ -66,4 +67,5 @@ __all__ = [
     "CompartmentSplitHistory",
     "OPTableDefinition",
     "OPTableData",
+    "OPTemplate",
 ]

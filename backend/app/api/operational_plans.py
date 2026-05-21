@@ -3,6 +3,7 @@ Operational Plan API endpoints — Tree Document Model
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Dict, Any, Optional, List
@@ -13,6 +14,7 @@ from ..core.database import get_db
 from ..models.user import User, UserRole
 from ..models.calculation import Calculation
 from ..models.operational_plan import OperationalPlan
+from ..models.op_template import OPTemplate
 from ..models.forest_block import ForestBlock
 from ..models.op_table import OPTableData
 from ..schemas.operational_plan import (
@@ -25,7 +27,13 @@ from ..schemas.operational_plan import (
     TreeNodeReorder,
     TreeNodeSchema,
     VariableDefResponse,
+    TemplateCreate,
+    TemplateUpdate,
+    TemplateApprove,
+    TemplateResponse,
+    TemplateSummary,
 )
+from ..services.operational_plan.template_utils import generate_template_summaries
 from ..utils.auth import get_current_active_user
 from ..services.operational_plan.tree_models import TreeNode, TreeOperations, DocumentTree
 from ..services.operational_plan.auto_numbering import recompute_numbers
@@ -103,6 +111,7 @@ def _save_tree(plan: OperationalPlan, tree: list, db: Session) -> None:
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_operational_plan(
     plan_data: OperationalPlanCreate,
+    template_id: Optional[UUID] = Query(None, description="Template ID to use instead of the default seed tree"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -114,10 +123,25 @@ async def create_operational_plan(
     if existing_plan:
         raise HTTPException(status_code=400, detail="Operational plan already exists for this calculation")
 
-    seed_tree = get_full_seed_document()
-    recompute_numbers(seed_tree, language="NP")
+    if template_id:
+        tmpl = db.execute(
+            select(OPTemplate).where(OPTemplate.id == template_id)
+        ).scalar_one_or_none()
+        if not tmpl:
+            raise HTTPException(status_code=404, detail="Template not found")
+        tree_list = [TreeNode.from_dict(n) for n in tmpl.tree]
+    else:
+        use_default = db.execute(
+            select(OPTemplate).where(OPTemplate.is_default == True, OPTemplate.is_system == True)
+        ).scalar_one_or_none()
+        if use_default:
+            tree_list = [TreeNode.from_dict(n) for n in use_default.tree]
+        else:
+            tree_list = get_full_seed_document()
 
-    sections = {"tree": _tree_to_dict_list(seed_tree)}
+    recompute_numbers(tree_list, language="NP")
+
+    sections = {"tree": _tree_to_dict_list(tree_list)}
 
     plan = OperationalPlan(
         calculation_id=plan_data.calculation_id,
@@ -130,6 +154,24 @@ async def create_operational_plan(
     db.add(plan)
     db.commit()
     db.refresh(plan)
+
+    # Auto-populate variables so the plan is ready-to-print immediately
+    try:
+        resolver = VariableResolver(db, plan.calculation_id, plan)
+        tree_list = _dict_list_to_tree(sections.get("tree", []))
+        resolved = resolver.resolve_all()
+        for node in TreeOperations.flatten(tree_list):
+            if node.content:
+                node.content = resolver.resolve_node_content(node.content)
+        plan.sections["tree"] = _tree_to_dict_list(tree_list)
+        plan.plan_metadata["auto_populated"] = True
+        plan.plan_metadata["auto_populated_at"] = datetime.utcnow().isoformat()
+        flag_modified(plan, "sections")
+        plan.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(plan)
+    except Exception:
+        pass
 
     return plan_to_dict(plan)
 
@@ -541,7 +583,7 @@ async def preview_operational_plan(
 def _build_toc_html(tree: List[TreeNode]) -> str:
     lines = []
     for node in tree:
-        if node.hidden_in_export:
+        if node.hidden_in_export or node.deleted:
             continue
         num = f"{node.number}. " if node.number else ""
         lines.append(f'<div style="padding-left:{node.level * 20}px"><a href="#{node.id}">{num}{node.title_ne}</a></div>')
@@ -908,3 +950,326 @@ async def export_operational_plan(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": disposition},
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# Template Management Endpoints
+# ═══════════════════════════════════════════════════════════
+
+
+@router.get("/templates", summary="List templates (user's own + globally available)")
+async def list_templates(
+    scope: str = Query("mine", description="Filter: mine, shared, global, all"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    conditions = []
+
+    if scope == "mine":
+        conditions.append(OPTemplate.created_by == current_user.id)
+    elif scope == "shared":
+        conditions.append(OPTemplate.visibility.in_(["shared", "global"]))
+        conditions.append(OPTemplate.approval_status == "approved")
+    elif scope == "global":
+        conditions.append(OPTemplate.visibility == "global")
+        conditions.append(OPTemplate.approval_status == "approved")
+    else:
+        conditions.append(
+            sa.or_(
+                OPTemplate.created_by == current_user.id,
+                sa.and_(
+                    OPTemplate.visibility.in_(["shared", "global"]),
+                    OPTemplate.approval_status == "approved",
+                ),
+            )
+        )
+
+    if tag:
+        conditions.append(OPTemplate.tags.contains(tag))
+
+    templates = db.execute(
+        select(OPTemplate).where(sa.and_(*conditions))
+        .order_by(OPTemplate.is_system.desc(), OPTemplate.is_default.desc(), OPTemplate.updated_at.desc())
+    ).scalars().all()
+
+    return {
+        "total": len(templates),
+        "templates": [TemplateSummary.model_validate(t) for t in templates],
+    }
+
+
+@router.get("/templates/public", summary="Browse all publicly available templates")
+async def list_public_templates(
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    search: Optional[str] = Query(None, description="Search name or description"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    conditions = [
+        OPTemplate.visibility.in_(["shared", "global"]),
+        OPTemplate.approval_status == "approved",
+    ]
+    if tag:
+        conditions.append(OPTemplate.tags.contains(tag))
+    if search:
+        conditions.append(
+            sa.or_(
+                OPTemplate.name.ilike(f"%{search}%"),
+                OPTemplate.description.ilike(f"%{search}%"),
+            )
+        )
+
+    templates = db.execute(
+        select(OPTemplate).where(sa.and_(*conditions))
+        .order_by(OPTemplate.is_default.desc(), OPTemplate.updated_at.desc())
+    ).scalars().all()
+
+    return {
+        "total": len(templates),
+        "templates": [TemplateSummary.model_validate(t) for t in templates],
+    }
+
+
+@router.get("/templates/pending-approval", summary="Super admin: list templates pending approval")
+async def list_pending_templates(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can view pending approval")
+
+    templates = db.execute(
+        select(OPTemplate).where(OPTemplate.approval_status == "pending")
+        .order_by(OPTemplate.updated_at.asc())
+    ).scalars().all()
+
+    return {
+        "total": len(templates),
+        "templates": [TemplateSummary.model_validate(t) for t in templates],
+    }
+
+
+@router.post("/templates", status_code=status.HTTP_201_CREATED, summary="Save a new template")
+async def create_template(
+    tmpl_data: TemplateCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if tmpl_data.is_default:
+        db.execute(
+            sa.update(OPTemplate).where(OPTemplate.created_by == current_user.id).values(is_default=False)
+        )
+
+    tree_dicts = [n.model_dump() for n in tmpl_data.tree]
+    summaries = generate_template_summaries(tree_dicts)
+
+    tmpl = OPTemplate(
+        name=tmpl_data.name,
+        description=tmpl_data.description or "",
+        tree=tree_dicts,
+        visibility=tmpl_data.visibility or "private",
+        tags=list(tmpl_data.tags) if tmpl_data.tags else [],
+        sections_summary=summaries["sections_summary"],
+        variables_summary=summaries["variables_summary"],
+        is_system=False,
+        is_default=tmpl_data.is_default,
+        created_by=current_user.id,
+    )
+    db.add(tmpl)
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.get("/templates/{template_id}", summary="Get full template details")
+async def get_template(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.visibility == "private" and tmpl.created_by != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.put("/templates/{template_id}", summary="Update a template")
+async def update_template(
+    template_id: UUID,
+    tmpl_data: TemplateUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.is_system:
+        raise HTTPException(status_code=400, detail="Cannot edit system templates")
+    if tmpl.created_by != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if tmpl_data.name is not None:
+        tmpl.name = tmpl_data.name
+    if tmpl_data.description is not None:
+        tmpl.description = tmpl_data.description
+    if tmpl_data.tree is not None:
+        tree_dicts = [n.model_dump() for n in tmpl_data.tree]
+        tmpl.tree = tree_dicts
+        summaries = generate_template_summaries(tree_dicts)
+        tmpl.sections_summary = summaries["sections_summary"]
+        tmpl.variables_summary = summaries["variables_summary"]
+    if tmpl_data.is_default is not None:
+        if tmpl_data.is_default:
+            db.execute(
+                sa.update(OPTemplate).where(
+                    OPTemplate.created_by == current_user.id, OPTemplate.id != template_id
+                ).values(is_default=False)
+            )
+        tmpl.is_default = tmpl_data.is_default
+    if tmpl_data.visibility is not None:
+        tmpl.visibility = tmpl_data.visibility
+    if tmpl_data.tags is not None:
+        tmpl.tags = list(tmpl_data.tags)
+
+    tmpl.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.delete("/templates/{template_id}", summary="Delete a user template")
+async def delete_template(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.is_system:
+        raise HTTPException(status_code=400, detail="Cannot delete system templates")
+    if tmpl.created_by != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    db.delete(tmpl)
+    db.commit()
+
+    return {"status": "ok", "message": "Template deleted"}
+
+
+@router.post("/templates/{template_id}/submit", summary="Submit a private template for global approval")
+async def submit_template_for_approval(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only submit your own templates")
+    if tmpl.approval_status == "pending":
+        raise HTTPException(status_code=400, detail="Template is already pending approval")
+    if tmpl.approval_status == "approved":
+        raise HTTPException(status_code=400, detail="Template is already approved")
+
+    tmpl.approval_status = "pending"
+    tmpl.approval_note = ""
+    tmpl.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.post("/templates/{template_id}/review", summary="Super admin: approve or reject a template")
+async def review_template(
+    template_id: UUID,
+    review: TemplateApprove,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can review templates")
+
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Template is not pending approval")
+
+    if review.action == "approve":
+        tmpl.approval_status = "approved"
+        tmpl.visibility = "global"
+        tmpl.approved_by = current_user.id
+        tmpl.approved_at = datetime.utcnow()
+        tmpl.approval_note = review.note or ""
+    else:
+        tmpl.approval_status = "rejected"
+        tmpl.approval_note = review.note or "No reason provided"
+
+    tmpl.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.post("/{plan_id}/save-as-template", summary="Save current operational plan as a template")
+async def save_plan_as_template(
+    plan_id: UUID,
+    tmpl_data: TemplateCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    plan = _check_plan_access(plan_id, current_user, db)
+
+    if tmpl_data.tree:
+        tree_list = [n.model_dump() for n in tmpl_data.tree]
+    else:
+        sections = plan.sections or {}
+        tree_list = sections.get("tree", [])
+
+    if not tree_list:
+        raise HTTPException(status_code=400, detail="Plan has no document tree to save")
+
+    if tmpl_data.is_default:
+        db.execute(
+            sa.update(OPTemplate).where(OPTemplate.created_by == current_user.id).values(is_default=False)
+        )
+
+    summaries = generate_template_summaries(tree_list)
+
+    tmpl = OPTemplate(
+        name=tmpl_data.name,
+        description=tmpl_data.description or "",
+        tree=tree_list,
+        visibility=tmpl_data.visibility or "private",
+        tags=list(tmpl_data.tags) if tmpl_data.tags else [],
+        sections_summary=summaries["sections_summary"],
+        variables_summary=summaries["variables_summary"],
+        is_system=False,
+        is_default=tmpl_data.is_default,
+        source_calculation_id=plan.calculation_id,
+        created_by=current_user.id,
+    )
+    db.add(tmpl)
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)

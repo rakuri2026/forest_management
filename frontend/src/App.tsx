@@ -19,6 +19,8 @@ import SamplingList from './pages/SamplingList';
 import DraftResume from './pages/DraftResume';
 import YearlyActivitiesPage from './components/YearlyActivities/YearlyActivitiesPage';
 import OperationalPlanPage from './pages/OperationalPlanPage';
+import PublicTemplatesPage from './pages/PublicTemplatesPage';
+import AdminTemplatesPage from './pages/AdminTemplatesPage';
 
 const App: React.FC = () => {
   return (
@@ -56,6 +58,10 @@ const App: React.FC = () => {
             <Route path="inventory" element={<InventoryList />} />
             <Route path="inventory/upload" element={<InventoryUpload />} />
             <Route path="inventory/:id" element={<InventoryDetail />} />
+
+            {/* Template routes */}
+            <Route path="templates" element={<PublicTemplatesPage />} />
+            <Route path="admin/templates" element={<AdminTemplatesPage />} />
 
             {/* Legacy routes (redirects for backward compatibility) */}
             <Route path="dashboard" element={<Navigate to="/my-uploads" replace />} />

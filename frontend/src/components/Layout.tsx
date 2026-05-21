@@ -35,6 +35,20 @@ const Layout: React.FC = () => {
                 >
                   Community Forests
                 </Link>
+                <Link
+                  to="/templates"
+                  className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                >
+                  Templates
+                </Link>
+                {user?.role === 'super_admin' && (
+                  <Link
+                    to="/admin/templates"
+                    className="border-transparent text-white hover:border-white hover:text-white inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                  >
+                    Admin
+                  </Link>
+                )}
               </div>
             </div>
             <div className="flex items-center">

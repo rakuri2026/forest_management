@@ -17,6 +17,7 @@ class TreeNodeSchema(BaseModel):
     children: List["TreeNodeSchema"] = []
     is_locked: bool = False
     hidden_in_export: bool = False
+    deleted: bool = False
     last_modified: Optional[str] = None
 
 
@@ -57,6 +58,7 @@ class TreeNodeUpdate(BaseModel):
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
     hidden_in_export: Optional[bool] = None
+    deleted: Optional[bool] = None
 
 
 class TreeNodeReorder(BaseModel):
@@ -102,3 +104,53 @@ class OperationalPlanListResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = ""
+    tree: List[TreeNodeSchema]
+    is_default: bool = False
+    visibility: Literal["private", "shared"] = "private"
+    tags: Optional[List[str]] = None
+
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    tree: Optional[List[TreeNodeSchema]] = None
+    is_default: Optional[bool] = None
+    visibility: Optional[Literal["private", "shared"]] = None
+    tags: Optional[List[str]] = None
+
+
+class TemplateApprove(BaseModel):
+    action: Literal["approve", "reject"]
+    note: Optional[str] = ""
+
+
+class TemplateSummary(BaseModel):
+    id: UUID4
+    name: str
+    description: str = ""
+    is_system: bool = False
+    is_default: bool = False
+    visibility: str = "private"
+    approval_status: str = "none"
+    tags: List[str] = []
+    sections_summary: List[str] = []
+    variables_summary: List[str] = []
+    created_by: Optional[UUID4] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateResponse(TemplateSummary):
+    tree: List[TreeNodeSchema] = []
+    approval_note: str = ""
+    approved_by: Optional[UUID4] = None
+    approved_at: Optional[datetime] = None
+    source_calculation_id: Optional[UUID4] = None

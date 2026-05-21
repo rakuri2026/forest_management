@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Button, Tooltip, Input, Dropdown } from 'antd';
-import { PlusOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined, PieChartOutlined, EnvironmentOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Button, Tooltip, Input } from 'antd';
+import { PlusOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined, PieChartOutlined, EnvironmentOutlined, FileTextOutlined, UndoOutlined } from '@ant-design/icons';
 
 interface TreeNodeData {
   id: string;
@@ -13,6 +13,7 @@ interface TreeNodeData {
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
+  deleted: boolean;
 }
 
 type TreeSidebarProps = {
@@ -22,7 +23,7 @@ type TreeSidebarProps = {
   onAddChild: (parentId: string | null) => void;
   onAddChartNode?: (parentId: string | null) => void;
   onAddMapNode?: (parentId: string | null) => void;
-  onDeleteNode: (nodeId: string) => void;
+  onToggleDelete: (nodeId: string) => void;
   onToggleHidden: (nodeId: string) => void;
   onUpdateTitle?: (nodeId: string, title_ne: string) => void;
   onReorderNode?: (nodeId: string, newParentId: string | null, newPosition: number) => void;
@@ -40,6 +41,7 @@ const TreeNodeComponent: React.FC<{
   node: TreeNodeData;
   activeNodeId: string | null;
   depth: number;
+  parentDeleted: boolean;
   editingId: string | null;
   editValue: string;
   setEditingId: (id: string | null) => void;
@@ -48,14 +50,16 @@ const TreeNodeComponent: React.FC<{
   onAddChild: (id: string | null) => void;
   onAddChartNode?: (id: string | null) => void;
   onAddMapNode?: (id: string | null) => void;
-  onDeleteNode: (id: string) => void;
+  onToggleDelete: (id: string) => void;
   onToggleHidden: (id: string) => void;
   onUpdateTitle?: (id: string, title: string) => void;
   onReorderNode?: (nodeId: string, newParentId: string | null, newPosition: number) => void;
   dragOverId: string | null;
   setDragOverId: (id: string | null) => void;
-}> = ({ node, activeNodeId, depth, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onDeleteNode, onToggleHidden, onUpdateTitle, onReorderNode, dragOverId, setDragOverId }) => {
+}> = ({ node, activeNodeId, depth, parentDeleted, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onToggleDelete, onToggleHidden, onUpdateTitle, onReorderNode, dragOverId, setDragOverId }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const isDeleted = parentDeleted || node.deleted;
 
   useEffect(() => {
     if (editingId === node.id && inputRef.current) {
@@ -73,11 +77,13 @@ const TreeNodeComponent: React.FC<{
   };
 
   const handleDragStart = (e: React.DragEvent) => {
+    if (isDeleted) { e.preventDefault(); return; }
     e.dataTransfer.setData('text/plain', node.id);
     e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (isDeleted) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDragOverId(node.id);
@@ -97,7 +103,7 @@ const TreeNodeComponent: React.FC<{
   return (
     <div>
       <div
-        draggable={!node.is_locked}
+        draggable={!node.is_locked && !isDeleted}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragLeave={() => setDragOverId(null)}
@@ -112,6 +118,9 @@ const TreeNodeComponent: React.FC<{
           marginBottom: 1,
           outline: isDragOver ? '2px dashed #1890ff' : 'none',
           outlineOffset: -2,
+          opacity: isDeleted ? 0.5 : 1,
+          textDecoration: isDeleted ? 'line-through' : 'none',
+          color: isDeleted ? '#bbb' : 'inherit',
         }}
         onMouseEnter={(e) => {
           if (activeNodeId !== node.id) (e.currentTarget as HTMLElement).style.background = '#f5f5f5';
@@ -144,50 +153,61 @@ const TreeNodeComponent: React.FC<{
         <span style={{ fontSize: 11, color: '#999', marginRight: 4 }}>
           {node.content_type === 'chart' ? '📊' : node.content_type === 'table' ? '📋' : node.content_type === 'map' ? '🗺️' : ''}
         </span>
-        {node.hidden_in_export && (
+        {isDeleted && (
+          <Tooltip title="Removed from export">
+            <span style={{ fontSize: 10, color: '#999' }}>removed</span>
+          </Tooltip>
+        )}
+        {!isDeleted && node.hidden_in_export && (
           <Tooltip title="Hidden in export">
             <EyeInvisibleOutlined style={{ fontSize: 11, color: '#faad14' }} />
           </Tooltip>
         )}
       </div>
       <div style={{ display: 'flex', gap: 2, paddingLeft: 12 + depth * 16 + 20, marginBottom: 2, flexWrap: 'wrap' }}>
-        <Tooltip title="Add section">
-          <Button type="text" size="small" icon={<FileTextOutlined style={{ fontSize: 10 }} />}
-            onClick={(e) => { e.stopPropagation(); onAddChild(node.id); }}
-            style={{ width: 20, height: 20 }} />
-        </Tooltip>
-        {onAddChartNode && (
-          <Tooltip title="Add chart">
-            <Button type="text" size="small" icon={<PieChartOutlined style={{ fontSize: 10, color: '#1677ff' }} />}
-              onClick={(e) => { e.stopPropagation(); onAddChartNode(node.id); }}
-              style={{ width: 20, height: 20 }} />
-          </Tooltip>
-        )}
-        {onAddMapNode && (
-          <Tooltip title="Add map">
-            <Button type="text" size="small" icon={<EnvironmentOutlined style={{ fontSize: 10, color: '#52c41a' }} />}
-              onClick={(e) => { e.stopPropagation(); onAddMapNode(node.id); }}
-              style={{ width: 20, height: 20 }} />
-          </Tooltip>
+        {!isDeleted && (
+          <>
+            <Tooltip title="Add section">
+              <Button type="text" size="small" icon={<FileTextOutlined style={{ fontSize: 10 }} />}
+                onClick={(e) => { e.stopPropagation(); onAddChild(node.id); }}
+                style={{ width: 20, height: 20 }} />
+            </Tooltip>
+            {onAddChartNode && (
+              <Tooltip title="Add chart">
+                <Button type="text" size="small" icon={<PieChartOutlined style={{ fontSize: 10, color: '#1677ff' }} />}
+                  onClick={(e) => { e.stopPropagation(); onAddChartNode(node.id); }}
+                  style={{ width: 20, height: 20 }} />
+              </Tooltip>
+            )}
+            {onAddMapNode && (
+              <Tooltip title="Add map">
+                <Button type="text" size="small" icon={<EnvironmentOutlined style={{ fontSize: 10, color: '#52c41a' }} />}
+                  onClick={(e) => { e.stopPropagation(); onAddMapNode(node.id); }}
+                  style={{ width: 20, height: 20 }} />
+              </Tooltip>
+            )}
+            <Tooltip title="Hide from export">
+              <Button type="text" size="small"
+                icon={node.hidden_in_export ? <EyeOutlined style={{ fontSize: 10 }} /> : <EyeInvisibleOutlined style={{ fontSize: 10 }} />}
+                onClick={(e) => { e.stopPropagation(); onToggleHidden(node.id); }}
+                style={{ width: 20, height: 20 }} />
+            </Tooltip>
+          </>
         )}
         {!node.is_locked && (
-          <Tooltip title="Delete section">
-            <Button type="text" size="small" danger icon={<DeleteOutlined style={{ fontSize: 10 }} />}
-              onClick={(e) => { e.stopPropagation(); onDeleteNode(node.id); }}
-              style={{ width: 20, height: 20 }} />
+          <Tooltip title={isDeleted ? 'Restore section' : 'Remove from export (strikethrough)'}>
+            <Button type="text" size="small"
+              icon={isDeleted ? <UndoOutlined style={{ fontSize: 10 }} /> : <DeleteOutlined style={{ fontSize: 10 }} />}
+              onClick={(e) => { e.stopPropagation(); onToggleDelete(node.id); }}
+              style={{ width: 20, height: 20, color: isDeleted ? '#52c41a' : '#ff4d4f' }} />
           </Tooltip>
         )}
-        <Tooltip title={node.hidden_in_export ? 'Show in export' : 'Hide from export'}>
-          <Button type="text" size="small"
-            icon={node.hidden_in_export ? <EyeOutlined style={{ fontSize: 10 }} /> : <EyeInvisibleOutlined style={{ fontSize: 10 }} />}
-            onClick={(e) => { e.stopPropagation(); onToggleHidden(node.id); }}
-            style={{ width: 20, height: 20 }} />
-        </Tooltip>
       </div>
       {node.children?.map(child =>
         <TreeNodeComponent key={child.id} node={child} activeNodeId={activeNodeId} depth={depth + 1}
+          parentDeleted={isDeleted}
           editingId={editingId} editValue={editValue} setEditingId={setEditingId} setEditValue={setEditValue}
-          onSelectNode={onSelectNode} onAddChild={onAddChild} onDeleteNode={onDeleteNode}
+          onSelectNode={onSelectNode} onAddChild={onAddChild} onToggleDelete={onToggleDelete}
           onToggleHidden={onToggleHidden} onUpdateTitle={onUpdateTitle} onReorderNode={onReorderNode}
           dragOverId={dragOverId} setDragOverId={setDragOverId} />
       )}
@@ -195,12 +215,12 @@ const TreeNodeComponent: React.FC<{
   );
 };
 
-const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onDeleteNode, onToggleHidden, onUpdateTitle, onReorderNode }) => {
+const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onToggleDelete, onToggleHidden, onUpdateTitle, onReorderNode }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
-  const shared = { activeNodeId, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onDeleteNode, onToggleHidden, onUpdateTitle, onReorderNode, dragOverId, setDragOverId };
+  const shared = { activeNodeId, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onToggleDelete, onToggleHidden, onUpdateTitle, onReorderNode, dragOverId, setDragOverId };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -224,7 +244,7 @@ const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectN
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
         {tree.map(node =>
-          <TreeNodeComponent key={node.id} node={node} depth={0} {...shared} />
+          <TreeNodeComponent key={node.id} node={node} depth={0} parentDeleted={false} {...shared} />
         )}
         {tree.length === 0 && (
           <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>

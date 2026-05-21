@@ -1,16 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Button, message, Spin, Tag, Tabs, Modal } from 'antd';
+import { Button, message, Spin, Tag, Tabs } from 'antd';
 import {
   SaveOutlined,
   SettingOutlined,
   ThunderboltOutlined,
   DownloadOutlined,
-  PlusOutlined,
   BranchesOutlined,
-  EyeOutlined,
   PieChartOutlined,
   EnvironmentOutlined,
+  FileTextOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../services/api';
 import TreeSidebar from '../components/OperationalPlan/TreeSidebar';
@@ -20,6 +20,7 @@ import TableEditor from '../components/OperationalPlan/TableEditor';
 import ChartEditor from '../components/OperationalPlan/ChartEditor';
 import MapPreview from '../components/OperationalPlan/MapPreview';
 import PreviewDrawer from '../components/OperationalPlan/PreviewDrawer';
+import TemplateManager from '../components/OperationalPlan/TemplateManager';
 
 interface TreeNodeData {
   id: string;
@@ -36,6 +37,7 @@ interface TreeNodeData {
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
+  deleted: boolean;
   last_modified?: string | null;
 }
 
@@ -56,6 +58,7 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   const [saving, setSaving] = useState(false);
   const [showMetadata, setShowMetadata] = useState(false);
   const [activeTab, setActiveTab] = useState<EditorTab>('editor');
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
 
   useEffect(() => {
     if (calculationId) {
@@ -75,21 +78,43 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       }
     } catch (err: any) {
       if (err.response?.status === 404) {
-        try {
-          const newPlan = await operationalPlanApi.create(calcId);
-          setPlan(newPlan);
-          setPlanId(newPlan.id);
-          setTree(newPlan.tree || []);
-          if ((newPlan.tree || []).length > 0) {
-            setActiveNodeId(newPlan.tree[0].id);
-          }
-          message.success('New operational plan created');
-        } catch {
-          message.error('Failed to create operational plan');
-        }
+        await createWithDefault(calcId);
       } else {
         message.error('Failed to load operational plan');
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createWithDefault = async (calcId: string) => {
+    try {
+      const newPlan = await operationalPlanApi.create(calcId);
+      setPlan(newPlan);
+      setPlanId(newPlan.id);
+      setTree(newPlan.tree || []);
+      if ((newPlan.tree || []).length > 0) {
+        setActiveNodeId(newPlan.tree[0].id);
+      }
+    } catch {
+      message.error('Failed to create operational plan');
+    }
+  };
+
+  const handleLoadTemplate = async (templateId: string) => {
+    if (!calculationId) return;
+    setLoading(true);
+    try {
+      const newPlan = await operationalPlanApi.create(calculationId, undefined, templateId);
+      setPlan(newPlan);
+      setPlanId(newPlan.id);
+      setTree(newPlan.tree || []);
+      if ((newPlan.tree || []).length > 0) {
+        setActiveNodeId(newPlan.tree[0].id);
+      }
+      message.success('Template loaded');
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to load template');
     } finally {
       setLoading(false);
     }
@@ -167,18 +192,19 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
     await handleAddChild(parentId, 'map', undefined, mapType);
   };
 
-  const handleDeleteNode = async (nodeId: string) => {
-    if (!planId) return;
-    try {
-      const result = await operationalPlanApi.deleteNode(planId, nodeId);
-      setTree(result.tree || []);
-      if (activeNodeId === nodeId) {
-        setActiveNodeId(null);
-      }
-      message.success('Section deleted');
-    } catch {
-      message.error('Failed to delete section');
-    }
+  const handleToggleDelete = (nodeId: string) => {
+    const toggleNode = (nodes: TreeNodeData[]): TreeNodeData[] =>
+      nodes.map(n => {
+        if (n.id === nodeId) {
+          const newDeleted = !n.deleted;
+          const cascade = (children: TreeNodeData[]): TreeNodeData[] =>
+            children.map(c => ({ ...c, deleted: newDeleted, children: cascade(c.children) }));
+          return { ...n, deleted: newDeleted, children: cascade(n.children) };
+        }
+        return { ...n, children: toggleNode(n.children) };
+      });
+    setTree(prev => toggleNode(prev));
+    setActiveNodeId(prev => prev === nodeId ? prev : prev);
   };
 
   const handleReorderNode = async (nodeId: string, newParentId: string | null, newPosition: number) => {
@@ -207,6 +233,17 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
         return update(prev);
       });
     } catch { message.error('Failed to update title'); }
+  };
+
+  const handleContentChange = (nodeId: string, content: string) => {
+    setTree(prev => {
+      const update = (nodes: TreeNodeData[]): TreeNodeData[] =>
+        nodes.map(n => {
+          if (n.id === nodeId) return { ...n, content };
+          return { ...n, children: update(n.children || []) };
+        });
+      return update(prev);
+    });
   };
 
   const handleToggleHidden = async (nodeId: string) => {
@@ -255,7 +292,7 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <Spin size="large" tip="Loading plan..." />
+        <Spin size="large" description="Loading plan..." />
       </div>
     );
   }
@@ -277,6 +314,9 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
           )}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
+          <Button icon={<FileTextOutlined />} onClick={() => setShowTemplateManager(true)} size="small">
+            Templates
+          </Button>
           <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
             Metadata
           </Button>
@@ -316,14 +356,14 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
               onAddChild={handleAddChild}
               onAddChartNode={handleAddChartNode}
               onAddMapNode={handleAddMapNode}
-              onDeleteNode={handleDeleteNode}
+              onToggleDelete={handleToggleDelete}
               onToggleHidden={handleToggleHidden}
               onUpdateTitle={handleUpdateTitle}
               onReorderNode={handleReorderNode}
             />
           </div>
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {planId && <ContentPane node={activeNode} planId={planId} />}
+            {planId && <ContentPane node={activeNode} planId={planId} onContentChange={handleContentChange} />}
           </div>
         </div>
       ) : activeTab === 'tables' ? (
@@ -347,6 +387,14 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
           onClose={() => setShowMetadata(false)}
         />
       )}
+
+      <TemplateManager
+        planId={planId}
+        tree={tree}
+        visible={showTemplateManager}
+        onClose={() => setShowTemplateManager(false)}
+        onLoadTemplate={handleLoadTemplate}
+      />
     </div>
   );
 };

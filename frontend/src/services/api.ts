@@ -2107,8 +2107,9 @@ export const compartmentApi = {
 };
 
 export const operationalPlanApi = {
-  create: async (calculationId: string, forestName?: string): Promise<any> => {
-    const response = await api.post('/api/operational-plans', { calculation_id: calculationId, forest_name: forestName });
+  create: async (calculationId: string, forestName?: string, templateId?: string): Promise<any> => {
+    const params = templateId ? `?template_id=${templateId}` : '';
+    const response = await api.post(`/api/operational-plans${params}`, { calculation_id: calculationId, forest_name: forestName });
     return response.data;
   },
 
@@ -2219,6 +2220,64 @@ export const operationalPlanApi = {
   clearMapCache: async (planId: string, layer?: string): Promise<any> => {
     const params = layer ? `?layer=${encodeURIComponent(layer)}` : '';
     const response = await api.post(`/api/operational-plans/${planId}/clear-map-cache${params}`);
+    return response.data;
+  },
+
+  // ── Template Management ──
+
+  listTemplates: async (scope: string = 'mine', tag?: string): Promise<any> => {
+    let url = `/api/operational-plans/templates?scope=${scope}`;
+    if (tag) url += `&tag=${encodeURIComponent(tag)}`;
+    const response = await api.get(url);
+    return response.data;
+  },
+
+  listPublicTemplates: async (tag?: string, search?: string): Promise<any> => {
+    let url = '/api/operational-plans/templates/public';
+    const params: any = {};
+    if (tag) params.tag = tag;
+    if (search) params.search = search;
+    const response = await api.get(url, { params });
+    return response.data;
+  },
+
+  listPendingTemplates: async (): Promise<any> => {
+    const response = await api.get('/api/operational-plans/templates/pending-approval');
+    return response.data;
+  },
+
+  getTemplate: async (templateId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/templates/${templateId}`);
+    return response.data;
+  },
+
+  createTemplate: async (data: { name: string; description?: string; tree: any[]; is_default?: boolean; visibility?: string; tags?: string[] }): Promise<any> => {
+    const response = await api.post('/api/operational-plans/templates', data);
+    return response.data;
+  },
+
+  updateTemplate: async (templateId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/templates/${templateId}`, data);
+    return response.data;
+  },
+
+  deleteTemplate: async (templateId: string): Promise<any> => {
+    const response = await api.delete(`/api/operational-plans/templates/${templateId}`);
+    return response.data;
+  },
+
+  submitTemplateForApproval: async (templateId: string): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/templates/${templateId}/submit`);
+    return response.data;
+  },
+
+  reviewTemplate: async (templateId: string, action: 'approve' | 'reject', note?: string): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/templates/${templateId}/review`, { action, note: note || '' });
+    return response.data;
+  },
+
+  savePlanAsTemplate: async (planId: string, data: { name: string; description?: string; tree?: any[]; is_default?: boolean; visibility?: string; tags?: string[] }): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/${planId}/save-as-template`, data);
     return response.data;
   },
 };

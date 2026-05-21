@@ -166,6 +166,9 @@ _reg("fi_total_biomass_t_per_ha", "A", "प्रतिहेक्टर कु
 _reg("fi_carbon_stock_tc_per_ha", "A", "प्रतिहेक्टर कार्बन मौज्दात", "Carbon Stock tC/ha", var_type="number", source="field_inventory")
 _reg("fi_co2_equivalent_tco2_per_ha", "A", "प्रतिहेक्टर CO₂ समतुल्य", "CO₂ Equivalent tCO₂/ha", var_type="number", source="field_inventory")
 _reg("fi_weighted_wood_density", "A", "भारित काठ घनत्व", "Weighted Wood Density", var_type="number", source="field_inventory")
+_reg("fi_species_block_growing_stock", "A", "ब्लक अनुसार प्रजाति वन मौज्दात (पोल+रूख)", "Block-wise Species Growing Stock (Pole+Tree)", var_type="list", source="field_inventory")
+_reg("fi_block_regeneration_status", "A", "वन खन्ड अनुसार पुनरोत्पादनको स्थिति", "Forest Block-wise Regeneration Status", var_type="list", source="field_inventory")
+_reg("fi_block_dbh_class_growing_stock", "A", "ब्लक अनुसार DBH वर्ग वन मौज्दात", "Block-wise DBH Class Growing Stock", var_type="list", source="field_inventory")
 
 # A11: Sampling (6)
 _reg("sampling_available", "A", "नमूना योजना उपलब्ध", "Sampling Available", var_type="boolean", source="sampling")

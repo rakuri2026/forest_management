@@ -23,6 +23,7 @@ class TreeNode(BaseModel):
     children: List[TreeNode] = []
     is_locked: bool = False
     hidden_in_export: bool = False
+    deleted: bool = False
     last_modified: Optional[str] = None
 
     def touch(self):

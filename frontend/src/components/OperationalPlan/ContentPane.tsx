@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Input, Button, message, Tag, Spin, Tooltip } from 'antd';
-import { SaveOutlined, CodeOutlined, EyeOutlined } from '@ant-design/icons';
+import { Input, Button, message, Tag, Spin, Tooltip, Alert } from 'antd';
+import { SaveOutlined, CodeOutlined, EyeOutlined, WarningOutlined } from '@ant-design/icons';
 import { operationalPlanApi } from '../../services/api';
 import VariablePicker from './VariablePicker';
 
@@ -18,12 +18,14 @@ interface TreeNodeData {
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
+  deleted: boolean;
   last_modified?: string | null;
 }
 
 interface ContentPaneProps {
   node: TreeNodeData | null;
   planId: string;
+  onContentChange?: (nodeId: string, content: string) => void;
 }
 
 const typeLabels: Record<string, string> = {
@@ -34,7 +36,7 @@ const typeLabels: Record<string, string> = {
   appendix: 'Appendix',
 };
 
-const ContentPane: React.FC<ContentPaneProps> = ({ node, planId }) => {
+const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, onContentChange }) => {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -53,12 +55,13 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId }) => {
     try {
       await operationalPlanApi.updateNode(planId, node.id, { content });
       setDirty(false);
+      onContentChange?.(node.id, content);
     } catch {
       message.error('Failed to save');
     } finally {
       setSaving(false);
     }
-  }, [node, planId, content, dirty]);
+  }, [node, planId, content, dirty, onContentChange]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -138,6 +141,16 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId }) => {
           </div>
         </div>
       </div>
+
+      {node.deleted && (
+        <Alert
+          message="This section is marked as removed. It will NOT appear in the DOCX export or HTML preview. Click the undo button in the tree sidebar to restore it."
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          style={{ margin: '8px 16px', borderRadius: 6 }}
+        />
+      )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
