@@ -72,8 +72,8 @@ def get_default_seed_tree() -> List[TreeNode]:
               children=[
                   _node("subsection", "वन श्रोत मापन विधी", "Measurement Method",
                         "वन श्रोत मापन {{sampling_type}} विधिबाट गरिएको थियो। कुल {{sampling_total_points}} वटा नमूना प्लट राखिएका थिए।"),
-                  _node("subsection", "कम्पार्टमेण्ट अनुसार वनको मौज्दात", "Growing Stock",
-                        "प्रतिहेक्टर औसत growing stock {{fi_growing_stock_m3_per_ha}} घनमिटर रहेको छ।"),
+                  _node("subsection", "ब्यास वर्ग अनुसार वन मौज्दात", "DBH Class Growing Stock",
+                        "ब्लक अनुसार ब्यास वर्गको वन मौज्दात निम्नानुसार छ:\n\n{{fi_block_dbh_class_growing_stock_np}}"),
                   _node("subsection", "वार्षिक उत्पादन", "Annual Production",
                         "वार्षिक उत्पादन {{annual_increment_m3}} घनमिटर रहेको छ।"),
                   _node("subsection", "मुख्य प्रजातीहरू", "Main Species",

@@ -169,6 +169,10 @@ _reg("fi_weighted_wood_density", "A", "भारित काठ घनत्व
 _reg("fi_species_block_growing_stock", "A", "ब्लक अनुसार प्रजाति वन मौज्दात (पोल+रूख)", "Block-wise Species Growing Stock (Pole+Tree)", var_type="list", source="field_inventory")
 _reg("fi_block_regeneration_status", "A", "वन खन्ड अनुसार पुनरोत्पादनको स्थिति", "Forest Block-wise Regeneration Status", var_type="list", source="field_inventory")
 _reg("fi_block_dbh_class_growing_stock", "A", "ब्लक अनुसार DBH वर्ग वन मौज्दात", "Block-wise DBH Class Growing Stock", var_type="list", source="field_inventory")
+_reg("fi_block_dbh_class_growing_stock_np", "A", "ब्लक अनुसार DBH वर्ग वन मौज्दात (नेपाली)", "Block-wise DBH Class Growing Stock (Nepali)", var_type="list", source="field_inventory")
+_reg("fi_block_summaries", "A", "ब्लक अनुसार पूर्ण नतिजा", "Block-wise Full Results", var_type="list", source="field_inventory")
+_reg("fi_mai_table", "A", "वार्षिक वृद्धि तालिका (m³/ha/yr)", "Annual Increment (MAI) Table", var_type="list", source="field_inventory")
+_reg("fi_aah_table", "A", "वार्षिक स्वीकार्य कटान तालिका (m³/ha/yr)", "Annual Allowable Cut (AAH) Table", var_type="list", source="field_inventory")
 
 # A11: Sampling (6)
 _reg("sampling_available", "A", "नमूना योजना उपलब्ध", "Sampling Available", var_type="boolean", source="sampling")

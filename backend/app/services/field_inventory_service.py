@@ -47,7 +47,7 @@ class FieldInventoryService:
     def _load_species_coefficients(self) -> Dict[str, Dict]:
         """Load species coefficients from database (including wood density for carbon calculations)"""
         query = text("""
-            SELECT scientific_name, local_name, a, b, c, a1, b1, s, m, bg, growth_rate, wood_density_gm_cm3
+            SELECT scientific_name, local_name, a, b, c, a1, b1, s, m, bg, growth_rate, wood_density_gm_cm3, full_stem_merchantable
             FROM public.tree_species_coefficients
             WHERE is_active = TRUE
         """)
@@ -66,7 +66,8 @@ class FieldInventoryService:
                 'm': row[8],
                 'bg': row[9],
                 'growth_rate': row[10],
-                'wood_density': float(row[11]) if row[11] is not None else 0.65  # Default to 0.65 if missing
+                'wood_density': float(row[11]) if row[11] is not None else 0.65,  # Default to 0.65 if missing
+                'full_stem_merchantable': bool(row[12]) if row[12] is not None else False
             }
 
         return coefficients
@@ -378,7 +379,14 @@ class FieldInventoryService:
         if class_col and class_col in row.index:
             class_value = row[class_col]
             if pd.notna(class_value) and str(class_value).strip() != '':
-                tree_class = str(class_value).strip()
+                tc_raw = str(class_value).strip()
+                try:
+                    tc_num = str(int(float(tc_raw)))
+                    tree_class = {'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(tc_num, tc_num)
+                except (ValueError, TypeError):
+                    tc_lower = tc_raw.lower()
+                    tree_class = {'i': 'a', 'ii': 'b', 'iii': 'c', 'iv': 'd',
+                                  'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd'}.get(tc_lower, tc_lower)
 
         # Get count (for regeneration and sapling)
         count = 1
@@ -561,7 +569,12 @@ class FieldInventoryService:
             # Formula: Gross Timber = Stem Volume - 10cm Top Stem Volume
             # Source: Forest Regulation 2079, Section 4
             # NOTE: Gross timber comes ONLY from stem, branches go to firewood
-            if coef['a1'] is not None and coef['b1'] is not None:
+            # For FSM species (e.g. Acacia catechu/Khair), entire stem is merchantable
+            if coef.get('full_stem_merchantable'):
+                gross_volume = stem_volume
+                if DEBUG_VOLUME_CALC:
+                    _debug_log(f"[FIELD_INV_VOLUME] GROSS: FSM=true, gross_vol=stem_vol={gross_volume}")
+            elif coef['a1'] is not None and coef['b1'] is not None:
                 cm10_dia_ratio = math.exp(coef['a1'] + coef['b1'] * math.log(dbh_cm))
                 cm10_top_volume = stem_volume * cm10_dia_ratio  # Use stem_volume (not tree_volume)
                 gross_volume = stem_volume - cm10_top_volume   # Use stem_volume (not tree_volume)
@@ -576,11 +589,10 @@ class FieldInventoryService:
             # 5. Net timber volume (काठको नेट आयतन)
             # Apply waste factors based on tree class (दर्जा)
             # Source: Forest Regulation 2079, Section 5
-            # Handle multiple class formats: 1,2,3,4 or i,ii,iii,iv or A,B,C,D or a,b,c,d
-            # Also handle float format from Excel: "1.0", "2.0", etc.
+            # All formats normalize to lowercase letter: a, b, c, d
 
             # Convert class value to string, handling float format from Excel CSV
-            tree_class_raw = measurement.tree_class or '2'
+            tree_class_raw = measurement.tree_class or 'b'
             try:
                 # Try to convert to float then int to handle "1.0" → 1
                 tree_class = str(int(float(tree_class_raw)))

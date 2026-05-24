@@ -355,22 +355,29 @@ class InventoryService:
 
             # Use class for waste calculation (default to Class 2 if not provided)
             if class_val is not None:
-                tree_class = str(class_val).strip()
+                tc_raw = str(class_val).strip()
+                try:
+                    tc_num = str(int(float(tc_raw)))
+                    tree_class = {'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(tc_num, tc_num)
+                except (ValueError, TypeError):
+                    tc_lower = tc_raw.lower()
+                    tree_class = {'i': 'a', 'ii': 'b', 'iii': 'c', 'iv': 'd',
+                                  'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd'}.get(tc_lower, tc_lower)
             else:
-                tree_class = '2'  # Default to Class 2 (moderate quality)
+                tree_class = 'b'  # Default to Class 2 (moderate quality)
 
             # Apply waste factor based on class (Forest Regulation 2079)
             # Class 1 (पहिलो दर्जा): 80% net, 20% waste
             # Class 2 (दोस्रो दर्जा): 60% net, 40% waste
             # Class 3 (तेस्रो दर्जा): 30% net, 70% waste
             # Class 4 (चौथो दर्जा): 0% timber (all firewood)
-            if tree_class == '1' or tree_class.upper() == 'A':
+            if tree_class == 'a':
                 net_volume = gross_volume * 0.80  # 20% waste
-            elif tree_class == '2' or tree_class.upper() == 'B':
+            elif tree_class == 'b':
                 net_volume = gross_volume * 0.60  # 40% waste
-            elif tree_class == '3' or tree_class.upper() == 'C':
+            elif tree_class == 'c':
                 net_volume = gross_volume * 0.30  # 70% waste
-            elif tree_class == '4' or tree_class.upper() == 'D':
+            elif tree_class == 'd':
                 net_volume = 0.0  # All firewood (100% waste)
             else:
                 # Unknown class: default to Class 2 (moderate)
@@ -838,7 +845,7 @@ class InventoryService:
                     species=species,
                     dia_cm=float(row[diameter_col]),
                     height_m=float(height_val) if pd.notna(height_val) else None,
-                    tree_class=class_val if pd.notna(class_val) else None,
+                    tree_class={'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(str(int(float(class_val))).strip()) if pd.notna(class_val) else None,
                     location=f'SRID=4326;POINT({lon} {lat})',
                     stem_volume=float(row['stem_volume']),
                     branch_volume=float(row['branch_volume']),

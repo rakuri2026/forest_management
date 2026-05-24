@@ -436,8 +436,13 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
   // Map field-inventory block names to current calculation block names
   const blockNameMap: Record<string, string> = {};
   if (summary?.blocks && blocks.length > 0) {
-    summary.blocks.forEach((sb: any, idx: number) => {
-      const current = blocks[idx];
+    // Sort summary blocks to match blocks prop order for consistent display
+    const blockOrder = blocks.map((b: any) => b.block_name);
+    summary.blocks.sort(
+      (a: any, b: any) => blockOrder.indexOf(a.block_name) - blockOrder.indexOf(b.block_name)
+    );
+    summary.blocks.forEach((sb: any) => {
+      const current = blocks.find((b: any) => b.block_name === sb.block_name);
       if (current && current.block_name !== sb.block_name) {
         blockNameMap[sb.block_name] = current.block_name;
       }

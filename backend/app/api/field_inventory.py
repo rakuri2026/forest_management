@@ -242,10 +242,10 @@ async def get_summary(
     if not field_inventory:
         raise HTTPException(status_code=404, detail="Field inventory not found")
 
-    # Get all block summaries
+    # Get all block summaries (ordered by name for consistent rendering)
     blocks = db.query(FieldInventoryBlockSummary).filter(
         FieldInventoryBlockSummary.field_inventory_calculation_id == field_inventory_id
-    ).all()
+    ).order_by(FieldInventoryBlockSummary.block_name).all()
 
     # Calculate forest-wide averages
     if blocks:
@@ -397,8 +397,8 @@ async def get_species_breakdown(
                 m.species_local,
                 m.stand_type,
                 SUM(m.count) as total_count,
-                SUM(COALESCE(m.stem_volume, 0)) as total_timber,
-                SUM(COALESCE(m.branch_volume, 0)) as total_firewood,
+                SUM(COALESCE(m.net_volume, 0)) as total_timber,
+                SUM(COALESCE(m.firewood_m3, 0)) as total_firewood,
                 SUM(COALESCE(m.basal_area_m2, 0) * m.count) as total_basal_area
             FROM public.field_inventory_sample_plots sp
             JOIN public.field_inventory_measurements m ON m.sample_plot_id = sp.id

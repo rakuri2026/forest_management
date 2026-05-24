@@ -230,6 +230,17 @@ def _safe(v, precision=4):
     return round(v, precision) if isinstance(v, float) else v
 
 
+def _tree_class_to_letter(val) -> str:
+    """Convert tree_class from any format to lowercase letter: a, b, c, d"""
+    if not val:
+        return ''
+    s = str(val).strip().lower().replace('.0', '')
+    return {'1': 'a', 'i': 'a', 'a': 'a',
+            '2': 'b', 'ii': 'b', 'b': 'b',
+            '3': 'c', 'iii': 'c', 'c': 'c',
+            '4': 'd', 'iv': 'd', 'd': 'd'}.get(s, s)
+
+
 def generate_field_inventory_excel(
     db: Session,
     field_inventory_id: UUID,
@@ -456,7 +467,7 @@ def generate_field_inventory_excel(
             _safe(dbh, 2),
             _safe(height, 2),
             'Yes' if r.height_estimated else 'No',
-            str(r.tree_class or ''),
+            _tree_class_to_letter(r.tree_class),
             int(r.count) if r.count is not None else 1,
             int(r.sn) if r.sn is not None else 0,
             block_plot_counts.get(block_name, 0),
@@ -519,14 +530,13 @@ def generate_field_inventory_excel(
         ws.cell(row=dr, column=32).value = (
             f'=IF({is_vol},IF({FSM}{dr}=1,{SV}{dr},{SV}{dr}-{TVOL}{dr}),0)'
         )
-        # Col 33: Recovery Factor % — conditional: if FSM=1, 100%, else quality lookup
+        # Col 33: Recovery Factor % — quality class lookup (applies to ALL species)
         ws.cell(row=dr, column=33).value = (
-            f'=IF({FSM}{dr}=1,100,'
-            f'IF({K_}{dr}="",60,'
+            f'=IF({K_}{dr}="",60,'
             f'IF(OR({K_}{dr}="1",{K_}{dr}="i",{K_}{dr}="a"),80,'
             f'IF(OR({K_}{dr}="2",{K_}{dr}="ii",{K_}{dr}="b"),60,'
             f'IF(OR({K_}{dr}="3",{K_}{dr}="iii",{K_}{dr}="c"),30,'
-            f'IF(OR({K_}{dr}="4",{K_}{dr}="iv",{K_}{dr}="d"),0,60))))))'
+            f'IF(OR({K_}{dr}="4",{K_}{dr}="iv",{K_}{dr}="d"),0,60)))))'
         )
         # Col 34: Net Timber Volume
         ws.cell(row=dr, column=34).value = f'={GT}{dr}*{RF}{dr}/100'
