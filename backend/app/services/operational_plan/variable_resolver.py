@@ -276,6 +276,7 @@ class VariableResolver:
             "compute_annual_increment": lambda: ctx.get("total_growing_stock_m3", 0) * ctx.get("fi_mai_percent", 0) / 100,
             "compute_forest_per_hh": lambda: round(ctx.get("forest_area_ha", 0) / max(ctx.get("hh_total_households", 1), 1), 2),
             "compute_plan_years_range": lambda: f"{ctx.get('plan_year_start', '')}-{ctx.get('plan_year_end', '')}",
+            "compute_cf_area_provided": lambda: self._compute_cf_area_provided(),
         }
         fn = compute_map.get(var_def.compute_fn)
         return fn() if fn else None
@@ -291,6 +292,12 @@ class VariableResolver:
         if forest_area == 0:
             forest_area = data.get("basic_info", {}).get("effective_area_hectares", 0)
         return forest_area
+
+    def _compute_cf_area_provided(self) -> float:
+        data = self.get_raw_data()
+        blocks_data = data.get("blocks", {})
+        blocks = blocks_data.get("blocks", [])
+        return sum(b.get("area_hectares", 0) for b in blocks)
 
     def _resolve_section_content(self, var_def: VariableDef) -> Any:
         sections = {

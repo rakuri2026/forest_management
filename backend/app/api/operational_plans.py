@@ -33,6 +33,17 @@ from ..schemas.operational_plan import (
     TemplateResponse,
     TemplateSummary,
 )
+from ..schemas.metadata_form import MetadataFormUpdate
+from ..services.metadata.admin_location_service import (
+    get_provinces,
+    get_divisions,
+    get_sub_divisions,
+    get_municipalities,
+    get_wards,
+    get_physiography_and_jurisdiction,
+    get_location_by_centroid,
+    resolve_from_resolved_vars,
+)
 from ..services.operational_plan.template_utils import generate_template_summaries
 from ..utils.auth import get_current_active_user
 from ..services.operational_plan.tree_models import TreeNode, TreeOperations, DocumentTree
@@ -435,7 +446,65 @@ async def get_variable_detail(key: str):
 
 
 # ═══════════════════════════════════════════════════════════
-# Metadata Form Endpoint (Phase 2 stub)
+# Cascading Location Data Endpoints (from admin.admin_nepal)
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/locations/provinces")
+async def list_provinces(db: Session = Depends(get_db)):
+    return get_provinces(db)
+
+
+@router.get("/locations/divisions")
+async def list_divisions(
+    province: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return get_divisions(db, province)
+
+
+@router.get("/locations/sub-divisions")
+async def list_sub_divisions(
+    province: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return get_sub_divisions(db, province, division)
+
+
+@router.get("/locations/municipalities")
+async def list_municipalities(
+    province: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    sub_division: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return get_municipalities(db, province, division, sub_division)
+
+
+@router.get("/locations/wards")
+async def list_wards(
+    province: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    sub_division: Optional[str] = Query(None),
+    municipality: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return get_wards(db, province, division, sub_division, municipality)
+
+
+@router.get("/locations/physiography-jurisdiction")
+async def get_location_physiography(
+    province: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    sub_division: Optional[str] = Query(None),
+    municipality: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return get_physiography_and_jurisdiction(db, province, division, sub_division, municipality)
+
+
+# ═══════════════════════════════════════════════════════════
+# Metadata Form Endpoint
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/{plan_id}/metadata-form")
@@ -448,55 +517,121 @@ async def get_metadata_form(
     user_inputs = (plan.plan_metadata or {}).get("user_inputs", {})
     hybrid_overrides = (plan.plan_metadata or {}).get("hybrid_overrides", {})
 
+    system_defaults = {}
+    try:
+        resolver = VariableResolver(db, plan.calculation_id, plan)
+        for key, var_def in VARIABLE_REGISTRY.items():
+            if var_def.resolver == "resolve_hybrid":
+                val = resolver._resolve_category_a(var_def)
+                if val is not None:
+                    system_defaults[key] = val
+    except Exception:
+        pass
+
+    has_location = bool(user_inputs.get("province"))
+    if not has_location:
+        loc = get_location_by_centroid(plan.calculation_id, db)
+        if not loc:
+            resolved = (plan.plan_metadata or {}).get("resolved_variables", {})
+            loc = resolve_from_resolved_vars(resolved, db)
+        if loc:
+            loc["forest_municipality"] = loc.get("forest_municipality") or loc.get("municipality")
+            loc["forest_ward"] = loc.get("forest_ward") or loc.get("ward")
+            loc["municipality"] = loc["forest_municipality"]
+            loc["ward"] = loc["forest_ward"]
+            loc["ug_prepopulated"] = True
+            loc["ug_province"] = loc.get("province")
+            loc["ug_division"] = loc.get("division")
+            loc["ug_sub_division"] = loc.get("sub_division")
+            loc["ug_municipality"] = loc.get("forest_municipality")
+            loc["ug_ward"] = loc.get("forest_ward")
+            user_inputs = {**user_inputs, **loc}
+            metadata = plan.plan_metadata or {}
+            metadata["user_inputs"] = user_inputs
+            plan.plan_metadata = metadata
+            flag_modified(plan, "plan_metadata")
+            db.commit()
+
+    admin_locations = {
+        "provinces": get_provinces(db),
+        "divisions": [],
+        "sub_divisions": [],
+        "municipalities": [],
+        "wards": [],
+    }
+
+    province = user_inputs.get("province")
+    division = user_inputs.get("division")
+    sub_division = user_inputs.get("sub_division")
+
+    if province:
+        admin_locations["divisions"] = get_divisions(db, province)
+    if province and division:
+        admin_locations["sub_divisions"] = get_sub_divisions(db, province, division)
+    if province and division and sub_division:
+        admin_locations["municipalities"] = get_municipalities(db, province, division, sub_division)
+    if province and division and sub_division:
+        mun = user_inputs.get("forest_municipality")
+        if mun:
+            admin_locations["wards"] = get_wards(db, province, division, sub_division, mun)
+
     return {
         "user_inputs": user_inputs,
         "hybrid_overrides": hybrid_overrides,
+        "system_defaults": system_defaults,
+        "admin_locations": admin_locations,
     }
 
 
 @router.put("/{plan_id}/metadata-form")
 async def update_metadata_form(
     plan_id: UUID,
-    form_data: Dict[str, Any],
+    form_data: MetadataFormUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     plan = _check_plan_access(plan_id, current_user, db)
 
-    import re
-    errors = []
-
-    user_inputs = form_data.get("user_inputs", {})
-    hybrid = form_data.get("hybrid_overrides", {})
-
-    for phone_key in ("contact_phone", "ranger_phone"):
-        val = user_inputs.get(phone_key, "")
-        if val and not re.match(r"^\d{7,15}$", str(val)):
-            errors.append(f"{phone_key}: must be 7-15 digits")
-
-    for date_key in ("registration_date", "cf_handover_date"):
-        val = user_inputs.get(date_key, "")
-        if val and not re.match(r"^\d{4}-\d{2}-\d{2}$", str(val)):
-            errors.append(f"{date_key}: must be YYYY-MM-DD format")
-
-    for year_key in ("plan_year_start", "plan_year_end"):
-        val = user_inputs.get(year_key)
-        if val is not None and (not isinstance(val, int) or val < 1900 or val > 2200):
-            errors.append(f"{year_key}: must be a year between 1900-2200")
-
-    if errors:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=422, detail=errors)
+    user_inputs = form_data.user_inputs.model_dump(exclude_none=True) if form_data.user_inputs else {}
+    hybrid = form_data.hybrid_overrides.model_dump(exclude_none=True) if form_data.hybrid_overrides else {}
 
     metadata = plan.plan_metadata or {}
     metadata["user_inputs"] = user_inputs
     metadata["hybrid_overrides"] = hybrid
     plan.plan_metadata = metadata
+    flag_modified(plan, "plan_metadata")
     plan.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(plan)
 
-    return {"status": "ok", "plan_metadata": plan.plan_metadata}
+    admin_locations = {
+        "provinces": get_provinces(db),
+        "divisions": [],
+        "sub_divisions": [],
+        "municipalities": [],
+        "wards": [],
+    }
+
+    province = user_inputs.get("province")
+    division = user_inputs.get("division")
+    sub_division = user_inputs.get("sub_division")
+
+    if province:
+        admin_locations["divisions"] = get_divisions(db, province)
+    if province and division:
+        admin_locations["sub_divisions"] = get_sub_divisions(db, province, division)
+    if province and division and sub_division:
+        admin_locations["municipalities"] = get_municipalities(db, province, division, sub_division)
+    if province and division and sub_division:
+        mun = user_inputs.get("forest_municipality")
+        if mun:
+            admin_locations["wards"] = get_wards(db, province, division, sub_division, mun)
+
+    return {
+        "status": "ok",
+        "plan_metadata": plan.plan_metadata,
+        "admin_locations": admin_locations,
+    }
 
 
 # ═══════════════════════════════════════════════════════════

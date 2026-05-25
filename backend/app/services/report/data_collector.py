@@ -42,6 +42,34 @@ def get_calculation_basic_info(db: Session, calculation_id: str) -> Dict[str, An
 
     result_data = calc.result_data or {}
 
+    # Fallback: query admin.admin_nepal for Nepali names if missing from result_data
+    if not result_data.get("whole_division_n"):
+        try:
+            fn_query = text("""
+                SELECT province_ne, division_n, subdivis_n, palika_n,
+                       type_nep, ward_ne, physiography_ne, juridiction_ne
+                FROM admin.admin_nepal
+                WHERE ST_Contains(geom, ST_Centroid(ST_GeomFromText(:wkt, 4326)))
+                LIMIT 1
+            """)
+            wkt = db.execute(
+                text("SELECT ST_AsText(boundary_geom) FROM public.calculations WHERE id = :cid"),
+                {"cid": str(calc.id)}
+            ).scalar()
+            if wkt:
+                row = db.execute(fn_query, {"wkt": wkt}).first()
+                if row:
+                    result_data.setdefault("whole_province_ne", row[0])
+                    result_data.setdefault("whole_division_n", row[1])
+                    result_data.setdefault("whole_subdivis_n", row[2])
+                    result_data.setdefault("whole_municipality_n", row[3])
+                    result_data.setdefault("whole_municipality_type_nep", row[4])
+                    result_data.setdefault("whole_ward_ne", row[5])
+                    result_data.setdefault("whole_physiography_ne", row[6])
+                    result_data.setdefault("whole_juridiction_ne", row[7])
+        except Exception:
+            pass
+
     return {
         "forest_name": calc.forest_name or "",
         "block_name": calc.block_name or "",
@@ -52,11 +80,11 @@ def get_calculation_basic_info(db: Session, calculation_id: str) -> Dict[str, An
         "total_area_hectares": result_data.get("area_hectares", 0),
         "effective_area_hectares": result_data.get("effective_area_hectares", 0),
         "excluded_area_hectares": result_data.get("excluded_area_hectares", 0),
-        "province": result_data.get("whole_province", ""),
-        "district": result_data.get("whole_district", ""),
-        "municipality": result_data.get("whole_municipality", ""),
-        "municipality_type": result_data.get("whole_municipality_type", ""),
-        "ward": result_data.get("whole_ward", ""),
+        "province": result_data.get("whole_province_ne", "") or result_data.get("whole_province", ""),
+        "district": result_data.get("whole_division_n", "") or result_data.get("whole_district", ""),
+        "municipality": result_data.get("whole_municipality_n", "") or result_data.get("whole_municipality", ""),
+        "municipality_type": result_data.get("whole_municipality_type_nep", "") or result_data.get("whole_municipality_type", ""),
+        "ward": result_data.get("whole_ward_ne", "") or result_data.get("whole_ward", ""),
         "watershed": result_data.get("whole_watershed", ""),
         "major_river_basin": result_data.get("whole_major_river_basin", ""),
         "total_blocks": result_data.get("total_blocks", 0),

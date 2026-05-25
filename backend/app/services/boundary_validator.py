@@ -4,7 +4,8 @@ Checks if tree coordinates fall within forest boundary polygon
 """
 from typing import List, Tuple, Dict
 from shapely import wkt
-from shapely.geometry import Point, Polygon, MultiPolygon
+from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
+from shapely.ops import unary_union
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from uuid import UUID
@@ -58,9 +59,19 @@ def check_points_in_boundary(
         # Parse boundary geometry
         boundary = wkt.loads(boundary_geom_wkt)
 
+        # Handle GeometryCollection — extract only polygonal parts
+        if isinstance(boundary, GeometryCollection):
+            polygonal = [g for g in boundary.geoms
+                         if g.geom_type in ('Polygon', 'MultiPolygon') and not g.is_empty]
+            if not polygonal:
+                raise ValueError("GeometryCollection contains no valid polygon geometries")
+            if len(polygonal) == 1:
+                boundary = polygonal[0]
+            else:
+                boundary = unary_union(polygonal)
+
         # Handle MultiPolygon (union all polygons)
         if isinstance(boundary, MultiPolygon):
-            # Use the union of all polygons
             boundary = boundary.buffer(0)  # Fix any invalid geometries
         elif not isinstance(boundary, Polygon):
             raise ValueError(f"Boundary must be Polygon or MultiPolygon, got {type(boundary)}")

@@ -2163,6 +2163,55 @@ export const operationalPlanApi = {
     return response.data;
   },
 
+  // ── Cascading Location Data (from admin.admin_nepal) ──
+  getProvinces: async (): Promise<string[]> => {
+    const response = await api.get('/api/operational-plans/locations/provinces');
+    return response.data;
+  },
+
+  getDivisions: async (province?: string): Promise<string[]> => {
+    const params = province ? { province } : {};
+    const response = await api.get('/api/operational-plans/locations/divisions', { params });
+    return response.data;
+  },
+
+  getSubDivisions: async (province?: string, division?: string): Promise<string[]> => {
+    const params: Record<string, string> = {};
+    if (province) params.province = province;
+    if (division) params.division = division;
+    const response = await api.get('/api/operational-plans/locations/sub-divisions', { params });
+    return response.data;
+  },
+
+  getMunicipalities: async (province?: string, division?: string, subDivision?: string): Promise<{ name: string; type: string }[]> => {
+    const params: Record<string, string> = {};
+    if (province) params.province = province;
+    if (division) params.division = division;
+    if (subDivision) params.sub_division = subDivision;
+    const response = await api.get('/api/operational-plans/locations/municipalities', { params });
+    return response.data;
+  },
+
+  getWards: async (province?: string, division?: string, subDivision?: string, municipality?: string): Promise<string[]> => {
+    const params: Record<string, string> = {};
+    if (province) params.province = province;
+    if (division) params.division = division;
+    if (subDivision) params.sub_division = subDivision;
+    if (municipality) params.municipality = municipality;
+    const response = await api.get('/api/operational-plans/locations/wards', { params });
+    return response.data;
+  },
+
+  getPhysiographyJurisdiction: async (province?: string, division?: string, subDivision?: string, municipality?: string): Promise<{ physiography_zone: string; protected_area_status: string }> => {
+    const params: Record<string, string> = {};
+    if (province) params.province = province;
+    if (division) params.division = division;
+    if (subDivision) params.sub_division = subDivision;
+    if (municipality) params.municipality = municipality;
+    const response = await api.get('/api/operational-plans/locations/physiography-jurisdiction', { params });
+    return response.data;
+  },
+
   listVariables: async (params?: { category?: string; search?: string }): Promise<any> => {
     const response = await api.get('/api/operational-plans/variables', { params });
     return response.data;

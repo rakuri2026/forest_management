@@ -414,6 +414,15 @@ async def analyze_forest_boundary(calculation_id: UUID, db: Session, options: Op
         results["whole_ward"] = whole_location.get("ward")
         results["whole_watershed"] = whole_location.get("watershed")
         results["whole_major_river_basin"] = whole_location.get("major_river_basin")
+        # Nepali names (from admin.admin_nepal)
+        results["whole_province_ne"] = whole_location.get("province_ne")
+        results["whole_division_n"] = whole_location.get("division_n")
+        results["whole_subdivis_n"] = whole_location.get("subdivis_n")
+        results["whole_municipality_n"] = whole_location.get("municipality_n")
+        results["whole_municipality_type_nep"] = whole_location.get("municipality_type_nep")
+        results["whole_ward_ne"] = whole_location.get("ward_ne")
+        results["whole_physiography_ne"] = whole_location.get("physiography_ne")
+        results["whole_juridiction_ne"] = whole_location.get("juridiction_ne")
 
     # 3c. Geology analysis for whole forest
     if whole_geom:
@@ -2157,10 +2166,33 @@ def get_administrative_location(geometry_wkt: str, db: Session) -> Dict[str, Any
 
     Returns:
         Dict with: province, district, municipality, ward, watershed, major_river_basin
+                   plus Nepali names: province_ne, division_n, subdivis_n,
+                   municipality_n, municipality_type_nep, ward_ne,
+                   physiography_ne, juridiction_ne
     """
     location = {}
 
-    # Query for province
+    # Query admin.admin_nepal for Nepali names (single spatial query, all fields)
+    admin_query = text("""
+        SELECT province_ne, division_n, subdivis_n,
+               palika_n, type_nep, ward_ne,
+               physiography_ne, juridiction_ne
+        FROM admin.admin_nepal
+        WHERE ST_Contains(geom, ST_Centroid(ST_GeomFromText(:wkt, 4326)))
+        LIMIT 1
+    """)
+    admin_row = db.execute(admin_query, {"wkt": geometry_wkt}).first()
+    if admin_row:
+        location["province_ne"] = admin_row[0]
+        location["division_n"] = admin_row[1]
+        location["subdivis_n"] = admin_row[2]
+        location["municipality_n"] = admin_row[3]
+        location["municipality_type_nep"] = admin_row[4]
+        location["ward_ne"] = admin_row[5]
+        location["physiography_ne"] = admin_row[6]
+        location["juridiction_ne"] = admin_row[7]
+
+    # Query for province (English)
     province_query = text("""
         SELECT p.province
         FROM admin.province p
