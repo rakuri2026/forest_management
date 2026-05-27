@@ -7,7 +7,7 @@ from uuid import UUID
 def get_location_by_centroid(calculation_id: UUID, db: Session) -> Optional[Dict[str, str]]:
     row = db.execute(
         text("""
-            SELECT province_ne, division_n, subdivis_n,
+            SELECT province_ne, district_n, division_n, subdivis_n,
                    palika_n, type_nep, ward_ne,
                    physiography_ne, juridiction_ne
             FROM admin.admin_nepal
@@ -24,15 +24,18 @@ def get_location_by_centroid(calculation_id: UUID, db: Session) -> Optional[Dict
         return None
     return {
         "province": row[0],
-        "division": row[1],
-        "sub_division": row[2],
-        "forest_municipality": row[3],
-        "municipality": row[3],
-        "municipality_type": row[4],
-        "forest_ward": row[5],
-        "ward": row[5],
-        "physiography_zone": row[6],
-        "protected_area_status": row[7],
+        "forest_district": row[1],
+        "district": row[1],
+        "division": row[2],
+        "sub_division": row[3],
+        "forest_municipality": row[4],
+        "municipality": row[4],
+        "municipality_type": row[5],
+        "forest_municipality_type": row[5],
+        "forest_ward": row[6],
+        "ward": row[6],
+        "physiography_zone": row[7],
+        "protected_area_status": row[8],
     }
 
 
@@ -42,6 +45,9 @@ def resolve_from_resolved_vars(resolved: Dict[str, Any], db: Session) -> Dict[st
     # Prefer already-saved Nepali names from analysis
     if resolved.get("province_ne"):
         out["province"] = resolved["province_ne"]
+    if resolved.get("district_n"):
+        out["forest_district"] = resolved["district_n"]
+        out["district"] = resolved["district_n"]
     if resolved.get("division_n"):
         out["division"] = resolved["division_n"]
     if resolved.get("subdivis_n"):
@@ -51,6 +57,7 @@ def resolve_from_resolved_vars(resolved: Dict[str, Any], db: Session) -> Dict[st
         out["municipality"] = resolved["municipality_n"]
     if resolved.get("municipality_type_nep"):
         out["municipality_type"] = resolved["municipality_type_nep"]
+        out["forest_municipality_type"] = resolved["municipality_type_nep"]
     if resolved.get("ward_ne"):
         out["forest_ward"] = resolved["ward_ne"]
         out["ward"] = resolved["ward_ne"]
@@ -59,7 +66,7 @@ def resolve_from_resolved_vars(resolved: Dict[str, Any], db: Session) -> Dict[st
     if resolved.get("juridiction_ne"):
         out["protected_area_status"] = resolved["juridiction_ne"]
 
-    if out.get("province") and out.get("division") and out.get("sub_division"):
+    if out.get("province") and out.get("forest_district") and out.get("division") and out.get("sub_division"):
         return out
 
     province_en = resolved.get("province")
@@ -81,6 +88,8 @@ def resolve_from_resolved_vars(resolved: Dict[str, Any], db: Session) -> Dict[st
         ).first()
         if row:
             out["division"] = row[0]
+            out["forest_district"] = row[1]
+            out["district"] = row[1]
     if district_en and out.get("province"):
         row = db.execute(
             text("""
@@ -141,6 +150,77 @@ def get_provinces(db: Session) -> List[str]:
         text("SELECT DISTINCT province_ne FROM admin.admin_nepal WHERE province_ne IS NOT NULL ORDER BY province_ne")
     ).all()
     return [r[0] for r in rows]
+
+
+def get_districts(db: Session, province: Optional[str] = None) -> List[str]:
+    sql = "SELECT DISTINCT district_n FROM admin.admin_nepal WHERE district_n IS NOT NULL"
+    params: Dict[str, str] = {}
+    if province:
+        sql += " AND province_ne = :province"
+        params["province"] = province
+    sql += " ORDER BY district_n"
+    rows = db.execute(text(sql), params).all()
+    return [r[0] for r in rows]
+
+
+def get_municipalities_by_district(
+    db: Session,
+    province: str,
+    district: str,
+) -> List[dict]:
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT palika_n, type_nep
+            FROM admin.admin_nepal
+            WHERE province_ne = :p AND district_n = :d
+              AND palika_n IS NOT NULL
+            ORDER BY palika_n
+        """),
+        {"p": province, "d": district},
+    ).all()
+    return [{"name": r[0], "type": r[1]} for r in rows]
+
+
+def get_wards_by_district_municipality(
+    db: Session,
+    province: str,
+    district: str,
+    municipality: str,
+) -> List[str]:
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT ward_ne
+            FROM admin.admin_nepal
+            WHERE province_ne = :p AND district_n = :d AND palika_n = :m
+              AND ward_ne IS NOT NULL
+            ORDER BY ward_ne
+        """),
+        {"p": province, "d": district, "m": municipality},
+    ).all()
+    return [r[0] for r in rows]
+
+
+def get_physiography_by_district_municipality(
+    db: Session,
+    province: str,
+    district: str,
+    municipality: str,
+) -> dict:
+    row = db.execute(
+        text("""
+            SELECT physiography_ne, juridiction_ne
+            FROM admin.admin_nepal
+            WHERE province_ne = :p AND district_n = :d AND palika_n = :m
+            LIMIT 1
+        """),
+        {"p": province, "d": district, "m": municipality},
+    ).first()
+    if row:
+        return {
+            "physiography_zone": row[0] or "",
+            "protected_area_status": row[1] or "",
+        }
+    return {"physiography_zone": "", "protected_area_status": ""}
 
 
 def get_divisions(db: Session, province: Optional[str] = None) -> List[str]:

@@ -10,10 +10,11 @@ class TreeNodeSchema(BaseModel):
     title_en: str = ""
     number: Optional[str] = None
     level: int = 0
-    content_type: Literal["richtext", "chart", "table", "map"] = "richtext"
+    content_type: Literal["richtext", "chart", "table", "map", "static_table"] = "richtext"
     content: str = ""
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
+    static_table: Optional[dict] = None
     children: List["TreeNodeSchema"] = []
     is_locked: bool = False
     hidden_in_export: bool = False
@@ -44,9 +45,10 @@ class TreeNodeCreate(BaseModel):
     title_ne: str = ""
     title_en: str = ""
     content: str = ""
-    content_type: Literal["richtext", "chart", "table", "map"] = "richtext"
+    content_type: Literal["richtext", "chart", "table", "map", "static_table"] = "richtext"
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
+    static_table: Optional[dict] = None
     position: int = -1
 
 
@@ -54,9 +56,10 @@ class TreeNodeUpdate(BaseModel):
     title_ne: Optional[str] = None
     title_en: Optional[str] = None
     content: Optional[str] = None
-    content_type: Optional[Literal["richtext", "chart", "table", "map"]] = None
+    content_type: Optional[Literal["richtext", "chart", "table", "map", "static_table"]] = None
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
+    static_table: Optional[dict] = None
     hidden_in_export: Optional[bool] = None
     deleted: Optional[bool] = None
 

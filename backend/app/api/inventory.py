@@ -31,6 +31,7 @@ from ..utils.auth import get_current_active_user
 from ..services.inventory_validator import InventoryValidator
 from ..services.inventory import InventoryService
 from ..utils.column_mapper import ColumnMapper
+from ..utils.number_format import normalize_nepali_digits
 from ..models.calculation import Calculation
 from ..utils.column_mapping_helpers import (
     merge_auto_mapping_with_preferences,
@@ -246,6 +247,7 @@ async def confirm_and_upload_with_mapping(
     try:
         content = await file.read()
         df = pd.read_csv(io.BytesIO(content))
+        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -589,6 +591,7 @@ async def upload_inventory(
     try:
         content = await file.read()
         df = pd.read_csv(io.BytesIO(content))
+        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
     except Exception as e:
         raise HTTPException(
             status_code=400,

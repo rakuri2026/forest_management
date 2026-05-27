@@ -119,7 +119,7 @@ export default function MyUploads() {
   };
 
   const handleDigitizeComplete = async (data: {
-    outerBoundary: any; gpsPoints: any[]; blocks: any[]; subAreas: any[]; runAnalysis?: boolean;
+    outerBoundary: any; gpsPoints: any[]; blocks: any[]; subAreas: any[];
   }) => {
     setUploading(true); setError(null);
     try {
@@ -127,12 +127,13 @@ export default function MyUploads() {
         forest_name: forestName, outer_boundary: data.outerBoundary,
         gps_points: data.gpsPoints, blocks: data.blocks, sub_areas: data.subAreas,
         analysis_options: analysisOptions, map_options: mapOptions,
-        run_analysis: data.runAnalysis ?? false,
       });
       setShowCreateModal(false);
       navigate(`/calculations/${result.id}`);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Map creation failed');
+      const errorMsg = err.response?.data?.detail || 'Map creation failed. Please try again.';
+      alert(errorMsg);
+      setError(errorMsg);
       setUploading(false);
     }
   };

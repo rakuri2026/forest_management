@@ -2,15 +2,19 @@ import re
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
 from uuid import UUID
+
 from sqlalchemy.orm import Session
+from nepali_datetime import date as nepali_date
 
 from app.models.operational_plan import OperationalPlan
 from app.models.calculation import Calculation
 from .variable_registry import VARIABLE_REGISTRY, VariableDef
 from .data_collector import collect_all_op_data
+from app.utils.number_format import format_devanagari
 
 
 VARIABLE_PATTERN = re.compile(r"\{\{(\w+:?\w+)\}\}")
+_SENTINEL = object()
 
 
 _KEY_ALIAS: Dict[tuple, str] = {
@@ -192,13 +196,15 @@ class VariableResolver:
                 return match.group(0)
             var_def = VARIABLE_REGISTRY.get(var_name)
             if var_def is None:
-                return match.group(0)
+                return ""
             if var_name not in self._resolved:
                 self._resolved[var_name] = self._resolve_single(var_def)
             val = self._resolved[var_name]
             if val is None:
+                return ""
+            if isinstance(val, (dict, list)):
                 return match.group(0)
-            return str(val) if not isinstance(val, (dict, list)) else match.group(0)
+            return format_devanagari(val, var_def.precision)
 
         return VARIABLE_PATTERN.sub(_replacer, content)
 
@@ -215,6 +221,8 @@ class VariableResolver:
             "resolve_computed": self._resolve_computed,
             "resolve_section_content": self._resolve_section_content,
             "resolve_template": self._resolve_template,
+            "resolve_kabuliyatnama_detail": self._resolve_kabuliyatnama_detail,
+            "resolve_chairperson": self._resolve_chairperson,
         }
         resolver = resolver_map.get(var_def.resolver, self._resolve_category_a)
         return resolver(var_def)
@@ -259,7 +267,59 @@ class VariableResolver:
 
     def _resolve_user_input(self, var_def: VariableDef) -> Any:
         user_inputs = (self.plan.plan_metadata or {}).get("user_inputs", {})
-        return user_inputs.get(var_def.key, None)
+        val = user_inputs.get(var_def.key, _SENTINEL)
+        if val is _SENTINEL or val is None:
+            if var_def.key == "kabuliyatnama_date":
+                return nepali_date.today().strftime("%Y/%m/%d")
+            fallback_map = {
+                "forest_municipality": "municipality",
+                "forest_ward": "ward",
+            }
+            if var_def.key in fallback_map:
+                a_def = VARIABLE_REGISTRY.get(fallback_map[var_def.key])
+                if a_def:
+                    return self._resolve_category_a(a_def)
+            return None
+        return val
+
+    MONTH_NAMES_NP = (None, "वैशाख", "जेष्ठ", "असार", "श्रावण", "भदौ", "आश्विन", "कार्तिक", "मंसिर", "पौष", "माघ", "फाल्गुण", "चैत्र")
+    DAY_NAMES_NP = ("आइतबार", "सोमबार", "मङ्गलबार", "बुधबार", "बिहिबार", "शुक्रबार", "शनिबार")
+
+    def _resolve_kabuliyatnama_detail(self, var_def: VariableDef) -> Any:
+        user_inputs = (self.plan.plan_metadata or {}).get("user_inputs", {})
+        raw = user_inputs.get("kabuliyatnama_date", "")
+        if not raw or not isinstance(raw, str):
+            today_default = nepali_date.today()
+            raw = today_default.strftime("%Y/%m/%d")
+        parts = raw.split("/")
+        if len(parts) != 3:
+            return raw
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        if var_def.key == "kabuliyatnama_date_year":
+            return y
+        if var_def.key == "kabuliyatnama_date_month":
+            return m
+        if var_def.key == "kabuliyatnama_date_day":
+            return d
+        if var_def.key == "kabuliyatnama_date_sentence":
+            try:
+                nd = nepali_date(y, m, d)
+                month_name = self.MONTH_NAMES_NP[m] if 1 <= m <= 12 else str(m)
+                day_name = self.DAY_NAMES_NP[nd.weekday()]
+                return f"ईति सम्वत {format_devanagari(y)} साल {month_name} महिना {format_devanagari(d)} गते रोज {day_name} शुभम् ।"
+            except (ValueError, OverflowError):
+                return raw
+        return raw
+
+    def _resolve_chairperson(self, var_def: VariableDef) -> Any:
+        data = self.get_raw_data()
+        committees = data.get("committees", {})
+        uc = committees.get("user_committee", {})
+        members = uc.get("members", [])
+        for m in members:
+            if m.get("position") == "अध्यक्ष":
+                return m.get("name")
+        return None
 
     def _resolve_computed(self, var_def: VariableDef) -> Any:
         if not var_def.compute_fn:
@@ -295,9 +355,13 @@ class VariableResolver:
 
     def _compute_cf_area_provided(self) -> float:
         data = self.get_raw_data()
+        bi = data.get("basic_info", {})
+        effective = bi.get("effective_area_hectares", 0)
+        if effective:
+            return effective
         blocks_data = data.get("blocks", {})
         blocks = blocks_data.get("blocks", [])
-        return sum(b.get("area_hectares", 0) for b in blocks)
+        return sum(b.get("effective_area_hectares", b.get("area_hectares", 0)) for b in blocks)
 
     def _resolve_section_content(self, var_def: VariableDef) -> Any:
         sections = {

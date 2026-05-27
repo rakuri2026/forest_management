@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Button, Tooltip, Input } from 'antd';
-import { PlusOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined, PieChartOutlined, EnvironmentOutlined, FileTextOutlined, UndoOutlined } from '@ant-design/icons';
+import { Button, Tooltip, Input, Modal } from 'antd';
+import { PlusOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined, PieChartOutlined, EnvironmentOutlined, FileTextOutlined, UndoOutlined, CloseCircleOutlined, TableOutlined } from '@ant-design/icons';
 
 interface TreeNodeData {
   id: string;
@@ -23,8 +23,10 @@ type TreeSidebarProps = {
   onAddChild: (parentId: string | null) => void;
   onAddChartNode?: (parentId: string | null) => void;
   onAddMapNode?: (parentId: string | null) => void;
+  onAddStaticTable?: (parentId: string | null) => void;
   onToggleDelete: (nodeId: string) => void;
   onToggleHidden: (nodeId: string) => void;
+  onHardDelete: (nodeId: string) => void;
   onUpdateTitle?: (nodeId: string, title_ne: string) => void;
   onReorderNode?: (nodeId: string, newParentId: string | null, newPosition: number) => void;
 };
@@ -50,13 +52,15 @@ const TreeNodeComponent: React.FC<{
   onAddChild: (id: string | null) => void;
   onAddChartNode?: (id: string | null) => void;
   onAddMapNode?: (id: string | null) => void;
+  onAddStaticTable?: (id: string | null) => void;
   onToggleDelete: (id: string) => void;
   onToggleHidden: (id: string) => void;
+  onHardDelete: (id: string) => void;
   onUpdateTitle?: (id: string, title: string) => void;
   onReorderNode?: (nodeId: string, newParentId: string | null, newPosition: number) => void;
   dragOverId: string | null;
   setDragOverId: (id: string | null) => void;
-}> = ({ node, activeNodeId, depth, parentDeleted, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onToggleDelete, onToggleHidden, onUpdateTitle, onReorderNode, dragOverId, setDragOverId }) => {
+}> = ({ node, activeNodeId, depth, parentDeleted, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onAddStaticTable, onToggleDelete, onToggleHidden, onHardDelete, onUpdateTitle, onReorderNode, dragOverId, setDragOverId }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isDeleted = parentDeleted || node.deleted;
@@ -186,12 +190,37 @@ const TreeNodeComponent: React.FC<{
                   style={{ width: 20, height: 20 }} />
               </Tooltip>
             )}
+            {onAddStaticTable && (
+              <Tooltip title="Add static table">
+                <Button type="text" size="small" icon={<TableOutlined style={{ fontSize: 10, color: '#722ed1' }} />}
+                  onClick={(e) => { e.stopPropagation(); onAddStaticTable(node.id); }}
+                  style={{ width: 20, height: 20 }} />
+              </Tooltip>
+            )}
             <Tooltip title="Hide from export">
               <Button type="text" size="small"
                 icon={node.hidden_in_export ? <EyeOutlined style={{ fontSize: 10 }} /> : <EyeInvisibleOutlined style={{ fontSize: 10 }} />}
                 onClick={(e) => { e.stopPropagation(); onToggleHidden(node.id); }}
                 style={{ width: 20, height: 20 }} />
             </Tooltip>
+            {!isDeleted && (
+              <Tooltip title="Delete permanently">
+                <Button type="text" size="small" danger
+                  icon={<CloseCircleOutlined style={{ fontSize: 10 }} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    Modal.confirm({
+                      title: 'Delete section permanently?',
+                      content: `"${node.number ? node.number + '. ' : ''}${node.title_ne || node.title_en}" and all its children will be permanently removed. This cannot be undone.`,
+                      okText: 'Delete',
+                      okType: 'danger',
+                      cancelText: 'Cancel',
+                      onOk: () => onHardDelete(node.id),
+                    });
+                  }}
+                  style={{ width: 20, height: 20 }} />
+              </Tooltip>
+            )}
           </>
         )}
         {!node.is_locked && (
@@ -208,19 +237,20 @@ const TreeNodeComponent: React.FC<{
           parentDeleted={isDeleted}
           editingId={editingId} editValue={editValue} setEditingId={setEditingId} setEditValue={setEditValue}
           onSelectNode={onSelectNode} onAddChild={onAddChild} onToggleDelete={onToggleDelete}
-          onToggleHidden={onToggleHidden} onUpdateTitle={onUpdateTitle} onReorderNode={onReorderNode}
+          onAddChartNode={onAddChartNode} onAddMapNode={onAddMapNode} onAddStaticTable={onAddStaticTable}
+          onToggleHidden={onToggleHidden} onHardDelete={onHardDelete} onUpdateTitle={onUpdateTitle} onReorderNode={onReorderNode}
           dragOverId={dragOverId} setDragOverId={setDragOverId} />
       )}
     </div>
   );
 };
 
-const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onToggleDelete, onToggleHidden, onUpdateTitle, onReorderNode }) => {
+const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onAddStaticTable, onToggleDelete, onToggleHidden, onHardDelete, onUpdateTitle, onReorderNode }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
-  const shared = { activeNodeId, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onToggleDelete, onToggleHidden, onUpdateTitle, onReorderNode, dragOverId, setDragOverId };
+  const shared = { activeNodeId, editingId, editValue, setEditingId, setEditValue, onSelectNode, onAddChild, onAddChartNode, onAddMapNode, onAddStaticTable, onToggleDelete, onToggleHidden, onHardDelete, onUpdateTitle, onReorderNode, dragOverId, setDragOverId };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -239,6 +269,11 @@ const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectN
         {onAddMapNode && (
           <Button size="small" icon={<EnvironmentOutlined />} onClick={() => onAddMapNode(null)} style={{ borderColor: '#52c41a', color: '#52c41a' }}>
             Map
+          </Button>
+        )}
+        {onAddStaticTable && (
+          <Button size="small" icon={<TableOutlined />} onClick={() => onAddStaticTable(null)} style={{ borderColor: '#722ed1', color: '#722ed1' }}>
+            Table
           </Button>
         )}
       </div>

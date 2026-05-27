@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Form, Input, InputNumber, Select, Button, message, Spin, Collapse } from 'antd';
+import { Form, Input, InputNumber, Select, Button, message, Spin, Collapse, Divider } from 'antd';
 import { operationalPlanApi } from '../../services/api';
 import { useAdminLocation } from './hooks/useAdminLocation';
 import { NepaliDatePicker } from './NepaliDatePicker';
@@ -30,10 +30,12 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
     const fv = form.getFieldsValue();
     const ugFields: Record<string, any> = {};
     if (fv.province) ugFields.ug_province = fv.province;
+    if (fv.district) ugFields.ug_district = fv.district;
     if (fv.division) ugFields.ug_division = fv.division;
     if (fv.sub_division) ugFields.ug_sub_division = fv.sub_division;
-    if (fv.forest_municipality) ugFields.ug_municipality = fv.forest_municipality;
-    if (fv.forest_ward) ugFields.ug_ward = fv.forest_ward;
+    if (fv.municipality) ugFields.ug_municipality = fv.municipality;
+    if (fv.forest_municipality_type) ugFields.ug_municipality_type = fv.forest_municipality_type;
+    if (fv.ward) ugFields.ug_ward = fv.ward;
     form.setFieldsValue(ugFields);
     setUgPrepopulated(true);
   }, [form]);
@@ -42,59 +44,89 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
     setLoading(true);
     try {
       const data = await operationalPlanApi.getMetadataForm(planId);
+      const userInputs = data.user_inputs || {};
+      const formValues = { ...userInputs };
+      formValues.district = formValues.forest_district;
+      formValues.municipality = formValues.forest_municipality;
+      formValues.ward = formValues.forest_ward;
       form.setFieldsValue({
-        ...data.user_inputs,
+        ...formValues,
         ...data.system_defaults,
         ...data.hybrid_overrides,
       });
 
       if (data.admin_locations?.provinces) {
         forestLoc.setOptions(prev => ({ ...prev, provinces: data.admin_locations.provinces }));
+        ugLoc.setOptions(prev => ({ ...prev, provinces: data.admin_locations.provinces }));
       }
 
-      const ui = data.user_inputs || {};
-      const DATE_FIELDS = ['registration_date', 'constitution_approved_year', 'cf_handover_date', 'op_general_assembly_date'];
+      const ui = userInputs;
+      const DATE_FIELDS = ['registration_date', 'constitution_approved_year', 'cf_handover_date', 'op_general_assembly_date', 'kabuliyatnama_date'];
       for (const f of DATE_FIELDS) {
         if (ui[f]) form.setFieldValue(f, ui[f].replace(/-/g, '/'));
       }
+
+      // Forest location cascading state
       if (ui.province) {
         forestLoc.setOptions(prev => ({ ...prev, province: ui.province }));
-        const divisions = await operationalPlanApi.getDivisions(ui.province);
-        forestLoc.setOptions(prev => ({ ...prev, divisions }));
+        const [districts, divisions] = await Promise.all([
+          operationalPlanApi.getDistricts(ui.province),
+          operationalPlanApi.getDivisions(ui.province),
+        ]);
+        forestLoc.setOptions(prev => ({ ...prev, districts, divisions }));
+      }
+      if (ui.province && ui.forest_district) {
+        const muns = await operationalPlanApi.getMunicipalitiesByDistrict(ui.province, ui.forest_district);
+        forestLoc.setOptions(prev => ({ ...prev, municipalities: muns }));
+      }
+      if (ui.province && ui.forest_district && ui.forest_municipality) {
+        const wards = await operationalPlanApi.getWardsByDistrict(ui.province, ui.forest_district, ui.forest_municipality);
+        forestLoc.setOptions(prev => ({ ...prev, wards }));
       }
       if (ui.province && ui.division) {
         const subDivs = await operationalPlanApi.getSubDivisions(ui.province, ui.division);
         forestLoc.setOptions(prev => ({ ...prev, subDivisions: subDivs }));
       }
-      if (ui.province && ui.division && ui.sub_division) {
-        const muns = await operationalPlanApi.getMunicipalities(ui.province, ui.division, ui.sub_division);
-        forestLoc.setOptions(prev => ({ ...prev, municipalities: muns }));
-      }
-      if (ui.province && ui.division && ui.sub_division && ui.forest_municipality) {
-        const wards = await operationalPlanApi.getWards(ui.province, ui.division, ui.sub_division, ui.forest_municipality);
-        forestLoc.setOptions(prev => ({ ...prev, wards }));
-      }
 
+      // UG location cascading state (auto-copy forest to UG on first load)
       if (!ui.ug_prepopulated && ui.province) {
         copyForestToUg();
+        ugLoc.setOptions(prev => ({ ...prev, province: ui.province }));
+        if (ui.forest_district) {
+          const ugMuns = await operationalPlanApi.getMunicipalitiesByDistrict(ui.province, ui.forest_district);
+          ugLoc.setOptions(prev => ({ ...prev, districts: [ui.forest_district], municipalities: ugMuns }));
+        } else {
+          const ugDists = await operationalPlanApi.getDistricts(ui.province);
+          ugLoc.setOptions(prev => ({ ...prev, districts: ugDists }));
+        }
+        if (ui.division) {
+          const ugSubDivs = await operationalPlanApi.getSubDivisions(ui.province, ui.division);
+          ugLoc.setOptions(prev => ({ ...prev, divisions: [ui.division], subDivisions: ugSubDivs }));
+        }
+        if (ui.forest_district && ui.forest_municipality) {
+          const ugWards = await operationalPlanApi.getWardsByDistrict(ui.province, ui.forest_district, ui.forest_municipality);
+          ugLoc.setOptions(prev => ({ ...prev, wards: ugWards }));
+        }
       }
 
       if (ui.ug_province) {
         ugLoc.setOptions(prev => ({ ...prev, province: ui.ug_province }));
-        const ugDivs = await operationalPlanApi.getDivisions(ui.ug_province);
-        ugLoc.setOptions(prev => ({ ...prev, divisions: ugDivs }));
+        Promise.all([
+          operationalPlanApi.getDistricts(ui.ug_province).then(d => ugLoc.setOptions(p => ({ ...p, districts: d }))),
+          operationalPlanApi.getDivisions(ui.ug_province).then(d => ugLoc.setOptions(p => ({ ...p, divisions: d }))),
+        ]);
+      }
+      if (ui.ug_province && ui.ug_district) {
+        const ugMuns = await operationalPlanApi.getMunicipalitiesByDistrict(ui.ug_province, ui.ug_district);
+        ugLoc.setOptions(prev => ({ ...prev, municipalities: ugMuns }));
+      }
+      if (ui.ug_province && ui.ug_district && ui.ug_municipality) {
+        const ugWards = await operationalPlanApi.getWardsByDistrict(ui.ug_province, ui.ug_district, ui.ug_municipality);
+        ugLoc.setOptions(prev => ({ ...prev, wards: ugWards }));
       }
       if (ui.ug_province && ui.ug_division) {
         const ugSubDivs = await operationalPlanApi.getSubDivisions(ui.ug_province, ui.ug_division);
         ugLoc.setOptions(prev => ({ ...prev, subDivisions: ugSubDivs }));
-      }
-      if (ui.ug_province && ui.ug_division && ui.ug_sub_division) {
-        const ugMuns = await operationalPlanApi.getMunicipalities(ui.ug_province, ui.ug_division, ui.ug_sub_division);
-        ugLoc.setOptions(prev => ({ ...prev, municipalities: ugMuns }));
-      }
-      if (ui.ug_province && ui.ug_division && ui.ug_sub_division && ui.ug_municipality) {
-        const ugWards = await operationalPlanApi.getWards(ui.ug_province, ui.ug_division, ui.ug_sub_division, ui.ug_municipality);
-        ugLoc.setOptions(prev => ({ ...prev, wards: ugWards }));
       }
 
       const alreadyPrepopulated = !!ui.ug_prepopulated;
@@ -106,74 +138,104 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
     }
   };
 
+  const autoCopyToUg = async () => {
+    const ugProv = form.getFieldValue('ug_province');
+    const forestProv = form.getFieldValue('province');
+    const forestDist = form.getFieldValue('district');
+    const forestMun = form.getFieldValue('municipality');
+    const forestWard = form.getFieldValue('ward');
+
+    if (forestProv) {
+      if (!ugProv) {
+        form.setFieldValue('ug_province', forestProv);
+        await ugLoc.cascadeOnProvinceChange(forestProv);
+      }
+      if (forestDist) {
+        form.setFieldValue('ug_district', forestDist);
+        const p = forestProv && !ugProv ? forestProv : ugProv;
+        await ugLoc.cascadeOnDistrictChange(p, forestDist);
+      }
+      if (forestMun && forestDist) {
+        form.setFieldValue('ug_municipality', forestMun);
+        const p = forestProv && !ugProv ? forestProv : ugProv;
+        await ugLoc.cascadeOnMunicipalityChange(p, forestDist, forestMun, false);
+      }
+      if (forestWard) {
+        form.setFieldValue('ug_ward', forestWard);
+      }
+    }
+    setUgPrepopulated(true);
+  };
+
   const handleProvinceChange = async (value: string | undefined) => {
-    form.setFieldsValue({ division: undefined, sub_division: undefined, forest_municipality: undefined, forest_ward: undefined });
+    form.setFieldsValue({
+      district: undefined, division: undefined,
+      sub_division: undefined, municipality: undefined, ward: undefined,
+    });
     await forestLoc.cascadeOnProvinceChange(value);
-    await forestLoc.cascadeOnDivisionChange(value, undefined);
+    await autoCopyToUg();
+  };
+
+  const handleDistrictChange = async (value: string | undefined) => {
+    const province = form.getFieldValue('province');
+    form.setFieldsValue({ municipality: undefined, ward: undefined });
+    await forestLoc.cascadeOnDistrictChange(province, value);
+    await autoCopyToUg();
   };
 
   const handleDivisionChange = async (value: string | undefined) => {
     const province = form.getFieldValue('province');
-    form.setFieldsValue({ sub_division: undefined, forest_municipality: undefined, forest_ward: undefined });
+    form.setFieldsValue({ sub_division: undefined });
     await forestLoc.cascadeOnDivisionChange(province, value);
-    await forestLoc.cascadeOnSubDivisionChange(province, value, undefined);
-  };
-
-  const handleSubDivisionChange = async (value: string | undefined) => {
-    const province = form.getFieldValue('province');
-    const division = form.getFieldValue('division');
-    form.setFieldsValue({ forest_municipality: undefined, forest_ward: undefined });
-    await forestLoc.cascadeOnSubDivisionChange(province, division, value);
-    await forestLoc.cascadeOnMunicipalityChange(province, division, value, undefined, false);
   };
 
   const handleMunicipalityChange = async (value: string | undefined) => {
     const province = form.getFieldValue('province');
-    const division = form.getFieldValue('division');
-    const subDivision = form.getFieldValue('sub_division');
-    form.setFieldsValue({ forest_ward: undefined });
-    await forestLoc.cascadeOnMunicipalityChange(province, division, subDivision, value, true);
+    const district = form.getFieldValue('district');
+    form.setFieldsValue({ ward: undefined });
+    await forestLoc.cascadeOnMunicipalityChange(province, district, value, true);
 
     if (value) {
       const munData = forestLoc.options.municipalities.find(m => m.name === value);
       if (munData) {
-        form.setFieldValue('municipality_type', munData.type);
-      }
-      if (!ugPrepopulated) {
-        const result = await operationalPlanApi.getPhysiographyJurisdiction(province, division, subDivision, value);
-        form.setFieldsValue({
-          physiography_zone: result.physiography_zone,
-          protected_area_status: result.protected_area_status,
-        });
-        forestLoc.setOptions(prev => ({ ...prev, physiographyZone: result.physiography_zone, protectedAreaStatus: result.protected_area_status }));
+        form.setFieldValue('forest_municipality_type', munData.type);
       }
     }
+    await autoCopyToUg();
   };
 
   const handleUgProvinceChange = async (value: string | undefined) => {
-    form.setFieldsValue({ ug_division: undefined, ug_sub_division: undefined, ug_municipality: undefined, ug_ward: undefined });
+    form.setFieldsValue({
+      ug_district: undefined, ug_division: undefined,
+      ug_sub_division: undefined, ug_municipality: undefined, ug_ward: undefined,
+    });
     await ugLoc.cascadeOnProvinceChange(value);
+  };
+
+  const handleUgDistrictChange = async (value: string | undefined) => {
+    const province = form.getFieldValue('ug_province');
+    form.setFieldsValue({ ug_municipality: undefined, ug_ward: undefined });
+    await ugLoc.cascadeOnDistrictChange(province, value);
   };
 
   const handleUgDivisionChange = async (value: string | undefined) => {
     const province = form.getFieldValue('ug_province');
-    form.setFieldsValue({ ug_sub_division: undefined, ug_municipality: undefined, ug_ward: undefined });
+    form.setFieldsValue({ ug_sub_division: undefined });
     await ugLoc.cascadeOnDivisionChange(province, value);
-  };
-
-  const handleUgSubDivisionChange = async (value: string | undefined) => {
-    const province = form.getFieldValue('ug_province');
-    const division = form.getFieldValue('ug_division');
-    form.setFieldsValue({ ug_municipality: undefined, ug_ward: undefined });
-    await ugLoc.cascadeOnSubDivisionChange(province, division, value);
   };
 
   const handleUgMunicipalityChange = async (value: string | undefined) => {
     const province = form.getFieldValue('ug_province');
-    const division = form.getFieldValue('ug_division');
-    const subDivision = form.getFieldValue('ug_sub_division');
+    const district = form.getFieldValue('ug_district');
     form.setFieldsValue({ ug_ward: undefined });
-    await ugLoc.cascadeOnMunicipalityChange(province, division, subDivision, value, false);
+    await ugLoc.cascadeOnMunicipalityChange(province, district, value, false);
+
+    if (value) {
+      const munData = ugLoc.options.municipalities.find(m => m.name === value);
+      if (munData) {
+        form.setFieldValue('ug_municipality_type', munData.type);
+      }
+    }
   };
 
   const handleSave = async () => {
@@ -183,15 +245,15 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
 
       const userInputKeys = [
         'cf_registration_number', 'op_preparation_year', 'sn_number', 'province_guideline_year',
-        'province', 'division', 'sub_division', 'sub_division_chief',
+        'province', 'forest_district', 'division', 'sub_division', 'sub_division_chief',
         'forest_management_section_chief', 'division_forest_officer',
-        'forest_municipality', 'municipality_type', 'forest_ward',
+        'forest_municipality', 'forest_municipality_type', 'forest_ward',
         'cf_sn_number', 'constitution_approved_year', 'user_group_reg_no',
-        'op_start_fy', 'op_end_fy', 'cf_code', 'cf_name',
+        'op_start_fy', 'op_end_fy', 'cf_code',
         'cf_boundary_east', 'cf_boundary_south', 'cf_boundary_west', 'cf_boundary_north',
         'physiography_zone', 'protected_area_status', 'cf_handover_date',
-        'ug_prepopulated', 'ug_province', 'ug_division', 'ug_sub_division',
-        'ug_municipality', 'ug_ward', 'ug_settlement',
+        'ug_prepopulated', 'ug_province', 'ug_district', 'ug_division', 'ug_sub_division',
+        'ug_municipality', 'ug_municipality_type', 'ug_ward', 'ug_settlement',
         'ug_boundary_east', 'ug_boundary_south', 'ug_boundary_west', 'ug_boundary_north',
         'technical_assistance_org', 'op_general_assembly_date',
         'forest_type', 'forest_abundance', 'forest_avg_age', 'main_non_timber_fp',
@@ -208,10 +270,14 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
       const userInputs: Record<string, any> = {};
       const hybridOverrides: Record<string, any> = {};
 
+      userInputs.forest_district = values.district;
+      userInputs.forest_municipality = values.municipality;
+      userInputs.forest_ward = values.ward;
+
       for (const key of userInputKeys) {
         if (values[key] !== undefined && values[key] !== null && values[key] !== '') {
           let val = values[key];
-          if (['constitution_approved_year', 'cf_handover_date', 'op_general_assembly_date'].includes(key) && typeof val === 'string') {
+          if (['constitution_approved_year', 'cf_handover_date', 'op_general_assembly_date', 'kabuliyatnama_date'].includes(key) && typeof val === 'string') {
             val = val.replace(/-/g, '/');
           }
           userInputs[key] = val;
@@ -248,22 +314,38 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
 
   const selectStyle = { width: '100%' };
 
-  const locationSelects = (prefix: string, loc: typeof forestLoc, onProvinceChange: any, onDivisionChange: any, onSubDivisionChange: any, onMunicipalityChange: any) => (
+  // Cascading civil admin fields: Province → District → Municipality → Ward
+  const cascadingSelects = (
+    prefix: string,
+    loc: typeof forestLoc,
+    onProvinceChange: any,
+    onDistrictChange: any,
+    onMunicipalityChange: any,
+  ) => (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <Form.Item label="प्रदेश" name={`${prefix}province`}>
         <Select showSearch allowClear placeholder="प्रदेश चुन्नुहोस्" style={selectStyle} options={loc.options.provinces.map(p => ({ value: p, label: p }))} onChange={onProvinceChange} />
       </Form.Item>
-      <Form.Item label="डिभिजन" name={`${prefix}division`}>
-        <Select showSearch allowClear placeholder="डिभिजन चुन्नुहोस्" style={selectStyle} options={loc.options.divisions.map(d => ({ value: d, label: d }))} onChange={onDivisionChange} />
-      </Form.Item>
-      <Form.Item label="सव डिभिजन" name={`${prefix}sub_division`}>
-        <Select showSearch allowClear placeholder="सव डिभिजन चुन्नुहोस्" style={selectStyle} options={loc.options.subDivisions.map(s => ({ value: s, label: s }))} onChange={onSubDivisionChange} />
+      <Form.Item label="जिल्ला" name={`${prefix}district`}>
+        <Select showSearch allowClear placeholder="जिल्ला चुन्नुहोस्" style={selectStyle} options={loc.options.districts.map(d => ({ value: d, label: d }))} onChange={onDistrictChange} />
       </Form.Item>
       <Form.Item label="स्थानिय तह" name={`${prefix}municipality`}>
         <Select showSearch allowClear placeholder="स्थानिय तह चुन्नुहोस्" style={selectStyle} options={loc.options.municipalities.map(m => ({ value: m.name, label: `${m.name} (${m.type})` }))} onChange={onMunicipalityChange} />
       </Form.Item>
       <Form.Item label="वार्ड नं." name={`${prefix}ward`}>
-        <Select showSearch allowClear placeholder="वार्ड चुन्नुहोस्" style={selectStyle} options={loc.options.wards.map(w => ({ value: w, label: w }))} />
+        <Select showSearch allowClear placeholder="वार्ड चुन्नुहोस्" style={selectStyle} options={loc.options.wards.map(w => ({ value: w, label: w }))} onChange={prefix === '' ? autoCopyToUg : undefined} />
+      </Form.Item>
+    </div>
+  );
+
+  // Non-cascading forest dept admin fields
+  const forestDeptSelects = (prefix: string, loc: typeof forestLoc, onDivisionChange?: any) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <Form.Item label="डिभिजन" name={`${prefix}division`}>
+        <Select showSearch allowClear placeholder="डिभिजन चुन्नुहोस्" style={selectStyle} options={loc.options.divisions.map(d => ({ value: d, label: d }))} onChange={onDivisionChange} />
+      </Form.Item>
+      <Form.Item label="सव डिभिजन" name={`${prefix}sub_division`}>
+        <Select showSearch allowClear placeholder="सव डिभिजन चुन्नुहोस्" style={selectStyle} options={loc.options.subDivisions.map(s => ({ value: s, label: s }))} />
       </Form.Item>
     </div>
   );
@@ -291,10 +373,14 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
     },
     {
       key: 'B',
-      label: 'प्रशासनिक स्थान (सामुदायिक वन)',
+      label: 'सामुदायिक वन रहेको स्थान',
       children: (
         <>
-          {locationSelects('', forestLoc, handleProvinceChange, handleDivisionChange, handleSubDivisionChange, handleMunicipalityChange)}
+          {cascadingSelects('', forestLoc, handleProvinceChange, handleDistrictChange, handleMunicipalityChange)}
+          <Divider plain style={{ fontSize: 12, color: '#999', margin: '8px 0' }}>
+            वन प्रशासनिक एकाइ (सीमाङ्कनबाट स्वतः भरिने)
+          </Divider>
+          {forestDeptSelects('', forestLoc, handleDivisionChange)}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 16 }}>
             <Form.Item label="सव डिभिजन प्रमुखको नाम" name="sub_division_chief">
               <Input placeholder="रामचन्द्र श्रेष्ठ" />
@@ -307,7 +393,7 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
             </Form.Item>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item label="स्थानिय तहको प्रकार" name="municipality_type">
+            <Form.Item label="स्थानिय तहको प्रकार" name="forest_municipality_type">
               <Input disabled />
             </Form.Item>
           </div>
@@ -325,6 +411,9 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
           <Form.Item label="विधान स्वीकृति वर्ष" name="constitution_approved_year">
             <NepaliDatePicker placeholder="२०८१/०१/१५" />
           </Form.Item>
+          <Form.Item label="कबुलियतिनामा मिति" name="kabuliyatnama_date">
+            <NepaliDatePicker placeholder="२०८१/०१/१५" />
+          </Form.Item>
           <Form.Item label="समूह दर्ता नं." name="user_group_reg_no">
             <InputNumber style={selectStyle} min={0} />
           </Form.Item>
@@ -336,9 +425,6 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
           </Form.Item>
           <Form.Item label="सामुदायिक वनको कोड" name="cf_code">
             <Input placeholder="जस्तै: MAK/PH/42/33" />
-          </Form.Item>
-          <Form.Item label="सामुदायिक वनको नाम" name="cf_name" style={{ gridColumn: 'span 2' }}>
-            <Input placeholder="जस्तै: अमृता" />
           </Form.Item>
         </div>
       ),
@@ -387,10 +473,17 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
       children: (
         <>
           <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-            {ugPrepopulated ? 'पहिलो पटक वन स्थानबाट स्वतः भरिएको। तपाईं परिवर्तन गर्न सक्नुहुन्छ।' : 'वन स्थान चयन गरेपछि यहाँ स्वतः भरिनेछ।'}
+            {ugPrepopulated ? 'सामुदायिक वनको केन्द्रबिन्दुको आधारमा स्वतः भरिएको। तपाईं परिवर्तन गर्न सक्नुहुन्छ।' : 'वन स्थान चयन गरेपछि यहाँ स्वतः भरिनेछ।'}
           </div>
-          {locationSelects('ug_', ugLoc, handleUgProvinceChange, handleUgDivisionChange, handleUgSubDivisionChange, handleUgMunicipalityChange)}
+          {cascadingSelects('ug_', ugLoc, handleUgProvinceChange, handleUgDistrictChange, handleUgMunicipalityChange)}
+          <Divider plain style={{ fontSize: 12, color: '#999', margin: '8px 0' }}>
+            वन प्रशासनिक एकाइ (सीमाङ्कनबाट स्वतः भरिने)
+          </Divider>
+          {forestDeptSelects('ug_', ugLoc, handleUgDivisionChange)}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item label="स्थानिय तहको प्रकार" name="ug_municipality_type">
+              <Input disabled />
+            </Form.Item>
             <Form.Item label="उपभोक्ता समूह रहेको मुख्य टोल" name="ug_settlement">
               <Input placeholder="टोलको नाम" />
             </Form.Item>

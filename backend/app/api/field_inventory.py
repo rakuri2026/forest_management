@@ -30,6 +30,7 @@ from ..schemas.field_inventory import (
 from ..utils.auth import get_current_active_user
 from ..services.field_inventory_validator import FieldInventoryValidator
 from ..services.field_inventory_service import FieldInventoryService
+from ..utils.number_format import normalize_nepali_digits
 
 import logging
 
@@ -130,6 +131,7 @@ async def upload_field_inventory(
             df = pd.read_excel(io.BytesIO(content))
         else:
             df = pd.read_csv(io.BytesIO(content))
+        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 
@@ -192,6 +194,7 @@ async def process_field_inventory(
             df = pd.read_excel(io.BytesIO(content))
         else:
             df = pd.read_csv(io.BytesIO(content))
+        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 

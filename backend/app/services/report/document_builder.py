@@ -2,6 +2,7 @@
 Document builder - Generate .docx report from AI-generated sections
 """
 import os
+import re
 import tempfile
 from typing import Dict, Any, Optional, List
 from io import BytesIO
@@ -11,6 +12,8 @@ from docx.shared import Inches, Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
+
+from app.utils.number_format import format_devanagari
 
 
 def build_cover_page(doc: Document, metadata: Dict) -> None:
@@ -112,7 +115,17 @@ def add_subsection_heading(doc: Document, section_num: str, subsection: str, tit
     heading.paragraph_format.space_before = Pt(18)
 
 
-def add_text_content(doc: Document, text: str) -> None:
+_NUM_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
+
+
+def _replace_numbers(text: str) -> str:
+    """Replace all numeric values in text with Devanagari digits."""
+    def _replace(m):
+        return format_devanagari(m.group(0), 2)
+    return _NUM_PATTERN.sub(_replace, text)
+
+
+def add_text_content(doc: Document, text: str, language: str = "NP") -> None:
     """Add text content with proper formatting"""
     # Clean up the text
     text = text.strip()
@@ -124,6 +137,9 @@ def add_text_content(doc: Document, text: str) -> None:
         para_text = para_text.strip()
         if not para_text:
             continue
+
+        if language == "NP":
+            para_text = _replace_numbers(para_text)
 
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(6)
@@ -163,7 +179,7 @@ def add_table_from_dict(doc: Document, headers: List[str], rows: List[List], cap
     for row_idx, row_data in enumerate(rows, 1):
         for col_idx, cell_text in enumerate(row_data):
             cell = table.cell(row_idx, col_idx)
-            cell.text = str(cell_text)
+            cell.text = format_devanagari(cell_text)
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
                     run.font.size = Pt(9)
@@ -266,6 +282,8 @@ def build_report_document(
         except (ValueError, IndexError):
             return (99, 0)
 
+    doc_language = (metadata.get("language") or metadata.get("plan_language") or "NP").upper()
+
     for section_num in sorted(sections.keys(), key=sort_key):
         section_data = sections[section_num]
         title_ne = section_data.get('title_ne', '')
@@ -280,7 +298,7 @@ def build_report_document(
 
                 content = sub_data.get('content', '')
                 if content:
-                    add_text_content(doc, content)
+                    add_text_content(doc, content, language=doc_language)
 
                 if include_images:
                     images = sub_data.get('images', [])
@@ -291,7 +309,7 @@ def build_report_document(
 
             content = section_data.get('content', '')
             if content:
-                add_text_content(doc, content)
+                add_text_content(doc, content, language=doc_language)
 
             if include_images:
                 images = section_data.get('images', [])

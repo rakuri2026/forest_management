@@ -5,6 +5,7 @@ Walks the resolved tree and builds a .docx document with headings, text, charts,
 from typing import Dict, Any, Optional, List
 from io import BytesIO
 from uuid import UUID
+from unicodedata import normalize as _norm
 from sqlalchemy.orm import Session
 
 from docx import Document
@@ -12,12 +13,15 @@ from docx.shared import Inches, Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 from app.models.op_table import OPTableData
 from app.models.forest_block import ForestBlock
 from app.models.calculation import Calculation
 from app.services.operational_plan.tree_models import TreeNode
 from app.services.operational_plan.variable_resolver import VariableResolver
+from app.services.operational_plan.variable_registry import get_variable
+from app.utils.number_format import format_devanagari
 from app.services.report.chart_generator import (
     generate_species_pie,
     generate_forest_type_pie,
@@ -36,6 +40,18 @@ from shapely.geometry import mapping
 _COVER_GREEN = RGBColor(0, 100, 0)
 _SUBTITLE_GRAY = RGBColor(80, 80, 80)
 
+import docx.document as _docx_doc
+
+# Patch Document.add_table to auto-repeat header row on every page
+_orig_add_table = _docx_doc.Document.add_table
+def _patched_add_table(self, rows, cols, *args, **kwargs):
+    tbl = _orig_add_table(self, rows, cols, *args, **kwargs)
+    if rows > 0:
+        trPr = tbl.rows[0]._tr.get_or_add_trPr()
+        trPr.append(OxmlElement("w:tblHeader"))
+    return tbl
+_docx_doc.Document.add_table = _patched_add_table
+
 
 def _set_cell_shading(cell, color_hex: str):
     shading = cell._tc.get_or_add_tcPr()
@@ -46,67 +62,227 @@ def _set_cell_shading(cell, color_hex: str):
     shading.append(elem)
 
 
+def _set_page_border(section):
+    """Add double-line green page border to a section."""
+    sectPr = section._sectPr
+    pgBorders = OxmlElement("w:pgBorders")
+    pgBorders.set(qn("w:offsetFrom"), "page")
+    for side in ("top", "left", "bottom", "right"):
+        border = OxmlElement(f"w:{side}")
+        border.set(qn("w:val"), "double")
+        border.set(qn("w:sz"), "12")
+        border.set(qn("w:space"), "18")
+        border.set(qn("w:color"), "006400")
+        pgBorders.append(border)
+    sectPr.append(pgBorders)
+
+
 def _add_cover_page(doc: Document, plan: Dict[str, Any], metadata: Dict[str, Any]):
-    for _ in range(6):
-        p = doc.add_paragraph()
-        p.paragraph_format.space_after = Pt(6)
-
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("सामुदायिक वन कार्य योजना")
-    run.font.size = Pt(24)
-    run.font.bold = True
-    run.font.color.rgb = _COVER_GREEN
-
-    subtitle = doc.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = subtitle.add_run("COMMUNITY FOREST OPERATIONAL PLAN")
-    run.font.size = Pt(16)
-    run.font.color.rgb = _SUBTITLE_GRAY
-
-    doc.add_paragraph()
+    section = doc.sections[0]
+    _set_page_border(section)
+    section.top_margin = Cm(2.5)
+    section.bottom_margin = Cm(1.8)
+    section.left_margin = Cm(2.2)
+    section.right_margin = Cm(2.2)
 
     user_inputs = metadata.get("user_inputs", {})
-    hybrid = metadata.get("hybrid_overrides", {})
+    forest_name = plan.get("forest_name", user_inputs.get("forest_name", "..............."))
+    sn_number = user_inputs.get("sn_number", "...............")
+    division = user_inputs.get("division", "...........")
+    sub_division = user_inputs.get("sub_division", "...........")
+    forest_municipality = user_inputs.get("forest_municipality", "...........")
+    forest_ward = user_inputs.get("forest_ward", "...........")
+    op_prep_year = user_inputs.get("op_preparation_year", "...........")
+    op_start_fy = user_inputs.get("op_start_fy", "२०../..")
+    op_end_fy = user_inputs.get("op_end_fy", "२०../..")
+    cf_reg_no = user_inputs.get("cf_registration_number", "")
+    cf_handover = user_inputs.get("cf_handover_date", "")
+    district = user_inputs.get("district", "")
 
+    np = _fix
+
+    # -- top spacer --
+    for _ in range(2):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        p.paragraph_format.space_before = Pt(0)
+
+    # -- registration number (right) --
+    if cf_reg_no:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        r = p.add_run(f"सामुदायिक वन द.नं. : {np(cf_reg_no)}")
+        r.font.size = Pt(11)
+        r.font.bold = True
+
+    # -- main title --
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(8)
+    p.paragraph_format.space_after = Pt(2)
+    r = p.add_run("सामुदायिक वन व्यवस्थापन कार्ययोजना")
+    r.font.size = Pt(22)
+    r.font.bold = True
+    r.font.color.rgb = _COVER_GREEN
+
+    # -- year --
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(2)
+    r = p.add_run(np(str(op_prep_year)))
+    r.font.size = Pt(18)
+    r.font.bold = True
+    r.font.color.rgb = _COVER_GREEN
+
+    # -- divider --
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(8)
+    pPr = p._p.get_or_add_pPr()
+    pBdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "12")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), "006400")
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+    # -- details section --
     details = [
-        ("सामुदायिक वनको नाम (Forest Name)", plan.get("forest_name", user_inputs.get("forest_name", "..............."))),
-        ("क्रम संख्या (Serial No.)", user_inputs.get("serial_number", "...............")),
-        ("सामुदायिक वनको कोड (CF Code)", hybrid.get("cf_code", user_inputs.get("cf_code", "..............."))),
-        ("प्रदेश/डिभिजन/सब डिभिजन/पालिका",
-         f"{user_inputs.get('province', '.....')} / {user_inputs.get('division', '..........')} / "
-         f"{user_inputs.get('sub_division', '..............')} / {user_inputs.get('municipality', '.........')}"),
-        ("उपभोक्ता समूहको नाम (Group Name)", user_inputs.get("user_group_name", "...............")),
-        ("ठेगाना (Address)", user_inputs.get("address", "...............")),
+        ("क्रम संख्या :", np(str(sn_number))),
+        ("डिभिजन / सव डिभिजन / स्थानिय तह / वडा :",
+         f"{np(division)} / {np(sub_division)} / {np(forest_municipality)} / {np(forest_ward)}"),
     ]
+    for label, value in details:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(1)
+        p.paragraph_format.line_spacing = Pt(20)
+        r = p.add_run(label + " ")
+        r.font.size = Pt(11)
+        r.font.bold = True
+        r2 = p.add_run(value)
+        r2.font.size = Pt(11)
 
-    table = doc.add_table(rows=len(details), cols=2)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for i, (label, value) in enumerate(details):
-        c0, c1 = table.cell(i, 0), table.cell(i, 1)
-        c0.text = label
-        c1.text = str(value)
-        for cell in (c0, c1):
-            for p in cell.paragraphs:
-                for r in p.runs:
-                    r.font.size = Pt(11)
-                    if cell == c0:
-                        r.font.bold = True
+    # -- group name --
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(10)
+    p.paragraph_format.space_after = Pt(2)
+    r = p.add_run(np(f"श्री {forest_name} सामुदायिक वन उपभोक्ता समूह"))
+    r.font.size = Pt(12)
+    r.font.bold = True
+    r.font.color.rgb = _COVER_GREEN
 
-    doc.add_paragraph()
-    fy_start = user_inputs.get("fy_start", "२०../..")
-    fy_end = user_inputs.get("fy_end", "२०../..")
-    period = doc.add_paragraph()
-    period.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = period.add_run(f"आ.व. {fy_start} देखि आ.व. {fy_end} सम्म")
-    run.font.size = Pt(14)
-    run.font.bold = True
+    # -- address --
+    mun_label = user_inputs.get("municipality_type", "")
+    mun_display = f"{forest_municipality} {mun_label}" if mun_label else forest_municipality
+    addr_parts = [f"{mun_display} वडा नं. {forest_ward}"]
+    if district:
+        addr_parts.append(district)
+    address = ", ".join(addr_parts)
 
-    period_en = doc.add_paragraph()
-    period_en.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = period_en.add_run(f"FY {fy_start} TO FY {fy_end}")
-    run.font.size = Pt(12)
-    run.font.color.rgb = _SUBTITLE_GRAY
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(1)
+    p.paragraph_format.space_after = Pt(1)
+    r = p.add_run(np(address))
+    r.font.size = Pt(11)
+    r.font.color.rgb = RGBColor(60, 60, 60)
+
+    # -- FY period --
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(2)
+    r = p.add_run(np(f"आ.व. {op_start_fy} देखि आ.व. {op_end_fy} सम्म"))
+    r.font.size = Pt(11)
+    r.font.bold = True
+
+    # -- English section (bordered) --
+    en_table = doc.add_table(rows=1, cols=1)
+    en_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    en_cell = en_table.cell(0, 0)
+
+    # style the cell with double border
+    tcPr = en_cell._tc.get_or_add_tcPr()
+    tcBorders = OxmlElement("w:tcBorders")
+    for side in ("top", "left", "bottom", "right"):
+        border = OxmlElement(f"w:{side}")
+        border.set(qn("w:val"), "double")
+        border.set(qn("w:sz"), "6")
+        border.set(qn("w:space"), "4")
+        border.set(qn("w:color"), "006400")
+        tcBorders.append(border)
+    tcPr.append(tcBorders)
+
+    # set cell paragraph alignment center
+    for para in en_cell.paragraphs:
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    en_cell.paragraphs[0].paragraph_format.space_before = Pt(6)
+    en_cell.paragraphs[0].paragraph_format.space_after = Pt(2)
+
+    r = en_cell.paragraphs[0].add_run("COMMUNITY FORESTRY OPERATIONAL PLAN")
+    r.font.size = Pt(13)
+    r.font.bold = True
+    r.font.color.rgb = RGBColor(60, 60, 60)
+
+    p2 = en_cell.add_paragraph()
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p2.paragraph_format.space_before = Pt(0)
+    p2.paragraph_format.space_after = Pt(4)
+    r = p2.add_run(f"FY {op_start_fy} TO {op_end_fy}")
+    r.font.size = Pt(10)
+    r.font.color.rgb = _SUBTITLE_GRAY
+
+    p3 = en_cell.add_paragraph()
+    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p3.paragraph_format.space_before = Pt(1)
+    p3.paragraph_format.space_after = Pt(1)
+    r = p3.add_run(f"Serial No.: {sn_number}")
+    r.font.size = Pt(10)
+    r.font.bold = True
+
+    p4 = en_cell.add_paragraph()
+    p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p4.paragraph_format.space_before = Pt(0)
+    p4.paragraph_format.space_after = Pt(1)
+    r = p4.add_run(f"District/Sub Division/RM/Ward: {division} / {sub_division} / {forest_municipality} / {forest_ward}")
+    r.font.size = Pt(10)
+
+    p5 = en_cell.add_paragraph()
+    p5.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p5.paragraph_format.space_before = Pt(2)
+    p5.paragraph_format.space_after = Pt(4)
+    r = p5.add_run(f"Shree {forest_name} Community Forest User Group")
+    r.font.size = Pt(10)
+    r.font.bold = True
+
+    # -- spacer to push bottom --
+    p = doc.add_paragraph()
+    pf = p.paragraph_format
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(0)
+
+    # -- handover date --
+    if cf_handover:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(2)
+        r = p.add_run(np(f"वन हस्तान्तरण मिति : {cf_handover}"))
+        r.font.size = Pt(11)
+        r.font.color.rgb = RGBColor(60, 60, 60)
+
+    # -- footer title --
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after = Pt(0)
+    r = p.add_run(np(f"वन व्यवस्थापन कार्ययोजना {op_prep_year}"))
+    r.font.size = Pt(14)
+    r.font.bold = True
+    r.font.color.rgb = _COVER_GREEN
 
     doc.add_page_break()
 
@@ -167,7 +343,7 @@ def _add_toc_field(doc: Document):
 
 def _add_heading(doc: Document, node: TreeNode):
     num = f"{node.number}. " if node.number else ""
-    text = f"{num}{node.title_ne}"
+    text = f"{num}{_norm('NFC', node.title_ne)}"
 
     if node.type in ("section", "appendix"):
         heading = doc.add_heading(text, level=1)
@@ -183,7 +359,7 @@ def _add_heading(doc: Document, node: TreeNode):
 
     if node.title_en and node.title_en != node.title_ne:
         sub = doc.add_paragraph()
-        run = sub.add_run(node.title_en)
+        run = sub.add_run(_fix( node.title_en))
         run.font.size = Pt(10)
         run.font.italic = True
         run.font.color.rgb = RGBColor(120, 120, 120)
@@ -193,6 +369,54 @@ def _add_heading(doc: Document, node: TreeNode):
 import re
 
 _VARIABLE_PATTERN = re.compile(r"\{\{(\w+:?\w+)\}\}")
+
+# Devanagari text cleanup: common decomposed/wrong sequences → proper composed forms
+_DEVANAGARI_FIXES = [
+    ("\u093E\u0948", "\u094C"),  # ा+ै → ौ
+    ("\u0947\u0947", "\u0947"),  # े+े → े (duplicate e)
+    ("\u0948\u0948", "\u0948"),  # ै+ै → ै (duplicate ai)
+]
+
+_ARABIC_TO_DEV = str.maketrans("0123456789", "०१२३४५६७८९")
+
+def _fix(text: str) -> str:
+    """Normalize NFC + fix common Devanagari sequence errors + convert Arabic digits to Devanagari."""
+    if text is None:
+        return ""
+    text = _norm("NFC", text)
+    for wrong, correct in _DEVANAGARI_FIXES:
+        text = text.replace(wrong, correct)
+    text = text.translate(_ARABIC_TO_DEV)
+    return text
+
+
+def _set_header_repeat(tbl, row_index=0):
+    """Mark a table row to repeat as header on each page when table spans multiple pages."""
+    trPr = tbl.rows[row_index]._tr.get_or_add_trPr()
+    trPr.append(OxmlElement("w:tblHeader"))
+
+def _fmt_value(value, var_name=""):
+    """Format a resolved variable value with Devanagari digits and correct precision."""
+    if value is None:
+        return "-"
+    val = get_variable(var_name)
+    precision = val.precision if val else 2
+    return _fix( format_devanagari(value, precision))
+
+
+def _resolve_var_text(text: str, raw_data: dict) -> str:
+    """Resolve {{variable}} patterns in a text string using raw_data."""
+    def _replacer(m):
+        var_name = m.group(1)
+        if var_name.startswith("chart:") or var_name.startswith("map:") or var_name.startswith("table:"):
+            return m.group(0)
+        var_val = _resolve_var_from_raw(var_name, raw_data)
+        if var_val is None:
+            return ""
+        if isinstance(var_val, (dict, list)):
+            return m.group(0)
+        return _fmt_value(var_val, var_name)
+    return _fix( re.sub(r"\{\{(\w+:?\w+)\}\}", _replacer, text))
 
 # Alias mapping to look up unresolved list/dict variables from raw_data
 _VAR_LOOKUP = {
@@ -208,6 +432,13 @@ _VAR_LOOKUP = {
     "hh_caste_distribution": ("households", "caste_distribution"),
     "inventory_species_summary": ("inventory", "species_summary"),
     "inventory_block_summary": ("inventory", "block_summary"),
+    "blocks_count": ("blocks", "total_blocks"),
+    "species_by_role": ("species", "by_role"),
+    "kabuliyatnama_date": ("user_inputs", "kabuliyatnama_date"),
+    "kabuliyatnama_date_year": ("user_inputs", "kabuliyatnama_date"),
+    "kabuliyatnama_date_month": ("user_inputs", "kabuliyatnama_date"),
+    "kabuliyatnama_date_day": ("user_inputs", "kabuliyatnama_date"),
+    "kabuliyatnama_date_sentence": ("user_inputs", "kabuliyatnama_date"),
 }
 
 def _deep_get(data, path):
@@ -234,7 +465,25 @@ def _resolve_var_from_raw(var_name: str, raw_data: dict) -> any:
     if lookup:
         section, path = lookup
         section_data = raw_data.get(section, {})
-        return _deep_get(section_data, path)
+        result = _deep_get(section_data, path)
+        if result is not None:
+            if var_name == "kabuliyatnama_date_year":
+                parts = str(result).split("/")
+                return int(parts[0]) if len(parts) == 3 else result
+            if var_name == "kabuliyatnama_date_month":
+                parts = str(result).split("/")
+                return int(parts[1]) if len(parts) == 3 else result
+            if var_name == "kabuliyatnama_date_day":
+                parts = str(result).split("/")
+                return int(parts[2]) if len(parts) == 3 else result
+            if var_name == "kabuliyatnama_date_sentence":
+                return _format_kabuliyatnama_sentence(str(result))
+            return result
+
+    user_inputs = raw_data.get("user_inputs", {})
+    if var_name in user_inputs and user_inputs[var_name] is not None:
+        return user_inputs[var_name]
+
     for section_key in ("basic_info", "raster_analysis", "boundary", "blocks",
                         "species", "inventory", "field_inventory", "sampling",
                         "households", "committees", "biodiversity", "activities", "user_group"):
@@ -243,6 +492,23 @@ def _resolve_var_from_raw(var_name: str, raw_data: dict) -> any:
             return section_data[var_name]
     return None
 
+
+def _format_kabuliyatnama_sentence(raw: str) -> str:
+    parts = raw.split("/")
+    if len(parts) != 3:
+        return raw
+    try:
+        from nepali_datetime import date as nepali_date
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        nd = nepali_date(y, m, d)
+        MONTH_NAMES_NP = (None, "वैशाख", "जेष्ठ", "असार", "श्रावण", "भदौ", "आश्विन", "कार्तिक", "मंसिर", "पौष", "माघ", "फाल्गुण", "चैत्र")
+        DAY_NAMES_NP = ("आइतबार", "सोमबार", "मङ्गलबार", "बुधबार", "बिहिबार", "शुक्रबार", "शनिबार")
+        month_name = MONTH_NAMES_NP[m] if 1 <= m <= 12 else str(m)
+        day_name = DAY_NAMES_NP[nd.weekday()]
+        return f"ईति सम्वत {_fix(str(y))} साल {month_name} महिना {_fix(str(d))} गते रोज {day_name} शुभम् ।"
+    except Exception:
+        return raw
+
 def _render_list_value_as_text(val: any, var_name: str = "") -> str:
     if not val:
         return ""
@@ -250,17 +516,27 @@ def _render_list_value_as_text(val: any, var_name: str = "") -> str:
         if all(isinstance(v, str) for v in val):
             return ", ".join(val)
         if all(isinstance(v, dict) for v in val):
+            if var_name == "uc_members":
+                headers, rows = _build_uc_members_data(val)
+                col_widths = [max(len(cell) for cell in [h] + [r[i] for r in rows]) for i, h in enumerate(headers)]
+                lines = []
+                sep = " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers))
+                lines.append(sep)
+                lines.append("-+-".join("-" * col_widths[i] for i in range(len(headers))))
+                for row in rows:
+                    lines.append(" | ".join(cell.ljust(col_widths[i]) for i, cell in enumerate(row)))
+                return "\n".join(lines)
             lines = []
             for i, item in enumerate(val, 1):
-                parts = [str(item.get(k, "")) for k in ("name", "position", "gender") if k in item]
+                parts = [_fmt_value(item.get(k, ""), var_name) for k in ("name", "position", "gender") if k in item]
                 clean = " — ".join(p for p in parts if p.strip())
                 if clean:
                     lines.append(f"{i}. {clean}")
             return "\n".join(lines)
         return "\n".join(f"• {v}" for v in val if v)
     if isinstance(val, dict):
-        return "\n".join(f"{k}: {v}" for k, v in val.items() if v)
-    return str(val)
+        return "\n".join(f"{k}: {_fmt_value(v, var_name)}" for k, v in val.items() if v)
+    return _fmt_value(val, var_name)
 
 def _add_list_table(doc: Document, val: list, var_name: str = ""):
     if not val or not isinstance(val, list):
@@ -289,7 +565,7 @@ def _add_list_table(doc: Document, val: list, var_name: str = ""):
         for ri, row in enumerate(val, 1):
             for ci, h in enumerate(headers):
                 cell = tbl.cell(ri, ci)
-                cell.text = str(row.get(h, ""))
+                cell.text = _fmt_value(row.get(h, ""), var_name)
                 for p in cell.paragraphs:
                     for r in p.runs:
                         r.font.size = Pt(9)
@@ -298,6 +574,7 @@ def _add_list_table(doc: Document, val: list, var_name: str = ""):
     return None
 
 def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db: Session = None, raw_data: dict = None, table_cache: dict = None):
+    text = _fix( text)
     parts = re.split(r"(\{\{chart:\w+\}\}|\{\{map:\w+\}\}|\{\{table:\w+\}\})", text)
     for part in parts:
         part = part.strip()
@@ -321,12 +598,15 @@ def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db:
                 if not var_name.startswith("chart:") and not var_name.startswith("map:") and not var_name.startswith("table:"):
                     var_val = _resolve_var_from_raw(var_name, raw_data)
                     if isinstance(var_val, list):
+                        if var_name == "uc_members":
+                            _add_uc_members_table(doc, var_val)
+                            continue
                         if _add_list_table(doc, var_val, var_name):
                             continue
                     if var_val is not None and not isinstance(var_val, (dict, list)):
                         p = doc.add_paragraph()
                         p.paragraph_format.space_after = Pt(6)
-                        run = p.add_run(str(var_val))
+                        run = p.add_run(_fmt_value(var_val, var_name))
                         run.font.size = Pt(11)
                         continue
 
@@ -334,12 +614,31 @@ def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db:
                 para_text = para_text.strip()
                 if not para_text:
                     continue
+                line_var_match = re.match(r"^\{\{(\w+:?\w+)\}\}$", para_text)
+                if line_var_match and raw_data:
+                    var_name = line_var_match.group(1)
+                    if not var_name.startswith("chart:") and not var_name.startswith("map:") and not var_name.startswith("table:"):
+                        var_val = _resolve_var_from_raw(var_name, raw_data)
+                        if isinstance(var_val, list):
+                            if var_name == "uc_members":
+                                _add_uc_members_table(doc, var_val)
+                                continue
+                            if _add_list_table(doc, var_val, var_name):
+                                continue
+                        if var_val is not None and not isinstance(var_val, (dict, list)):
+                            p = doc.add_paragraph()
+                            p.paragraph_format.space_after = Pt(6)
+                            run = p.add_run(_fmt_value(var_val, var_name))
+                            run.font.size = Pt(11)
+                            continue
                 p = doc.add_paragraph()
                 p.paragraph_format.space_after = Pt(6)
                 p.paragraph_format.line_spacing = 1.15
-                run = p.add_run(para_text)
+                if raw_data:
+                    para_text = re.sub(r'\{\{(\w+:?\w+)\}\}', lambda m: _resolve_var_text(m.group(0), raw_data) if not m.group(1).startswith(('chart:', 'map:', 'table:')) else m.group(0), para_text)
+                run = p.add_run(_fix( para_text))
                 run.font.size = Pt(11)
-                run.font.name = "Calibri"
+                run.font.name = "Nirmala UI"
 
 
 def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
@@ -354,7 +653,7 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
 
     rows = table_data.rows
     headers = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
-    data_rows = [[str(r.get(h, "")) for h in headers] for r in rows] if headers else rows
+    data_rows = [[_fix( format_devanagari(r.get(h, ""))) for h in headers] for r in rows] if headers else rows
     num_cols = len(headers) if headers else len(rows[0]) if rows else 1
     num_rows = len(rows) + 1
 
@@ -390,6 +689,7 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
 
 def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict):
     forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
+    language = raw_data.get("basic_info", {}).get("language", "NP")
     img_data = None
 
     if chart_type == "species_pie" or chart_type == "species_composition_pie":
@@ -402,10 +702,10 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict):
     elif chart_type == "forest_type_pie" or chart_type == "forest_type":
         ra = raw_data.get("raster_analysis", {})
         ft = ra.get("forest_type", {}).get("percentages", {})
-        img_data = generate_forest_type_pie(ft, forest_name)
+        img_data = generate_forest_type_pie(ft, forest_name, language=language)
     elif chart_type == "block_area_bar":
         blocks = raw_data.get("blocks", {}).get("blocks", [])
-        img_data = generate_block_area_bar(blocks, forest_name)
+        img_data = generate_block_area_bar(blocks, forest_name, language=language)
     elif chart_type == "dbh_histogram":
         inv = raw_data.get("inventory", {})
         dbh = inv.get("dbh_summary", {}) or inv.get("dbh_distribution", {})
@@ -414,22 +714,22 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict):
         bi = raw_data.get("basic_info", {})
         agb = bi.get("above_ground_biomass_tons", 0) or bi.get("agb_total", 0)
         carbon = bi.get("carbon_stock_tc", 0) or bi.get("carbon_stock", 0)
-        img_data = generate_biomass_bar(agb, carbon, forest_name)
+        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
     elif chart_type in ("slope_pie", "slope_bar"):
         ra = raw_data.get("raster_analysis", {})
         sp = ra.get("slope", {}).get("percentages", {})
         dom = ra.get("slope", {}).get("dominant_class", "")
-        img_data = generate_slope_pie(sp, dom, forest_name)
+        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
     elif chart_type in ("canopy_pie", "canopy_bar"):
         ra = raw_data.get("raster_analysis", {})
         cp = ra.get("canopy", {}).get("percentages", {})
         dom = ra.get("canopy", {}).get("dominant_class", "")
-        img_data = generate_canopy_pie(cp, dom, forest_name)
+        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
     elif chart_type == "landcover_pie":
         ra = raw_data.get("raster_analysis", {})
         lc = ra.get("landcover", {}).get("percentages", {})
         dom = ra.get("landcover", {}).get("dominant_class", "")
-        img_data = generate_landcover_pie(lc, dom, forest_name)
+        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
     elif chart_type == "forest_health_pie":
         ra = raw_data.get("raster_analysis", {})
         fh = ra.get("forest_health", {}).get("percentages", {})
@@ -544,6 +844,7 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
 
 def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any]):
     forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
+    language = raw_data.get("basic_info", {}).get("language", "NP")
     img_data = None
 
     if node.chart_type == "species_pie":
@@ -554,10 +855,10 @@ def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any]):
     elif node.chart_type == "forest_type_pie":
         ra = raw_data.get("raster_analysis", {})
         ft = ra.get("forest_type", {}).get("percentages", {})
-        img_data = generate_forest_type_pie(ft, forest_name)
+        img_data = generate_forest_type_pie(ft, forest_name, language=language)
     elif node.chart_type == "block_area_bar":
         blocks = raw_data.get("blocks", {}).get("blocks", [])
-        img_data = generate_block_area_bar(blocks, forest_name)
+        img_data = generate_block_area_bar(blocks, forest_name, language=language)
     elif node.chart_type == "dbh_histogram":
         inv = raw_data.get("inventory", {}).get("dbh_distribution", {})
         img_data = generate_dbh_histogram(inv, forest_name)
@@ -565,22 +866,22 @@ def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any]):
         bi = raw_data.get("basic_info", {})
         agb = bi.get("above_ground_biomass_tons", 0)
         carbon = bi.get("carbon_stock_tc", 0)
-        img_data = generate_biomass_bar(agb, carbon, forest_name)
+        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
     elif node.chart_type == "slope_pie":
         ra = raw_data.get("raster_analysis", {})
         sp = ra.get("slope", {}).get("percentages", {})
         dom = ra.get("slope", {}).get("dominant_class", "")
-        img_data = generate_slope_pie(sp, dom, forest_name)
+        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
     elif node.chart_type == "canopy_pie":
         ra = raw_data.get("raster_analysis", {})
         cp = ra.get("canopy", {}).get("percentages", {})
         dom = ra.get("canopy", {}).get("dominant_class", "")
-        img_data = generate_canopy_pie(cp, dom, forest_name)
+        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
     elif node.chart_type == "landcover_pie":
         ra = raw_data.get("raster_analysis", {})
         lc = ra.get("landcover", {}).get("percentages", {})
         dom = ra.get("landcover", {}).get("dominant_class", "")
-        img_data = generate_landcover_pie(lc, dom, forest_name)
+        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
 
     if img_data:
         try:
@@ -626,7 +927,7 @@ def _add_table(doc: Document, node: TreeNode, table_cache: dict = None):
         return
 
     headers = list(rows[0].keys()) if isinstance(rows[0], dict) else []
-    data_rows = [[str(r.get(h, "")) for h in headers] for r in rows] if headers else rows
+    data_rows = [[format_devanagari(r.get(h, "")) for h in headers] for r in rows] if headers else rows
 
     tbl = doc.add_table(rows=1 + len(data_rows), cols=len(headers) if headers else len(data_rows[0]))
     tbl.style = "Table Grid"
@@ -656,6 +957,133 @@ def _add_table(doc: Document, node: TreeNode, table_cache: dict = None):
     run = cap_p.add_run(node.title_ne or table_id)
     run.font.size = Pt(9)
     run.font.italic = True
+
+
+def _build_uc_members_data(val: list) -> tuple:
+    """Build uc_members table data with Nepali headers, chairperson-first layout."""
+    if not val or not isinstance(val, list):
+        return [], []
+    headers = ["पदाधिकारीको नाम", "पद", "ठेगाना", "दाँया", "बाँया", "हस्ताक्षर"]
+    chairperson = None
+    others = []
+    for m in val:
+        pos = (m.get("position") or "").strip()
+        if pos == "अध्यक्ष":
+            chairperson = m
+        else:
+            others.append(m)
+    rows = []
+    if chairperson:
+        rows.append([
+            _fix( chairperson.get("name", "")),
+            _fix( chairperson.get("position", "")),
+            _fix( chairperson.get("address", "")),
+            "", "", "",
+        ])
+    rows.append(["साक्षिहरू", "", "", "", "", ""])
+    for m in others:
+        rows.append([
+            _fix( m.get("name", "")),
+            _fix( m.get("position", "")),
+            _fix( m.get("address", "")),
+            "", "", "",
+        ])
+    return headers, rows
+
+
+def _add_uc_members_table(doc: Document, val: list):
+    headers, rows = _build_uc_members_data(val)
+    if not headers or not rows:
+        return
+    num_rows = len(rows) + 1
+    tbl = doc.add_table(rows=num_rows, cols=len(headers))
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tbl.style = "Table Grid"
+    for ci, h in enumerate(headers):
+        cell = tbl.cell(0, ci)
+        cell.text = h
+        for p in cell.paragraphs:
+            for r in p.runs:
+                r.font.size = Pt(9)
+                r.font.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+        _set_cell_shading(cell, "006400")
+    for ri, row in enumerate(rows):
+        tr = tbl.rows[ri + 1]._tr
+        trPr = tr.get_or_add_trPr()
+        h_elem = OxmlElement("w:trHeight")
+        h_elem.set(qn("w:val"), "900")
+        h_elem.set(qn("w:hRule"), "atLeast")
+        trPr.append(h_elem)
+        is_separator = ri >= 1 and row[0] == "साक्षिहरू"
+        for ci, val_str in enumerate(row):
+            cell = tbl.cell(ri + 1, ci)
+            cell.text = val_str
+            for p in cell.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9)
+                    if is_separator:
+                        r.font.bold = True
+                if is_separator:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if is_separator:
+                _set_cell_shading(cell, "f0f0f0")
+    doc.add_paragraph()
+
+
+def _add_uc_members_table_html(parts: list, val: list, var_name: str = ""):
+    headers, rows = _build_uc_members_data(val)
+    if not headers or not rows:
+        return
+    parts.append('<div class="table-preview"><table class="data" style="border-collapse:collapse;width:100%"><thead><tr>')
+    for h in headers:
+        parts.append(f'<th style="background:#006400;color:white;padding:8px;font-size:9pt;text-align:center;border:1px solid #006400">{_html_escape(h)}</th>')
+    parts.append('</tr></thead><tbody>')
+    for ri, row in enumerate(rows):
+        is_separator = ri >= 1 and row[0] == "साक्षिहरू"
+        bg = "#f0f0f0" if is_separator else "transparent"
+        style = f'background:{bg};'
+        parts.append(f'<tr style="{style}">')
+        for ci, val_str in enumerate(row):
+            align = "center" if is_separator and ci == 0 else "left"
+            parts.append(f'<td style="padding:8px;font-size:9pt;border:1px solid #ddd;text-align:{align}">{_html_escape(val_str)}</td>')
+        parts.append('</tr>')
+    parts.append('</tbody></table></div>')
+
+
+def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
+    data = node.static_table or {}
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+    if not columns or not rows:
+        p = doc.add_paragraph()
+        run = p.add_run("[Static table — no data]")
+        run.font.italic = True
+        run.font.color.rgb = RGBColor(200, 0, 0)
+        return
+    tbl = doc.add_table(rows=1 + len(rows), cols=len(columns))
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tbl.style = "Table Grid"
+    for ci, h in enumerate(columns):
+        cell = tbl.cell(0, ci)
+        cell.text = h
+        for p in cell.paragraphs:
+            for r in p.runs:
+                r.font.size = Pt(9)
+                r.font.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+        _set_cell_shading(cell, "006400")
+    for ri, row in enumerate(rows, 1):
+        for ci, val in enumerate(row):
+            cell = tbl.cell(ri, ci)
+            cell_text = str(val) if val is not None else ""
+            if raw_data and cell_text.startswith("{{") and cell_text.endswith("}}"):
+                cell_text = _resolve_var_text(cell_text, raw_data)
+            cell.text = _fix( cell_text)
+            for p in cell.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9)
+    doc.add_paragraph()
 
 
 def _add_map(doc: Document, node: TreeNode, calculation_id: UUID, db: Session, calc_cache: dict = None):
@@ -740,10 +1168,13 @@ def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
         has_content = node.content_type == "richtext" and node.content and node.content.strip()
         is_chart = node.content_type == "chart" and node.chart_type
         is_table = node.content_type == "table" and node.table_id
+        is_static_table = node.content_type == "static_table"
         is_map = node.content_type == "map"
         has_children = any((not c.hidden_in_export and not c.deleted) for c in node.children)
 
-        if has_content or is_chart or is_table or is_map or has_children:
+        if has_content or is_chart or is_table or is_static_table or is_map or has_children:
+            if node.type in ("section", "preamble", "appendix"):
+                doc.add_page_break()
             _add_heading(doc, node)
 
         if has_content:
@@ -755,13 +1186,16 @@ def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
         if is_table:
             _add_table(doc, node, table_cache)
 
+        if is_static_table:
+            _add_static_table(doc, node, raw_data)
+
         if is_map:
             _add_map(doc, node, calculation_id, db, calc_cache)
 
         if has_children:
             _walk_tree(doc, node.children, calculation_id, raw_data, db, table_cache, calc_cache)
 
-        if has_content or is_chart or is_table or is_map or has_children:
+        if has_content or is_chart or is_table or is_static_table or is_map or has_children:
             doc.add_paragraph()
 
 
@@ -779,9 +1213,10 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
         has_content = node.content_type == "richtext" and node.content and node.content.strip()
         is_chart = node.content_type == "chart" and node.chart_type
         is_table = node.content_type == "table" and node.table_id
+        is_static_table = node.content_type == "static_table"
         is_map = node.content_type == "map"
         has_children = any((not c.hidden_in_export and not c.deleted) for c in node.children)
-        if not (has_content or is_chart or is_table or is_map or has_children):
+        if not (has_content or is_chart or is_table or is_static_table or is_map or has_children):
             continue
 
         num = f"{node.number}. " if node.number else ""
@@ -829,6 +1264,9 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
         if is_table:
             _add_table_html(parts, node, table_cache)
 
+        if is_static_table:
+            _add_static_table_html(parts, node, raw_data)
+
         if has_children:
             parts.append(_walk_tree_html(node.children, calculation_id, raw_data, db, table_cache))
 
@@ -848,15 +1286,37 @@ def _add_table_html(parts: List[str], node: TreeNode, table_cache: dict = None):
     if not rows:
         return
     headers = list(rows[0].keys()) if isinstance(rows[0], dict) else []
-    data_rows = [[str(r.get(h, "")) for h in headers] for r in rows] if headers else rows
     parts.append('<div class="table-preview"><table class="data"><thead><tr>')
     for h in headers:
         parts.append(f'<th>{_html_escape(h)}</th>')
     parts.append('</tr></thead><tbody>')
-    for row in data_rows:
+    for row in rows:
         parts.append('<tr>')
-        for cell in row:
-            parts.append(f'<td>{_html_escape(cell)}</td>')
+        for h in headers:
+            val = format_devanagari(row.get(h, ""))
+            parts.append(f'<td>{_html_escape(val)}</td>')
+        parts.append('</tr>')
+    parts.append('</tbody></table></div>')
+
+
+def _add_static_table_html(parts: List[str], node: TreeNode, raw_data: dict = None):
+    data = node.static_table or {}
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+    if not columns or not rows:
+        parts.append('<div class="chart-placeholder">📋 Static table — no data</div>')
+        return
+    parts.append('<div class="table-preview"><table class="data"><thead><tr>')
+    for h in columns:
+        parts.append(f'<th>{_html_escape(h)}</th>')
+    parts.append('</tr></thead><tbody>')
+    for row in rows:
+        parts.append('<tr>')
+        for ci, val in enumerate(row):
+            cell_text = str(val) if val is not None else ""
+            if raw_data and cell_text.startswith("{{") and cell_text.endswith("}}"):
+                cell_text = _resolve_var_text(cell_text, raw_data)
+            parts.append(f'<td>{_html_escape(cell_text)}</td>')
         parts.append('</tr>')
     parts.append('</tbody></table></div>')
 
@@ -873,25 +1333,29 @@ def _render_html_list_vars(text: str, raw_data: dict) -> str:
             return m.group(0)
         var_val = _resolve_var_from_raw(var_name, raw_data)
         if var_val is None:
-            return m.group(0)
+            return ""
         if isinstance(var_val, list):
             if all(isinstance(v, str) for v in var_val):
                 items = "".join(f"<li>{_html_escape(v)}</li>" for v in var_val if v)
                 return f"<ul>{items}</ul>" if items else m.group(0)
             if all(isinstance(v, dict) for v in var_val):
+                if var_name == "uc_members":
+                    parts = []
+                    _add_uc_members_table_html(parts, var_val, var_name)
+                    return "".join(parts)
                 headers = list(var_val[0].keys())
                 header_row = "".join(f"<th>{_html_escape(h.replace('_', ' ').title())}</th>" for h in headers)
                 data_rows = ""
                 for row in var_val:
-                    cells = "".join(f"<td>{_html_escape(str(row.get(h, '')))}</td>" for h in headers)
+                    cells = "".join(f"<td>{_html_escape(_fmt_value(row.get(h, ''), var_name))}</td>" for h in headers)
                     data_rows += f"<tr>{cells}</tr>"
                 return f'<div class="table-preview"><table class="data"><thead><tr>{header_row}</tr></thead><tbody>{data_rows}</tbody></table></div>'
             items = "".join(f"<li>{_html_escape(str(v))}</li>" for v in var_val if v)
             return f"<ul>{items}</ul>" if items else m.group(0)
         if isinstance(var_val, dict):
-            items = "".join(f"<li><b>{_html_escape(k)}</b>: {_html_escape(str(v))}</li>" for k, v in var_val.items() if v)
+            items = "".join(f"<li><b>{_html_escape(k)}</b>: {_html_escape(_fmt_value(v, var_name))}</li>" for k, v in var_val.items() if v)
             return f"<ul>{items}</ul>" if items else m.group(0)
-        return _html_escape(str(var_val))
+        return _html_escape(_fmt_value(var_val, var_name))
     return re.sub(r"\{\{(\w+:?\w+)\}\}", _replace_var, text)
 
 
@@ -927,8 +1391,10 @@ def build_op_document(
 ) -> BytesIO:
     doc = Document()
     style = doc.styles["Normal"]
-    style.font.name = "Calibri"
+    style.font.name = "Nirmala UI"
     style.font.size = Pt(11)
+
+    style.element.rPr.rFonts.set(qn("w:eastAsia"), "Nirmala UI")
 
     for section in doc.sections:
         section.top_margin = Cm(2)
@@ -941,6 +1407,7 @@ def build_op_document(
     _add_toc_field(doc)
 
     raw_data = resolver.get_raw_data()
+    raw_data["user_inputs"] = metadata.get("user_inputs", {})
     table_cache = _build_table_cache(calculation_id, db)
     calc_cache = _build_calc_cache(calculation_id, db)
 

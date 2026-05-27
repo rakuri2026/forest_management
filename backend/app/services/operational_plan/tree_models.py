@@ -15,11 +15,12 @@ class TreeNode(BaseModel):
     title_en: str = ""
     number: Optional[str] = None
     level: int = 0
-    content_type: Literal["richtext", "chart", "table", "map"] = "richtext"
+    content_type: Literal["richtext", "chart", "table", "map", "static_table"] = "richtext"
     content: str = ""
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
     map_type: Optional[str] = None
+    static_table: Optional[dict] = None
     children: List[TreeNode] = []
     is_locked: bool = False
     hidden_in_export: bool = False

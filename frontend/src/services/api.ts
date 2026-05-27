@@ -147,7 +147,6 @@ export const forestApi = {
     sub_areas?: any[];
     analysis_options?: Record<string, boolean>;
     map_options?: Record<string, boolean>;
-    run_analysis?: boolean;
   }): Promise<Calculation> => {
     const response = await api.post<Calculation>('/api/forests/create-from-map', data);
     return response.data;
@@ -2212,6 +2211,28 @@ export const operationalPlanApi = {
     return response.data;
   },
 
+  // ── District-based Cascade (new civil admin hierarchy) ──
+  getDistricts: async (province?: string): Promise<string[]> => {
+    const params = province ? { province } : {};
+    const response = await api.get('/api/operational-plans/locations/districts', { params });
+    return response.data;
+  },
+
+  getMunicipalitiesByDistrict: async (province: string, district: string): Promise<{ name: string; type: string }[]> => {
+    const response = await api.get('/api/operational-plans/locations/municipalities-by-district', { params: { province, district } });
+    return response.data;
+  },
+
+  getWardsByDistrict: async (province: string, district: string, municipality: string): Promise<string[]> => {
+    const response = await api.get('/api/operational-plans/locations/wards-by-district', { params: { province, district, municipality } });
+    return response.data;
+  },
+
+  getPhysiographyByDistrict: async (province: string, district: string, municipality: string): Promise<{ physiography_zone: string; protected_area_status: string }> => {
+    const response = await api.get('/api/operational-plans/locations/physiography-by-district', { params: { province, district, municipality } });
+    return response.data;
+  },
+
   listVariables: async (params?: { category?: string; search?: string }): Promise<any> => {
     const response = await api.get('/api/operational-plans/variables', { params });
     return response.data;
@@ -2269,6 +2290,11 @@ export const operationalPlanApi = {
   clearMapCache: async (planId: string, layer?: string): Promise<any> => {
     const params = layer ? `?layer=${encodeURIComponent(layer)}` : '';
     const response = await api.post(`/api/operational-plans/${planId}/clear-map-cache${params}`);
+    return response.data;
+  },
+
+  resetTree: async (planId: string): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/${planId}/reset-tree`);
     return response.data;
   },
 

@@ -3,6 +3,7 @@ import { operationalPlanApi } from '../../../services/api';
 
 export interface LocationState {
   province: string | undefined;
+  district: string | undefined;
   division: string | undefined;
   subDivision: string | undefined;
   municipality: string | undefined;
@@ -11,6 +12,7 @@ export interface LocationState {
 
 export interface AdminLocationOptions {
   provinces: string[];
+  districts: string[];
   divisions: string[];
   subDivisions: string[];
   municipalities: { name: string; type: string }[];
@@ -22,6 +24,7 @@ export interface AdminLocationOptions {
 export function useAdminLocation() {
   const [options, setOptions] = useState<AdminLocationOptions>({
     provinces: [],
+    districts: [],
     divisions: [],
     subDivisions: [],
     municipalities: [],
@@ -38,94 +41,120 @@ export function useAdminLocation() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadDistricts = useCallback(async (province?: string) => {
+    if (!province) { setOptions(prev => ({ ...prev, districts: [], municipalities: [], wards: [] })); return; }
+    try {
+      const districts = await operationalPlanApi.getDistricts(province);
+      setOptions(prev => ({ ...prev, districts, municipalities: [], wards: [] }));
+    } catch { /* ignore */ }
+  }, []);
+
   const loadDivisions = useCallback(async (province?: string) => {
-    if (!province) { setOptions(prev => ({ ...prev, divisions: [], subDivisions: [], municipalities: [], wards: [] })); return; }
+    if (!province) { setOptions(prev => ({ ...prev, divisions: [], subDivisions: [] })); return; }
     try {
       const divisions = await operationalPlanApi.getDivisions(province);
-      setOptions(prev => ({ ...prev, divisions, subDivisions: [], municipalities: [], wards: [] }));
+      setOptions(prev => ({ ...prev, divisions, subDivisions: [] }));
     } catch { /* ignore */ }
   }, []);
 
   const loadSubDivisions = useCallback(async (province?: string, division?: string) => {
-    if (!province || !division) { setOptions(prev => ({ ...prev, subDivisions: [], municipalities: [], wards: [] })); return; }
+    if (!province || !division) { setOptions(prev => ({ ...prev, subDivisions: [] })); return; }
     try {
       const subDivisions = await operationalPlanApi.getSubDivisions(province, division);
-      setOptions(prev => ({ ...prev, subDivisions, municipalities: [], wards: [] }));
+      setOptions(prev => ({ ...prev, subDivisions }));
     } catch { /* ignore */ }
   }, []);
 
-  const loadMunicipalities = useCallback(async (province?: string, division?: string, subDivision?: string) => {
-    if (!province || !division || !subDivision) { setOptions(prev => ({ ...prev, municipalities: [], wards: [] })); return; }
+  const loadMunicipalitiesByDistrict = useCallback(async (province?: string, district?: string) => {
+    if (!province || !district) { setOptions(prev => ({ ...prev, municipalities: [], wards: [] })); return; }
     try {
-      const municipalities = await operationalPlanApi.getMunicipalities(province, division, subDivision);
+      const municipalities = await operationalPlanApi.getMunicipalitiesByDistrict(province, district);
       setOptions(prev => ({ ...prev, municipalities, wards: [] }));
     } catch { /* ignore */ }
   }, []);
 
-  const loadWards = useCallback(async (province?: string, division?: string, subDivision?: string, municipality?: string) => {
-    if (!province || !division || !subDivision || !municipality) { setOptions(prev => ({ ...prev, wards: [] })); return; }
+  const loadWardsByDistrict = useCallback(async (province?: string, district?: string, municipality?: string) => {
+    if (!province || !district || !municipality) { setOptions(prev => ({ ...prev, wards: [] })); return; }
     try {
-      const wards = await operationalPlanApi.getWards(province, division, subDivision, municipality);
+      const wards = await operationalPlanApi.getWardsByDistrict(province, district, municipality);
       setOptions(prev => ({ ...prev, wards }));
     } catch { /* ignore */ }
   }, []);
 
-  const loadPhysiography = useCallback(async (province?: string, division?: string, subDivision?: string, municipality?: string) => {
-    if (!province || !division || !subDivision || !municipality) return;
+  const loadPhysiographyByDistrict = useCallback(async (province?: string, district?: string, municipality?: string) => {
+    if (!province || !district || !municipality) return;
     try {
-      const result = await operationalPlanApi.getPhysiographyJurisdiction(province, division, subDivision, municipality);
+      const result = await operationalPlanApi.getPhysiographyByDistrict(province, district, municipality);
       setOptions(prev => ({ ...prev, physiographyZone: result.physiography_zone, protectedAreaStatus: result.protected_area_status }));
     } catch { /* ignore */ }
   }, []);
 
   const cascadeOnProvinceChange = useCallback(async (province: string | undefined) => {
     setLoading(true);
-    setOptions(prev => ({ ...prev, province: province, divisions: [], subDivisions: [], municipalities: [], wards: [], physiographyZone: '', protectedAreaStatus: '' }));
-    if (province) await loadDivisions(province);
+    setOptions(prev => ({
+      ...prev, province,
+      districts: [], divisions: [], subDivisions: [],
+      municipalities: [], wards: [],
+      physiographyZone: '', protectedAreaStatus: '',
+    }));
+    if (province) {
+      await Promise.all([
+        loadDistricts(province),
+        loadDivisions(province),
+      ]);
+    }
     setLoading(false);
-  }, [loadDivisions]);
+  }, [loadDistricts, loadDivisions]);
+
+  const cascadeOnDistrictChange = useCallback(async (province: string | undefined, district: string | undefined) => {
+    setLoading(true);
+    setOptions(prev => ({
+      ...prev, district,
+      municipalities: [], wards: [],
+      physiographyZone: '', protectedAreaStatus: '',
+    }));
+    if (province && district) {
+      await loadMunicipalitiesByDistrict(province, district);
+    }
+    setLoading(false);
+  }, [loadMunicipalitiesByDistrict]);
 
   const cascadeOnDivisionChange = useCallback(async (province: string | undefined, division: string | undefined) => {
     setLoading(true);
-    setOptions(prev => ({ ...prev, division, subDivisions: [], municipalities: [], wards: [], physiographyZone: '', protectedAreaStatus: '' }));
-    if (province && division) await loadSubDivisions(province, division);
+    setOptions(prev => ({
+      ...prev, division, subDivisions: [],
+    }));
+    if (province && division) {
+      await loadSubDivisions(province, division);
+    }
     setLoading(false);
   }, [loadSubDivisions]);
 
-  const cascadeOnSubDivisionChange = useCallback(async (province: string | undefined, division: string | undefined, subDivision: string | undefined) => {
-    setLoading(true);
-    setOptions(prev => ({ ...prev, subDivision, municipalities: [], wards: [], physiographyZone: '', protectedAreaStatus: '' }));
-    if (province && division && subDivision) {
-      await loadMunicipalities(province, division, subDivision);
-    }
-    setLoading(false);
-  }, [loadMunicipalities]);
-
-  const cascadeOnMunicipalityChange = useCallback(async (province: string | undefined, division: string | undefined, subDivision: string | undefined, municipality: string | undefined, fetchPhysiography: boolean = true) => {
+  const cascadeOnMunicipalityChange = useCallback(async (
+    province: string | undefined,
+    district: string | undefined,
+    municipality: string | undefined,
+    fetchPhysiography: boolean = true,
+  ) => {
     setLoading(true);
     setOptions(prev => ({ ...prev, municipality, wards: [] }));
-    if (province && division && subDivision && municipality) {
-      await loadWards(province, division, subDivision, municipality);
+    if (province && district && municipality) {
+      await loadWardsByDistrict(province, district, municipality);
       if (fetchPhysiography) {
-        await loadPhysiography(province, division, subDivision, municipality);
+        await loadPhysiographyByDistrict(province, district, municipality);
       }
     }
     setLoading(false);
-  }, [loadWards, loadPhysiography]);
-
-  const cascadeOnWardChange = useCallback((ward: string | undefined) => {
-    setOptions(prev => ({ ...prev, ward }));
-  }, []);
+  }, [loadWardsByDistrict, loadPhysiographyByDistrict]);
 
   return {
     options,
     loading,
     loadProvinces,
     cascadeOnProvinceChange,
+    cascadeOnDistrictChange,
     cascadeOnDivisionChange,
-    cascadeOnSubDivisionChange,
     cascadeOnMunicipalityChange,
-    cascadeOnWardChange,
     setOptions,
   };
 }

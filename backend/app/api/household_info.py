@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from ..core.database import get_db
 from ..utils.auth import get_current_user
+from ..utils.number_format import normalize_nepali_digits
 from ..models.user import User
 from ..models.calculation import Calculation
 from ..models.household_information import HouseholdInformation
@@ -1123,6 +1124,9 @@ async def upload_household_data(
                     field_name = header_map.get(header)
 
                     if field_name and cell_value is not None:
+                        # Normalize Devanagari digits → Arabic for string values
+                        if isinstance(cell_value, str):
+                            cell_value = normalize_nepali_digits(cell_value)
                         # Convert to string and strip whitespace for CSV
                         if is_csv and isinstance(cell_value, str):
                             cell_value = cell_value.strip()

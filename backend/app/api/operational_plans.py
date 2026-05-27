@@ -36,11 +36,15 @@ from ..schemas.operational_plan import (
 from ..schemas.metadata_form import MetadataFormUpdate
 from ..services.metadata.admin_location_service import (
     get_provinces,
+    get_districts,
     get_divisions,
     get_sub_divisions,
     get_municipalities,
+    get_municipalities_by_district,
     get_wards,
+    get_wards_by_district_municipality,
     get_physiography_and_jurisdiction,
+    get_physiography_by_district_municipality,
     get_location_by_centroid,
     resolve_from_resolved_vars,
 )
@@ -59,6 +63,8 @@ from ..services.operational_plan.variable_registry import (
 from ..services.operational_plan.variable_resolver import VariableResolver
 from ..services.operational_plan.op_docx_builder import build_op_document
 from ..utils.file_export import build_disposition
+from ..utils.number_format import format_devanagari
+from nepali_datetime import date as nepali_date
 
 router = APIRouter(tags=["operational-plans"])
 
@@ -283,6 +289,7 @@ async def add_tree_node(
         content_type=node_data.content_type,
         chart_type=node_data.chart_type,
         table_id=node_data.table_id,
+        static_table=node_data.static_table,
     )
 
     tree_list = TreeOperations.add_node(tree_list, node_data.parent_id, new_node, node_data.position)
@@ -454,6 +461,43 @@ async def list_provinces(db: Session = Depends(get_db)):
     return get_provinces(db)
 
 
+@router.get("/locations/districts")
+async def list_districts(
+    province: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return get_districts(db, province)
+
+
+@router.get("/locations/municipalities-by-district")
+async def list_municipalities_by_district(
+    province: str = Query(...),
+    district: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_municipalities_by_district(db, province, district)
+
+
+@router.get("/locations/wards-by-district")
+async def list_wards_by_district(
+    province: str = Query(...),
+    district: str = Query(...),
+    municipality: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_wards_by_district_municipality(db, province, district, municipality)
+
+
+@router.get("/locations/physiography-by-district")
+async def get_physiography_by_district(
+    province: str = Query(...),
+    district: str = Query(...),
+    municipality: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_physiography_by_district_municipality(db, province, district, municipality)
+
+
 @router.get("/locations/divisions")
 async def list_divisions(
     province: Optional[str] = Query(None),
@@ -517,6 +561,10 @@ async def get_metadata_form(
     user_inputs = (plan.plan_metadata or {}).get("user_inputs", {})
     hybrid_overrides = (plan.plan_metadata or {}).get("hybrid_overrides", {})
 
+    # Backward compat: map old municipality_type → forest_municipality_type
+    if user_inputs.get("municipality_type") and not user_inputs.get("forest_municipality_type"):
+        user_inputs["forest_municipality_type"] = user_inputs["municipality_type"]
+
     system_defaults = {}
     try:
         resolver = VariableResolver(db, plan.calculation_id, plan)
@@ -537,14 +585,21 @@ async def get_metadata_form(
         if loc:
             loc["forest_municipality"] = loc.get("forest_municipality") or loc.get("municipality")
             loc["forest_ward"] = loc.get("forest_ward") or loc.get("ward")
+            loc["forest_district"] = loc.get("forest_district") or loc.get("district")
+            loc["forest_municipality_type"] = loc.get("forest_municipality_type") or loc.get("municipality_type")
             loc["municipality"] = loc["forest_municipality"]
             loc["ward"] = loc["forest_ward"]
+            loc["district"] = loc["forest_district"]
+            loc["municipality_type"] = loc["forest_municipality_type"]
             loc["ug_prepopulated"] = True
             loc["ug_province"] = loc.get("province")
+            loc["ug_district"] = loc.get("forest_district")
             loc["ug_division"] = loc.get("division")
             loc["ug_sub_division"] = loc.get("sub_division")
             loc["ug_municipality"] = loc.get("forest_municipality")
+            loc["ug_municipality_type"] = loc.get("forest_municipality_type")
             loc["ug_ward"] = loc.get("forest_ward")
+            loc = {k: v for k, v in loc.items() if v is not None}
             user_inputs = {**user_inputs, **loc}
             metadata = plan.plan_metadata or {}
             metadata["user_inputs"] = user_inputs
@@ -552,8 +607,18 @@ async def get_metadata_form(
             flag_modified(plan, "plan_metadata")
             db.commit()
 
+    if not user_inputs.get("kabuliyatnama_date"):
+        today_bs = nepali_date.today()
+        user_inputs["kabuliyatnama_date"] = today_bs.strftime("%Y/%m/%d")
+        metadata = plan.plan_metadata or {}
+        metadata["user_inputs"] = user_inputs
+        plan.plan_metadata = metadata
+        flag_modified(plan, "plan_metadata")
+        db.commit()
+
     admin_locations = {
         "provinces": get_provinces(db),
+        "districts": [],
         "divisions": [],
         "sub_divisions": [],
         "municipalities": [],
@@ -561,19 +626,21 @@ async def get_metadata_form(
     }
 
     province = user_inputs.get("province")
+    forest_district = user_inputs.get("forest_district")
     division = user_inputs.get("division")
     sub_division = user_inputs.get("sub_division")
 
     if province:
+        admin_locations["districts"] = get_districts(db, province)
         admin_locations["divisions"] = get_divisions(db, province)
-    if province and division:
-        admin_locations["sub_divisions"] = get_sub_divisions(db, province, division)
-    if province and division and sub_division:
-        admin_locations["municipalities"] = get_municipalities(db, province, division, sub_division)
-    if province and division and sub_division:
+    if province and forest_district:
+        admin_locations["municipalities"] = get_municipalities_by_district(db, province, forest_district)
+    if province and forest_district:
         mun = user_inputs.get("forest_municipality")
         if mun:
-            admin_locations["wards"] = get_wards(db, province, division, sub_division, mun)
+            admin_locations["wards"] = get_wards_by_district_municipality(db, province, forest_district, mun)
+    if province and division:
+        admin_locations["sub_divisions"] = get_sub_divisions(db, province, division)
 
     return {
         "user_inputs": user_inputs,
@@ -606,6 +673,7 @@ async def update_metadata_form(
 
     admin_locations = {
         "provinces": get_provinces(db),
+        "districts": [],
         "divisions": [],
         "sub_divisions": [],
         "municipalities": [],
@@ -613,19 +681,21 @@ async def update_metadata_form(
     }
 
     province = user_inputs.get("province")
+    forest_district = user_inputs.get("forest_district")
     division = user_inputs.get("division")
     sub_division = user_inputs.get("sub_division")
 
     if province:
+        admin_locations["districts"] = get_districts(db, province)
         admin_locations["divisions"] = get_divisions(db, province)
-    if province and division:
-        admin_locations["sub_divisions"] = get_sub_divisions(db, province, division)
-    if province and division and sub_division:
-        admin_locations["municipalities"] = get_municipalities(db, province, division, sub_division)
-    if province and division and sub_division:
+    if province and forest_district:
+        admin_locations["municipalities"] = get_municipalities_by_district(db, province, forest_district)
+    if province and forest_district:
         mun = user_inputs.get("forest_municipality")
         if mun:
-            admin_locations["wards"] = get_wards(db, province, division, sub_division, mun)
+            admin_locations["wards"] = get_wards_by_district_municipality(db, province, forest_district, mun)
+    if province and division:
+        admin_locations["sub_divisions"] = get_sub_divisions(db, province, division)
 
     return {
         "status": "ok",
@@ -657,6 +727,8 @@ async def preview_operational_plan(
             node.content = resolver.resolve_node_content(node.content)
 
     raw_data = resolver.get_raw_data()
+    metadata = plan.plan_metadata or {}
+    raw_data["user_inputs"] = metadata.get("user_inputs", {})
     all_tables = db.query(OPTableData).filter(
         OPTableData.calculation_id == plan.calculation_id
     ).all()
@@ -665,22 +737,57 @@ async def preview_operational_plan(
     metadata = plan.plan_metadata or {}
     user_inputs = metadata.get("user_inputs", {})
 
+    _dev = format_devanagari
+    fn = plan.forest_name or user_inputs.get('forest_name', '')
+    sn = user_inputs.get('sn_number', '')
+    div = user_inputs.get('division', '')
+    sdiv = user_inputs.get('sub_division', '')
+    mun = user_inputs.get('forest_municipality', '')
+    wd = user_inputs.get('forest_ward', '')
+    py = user_inputs.get('op_preparation_year', '')
+    sf = user_inputs.get('op_start_fy', '')
+    ef = user_inputs.get('op_end_fy', '')
+    reg = user_inputs.get('cf_registration_number', '')
+    hd = user_inputs.get('cf_handover_date', '')
+    dst = user_inputs.get('forest_district', '') or user_inputs.get('district', '')
+    mun_type = user_inputs.get('municipality_type', '')
+    mun_disp = f"{mun} {mun_type}" if mun_type else mun
+    addr_parts = [f"{mun_disp} वडा नं. {wd}"]
+    if dst:
+        addr_parts.append(dst)
+
     html = f"""<!DOCTYPE html>
 <html lang="ne">
 <head>
 <meta charset="UTF-8">
-<title>{plan.forest_name or 'CF'} — Operational Plan Preview</title>
+<title>{fn or 'CF'} — Operational Plan Preview</title>
 <style>
-  body {{ font-family: 'Noto Sans', 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 40px 20px; line-height: 1.7; color: #222; }}
-  h1 {{ color: #006400; border-bottom: 2px solid #006400; padding-bottom: 8px; }}
+  body {{ font-family: 'Noto Sans', 'Segoe UI', sans-serif; max-width: 21cm; margin: 0 auto; padding: 0; line-height: 1.7; color: #222; background: #eee; }}
+  .page {{ background: white; width: 21cm; min-height: 29.7cm; margin: 0 auto; padding: 0; position: relative; box-sizing: border-box; }}
+  .border-outer {{ position: absolute; top: 12px; left: 12px; right: 12px; bottom: 12px; border: 2px solid #006400; pointer-events: none; }}
+  .border-inner {{ position: absolute; top: 16px; left: 16px; right: 16px; bottom: 16px; border: 1px solid #006400; pointer-events: none; }}
+  .content {{ padding: 36px 32px 24px 32px; display: flex; flex-direction: column; min-height: 29.7cm; box-sizing: border-box; position: relative; z-index: 1; }}
+  .inner {{ display: flex; flex-direction: column; min-height: calc(29.7cm - 60px); }}
+  .reg-no {{ text-align: right; font-size: 11pt; margin-bottom: 16px; }}
+  .main-title {{ text-align: center; margin: 0; padding-top: 12px; }}
+  .main-title h1 {{ font-size: 22pt; font-weight: bold; color: #006400; margin: 0 0 4px; border: none; padding: 0; }}
+  .main-title .year {{ font-size: 18pt; font-weight: bold; color: #006400; margin: 0; }}
+  .divider {{ border: none; border-top: 2.5px solid #006400; margin: 12px 0 14px; }}
+  .details {{ font-size: 11pt; line-height: 2; flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 4px 0; }}
+  .details .label {{ font-weight: 600; }}
+  .details .group {{ font-size: 12pt; font-weight: bold; color: #006400; margin: 8px 0 3px; }}
+  .details .addr {{ color: #444; }}
+  .details .period {{ font-weight: 600; margin-top: 6px; }}
+  .en-box {{ text-align: center; border: 2px double #006400; padding: 10px 14px; margin: 0; }}
+  .en-box .t {{ font-size: 13pt; font-weight: bold; color: #333; }}
+  .en-box .sub {{ font-size: 10pt; color: #666; margin: 2px 0 6px; }}
+  .en-box .d {{ font-size: 10pt; color: #444; line-height: 1.8; margin: 0; }}
+  .bottom {{ text-align: center; margin-top: auto; padding-top: 10px; }}
+  .bottom .h {{ font-size: 11pt; color: #444; margin: 0 0 4px; }}
+  .bottom .f {{ font-size: 14pt; font-weight: bold; color: #006400; margin: 0; }}
+
   h2 {{ color: #006400; margin-top: 24px; }}
   h3 {{ color: #333; }}
-  .cover {{ text-align: center; margin-bottom: 40px; page-break-after: always; }}
-  .cover h1 {{ font-size: 28px; border: none; }}
-  .cover .subtitle {{ color: #666; font-size: 16px; }}
-  .cover table {{ margin: 20px auto; border-collapse: collapse; }}
-  .cover td {{ padding: 6px 12px; border: 1px solid #ddd; text-align: left; font-size: 12px; }}
-  .cover td:first-child {{ font-weight: bold; background: #f9f9f9; white-space: nowrap; }}
   .toc {{ margin-bottom: 30px; }}
   .toc a {{ color: #006400; text-decoration: none; }}
   .section {{ margin-bottom: 20px; }}
@@ -695,16 +802,44 @@ async def preview_operational_plan(
 </style>
 </head>
 <body>
-<div class="cover">
-  <h1>सामुदायिक वन कार्य योजना</h1>
-  <div class="subtitle">COMMUNITY FOREST OPERATIONAL PLAN</div>
-  <table>
-    <tr><td>वनको नाम</td><td>{plan.forest_name or user_inputs.get('forest_name', '')}</td></tr>
-    <tr><td>क्रम संख्या</td><td>{user_inputs.get('serial_number', '')}</td></tr>
-    <tr><td>समूहको नाम</td><td>{user_inputs.get('user_group_name', '')}</td></tr>
-    <tr><td>ठेगाना</td><td>{user_inputs.get('address', '')}</td></tr>
-  </table>
-  <div style="margin-top:20px;font-weight:bold;">आ.व. {user_inputs.get('plan_year_start', '')} देखि {user_inputs.get('plan_year_end', '')} सम्म</div>
+<div class="page">
+  <div class="border-outer"></div>
+  <div class="border-inner"></div>
+  <div class="content">
+    <div class="inner">
+
+      <div class="reg-no">{'सामुदायिक वन द.नं. : ' + _dev(reg) if reg else ''}</div>
+
+      <div class="main-title">
+        <h1>सामुदायिक वन व्यवस्थापन कार्ययोजना</h1>
+        <div class="year">{_dev(str(py)) if py else ''}</div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="details">
+        <div><span class="label">क्रम संख्या :</span> {sn or '-'}</div>
+        <div><span class="label">डिभिजन / सव डिभिजन / स्थानिय तह / वडा :</span> {_dev(div) if div else '-'} / {_dev(sdiv) if sdiv else '-'} / {_dev(mun) if mun else '-'} / {_dev(wd) if wd else '-'}</div>
+
+        <div class="group">श्री {fn} सामुदायिक वन उपभोक्ता समूह</div>
+        <div class="addr">{addr_parts[0] + (', ' + dst if dst else '')}</div>
+        <div class="period">आ.व. {_dev(sf) if sf else '-'} देखि आ.व. {_dev(ef) if ef else '-'} सम्म</div>
+      </div>
+
+      <div class="en-box">
+        <div class="t">COMMUNITY FORESTRY OPERATIONAL PLAN</div>
+        <div class="sub">FY {sf} TO {ef}</div>
+        <div class="d"><strong>Serial No.:</strong> {sn} &nbsp;|&nbsp; <strong>District/Sub Division/RM/Ward:</strong> {div} / {sdiv} / {mun} / {wd}</div>
+        <div class="d"><strong>Shree {fn} Community Forest User Group</strong><br>{'Bagmati RM' if mun else ''} Ward No. {wd}{', ' + dst if dst else ''}</div>
+      </div>
+
+      <div class="bottom">
+        <div class="h">{'वन हस्तान्तरण मिति : ' + _dev(hd) if hd else ''}</div>
+        <div class="f">वन व्यवस्थापन कार्ययोजना {_dev(str(py)) if py else ''}</div>
+      </div>
+
+    </div>
+  </div>
 </div>
 <h2>विषय सूची</h2>
 <div class="toc">{_build_toc_html(tree_list)}</div>
@@ -1046,6 +1181,32 @@ async def clear_plan_map_cache(
     plan = _check_plan_access(plan_id, current_user, db)
     clear_map_cache(calculation_id=plan.calculation_id, layer_name=layer)
     return {"message": f"Map cache cleared for {layer or 'all layers'}"}
+
+
+@router.post("/{plan_id}/reset-tree")
+async def reset_plan_tree(
+    plan_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Reset the plan document tree to the default seed/default template."""
+    plan = _check_plan_access(plan_id, current_user, db)
+
+    use_default = db.execute(
+        select(OPTemplate).where(OPTemplate.is_default == True, OPTemplate.is_system == True)
+    ).scalar_one_or_none()
+    if use_default:
+        tree_list = [TreeNode.from_dict(n) for n in use_default.tree]
+    else:
+        tree_list = get_full_seed_document()
+
+    recompute_numbers(tree_list, language=(plan.plan_metadata or {}).get("language", "NP"))
+    plan.sections = {"tree": _tree_to_dict_list(tree_list)}
+    flag_modified(plan, "sections")
+    db.commit()
+    db.refresh(plan)
+
+    return {"tree": plan.sections.get("tree", [])}
 
 
 @router.get("/{plan_id}/export")

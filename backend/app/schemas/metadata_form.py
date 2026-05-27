@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 import re
 
 from app.utils.nepali_date import (
@@ -7,6 +7,7 @@ from app.utils.nepali_date import (
     is_valid_nepali_fiscal_year,
     is_valid_nepali_year_only,
 )
+from app.utils.number_format import normalize_nepali_digits
 
 
 class MetadataFormUserInputs(BaseModel):
@@ -16,6 +17,7 @@ class MetadataFormUserInputs(BaseModel):
     province_guideline_year: Optional[int] = None
 
     province: Optional[str] = None
+    forest_district: Optional[str] = None
     division: Optional[str] = None
     sub_division: Optional[str] = None
     sub_division_chief: Optional[str] = None
@@ -23,15 +25,16 @@ class MetadataFormUserInputs(BaseModel):
     division_forest_officer: Optional[str] = None
     forest_municipality: Optional[str] = None
     municipality_type: Optional[str] = None
+    forest_municipality_type: Optional[str] = None
     forest_ward: Optional[str] = None
 
     cf_sn_number: Optional[int] = None
     constitution_approved_year: Optional[str] = None
+    kabuliyatnama_date: Optional[str] = None
     user_group_reg_no: Optional[int] = None
     op_start_fy: Optional[str] = None
     op_end_fy: Optional[str] = None
     cf_code: Optional[str] = None
-    cf_name: Optional[str] = None
 
     cf_boundary_east: Optional[str] = None
     cf_boundary_south: Optional[str] = None
@@ -44,9 +47,11 @@ class MetadataFormUserInputs(BaseModel):
 
     ug_prepopulated: Optional[bool] = None
     ug_province: Optional[str] = None
+    ug_district: Optional[str] = None
     ug_division: Optional[str] = None
     ug_sub_division: Optional[str] = None
     ug_municipality: Optional[str] = None
+    ug_municipality_type: Optional[str] = None
     ug_ward: Optional[str] = None
     ug_settlement: Optional[str] = None
 
@@ -84,6 +89,15 @@ class MetadataFormUserInputs(BaseModel):
     approved_by: Optional[str] = None
     plan_language: Optional[str] = "NP"
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_all_digits(cls, data):
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, str):
+                    data[k] = normalize_nepali_digits(v)
+        return data
+
     @field_validator("cf_registration_number")
     @classmethod
     def validate_cf_reg_no(cls, v):
@@ -119,7 +133,7 @@ class MetadataFormUserInputs(BaseModel):
             raise ValueError("आर्थिक वर्ष ढाँचा: २०८१/२०८२")
         return v
 
-    @field_validator("constitution_approved_year", "cf_handover_date", "op_general_assembly_date")
+    @field_validator("constitution_approved_year", "cf_handover_date", "op_general_assembly_date", "kabuliyatnama_date")
     @classmethod
     def validate_nepali_date(cls, v):
         if v and not is_valid_nepali_date(v):

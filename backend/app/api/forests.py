@@ -7,7 +7,7 @@ from sqlalchemy import func, text, select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional, List, Dict, Any
 from uuid import UUID, uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from ..core.database import get_db
@@ -662,7 +662,6 @@ async def create_forest_from_map(
 
     The created boundary will be analyzed the same way as uploaded files.
     """
-    import datetime
 
     # Validate map creation data
     validation_result = validate_map_creation_data(
@@ -771,59 +770,65 @@ async def create_forest_from_map(
             block["excluded_area_hectares"] = 0
             block["effective_area_hectares"] = block.get("area_hectares", 0)
 
-    # Create Calculation record
-    calculation = Calculation(
-        user_id=current_user.id,
-        uploaded_filename="map_created_boundary.geojson",
-        forest_name=request.forest_name,
-        boundary_geom=boundary_wkt,
-        status=CalculationStatus.PROCESSING,
-        result_data=initial_result_data,
-        created_at=datetime.datetime.now(datetime.timezone.utc),
-    )
+    # Create Calculation record (wrapped in single transaction with rollback)
+    try:
+        calculation = Calculation(
+            user_id=current_user.id,
+            uploaded_filename="map_created_boundary.geojson",
+            forest_name=request.forest_name,
+            boundary_geom=boundary_wkt,
+            status=CalculationStatus.PROCESSING,
+            result_data=initial_result_data,
+            created_at=datetime.now(timezone.utc),
+        )
 
-    db.add(calculation)
-    db.commit()
-    db.refresh(calculation)
+        db.add(calculation)
+        db.flush()
+        db.refresh(calculation)
 
-    # Status is set to PENDING (ready for analysis to be triggered separately from Analysis page)
-    # The calculation is already created with PENDING status
-    # Just commit any pending changes to result_data
-    print(f"[create-forest-from-map] Forest created with status PENDING. Analysis can be triggered from Analysis page.")
-    flag_modified(calculation, "result_data")
-    db.commit()
-    db.refresh(calculation)
+        # Mark result_data as modified (JSONB column)
+        flag_modified(calculation, "result_data")
+        db.flush()
 
-    # Create ForestBlock records from blocks in result_data
-    # This ensures compartments API can find blocks in forest_blocks table
-    if blocks_for_analysis:
-        from app.models.forest_block import ForestBlock
-        from uuid import uuid4
+        # Create ForestBlock records from blocks in result_data
+        if blocks_for_analysis:
+            from app.models.forest_block import ForestBlock
+            from uuid import uuid4
 
-        print(f"[create-from-map] Creating {len(blocks_for_analysis)} ForestBlock records...")
+            print(f"[create-from-map] Creating {len(blocks_for_analysis)} ForestBlock records...")
 
-        for idx, block_data in enumerate(blocks_for_analysis):
-            block_geom_wkt = db.scalar(
-                select(func.ST_AsText(func.ST_GeomFromGeoJSON(json.dumps(block_data.get("geometry")))))
-            )
+            for idx, block_data in enumerate(blocks_for_analysis):
+                block_geom_wkt = db.scalar(
+                    select(func.ST_AsText(func.ST_GeomFromGeoJSON(json.dumps(block_data.get("geometry")))))
+                )
 
-            if not block_geom_wkt:
-                print(f"  Warning: Could not convert geometry for block {block_data.get('block_name')}")
-                continue
+                if not block_geom_wkt:
+                    print(f"  Warning: Could not convert geometry for block {block_data.get('block_name')}")
+                    continue
 
-            forest_block = ForestBlock(
-                id=uuid4(),
-                calculation_id=calculation.id,
-                name=block_data.get("block_name", f"Block {idx + 1}"),
-                geometry=func.ST_GeomFromText(block_geom_wkt, 4326),
-                area_hectares=block_data.get("area_hectares", 0),
-                index=idx,
-                created_at=datetime.now(datetime.timezone.utc)
-            )
-            db.add(forest_block)
+                forest_block = ForestBlock(
+                    id=uuid4(),
+                    calculation_id=calculation.id,
+                    name=block_data.get("block_name", f"Block {idx + 1}"),
+                    geometry=func.ST_GeomFromText(block_geom_wkt, 4326),
+                    area_hectares=block_data.get("area_hectares", 0),
+                    index=idx,
+                    created_at=datetime.now(timezone.utc)
+                )
+                db.add(forest_block)
 
+        # Single commit for all operations
         db.commit()
-        print(f"[create-from-map] Created {len(blocks_for_analysis)} ForestBlock records successfully")
+        db.refresh(calculation)
+        print(f"[create-forest-from-map] Forest created with status PENDING. Analysis can be triggered from Analysis page.")
+
+    except Exception as e:
+        db.rollback()
+        print(f"[create-forest-from-map] Transaction failed, rolled back: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create forest: {str(e)}"
+        )
 
     # Prepare response
     geometry_json = None

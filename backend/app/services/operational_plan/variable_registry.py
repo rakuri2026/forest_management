@@ -13,9 +13,46 @@ class VariableDef(BaseModel):
     resolver: str = ""
     compute_fn: Optional[str] = None
     description: str = ""
+    precision: int = 2
 
 
 VARIABLE_REGISTRY: Dict[str, VariableDef] = {}
+
+
+def _infer_precision(key: str, label_en: str) -> int:
+    """Auto-detect decimal precision from variable key and English label."""
+    text = f" {key} {label_en} ".replace("_", " ").lower()
+    key_lower = key.lower()
+
+    # Wood density (before generic "density" match)
+    if "wood density" in text:
+        return 4
+    # Carbon/biomass/CO2 -> 3 decimal places
+    if any(w in text for w in ("agb", "bgb", "biomass", "carbon", "co2")):
+        return 3
+    # Percentages/density -> 1 decimal place
+    if any(w in text for w in ("percent", " pct ", "density")):
+        return 1
+    # Climate
+    if any(w in text for w in ("temperature", "precipitation")):
+        return 1
+    # Elevation/altitude -> whole numbers
+    if any(w in text for w in ("elevation", "altitude", "utm")):
+        return 0
+    # Whole-number measures
+    if any(w in text for w in ("cft", "chatta", "bhari", "year", "budget", "rupees")):
+        return 0
+    # Counts (specific compound suffixes only)
+    if any(w in text.split() for w in (
+        "plots", "trees", "households", "members", "species", "blocks",
+        "points", "settlements", "activities", "revision", "population",
+        "male", "female", "occupation",
+    )):
+        return 0
+    # Suffix-based count detection (on raw key before space replacement)
+    if any(key_lower.endswith(s) for s in ("_count", "_total", "_number")):
+        return 0
+    return 2
 
 
 def _reg(
@@ -29,7 +66,10 @@ def _reg(
     resolver: str = "",
     compute_fn: str = "",
     description: str = "",
+    precision: int = 2,
 ) -> None:
+    if var_type == "number" and precision == 2:
+        precision = _infer_precision(key, label_en)
     VARIABLE_REGISTRY[key] = VariableDef(
         key=key,
         category=category,
@@ -41,6 +81,7 @@ def _reg(
         resolver=resolver or f"resolve_{category.lower()}",
         compute_fn=compute_fn or None,
         description=description,
+        precision=precision,
     )
 
 
@@ -65,13 +106,13 @@ _reg("municipality_type", "A", "स्थानीय तहको प्रक�
 _reg("ward", "A", "वडा नं.", "Ward No", source="calculation")
 _reg("watershed", "A", "जलाधार", "Watershed", source="calculation")
 _reg("major_river_basin", "A", "प्रमुख नदी बेसिन", "Major River Basin", source="calculation")
-_reg("total_blocks", "A", "कुल ब्लक सङ्ख्या", "Total Blocks", var_type="number", source="calculation")
-_reg("utm_zone", "A", "UTM जोन", "UTM Zone", var_type="number", source="calculation")
+_reg("total_blocks", "A", "कुल ब्लक सङ्ख्या", "Total Blocks", var_type="number", source="calculation", precision=0)
+_reg("utm_zone", "A", "UTM जोन", "UTM Zone", var_type="number", source="calculation", precision=0)
 
 # A2: Raster - Physiography (12)
-_reg("elevation_min_m", "A", "न्यूनतम उचाई (मि)", "Min Elevation (m)", var_type="number", source="raster")
-_reg("elevation_max_m", "A", "अधिकतम उचाई (मि)", "Max Elevation (m)", var_type="number", source="raster")
-_reg("elevation_mean_m", "A", "औसत उचाई (मि)", "Mean Elevation (m)", var_type="number", source="raster")
+_reg("elevation_min_m", "A", "न्यूनतम उचाई (मि)", "Min Elevation (m)", var_type="number", source="raster", precision=0)
+_reg("elevation_max_m", "A", "अधिकतम उचाई (मि)", "Max Elevation (m)", var_type="number", source="raster", precision=0)
+_reg("elevation_mean_m", "A", "औसत उचाई (मि)", "Mean Elevation (m)", var_type="number", source="raster", precision=0)
 _reg("slope_dominant_class", "A", "मुख्य भिरालो वर्ग", "Dominant Slope", source="raster")
 _reg("slope_percentages", "A", "भिरालो प्रतिशत", "Slope Percentages", var_type="dict", source="raster")
 _reg("aspect_dominant", "A", "मुख्य दिशा", "Dominant Aspect", source="raster")
@@ -83,12 +124,12 @@ _reg("physiography_percentages", "A", "भू-आकृति प्रतिश
 _reg("ecoregion_percentages", "A", "इकोरिजन प्रतिशत", "Ecoregion Percentages", var_type="dict", source="raster")
 
 # A3: Raster - Climate (6)
-_reg("temperature_mean_c", "A", "औसत तापक्रम (से)", "Mean Temperature (C)", var_type="number", source="raster")
-_reg("temperature_min_c", "A", "न्यूनतम तापक्रम (से)", "Min Temperature (C)", var_type="number", source="raster")
-_reg("temperature_max_c", "A", "अधिकतम तापक्रम (से)", "Max Temperature (C)", var_type="number", source="raster")
-_reg("precipitation_mean_mm", "A", "औसत वर्षा (मिमि)", "Mean Precipitation (mm)", var_type="number", source="raster")
-_reg("precipitation_min_mm", "A", "न्यूनतम वर्षा (मिमि)", "Min Precipitation (mm)", var_type="number", source="raster")
-_reg("precipitation_max_mm", "A", "अधिकतम वर्षा (मिमि)", "Max Precipitation (mm)", var_type="number", source="raster")
+_reg("temperature_mean_c", "A", "औसत तापक्रम (से)", "Mean Temperature (C)", var_type="number", source="raster", precision=1)
+_reg("temperature_min_c", "A", "न्यूनतम तापक्रम (से)", "Min Temperature (C)", var_type="number", source="raster", precision=1)
+_reg("temperature_max_c", "A", "अधिकतम तापक्रम (से)", "Max Temperature (C)", var_type="number", source="raster", precision=1)
+_reg("precipitation_mean_mm", "A", "औसत वर्षा (मिमि)", "Mean Precipitation (mm)", var_type="number", source="raster", precision=1)
+_reg("precipitation_min_mm", "A", "न्यूनतम वर्षा (मिमि)", "Min Precipitation (mm)", var_type="number", source="raster", precision=1)
+_reg("precipitation_max_mm", "A", "अधिकतम वर्षा (मिमि)", "Max Precipitation (mm)", var_type="number", source="raster", precision=1)
 
 # A4: Raster - Forest Cover (12)
 _reg("forest_type_dominant", "A", "मुख्य वन प्रकार", "Dominant Forest Type", source="raster")
@@ -99,15 +140,15 @@ _reg("forest_health_dominant", "A", "मुख्य वन स्वास्�
 _reg("forest_health_percentages", "A", "वन स्वास्थ्य प्रतिशत", "Forest Health Percentages", var_type="dict", source="raster")
 _reg("canopy_dominant_class", "A", "मुख्य वन मुकुट वर्ग", "Dominant Canopy Class", source="raster")
 _reg("canopy_percentages", "A", "वन मुकुट प्रतिशत", "Canopy Percentages", var_type="dict", source="raster")
-_reg("canopy_mean_m", "A", "औसत वन मुकुट (मि)", "Mean Canopy (m)", var_type="number", source="raster")
+_reg("canopy_mean_m", "A", "औसत वन मुकुट (मि)", "Mean Canopy (m)", var_type="number", source="raster", precision=1)
 _reg("forest_loss_hectares", "A", "वन क्षति (हे)", "Forest Loss (ha)", var_type="number", source="raster")
 _reg("forest_gain_hectares", "A", "वन लाभ (हे)", "Forest Gain (ha)", var_type="number", source="raster")
 _reg("forest_loss_by_year", "A", "वार्षिक वन क्षति", "Forest Loss by Year", var_type="dict", source="raster")
 
 # A5: Raster - Biomass/Carbon (3)
-_reg("agb_mean", "A", "औसत AGB", "Mean AGB", var_type="number", source="raster")
+_reg("agb_mean", "A", "औसत AGB", "Mean AGB", var_type="number", source="raster", precision=3)
 _reg("agb_total", "A", "कुल AGB", "Total AGB", var_type="number", source="raster")
-_reg("carbon_stock", "A", "कार्बन मौज्दात", "Carbon Stock", var_type="number", source="raster")
+_reg("carbon_stock", "A", "कार्बन मौज्दात", "Carbon Stock", var_type="number", source="raster", precision=3)
 
 # A6: Boundary (5)
 _reg("boundary_type", "A", "सिमाना प्रकार", "Boundary Type", source="boundary")
@@ -117,36 +158,36 @@ _reg("boundary_features_south", "A", "दक्षिण सिमाना", "S
 _reg("boundary_features_west", "A", "पश्चिम सिमाना", "West Boundary", var_type="list", source="boundary")
 
 # A7: Blocks & Sub-Areas (5)
-_reg("blocks_count", "A", "ब्लक सङ्ख्या", "Blocks Count", var_type="number", source="block")
+_reg("blocks_count", "A", "ब्लक सङ्ख्या", "Blocks Count", var_type="number", source="block", precision=0)
 _reg("sub_areas_by_category", "A", "उप-क्षेत्र प्रकार", "Sub-areas by Category", var_type="dict", source="block")
-_reg("sub_areas_total", "A", "कुल उप-क्षेत्र", "Total Sub-areas", var_type="number", source="block")
+_reg("sub_areas_total", "A", "कुल उप-क्षेत्र", "Total Sub-areas", var_type="number", source="block", precision=0)
 _reg("sub_area_categories", "A", "उप-क्षेत्र कोटीहरू", "Sub-area Categories", var_type="list", source="block")
 
 # A8: Species (4)
-_reg("total_species", "A", "कुल प्रजाति सङ्ख्या", "Total Species", var_type="number", source="species")
+_reg("total_species", "A", "कुल प्रजाति सङ्ख्या", "Total Species", var_type="number", source="species", precision=0)
 _reg("species_list", "A", "प्रजाति सूची", "Species List", var_type="list", source="species")
 _reg("species_by_role", "A", "भूमिका अनुसार प्रजाति", "Species by Role", var_type="dict", source="species")
 _reg("confirmed_species", "A", "पुष्टि गरिएका प्रजाति", "Confirmed Species", var_type="list", source="species")
 
 # A9: Tree Inventory (13)
 _reg("inventory_available", "A", "रूख गणना उपलब्ध", "Inventory Available", var_type="boolean", source="inventory")
-_reg("inventory_total_trees", "A", "कुल रूख सङ्ख्या", "Total Trees", var_type="number", source="inventory")
-_reg("inventory_mother_trees", "A", "माता रूख सङ्ख्या", "Mother Trees", var_type="number", source="inventory")
-_reg("inventory_felling_trees", "A", "कटानी रूख सङ्ख्या", "Felling Trees", var_type="number", source="inventory")
-_reg("inventory_seedling_count", "A", "बिरुवा सङ्ख्या", "Seedling Count", var_type="number", source="inventory")
+_reg("inventory_total_trees", "A", "कुल रूख सङ्ख्या", "Total Trees", var_type="number", source="inventory", precision=0)
+_reg("inventory_mother_trees", "A", "माता रूख सङ्ख्या", "Mother Trees", var_type="number", source="inventory", precision=0)
+_reg("inventory_felling_trees", "A", "कटानी रूख सङ्ख्या", "Felling Trees", var_type="number", source="inventory", precision=0)
+_reg("inventory_seedling_count", "A", "बिरुवा सङ्ख्या", "Seedling Count", var_type="number", source="inventory", precision=0)
 _reg("inventory_volume_m3", "A", "कुल आयतन (m³)", "Total Volume (m3)", var_type="number", source="inventory")
 _reg("inventory_net_volume_m3", "A", "शुद्ध आयतन (m³)", "Net Volume (m3)", var_type="number", source="inventory")
-_reg("inventory_net_volume_cft", "A", "शुद्ध आयतन (cft)", "Net Volume (cft)", var_type="number", source="inventory")
+_reg("inventory_net_volume_cft", "A", "शुद्ध आयतन (cft)", "Net Volume (cft)", var_type="number", source="inventory", precision=0)
 _reg("inventory_firewood_m3", "A", "दाउरा आयतन (m³)", "Firewood Volume (m3)", var_type="number", source="inventory")
-_reg("inventory_firewood_chatta", "A", "दाउरा (चट्टा)", "Firewood (chatta)", var_type="number", source="inventory")
+_reg("inventory_firewood_chatta", "A", "दाउरा (चट्टा)", "Firewood (chatta)", var_type="number", source="inventory", precision=0)
 _reg("inventory_species_summary", "A", "प्रजाति सारांश", "Species Summary", var_type="dict", source="inventory")
 _reg("inventory_dbh_summary", "A", "DBH सारांश", "DBH Summary", var_type="dict", source="inventory")
 _reg("inventory_block_summary", "A", "ब्लक सारांश", "Block Summary", var_type="dict", source="inventory")
 
 # A10: Field Inventory (23)
 _reg("fi_available", "A", "क्षेत्र सर्वेक्षण उपलब्ध", "Field Inventory Available", var_type="boolean", source="field_inventory")
-_reg("fi_total_plots", "A", "कुल नमूना प्लट", "Total Sample Plots", var_type="number", source="field_inventory")
-_reg("fi_total_blocks", "A", "सर्वेक्षण ब्लक", "Survey Blocks", var_type="number", source="field_inventory")
+_reg("fi_total_plots", "A", "कुल नमूना प्लट", "Total Sample Plots", var_type="number", source="field_inventory", precision=0)
+_reg("fi_total_blocks", "A", "सर्वेक्षण ब्लक", "Survey Blocks", var_type="number", source="field_inventory", precision=0)
 _reg("fi_regeneration_area_sqm", "A", "पुनरुत्पादन क्षेत्र (m²)", "Regeneration Area (sqm)", var_type="number", source="field_inventory")
 _reg("fi_sapling_area_sqm", "A", "बिरुवा क्षेत्र (m²)", "Sapling Area (sqm)", var_type="number", source="field_inventory")
 _reg("fi_pole_area_sqm", "A", "पोल क्षेत्र (m²)", "Pole Area (sqm)", var_type="number", source="field_inventory")
@@ -159,13 +200,13 @@ _reg("fi_growing_stock_m3_per_ha", "A", "प्रतिहेक्टर व�
 _reg("fi_basal_area_m2_per_ha", "A", "प्रतिहेक्टर आधार क्षेत्र", "Basal Area per ha", var_type="number", source="field_inventory")
 _reg("fi_regeneration_condition", "A", "पुनरुत्पादन अवस्था", "Regeneration Condition", source="field_inventory")
 _reg("fi_forest_condition", "A", "वन अवस्था", "Forest Condition", source="field_inventory")
-_reg("fi_mai_percent", "A", "MAI प्रतिशत", "MAI Percent", var_type="number", source="field_inventory")
-_reg("fi_agb_t_per_ha", "A", "प्रतिहेक्टर AGB (टन)", "AGB t/ha", var_type="number", source="field_inventory")
-_reg("fi_bgb_t_per_ha", "A", "प्रतिहेक्टर BGB (टन)", "BGB t/ha", var_type="number", source="field_inventory")
-_reg("fi_total_biomass_t_per_ha", "A", "प्रतिहेक्टर कुल जैविक पदार्थ", "Total Biomass t/ha", var_type="number", source="field_inventory")
-_reg("fi_carbon_stock_tc_per_ha", "A", "प्रतिहेक्टर कार्बन मौज्दात", "Carbon Stock tC/ha", var_type="number", source="field_inventory")
-_reg("fi_co2_equivalent_tco2_per_ha", "A", "प्रतिहेक्टर CO₂ समतुल्य", "CO₂ Equivalent tCO₂/ha", var_type="number", source="field_inventory")
-_reg("fi_weighted_wood_density", "A", "भारित काठ घनत्व", "Weighted Wood Density", var_type="number", source="field_inventory")
+_reg("fi_mai_percent", "A", "MAI प्रतिशत", "MAI Percent", var_type="number", source="field_inventory", precision=1)
+_reg("fi_agb_t_per_ha", "A", "प्रतिहेक्टर AGB (टन)", "AGB t/ha", var_type="number", source="field_inventory", precision=3)
+_reg("fi_bgb_t_per_ha", "A", "प्रतिहेक्टर BGB (टन)", "BGB t/ha", var_type="number", source="field_inventory", precision=3)
+_reg("fi_total_biomass_t_per_ha", "A", "प्रतिहेक्टर कुल जैविक पदार्थ", "Total Biomass t/ha", var_type="number", source="field_inventory", precision=3)
+_reg("fi_carbon_stock_tc_per_ha", "A", "प्रतिहेक्टर कार्बन मौज्दात", "Carbon Stock tC/ha", var_type="number", source="field_inventory", precision=3)
+_reg("fi_co2_equivalent_tco2_per_ha", "A", "प्रतिहेक्टर CO₂ समतुल्य", "CO₂ Equivalent tCO₂/ha", var_type="number", source="field_inventory", precision=3)
+_reg("fi_weighted_wood_density", "A", "भारित काठ घनत्व", "Weighted Wood Density", var_type="number", source="field_inventory", precision=4)
 _reg("fi_species_block_growing_stock", "A", "ब्लक अनुसार प्रजाति वन मौज्दात (पोल+रूख)", "Block-wise Species Growing Stock (Pole+Tree)", var_type="list", source="field_inventory")
 _reg("fi_block_regeneration_status", "A", "वन खन्ड अनुसार पुनरोत्पादनको स्थिति", "Forest Block-wise Regeneration Status", var_type="list", source="field_inventory")
 _reg("fi_block_dbh_class_growing_stock", "A", "ब्लक अनुसार DBH वर्ग वन मौज्दात", "Block-wise DBH Class Growing Stock", var_type="list", source="field_inventory")
@@ -204,6 +245,7 @@ _reg("fc_total_members", "A", "वित्त समिति सदस्य �
 _reg("uc_gender_distribution", "A", "लैङ्गिक वितरण", "Gender Distribution", var_type="dict", source="committee")
 _reg("uc_position_distribution", "A", "पद वितरण", "Position Distribution", var_type="dict", source="committee")
 _reg("uc_caste_distribution", "A", "जातीय वितरण", "Caste Distribution", var_type="dict", source="committee")
+_reg("cf_chairperson", "A", "सामुदायिक वन अध्यक्ष", "CF Chairperson", source="committee", resolver="resolve_chairperson")
 
 # A14: Biodiversity (6)
 _reg("bio_available", "A", "जैविक विविधता उपलब्ध", "Biodiversity Available", var_type="boolean", source="biodiversity")
@@ -268,6 +310,12 @@ _reg("user_group_code", "C", "दर्ता नं.", "Registration No", auto_
 _reg("cf_handover_date", "C", "हस्तान्तरण मिति", "Handover Date", auto_populate=False, resolver="resolve_user_input")
 _reg("plan_language", "C", "भाषा", "Language", auto_populate=False, resolver="resolve_user_input")
 
+_reg("kabuliyatnama_date", "C", "कबुलियतिनामा मिति", "Kabuliyatnama Date", auto_populate=False, resolver="resolve_user_input")
+_reg("kabuliyatnama_date_year", "C", "कबुलियतिनामा मिति (वर्ष)", "Kabuliyatnama Date Year", var_type="number", auto_populate=False, resolver="resolve_kabuliyatnama_detail")
+_reg("kabuliyatnama_date_month", "C", "कबुलियतिनामा मिति (महिना)", "Kabuliyatnama Date Month", var_type="number", auto_populate=False, resolver="resolve_kabuliyatnama_detail")
+_reg("kabuliyatnama_date_day", "C", "कबुलियतिनामा मिति (गते)", "Kabuliyatnama Date Day", var_type="number", auto_populate=False, resolver="resolve_kabuliyatnama_detail")
+_reg("kabuliyatnama_date_sentence", "C", "कबुलियतिनामा मिति (वाक्य)", "Kabuliyatnama Date Sentence", auto_populate=False, resolver="resolve_kabuliyatnama_detail")
+
 # ── Metadata Form Fields (boundaries, locations, identifiers) ──
 _reg("sn_number", "C", "क्रम संख्या", "SN Number", auto_populate=False, resolver="resolve_user_input")
 _reg("province_guideline_year", "C", "प्रदेश कार्यविधि वर्ष", "Province Guideline Year", var_type="number", auto_populate=False, resolver="resolve_user_input")
@@ -278,23 +326,23 @@ _reg("forest_management_section_chief", "C", "वन व्यवस्थाप
 _reg("division_forest_officer", "C", "डिभिजन प्रमुख", "Division Forest Officer", auto_populate=False, resolver="resolve_user_input")
 _reg("forest_municipality", "C", "स्थानीय तह", "Municipality", auto_populate=False, resolver="resolve_user_input")
 _reg("forest_ward", "C", "वार्ड", "Ward", auto_populate=False, resolver="resolve_user_input")
+_reg("forest_district", "C", "जिल्ला (वन)", "District (Forest)", auto_populate=False, resolver="resolve_user_input")
+_reg("ug_district", "C", "जिल्ला (उपभोक्ता)", "District (User Group)", auto_populate=False, resolver="resolve_user_input")
+_reg("forest_municipality_type", "C", "स्थानीय तहको प्रकार (वन)", "Municipality Type (Forest)", auto_populate=False, resolver="resolve_user_input")
+_reg("ug_municipality_type", "C", "स्थानीय तहको प्रकार (उपभोक्ता)", "Municipality Type (User Group)", auto_populate=False, resolver="resolve_user_input")
 _reg("cf_sn_number", "C", "सामुदायिक वन क्रम संख्या", "CF SN Number", var_type="number", auto_populate=False, resolver="resolve_user_input")
 _reg("constitution_approved_year", "C", "विधान स्वीकृति मिति", "Constitution Approved Date", auto_populate=False, resolver="resolve_user_input")
 _reg("user_group_reg_no", "C", "समूह दर्ता नं.", "User Group Reg No", var_type="number", auto_populate=False, resolver="resolve_user_input")
 _reg("cf_name", "C", "सामुदायिक वनको नाम", "CF Name", auto_populate=False, resolver="resolve_user_input")
-_reg("cf_boundary_east", "C", "सिमाना पूर्व", "CF Boundary East", auto_populate=False, resolver="resolve_user_input")
-_reg("cf_boundary_south", "C", "सिमाना दक्षिण", "CF Boundary South", auto_populate=False, resolver="resolve_user_input")
-_reg("cf_boundary_west", "C", "सिमाना पश्चिम", "CF Boundary West", auto_populate=False, resolver="resolve_user_input")
-_reg("cf_boundary_north", "C", "सिमाना उत्तर", "CF Boundary North", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_province", "C", "उपभोक्ता समूह प्रदेश", "UG Province", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_division", "C", "उपभोक्ता समूह डिभिजन", "UG Division", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_sub_division", "C", "उपभोक्ता समूह सब डिभिजन", "UG Sub Division", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_municipality", "C", "उपभोक्ता समूह स्थानीय तह", "UG Municipality", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_ward", "C", "उपभोक्ता समूह वार्ड", "UG Ward", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_boundary_east", "C", "उपभोक्ता समूह सिमाना पूर्व", "UG Boundary East", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_boundary_south", "C", "उपभोक्ता समूह सिमाना दक्षिण", "UG Boundary South", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_boundary_west", "C", "उपभोक्ता समूह सिमाना पश्चिम", "UG Boundary West", auto_populate=False, resolver="resolve_user_input")
-_reg("ug_boundary_north", "C", "उपभोक्ता समूह सिमाना उत्तर", "UG Boundary North", auto_populate=False, resolver="resolve_user_input")
+_reg("cf_boundary_east", "C", "पूर्व सिमाना", "East Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("cf_boundary_west", "C", "पश्चिम सिमाना", "West Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("cf_boundary_north", "C", "उत्तर सिमाना", "North Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("cf_boundary_south", "C", "दक्षिण सिमाना", "South Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("ug_boundary_east", "C", "उपभोक्ता समूह पूर्व सिमाना", "UG East Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("ug_boundary_west", "C", "उपभोक्ता समूह पश्चिम सिमाना", "UG West Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("ug_boundary_north", "C", "उपभोक्ता समूह उत्तर सिमाना", "UG North Boundary", auto_populate=False, resolver="resolve_user_input")
+_reg("ug_boundary_south", "C", "उपभोक्ता समूह दक्षिण सिमाना", "UG South Boundary", auto_populate=False, resolver="resolve_user_input")
+
 
 # ═══════════════════════════════════════════════════════
 # Category D: Computed Variables (10)

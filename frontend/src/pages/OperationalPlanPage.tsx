@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Button, message, Spin, Tag, Tabs } from 'antd';
+import { Button, message, Spin, Tag, Tabs, Modal } from 'antd';
 import {
   SaveOutlined,
   SettingOutlined,
@@ -11,6 +11,7 @@ import {
   EnvironmentOutlined,
   FileTextOutlined,
   PlusOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../services/api';
 import TreeSidebar from '../components/OperationalPlan/TreeSidebar';
@@ -34,6 +35,7 @@ interface TreeNodeData {
   chart_type?: string | null;
   table_id?: string | null;
   map_type?: string | null;
+  static_table?: { columns: string[]; rows: string[][] } | null;
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
@@ -147,6 +149,27 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
     }
   };
 
+  const handleResetTree = () => {
+    if (!planId) return;
+    Modal.confirm({
+      title: 'Reset document to default template?',
+      content: 'This will replace the entire document structure with the default template. All sections you added or modified will be permanently lost. This cannot be undone.',
+      okText: 'Reset',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const result = await operationalPlanApi.resetTree(planId);
+          setTree(result.tree || []);
+          setActiveNodeId((result.tree || [])[0]?.id || null);
+          message.success('Document reset to default template');
+        } catch {
+          message.error('Failed to reset document');
+        }
+      },
+    });
+  };
+
   const handleExport = async () => {
     if (!planId) return;
     try {
@@ -154,6 +177,41 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       message.success('DOCX exported');
     } catch (err: any) {
       message.error(err.message || 'Export failed');
+    }
+  };
+
+  const handleHardDelete = async (nodeId: string) => {
+    if (!planId) return;
+    try {
+      const result = await operationalPlanApi.deleteNode(planId, nodeId);
+      setTree(result.tree || []);
+      if (activeNodeId === nodeId) setActiveNodeId(null);
+      message.success('Section permanently deleted');
+    } catch {
+      message.error('Failed to delete section');
+    }
+  };
+
+  const handleAddStaticTable = async (parentId: string | null) => {
+    if (!planId) return;
+    const val = window.prompt('Enter table title (Nepali):');
+    if (!val) return;
+    try {
+      const result = await operationalPlanApi.addNode(planId, {
+        parent_id: parentId,
+        type: parentId ? 'subsection' : 'section',
+        title_ne: val,
+        content: '',
+        content_type: 'static_table',
+        static_table: {
+          columns: ['Column 1', 'Column 2', 'Column 3'],
+          rows: [['', '', ''], ['', '', ''], ['', '', '']],
+        },
+      });
+      setTree(result.tree || []);
+      message.success('Static table added');
+    } catch {
+      message.error('Failed to add static table');
     }
   };
 
@@ -235,11 +293,11 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
     } catch { message.error('Failed to update title'); }
   };
 
-  const handleContentChange = (nodeId: string, content: string) => {
+  const handleContentChange = (nodeId: string, content: string, updates?: Record<string, any>) => {
     setTree(prev => {
       const update = (nodes: TreeNodeData[]): TreeNodeData[] =>
         nodes.map(n => {
-          if (n.id === nodeId) return { ...n, content };
+          if (n.id === nodeId) return { ...n, content, ...(updates || {}) };
           return { ...n, children: update(n.children || []) };
         });
       return update(prev);
@@ -317,6 +375,9 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
           <Button icon={<FileTextOutlined />} onClick={() => setShowTemplateManager(true)} size="small">
             Templates
           </Button>
+          <Button icon={<RollbackOutlined />} onClick={handleResetTree} size="small" danger>
+            Reset to Default
+          </Button>
           <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
             Metadata
           </Button>
@@ -356,8 +417,10 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
               onAddChild={handleAddChild}
               onAddChartNode={handleAddChartNode}
               onAddMapNode={handleAddMapNode}
+              onAddStaticTable={handleAddStaticTable}
               onToggleDelete={handleToggleDelete}
               onToggleHidden={handleToggleHidden}
+              onHardDelete={handleHardDelete}
               onUpdateTitle={handleUpdateTitle}
               onReorderNode={handleReorderNode}
             />
