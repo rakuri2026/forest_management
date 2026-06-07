@@ -112,6 +112,7 @@ HEADERS = [
     "AAH_Basal Area (m\u00b2)/ha",
     "AAH_AGB (t)/ha", "AAH_BGB (t)/ha", "AAH_Total Biomass (t)/ha",
     "AAH_Carbon Stock (t C)/ha", "AAH_CO\u2082e (t)/ha",
+    "Species Code", "Species Regulation",
 ]
 
 NUM_COLS = len(HEADERS)
@@ -215,6 +216,8 @@ DESCRIPTIONS = [
     (96, "AAH_Total Biomass (t)/ha", "Formula", "= MAI_TotalBiomass/ha * AAH%/100."),
     (97, "AAH_Carbon Stock (t C)/ha", "Formula", "= MAI_CarbonStock/ha * AAH%/100. AAH of carbon stock."),
     (98, "AAH_CO\u2082e (t)/ha", "Formula", "= MAI_CO2e/ha * AAH%/100. AAH of CO\u2082 equivalent."),
+    (99, "Species Code", "Static", "Regulation species code per Forest Regulation 2079. 1-21 = named species, 22 = Terai spp, 23 = Hill spp."),
+    (100, "Species Regulation", "Static", "Regulation species name: scientific name for codes 1-21, 'Terai Spp' for code 22, 'Hill Spp' for code 23."),
 ]
 
 
@@ -281,7 +284,7 @@ def generate_field_inventory_excel(
         raise ValueError("No measurements found")
 
     sp_rows = db.execute(text("""
-        SELECT scientific_name, a, b, c, a1, b1, s, m, bg,
+        SELECT scientific_name, species_code, a, b, c, a1, b1, s, m, bg,
                growth_rate, wood_density_gm_cm3, full_stem_merchantable
         FROM public.tree_species_coefficients WHERE is_active = TRUE
     """)).fetchall()
@@ -290,6 +293,13 @@ def generate_field_inventory_excel(
     for sr in sp_rows:
         def f(v):
             return float(v) if v is not None else None
+        sc = int(sr.species_code) if sr.species_code is not None else 23
+        if sc <= 21:
+            reg = str(sr.scientific_name)
+        elif sc == 22:
+            reg = "Terai Spp"
+        else:
+            reg = "Hill Spp"
         sp_map[str(sr.scientific_name)] = {
             'a': f(sr.a), 'b': f(sr.b), 'c': f(sr.c),
             'a1': f(sr.a1), 'b1': f(sr.b1),
@@ -297,6 +307,8 @@ def generate_field_inventory_excel(
             'gr': str(sr.growth_rate or ''),
             'wd': f(sr.wood_density_gm_cm3),
             'fsm': bool(sr.full_stem_merchantable) if sr.full_stem_merchantable is not None else False,
+            'species_code': sc,
+            'species_regulation': reg,
         }
 
     block_summaries = db.execute(text("""
@@ -663,6 +675,17 @@ def generate_field_inventory_excel(
             cell.fill = meta_fill
             cell.border = thin
             cell.alignment = Alignment(horizontal='right')
+
+        # ── 99-100: Species Code & Species Regulation (static) ──
+        for ci, val in [
+            (99, coef.get('species_code')),
+            (100, coef.get('species_regulation')),
+        ]:
+            cell = ws.cell(row=dr, column=ci, value=val)
+            cell.font = df
+            cell.fill = coeff_fill
+            cell.border = thin
+            cell.alignment = Alignment(horizontal='right' if ci == 99 else 'left')
 
     for ci in range(1, NUM_COLS + 1):
         w = min(max(len(HEADERS[ci - 1]) + 4, 12), 28)

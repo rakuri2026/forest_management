@@ -59,6 +59,7 @@ from ..services.operational_plan.variable_registry import (
     get_variables_by_category,
     search_variables,
     get_all_variables,
+    VariableDef,
 )
 from ..services.operational_plan.variable_resolver import VariableResolver
 from ..services.operational_plan.op_docx_builder import build_op_document
@@ -450,6 +451,81 @@ async def get_variable_detail(key: str):
         auto_populate=var.auto_populate,
         description=var.description,
     )
+
+
+@router.get("/{calculation_id}/variable-catalog")
+async def get_variable_catalog(
+    calculation_id: UUID,
+    category: Optional[str] = Query(None, description="Filter by category (A-F)"),
+    search: Optional[str] = Query(None, description="Search by key or label"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Returns ALL variables with their resolved values for a given calculation.
+    This is the complete variable catalog — shows variable key, type, sample output,
+    and whether the data is available for the current forest calculation."""
+    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    plan = db.query(OperationalPlan).filter(
+        OperationalPlan.calculation_id == calculation_id
+    ).first()
+    if not plan:
+        plan = OperationalPlan(
+            calculation_id=calculation_id,
+            forest_name=calc.forest_name or "",
+            plan_metadata={},
+            status="draft",
+        )
+
+    resolver = VariableResolver(db, calculation_id, plan)
+    all_resolved = resolver.resolve_all()
+
+    if search:
+        vars_list = search_variables(search)
+    elif category:
+        vars_list = get_variables_by_category(category.upper())
+    else:
+        vars_list = get_all_variables()
+
+    catalog = []
+    for var_def in vars_list:
+        resolved = all_resolved.get(var_def.key)
+
+        data_status = "available"
+        sample_value = resolved
+        if resolved is None:
+            data_status = "empty"
+            sample_value = None
+        elif isinstance(resolved, dict):
+            if "datasets" in resolved:
+                sample_value = f"[Chart: {resolved.get('type', 'pie')}, {len(resolved.get('labels', []))} categories]"
+            elif "rows" in resolved:
+                sample_value = f"[Table: {len(resolved.get('rows', []))} rows]"
+            elif len(str(resolved)) > 200:
+                sample_value = str(resolved)[:200] + "..."
+        elif isinstance(resolved, list):
+            if len(resolved) > 5:
+                sample_value = f"[List: {len(resolved)} items]"
+            elif all(isinstance(v, dict) for v in resolved):
+                sample_value = f"[Table: {len(resolved)} rows, columns: {list(resolved[0].keys())}]" if resolved else "[]"
+        elif isinstance(resolved, bool):
+            sample_value = str(resolved)
+
+        catalog.append({
+            "key": var_def.key,
+            "category": var_def.category,
+            "label_ne": var_def.label_ne,
+            "label_en": var_def.label_en,
+            "var_type": var_def.var_type,
+            "source": var_def.source,
+            "auto_populate": var_def.auto_populate,
+            "data_status": data_status,
+            "sample_value": sample_value,
+        })
+
+    return {"total": len(catalog), "variables": catalog}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -925,6 +1001,11 @@ async def get_chart_data(
             "title": f"{forest_name} - Land Cover Distribution",
             "get_data": lambda rd: _chart_landcover_pie(rd, forest_name),
         },
+        "species_composition_pie_fi": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - प्रजाति संरचना (Species Composition)",
+            "get_data": lambda rd: _chart_species_composition_pie_fi(rd, forest_name),
+        },
     }
 
     if chart_type not in chart_configs:
@@ -1100,6 +1181,28 @@ def _chart_landcover_pie(raw: dict, forest_name: str) -> dict:
             "label": "Land Cover",
             "data": values,
             "backgroundColor": ["#27ae60", "#3498db", "#f39c12", "#e74c3c", "#95a5a6", "#9b59b6"],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_species_composition_pie_fi(raw: dict, forest_name: str) -> dict:
+    fi = raw.get("field_inventory", {})
+    comp = fi.get("fi_species_composition", {})
+    if not comp or not isinstance(comp, dict):
+        return None
+    sorted_items = sorted(comp.items(), key=lambda x: x[1], reverse=True)[:10]
+    labels = [x[0] for x in sorted_items]
+    values = [x[1] for x in sorted_items]
+    colors = ["#2ecc71", "#3498db", "#e67e22", "#9b59b6", "#f1c40f",
+              "#1abc9c", "#e74c3c", "#95a5a6", "#27ae60", "#2980b9"]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Species Composition (%)",
+            "data": values,
+            "backgroundColor": colors[:len(labels)],
             "borderColor": "#fff",
             "borderWidth": 1,
         }],

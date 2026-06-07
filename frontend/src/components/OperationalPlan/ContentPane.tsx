@@ -26,6 +26,7 @@ interface TreeNodeData {
 interface ContentPaneProps {
   node: TreeNodeData | null;
   planId: string;
+  calculationId?: string;
   onContentChange?: (nodeId: string, content: string, updates?: Record<string, any>) => void;
 }
 
@@ -37,7 +38,7 @@ const typeLabels: Record<string, string> = {
   appendix: 'Appendix',
 };
 
-const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, onContentChange }) => {
+const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, onContentChange }) => {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -361,6 +362,7 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, onContentChange
                   ? Array.from(tableRows.flat().join(' ').matchAll(/\{\{(\w+:?\w+)\}\}/g)).map(m => m[1])
                   : Array.from(content.matchAll(/\{\{(\w+:?\w+)\}\}/g)).map(m => m[1])
               }
+              calculationId={calculationId}
             />
           </div>
         )}

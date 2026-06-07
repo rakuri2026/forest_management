@@ -426,7 +426,7 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
             />
           </div>
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {planId && <ContentPane node={activeNode} planId={planId} onContentChange={handleContentChange} />}
+            {planId && <ContentPane node={activeNode} planId={planId} calculationId={calculationId} onContentChange={handleContentChange} />}
           </div>
         </div>
       ) : activeTab === 'tables' ? (

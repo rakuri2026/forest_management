@@ -291,7 +291,69 @@ def _fetch_block_effective_areas(db: Session, calculation_id: str) -> Dict[str, 
     return {d['block_name']: round(d['effective_area_ha'], 2) for d in details}
 
 
-def get_field_inventory_data(db: Session, calculation_id: str) -> Dict[str, Any]:
+def _compute_species_composition(species_block_data: List[Dict],
+                                  base_species_data: Optional[List[Dict]] = None) -> Dict[str, Any]:
+    """Compute species composition analysis from block-level species growing stock.
+
+    Classifies species into dominant (>=20%), co-dominant (10-20%), associated (<10%)
+    based on total volume share. Also categorizes by growth rate from base species data.
+    """
+    species_vol: Dict[str, float] = {}
+    for row in species_block_data:
+        if row.get("block_name") == "Grand Total (Weighted)" or not row.get("species_scientific"):
+            continue
+        sci = row["species_scientific"]
+        loc = row.get("species_local", "") or ""
+        key = f"{sci} ({loc})" if loc else sci
+        species_vol[key] = species_vol.get(key, 0) + float(row.get("total_volume_m3_per_ha", 0))
+
+    if not species_vol:
+        return {}
+
+    total = sum(species_vol.values())
+    if total <= 0:
+        return {}
+
+    pct = {k: round(v / total * 100, 1) for k, v in species_vol.items()}
+    sorted_species = sorted(pct.items(), key=lambda x: x[1], reverse=True)
+
+    dominant = [s for s, p in sorted_species if p >= 20.0]
+    co_dominant = [s for s, p in sorted_species if 10.0 <= p < 20.0]
+    associated = [s for s, p in sorted_species if p < 10.0]
+
+    # ── Growth rate categorization from base species data ──
+    fast_growing: List[str] = []
+    moderate_growing: List[str] = []
+    slow_growing: List[str] = []
+
+    if base_species_data:
+        for sp in base_species_data:
+            sci = sp.get("scientific_name", "")
+            loc = sp.get("local_name", "") or sp.get("nepali_name", "") or ""
+            key = f"{sci} ({loc})" if loc else sci
+            rate = (sp.get("growth_rate") or "").lower()
+            if rate in ("fast", "high"):
+                fast_growing.append(key)
+            elif rate in ("moderate", "medium"):
+                moderate_growing.append(key)
+            elif rate in ("slow", "low"):
+                slow_growing.append(key)
+
+    return {
+        "fi_species_composition": pct,
+        "fi_dominant_species": dominant,
+        "fi_co_dominant_species": co_dominant,
+        "fi_associated_species": associated,
+        "fi_fast_growing_species": fast_growing,
+        "fi_moderate_growing_species": moderate_growing,
+        "fi_slow_growing_species": slow_growing,
+        # For block-species volume bar chart: sorted list of (name, pct)
+        "fi_species_volume_by_block": sorted_species,
+    }
+
+
+def get_field_inventory_data(db: Session, calculation_id: str,
+                              base_species_data: Optional[Dict] = None) -> Dict[str, Any]:
     from app.models.field_inventory import FieldInventoryCalculation, FieldInventoryBlockSummary
     fi_calc = db.query(FieldInventoryCalculation).filter(
         FieldInventoryCalculation.calculation_id == calculation_id
@@ -516,6 +578,10 @@ def get_field_inventory_data(db: Session, calculation_id: str) -> Dict[str, Any]
             "fi_block_summaries": block_summaries,
             # ── Block-wise species growing stock ──
             "fi_species_block_growing_stock": species_block_data,
+            # ── Species composition analysis from field inventory ──
+            **_compute_species_composition(species_block_data,
+                                            base_species_data.get("species_list")
+                                            if base_species_data else None),
             # ── Block-wise regeneration status ──
             "fi_block_regeneration_status": [
                 {
@@ -535,11 +601,22 @@ def get_field_inventory_data(db: Session, calculation_id: str) -> Dict[str, Any]
             "fi_aah_table": aah_table,
         }
 
-    return {"available": True, "total_sample_plots": 0, "total_blocks": 0}
+    return {
+        "available": True, "total_sample_plots": 0, "total_blocks": 0,
+        "fi_species_composition": {},
+        "fi_dominant_species": [],
+        "fi_co_dominant_species": [],
+        "fi_associated_species": [],
+        "fi_fast_growing_species": [],
+        "fi_moderate_growing_species": [],
+        "fi_slow_growing_species": [],
+        "fi_species_volume_by_block": [],
+    }
 
 
 def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     raw = _collect_all_data(db, calculation_id)
-    fi_data = get_field_inventory_data(db, calculation_id)
+    fi_data = get_field_inventory_data(db, calculation_id,
+                                       base_species_data=raw.get("species"))
     raw["field_inventory"] = fi_data
     return raw

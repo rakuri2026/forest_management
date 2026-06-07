@@ -699,6 +699,17 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict):
         if isinstance(species, dict):
             species = species.get("species_list", [])
         img_data = generate_species_pie(species, forest_name, top_n=8)
+    elif chart_type in ("species_composition_pie_fi",):
+        fi = raw_data.get("field_inventory", {})
+        comp = fi.get("fi_species_composition", {})
+        if comp and isinstance(comp, dict):
+            species_list = [
+                {"scientific_name": k, "local_name": "", "availability_rank": i}
+                for i, (k, _) in enumerate(
+                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
+                )
+            ]
+            img_data = generate_species_pie(species_list, forest_name, top_n=8)
     elif chart_type == "forest_type_pie" or chart_type == "forest_type":
         ra = raw_data.get("raster_analysis", {})
         ft = ra.get("forest_type", {}).get("percentages", {})
@@ -852,6 +863,17 @@ def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any]):
         if isinstance(species, dict):
             species = species.get("species_list", [])
         img_data = generate_species_pie(species, forest_name, top_n=8)
+    elif node.chart_type == "species_composition_pie_fi":
+        fi = raw_data.get("field_inventory", {})
+        comp = fi.get("fi_species_composition", {})
+        if comp and isinstance(comp, dict):
+            species_list = [
+                {"scientific_name": k, "local_name": "", "availability_rank": i}
+                for i, (k, _) in enumerate(
+                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
+                )
+            ]
+            img_data = generate_species_pie(species_list, forest_name, top_n=8)
     elif node.chart_type == "forest_type_pie":
         ra = raw_data.get("raster_analysis", {})
         ft = ra.get("forest_type", {}).get("percentages", {})
@@ -1247,6 +1269,7 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
         if is_chart:
             chart_labels = {
                 "species_pie": "Species Composition Pie Chart",
+                "species_composition_pie_fi": "प्रजाति संरचना पाई चार्ट (क्षेत्र सर्वेक्षण)",
                 "forest_type_pie": "Forest Type Distribution Pie Chart",
                 "block_area_bar": "Block-wise Area Bar Chart",
                 "dbh_histogram": "DBH Class Distribution Histogram",
@@ -1337,7 +1360,7 @@ def _render_html_list_vars(text: str, raw_data: dict) -> str:
         if isinstance(var_val, list):
             if all(isinstance(v, str) for v in var_val):
                 items = "".join(f"<li>{_html_escape(v)}</li>" for v in var_val if v)
-                return f"<ul>{items}</ul>" if items else m.group(0)
+                return f"<ul>{items}</ul>" if items else ""
             if all(isinstance(v, dict) for v in var_val):
                 if var_name == "uc_members":
                     parts = []

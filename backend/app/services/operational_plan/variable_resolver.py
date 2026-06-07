@@ -184,8 +184,6 @@ class VariableResolver:
 
     def resolve_all(self) -> Dict[str, Any]:
         for key, var_def in VARIABLE_REGISTRY.items():
-            if key.startswith("chart:"):
-                continue
             self._resolved[key] = self._resolve_single(var_def)
         return self._resolved
 
@@ -209,6 +207,13 @@ class VariableResolver:
         return VARIABLE_PATTERN.sub(_replacer, content)
 
     def _resolve_single(self, var_def: VariableDef) -> Any:
+        key = var_def.key
+        if key.startswith("chart:"):
+            return self._resolve_chart(var_def)
+        if key.startswith("map:"):
+            return None
+        if key.startswith("table:"):
+            return self._resolve_table(var_def)
         resolver_map = {
             "resolve_a": self._resolve_category_a,
             "resolve_b": self._resolve_hybrid,
@@ -384,3 +389,128 @@ class VariableResolver:
             "plan_revision_number": (self.plan.plan_metadata or {}).get("revision", 1),
         }
         return template_values.get(var_def.key, "")
+
+    # ── Chart color palette for village-friendly graphics ──
+    _CHART_COLORS = [
+        "#2d5a27", "#5a8f4c", "#8bb87c", "#b8d9a5",
+        "#3498db", "#2980b9", "#e67e22", "#d35400",
+        "#e74c3c", "#c0392b", "#9b59b6", "#8e44ad",
+        "#f1c40f", "#f39c12", "#1abc9c", "#16a085",
+    ]
+
+    def _resolve_chart(self, var_def: VariableDef) -> Optional[Dict[str, Any]]:
+        key = var_def.key  # e.g. "chart:forest_type_pie"
+        chart_key = key.replace("chart:", "")
+        data = self.get_raw_data()
+
+        def _pct_data(pct_dict: dict) -> dict:
+            items = sorted(pct_dict.items(), key=lambda x: x[1], reverse=True)
+            labels = [k for k, _ in items]
+            values = [v for _, v in items]
+            colors = self._CHART_COLORS[:len(labels)]
+            return {"type": "pie", "labels": labels, "datasets": [{"data": values, "backgroundColor": colors}]}
+
+        def _bar_data(labels: list, values: list, label: str = "Value") -> dict:
+            colors = self._CHART_COLORS[:len(labels)]
+            return {"type": "bar", "labels": labels, "datasets": [{"label": label, "data": values, "backgroundColor": colors}]}
+
+        try:
+            if chart_key == "forest_type_pie":
+                pcts = data.get("raster_analysis", {}).get("forest_type", {}).get("percentages", {})
+                return _pct_data(pcts) if pcts else None
+            elif chart_key == "landcover_pie":
+                pcts = data.get("raster_analysis", {}).get("landcover", {}).get("percentages", {})
+                return _pct_data(pcts) if pcts else None
+            elif chart_key == "slope_bar":
+                pcts = data.get("raster_analysis", {}).get("slope", {}).get("percentages", {})
+                if pcts:
+                    return _bar_data(list(pcts.keys()), list(pcts.values()), "Percentage")
+                return None
+            elif chart_key == "aspect_rose":
+                pcts = data.get("raster_analysis", {}).get("aspect", {}).get("percentages", {})
+                if pcts:
+                    return _pct_data(pcts)
+                return None
+            elif chart_key == "soil_bar":
+                pcts = data.get("raster_analysis", {}).get("soil", {}).get("percentages", {})
+                if pcts:
+                    return _bar_data(list(pcts.keys()), list(pcts.values()), "Percentage")
+                return None
+            elif chart_key == "canopy_bar":
+                pcts = data.get("raster_analysis", {}).get("canopy", {}).get("percentages", {})
+                if pcts:
+                    return _bar_data(list(pcts.keys()), list(pcts.values()), "Percentage")
+                return None
+            elif chart_key == "forest_health_pie":
+                pcts = data.get("raster_analysis", {}).get("forest_health", {}).get("percentages", {})
+                return _pct_data(pcts) if pcts else None
+            elif chart_key == "species_composition_pie":
+                species = data.get("inventory", {}).get("species_summary", {})
+                if species:
+                    items = sorted(species.items(), key=lambda x: x[1], reverse=True)[:10]
+                    labels = [k for k, _ in items]
+                    values = [v for _, v in items]
+                    colors = self._CHART_COLORS[:len(labels)]
+                    return {"type": "pie", "labels": labels, "datasets": [{"data": values, "backgroundColor": colors}]}
+                return None
+            elif chart_key == "species_composition_pie_fi":
+                comp = data.get("field_inventory", {}).get("fi_species_composition", {})
+                if comp:
+                    items = sorted(comp.items(), key=lambda x: x[1], reverse=True)[:10]
+                    labels = [k for k, _ in items]
+                    values = [v for _, v in items]
+                    colors = self._CHART_COLORS[:len(labels)]
+                    return {"type": "pie", "labels": labels, "datasets": [{"data": values, "backgroundColor": colors}]}
+                return None
+            elif chart_key == "block_volume_bar":
+                bs = data.get("inventory", {}).get("block_summary", {})
+                if bs:
+                    labels = list(bs.keys())
+                    values = [v.get("total_volume", 0) for v in bs.values()]
+                    return _bar_data(labels, values, "Volume (m³)")
+                return None
+            elif chart_key == "block_area_bar":
+                blocks = data.get("blocks", {}).get("blocks", [])
+                if blocks:
+                    labels = [b.get("name", f"Block {i+1}") for i, b in enumerate(blocks)]
+                    values = [b.get("area_hectares", 0) for b in blocks]
+                    return _bar_data(labels, values, "Area (ha)")
+                return None
+            elif chart_key == "hh_prosperity_pie":
+                dist = data.get("households", {}).get("prosperity_distribution", {})
+                return _pct_data(dist) if dist else None
+            elif chart_key == "hh_caste_bar":
+                dist = data.get("households", {}).get("caste_distribution", {})
+                if dist:
+                    return _bar_data(list(dist.keys()), list(dist.values()), "Households")
+                return None
+            elif chart_key == "budget_bar":
+                activities = data.get("activities", {}).get("activities", [])
+                if activities:
+                    labels = [f"Activity {a.get('activity_id', i+1)}" for i, a in enumerate(activities)]
+                    values = []
+                    for a in activities:
+                        total = sum(yd.get("budget", 0) for yd in a.get("yearly_details", []))
+                        values.append(total or a.get("default_quantity", 0))
+                    return _bar_data(labels, values, "Budget (Rs)")
+                return None
+        except Exception:
+            return None
+        return None
+
+    def _resolve_table(self, var_def: VariableDef) -> Optional[Dict[str, Any]]:
+        table_id = var_def.key.replace("table:", "")
+        try:
+            from app.models.op_table import OPTableData
+            from sqlalchemy import select
+            tbl = self.db.execute(
+                select(OPTableData).where(
+                    OPTableData.calculation_id == self.calculation_id,
+                    OPTableData.table_id == table_id,
+                )
+            ).scalar_one_or_none()
+            if tbl and tbl.rows:
+                return {"table_id": table_id, "rows": tbl.rows, "auto_populated": tbl.auto_populated}
+        except Exception:
+            pass
+        return None

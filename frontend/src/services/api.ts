@@ -2243,6 +2243,11 @@ export const operationalPlanApi = {
     return response.data;
   },
 
+  getVariableCatalog: async (calculationId: string, params?: { category?: string; search?: string }): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/${calculationId}/variable-catalog`, { params });
+    return response.data;
+  },
+
   listTables: async (): Promise<any> => {
     const response = await api.get('/api/op-tables');
     return response.data;
