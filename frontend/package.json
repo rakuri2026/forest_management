@@ -28,8 +28,7 @@
     "react-leaflet": "^4.2.1",
     "react-nepali-datepicker-bs": "^2.2.4",
     "react-router-dom": "^6.20.0",
-    "recharts": "^3.8.0",
-    "xml2js": "^0.6.2"
+    "recharts": "^3.8.0"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.8",

@@ -196,6 +196,12 @@ class ColumnMapper:
         self.optional_columns = ["class"]
         self.all_standard_columns = self.required_columns + self.optional_columns
         self.mapping_dict = COLUMN_MAPPING
+        # Preferred column name substrings for tie-breaking
+        # When multiple columns map to the same standard column with equal priority,
+        # the one containing a preferred pattern wins (more semantically accurate).
+        self.preferred_patterns = {
+            "species": ["scientific", "botanical", "latin"],
+        }
 
     def normalize(self, col: str) -> str:
         """
@@ -347,13 +353,16 @@ class ColumnMapper:
         # AUTO-RESOLVE DUPLICATES: Keep best match using smart tie-breaking
         if duplicates:
             for std_col, csv_cols in duplicates.items():
-                # Smart tie-breaking: prefer exact matches, then highest confidence, then shortest name
+                # Smart tie-breaking: prefer exact matches, then highest confidence,
+                # then longest name, then preferred semantic patterns.
                 def match_priority(col):
                     conf = confidence[col]
-                    is_exact = (self.normalize(col) == self.normalize(std_col))  # Exact match
-                    col_len = len(col)  # Shorter is better
-                    # Return tuple: (is_exact DESC, confidence DESC, length ASC)
-                    return (is_exact, conf, -col_len)
+                    is_exact = (self.normalize(col) == self.normalize(std_col))
+                    col_len = len(col)
+                    patterns = self.preferred_patterns.get(std_col, [])
+                    has_preferred = any(p in col.lower() for p in patterns)
+                    # Return tuple (all DESC — max() picks the best)
+                    return (is_exact, conf, col_len, has_preferred)
 
                 # Find best mapping using priority
                 best_csv_col = max(csv_cols, key=match_priority)

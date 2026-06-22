@@ -351,6 +351,7 @@ def get_sampling_data(db: Session, calculation_id: str) -> Dict[str, Any]:
 
     design_list = []
     for d in designs:
+        rd = d.result_data or {}
         design_list.append({
             "id": str(d.id),
             "sampling_type": d.sampling_type,
@@ -358,6 +359,14 @@ def get_sampling_data(db: Session, calculation_id: str) -> Dict[str, Any]:
             "plot_shape": d.plot_shape,
             "plot_radius_meters": float(d.plot_radius_meters) if d.plot_radius_meters else 0,
             "intensity_per_hectare": float(d.intensity_per_hectare) if d.intensity_per_hectare else 0,
+            "total_blocks": rd.get("total_blocks", 0),
+            "forest_area_hectares": rd.get("forest_area_hectares", 0),
+            "requested_intensity_percent": rd.get("requested_intensity_percent", 0),
+            "sampling_percentage": rd.get("sampling_percentage", 0),
+            "actual_intensity_per_hectare": rd.get("actual_intensity_per_hectare", 0),
+            "plot_area_sqm": rd.get("plot_area_sqm", 0),
+            "total_sampled_area_hectares": rd.get("total_sampled_area_hectares", 0),
+            "blocks_info": rd.get("blocks_info", []),
         })
 
     return {
@@ -461,10 +470,13 @@ def get_biodiversity_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     vegetation = []
     animals = []
 
+    species_ids = [r.species_id for r in records]
+    species_map = {s.id: s for s in db.query(BiodiversitySpecies).filter(
+        BiodiversitySpecies.id.in_(species_ids)
+    ).all()}
+
     for r in records:
-        species = db.query(BiodiversitySpecies).filter(
-            BiodiversitySpecies.id == r.species_id
-        ).first()
+        species = species_map.get(r.species_id)
 
         record = {
             "name": species.nepali_name if species else "",
@@ -501,10 +513,16 @@ def get_activities_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     activity_list = []
     total_budget = 0
 
+    from collections import defaultdict
+    activity_ids = [a.id for a in activities]
+    all_year_details = defaultdict(list)
+    for yd in db.query(ActivityYearDetail).filter(
+        ActivityYearDetail.proposed_activity_id.in_(activity_ids)
+    ).order_by(ActivityYearDetail.year_number).all():
+        all_year_details[yd.proposed_activity_id].append(yd)
+
     for act in activities:
-        year_details = db.query(ActivityYearDetail).filter(
-            ActivityYearDetail.proposed_activity_id == act.id
-        ).order_by(ActivityYearDetail.year_number).all()
+        year_details = all_year_details.get(act.id, [])
 
         yearly_budgets = []
         for yd in year_details:
@@ -539,13 +557,17 @@ def get_user_group_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     if not extents:
         return {"available": False}
 
+    from collections import defaultdict
+    extent_ids = [ext.id for ext in extents]
+    ext_buildings_map = defaultdict(list)
+    for b in db.query(UserGroupBuilding).filter(
+        UserGroupBuilding.extent_id.in_(extent_ids)
+    ).all():
+        ext_buildings_map[b.extent_id].append(b)
+
     buildings = []
     for ext in extents:
-        ext_buildings = db.query(UserGroupBuilding).filter(
-            UserGroupBuilding.extent_id == ext.id
-        ).all()
-
-        for b in ext_buildings:
+        for b in ext_buildings_map.get(ext.id, []):
             buildings.append({
                 "settlement_name": b.settlement_name,
                 "building_count": b.building_count,

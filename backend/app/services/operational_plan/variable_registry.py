@@ -86,7 +86,7 @@ def _reg(
 
 
 # ═══════════════════════════════════════════════════════
-# Category A: System Variables (103)
+# Category A: System Variables (109)
 # ═══════════════════════════════════════════════════════
 
 # A1: Basic Calculation Info (22)
@@ -144,6 +144,9 @@ _reg("canopy_mean_m", "A", "औसत वन मुकुट (मि)", "Mean Ca
 _reg("forest_loss_hectares", "A", "वन क्षति (हे)", "Forest Loss (ha)", var_type="number", source="raster")
 _reg("forest_gain_hectares", "A", "वन लाभ (हे)", "Forest Gain (ha)", var_type="number", source="raster")
 _reg("forest_loss_by_year", "A", "वार्षिक वन क्षति", "Forest Loss by Year", var_type="dict", source="raster")
+_reg("nasa_forest_2020_percentages", "A", "वन गुणस्तर प्रतिशत (नासा)", "Forest Quality Percentages (NASA)", var_type="dict", source="raster")
+_reg("nasa_forest_2020_dominant", "A", "मुख्य वन गुणस्तर (नासा)", "Dominant Forest Quality (NASA)", source="raster")
+_reg("chart:nasa_forest_2020_pie", "A", "वन गुणस्तर पाई चार्ट (नासा)", "Forest Quality Pie Chart (NASA)", var_type="dict", source="raster")
 
 # A5: Raster - Biomass/Carbon (3)
 _reg("agb_mean", "A", "औसत AGB", "Mean AGB", var_type="number", source="raster", precision=3)
@@ -157,11 +160,19 @@ _reg("boundary_features_east", "A", "पूर्व सिमाना", "East 
 _reg("boundary_features_south", "A", "दक्षिण सिमाना", "South Boundary", var_type="list", source="boundary")
 _reg("boundary_features_west", "A", "पश्चिम सिमाना", "West Boundary", var_type="list", source="boundary")
 
-# A7: Blocks & Sub-Areas (5)
+# A7: Blocks & Sub-Areas (7)
 _reg("blocks_count", "A", "ब्लक सङ्ख्या", "Blocks Count", var_type="number", source="block", precision=0)
 _reg("sub_areas_by_category", "A", "उप-क्षेत्र प्रकार", "Sub-areas by Category", var_type="dict", source="block")
 _reg("sub_areas_total", "A", "कुल उप-क्षेत्र", "Total Sub-areas", var_type="number", source="block", precision=0)
 _reg("sub_area_categories", "A", "उप-क्षेत्र कोटीहरू", "Sub-area Categories", var_type="list", source="block")
+_reg("sub_areas_detail", "A",
+     "उप-क्षेत्र विवरण",
+     "Sub-Areas Detail",
+     var_type="list", source="block")
+_reg("block_area_detail_merged", "A",
+     "ब्लक अनुसार क्षेत्रफलको विस्तृत विवरण तथा सामुदायिक वन क्षेत्रफल",
+     "Block-wise Detailed Area & Community Forest Area Description (Merged)",
+     var_type="list", source="block")
 
 # A8: Species (4)
 _reg("total_species", "A", "कुल प्रजाति सङ्ख्या", "Total Species", var_type="number", source="species", precision=0)
@@ -211,7 +222,47 @@ _reg("fi_species_block_growing_stock", "A", "ब्लक अनुसार प
 _reg("fi_block_regeneration_status", "A", "वन खन्ड अनुसार पुनरोत्पादनको स्थिति", "Forest Block-wise Regeneration Status", var_type="list", source="field_inventory")
 _reg("fi_block_dbh_class_growing_stock", "A", "ब्लक अनुसार DBH वर्ग वन मौज्दात", "Block-wise DBH Class Growing Stock", var_type="list", source="field_inventory")
 _reg("fi_block_dbh_class_growing_stock_np", "A", "ब्लक अनुसार DBH वर्ग वन मौज्दात (नेपाली)", "Block-wise DBH Class Growing Stock (Nepali)", var_type="list", source="field_inventory")
+_reg("fi_block_dbh_class_ag_np", "A",
+     "ब्यास क्लास अनुसार प्रति हेक्टर मौज्दात (एड्भान्स ग्रोथ र परिपक्व रूख)",
+     "DBH Class Growing Stock — Advance Growth & Mature Tree (Nepali)",
+     var_type="list", source="field_inventory")
+_reg("fi_block_dbh_class_advance_np", "A",
+     "एड्भान्स ग्रोथ (१०-४० से.मी.) अनुसार प्रति हेक्टर मौज्दात",
+     "Advance Growth (10-40 cm) Growing Stock per ha (Nepali)",
+     var_type="list", source="field_inventory")
+_reg("fi_block_dbh_class_mature_np", "A",
+     "परिपक्व रूख (>४० से.मी.) अनुसार प्रति हेक्टर मौज्दात",
+     "Mature Tree (>40 cm) Growing Stock per ha (Nepali)",
+     var_type="list", source="field_inventory")
 _reg("fi_block_summaries", "A", "ब्लक अनुसार पूर्ण नतिजा", "Block-wise Full Results", var_type="list", source="field_inventory")
+_reg("fi_block_tree_count_per_ha", "A",
+     "वन ब्लक अनुसार प्रति हेक्टर विरूवा, लाथ्रा, पोल तथा रूखको संख्या",
+     "Block-wise Trees per Hectare (Regen/Sapling/Pole/Tree)",
+     var_type="list", source="field_inventory")
+_reg("fi_block_pole_tree_volume", "A",
+     "ब्लक अनुसार प्रति हेक्टर पोल (खाँवा) तथा रूखको काठ दाउराको परिणाम घ.मी.",
+     "Block-wise Pole & Tree Timber/Firewood Volume m³/ha",
+     var_type="list", source="field_inventory")
+_reg("fi_block_growing_stock", "A",
+     "वन ब्लक अनुसार काठ, दाउरा तथा जम्मा वृद्धि मौज्दात (Growing Stock) प्रति हेक्टर",
+     "Block-wise Growing Stock (Timber/Firewood/Total) m³/ha",
+     var_type="list", source="field_inventory")
+_reg("fi_block_basal_area", "A",
+     "ब्लक अनुसार प्रति हेक्टर वेसल एरीया",
+     "Block-wise Basal Area m²/ha",
+     var_type="list", source="field_inventory")
+_reg("fi_block_satellite_volume", "A",
+     "NASA/ORNL/biomass_carbon_density/v1 को अधारमा प्रति हेक्टर ग्रोइङ्स्टक अनुमान (घ.मी. प्रति हेक्टर)",
+     "Block-wise Satellite-derived Growing Stock m³/ha",
+     var_type="list", source="field_inventory")
+_reg("fi_block_condition_growth", "A",
+     "ब्लक अनुसार पुनरोत्पादन तथा वनको अवस्था र वार्षिक वृद्धि निर्धारण",
+     "Block-wise Regeneration/Forest Condition & MAI%",
+     var_type="list", source="field_inventory")
+_reg("fi_block_biomass_carbon", "A",
+     "(IPCC/REDD+) अनुसारको वनश्रोत सर्भेक्षणको अधारमा बायोमास तथा कार्वनको अनुमान",
+     "Block-wise Biomass & Carbon (IPCC/REDD+)",
+     var_type="list", source="field_inventory")
 _reg("fi_mai_table", "A", "वार्षिक वृद्धि तालिका (m³/ha/yr)", "Annual Increment (MAI) Table", var_type="list", source="field_inventory")
 _reg("fi_aah_table", "A", "वार्षिक स्वीकार्य कटान तालिका (m³/ha/yr)", "Annual Allowable Cut (AAH) Table", var_type="list", source="field_inventory")
 _reg("fi_species_composition", "A", "प्रजाति संरचना (प्रतिशत)", "Species Composition (%)", var_type="dict", source="field_inventory")
@@ -222,14 +273,31 @@ _reg("fi_fast_growing_species", "A", "द्रुत बृद्धि हु�
 _reg("fi_moderate_growing_species", "A", "मध्यम बृद्धि हुने प्रजाति", "Moderate Growing Species", var_type="list", source="field_inventory")
 _reg("fi_slow_growing_species", "A", "सुस्त बृद्धि हुने प्रजाति", "Slow Growing Species", var_type="list", source="field_inventory")
 _reg("fi_species_volume_by_block", "A", "ब्लक अनुसार प्रजाति आयतन", "Block-wise Species Volume", var_type="list", source="field_inventory")
+_reg("section:field_inventory_narration", "A",
+     "क्षेत्र सर्वेक्षण विवरण (स्वतः उत्पन्न)", "Field Inventory Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sampling_narration", "A",
+     "स्याम्पलिङ विवरण (स्वतः उत्पन्न)", "Sampling Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:fieldbook_narration", "A",
+     "फिल्डबुक विवरण (स्वतः उत्पन्न)", "Fieldbook Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
 
-# A11: Sampling (6)
+# A11: Sampling (14)
 _reg("sampling_available", "A", "नमूना योजना उपलब्ध", "Sampling Available", var_type="boolean", source="sampling")
 _reg("sampling_type", "A", "नमूना प्रकार", "Sampling Type", source="sampling")
 _reg("sampling_total_points", "A", "कुल नमूना बिन्दु", "Total Sample Points", var_type="number", source="sampling")
+_reg("sampling_total_blocks", "A", "कुल ब्लक सङ्ख्या", "Total Blocks", var_type="number", source="sampling")
 _reg("sampling_plot_shape", "A", "प्लट आकार", "Plot Shape", source="sampling")
 _reg("sampling_plot_radius_m", "A", "प्लट अर्धव्यास (मि)", "Plot Radius (m)", var_type="number", source="sampling")
 _reg("sampling_intensity_per_ha", "A", "प्रतिहेक्टर तीव्रता", "Intensity per ha", var_type="number", source="sampling")
+_reg("sampling_requested_intensity", "A", "अनुरोध गरिएको नमुना इन्टेन्सिटी", "Requested Intensity", var_type="number", source="sampling")
+_reg("sampling_actual_intensity", "A", "वास्तविक नमुना इन्टेन्सिटी", "Actual Sampling Intensity", var_type="number", source="sampling")
+_reg("sampling_block_summary", "A", "ब्लक अनुसार नमुनाप्लट विवरण तालीका", "Per-Block Sampling Summary", var_type="list", source="sampling")
+_reg("sampling_point_locations", "A", "नमुना प्लट स्थान विवरण तालीका", "Sample Point Locations", var_type="list", source="sampling")
+_reg("sampling_forest_area_ha", "A", "वन क्षेत्रफल (हे)", "Forest Area (ha)", var_type="number", source="sampling")
+_reg("sampling_plot_area_sqm", "A", "प्लट क्षेत्रफल (वर्गमि)", "Plot Area (sqm)", var_type="number", source="sampling")
+_reg("sampling_total_sampled_area_ha", "A", "जम्मा नमुना क्षेत्रफल (हे)", "Total Sampled Area (ha)", var_type="number", source="sampling")
 
 # A12: Household (10)
 _reg("hh_available", "A", "घरधुरी डाटा उपलब्ध", "Household Data Available", var_type="boolean", source="household")
@@ -269,12 +337,52 @@ _reg("activities_total", "A", "कुल क्रियाकलाप", "Total
 _reg("activities_total_budget", "A", "कुल बजेट (रु)", "Total Budget (Rs)", var_type="number", source="activities")
 _reg("activities_list", "A", "क्रियाकलाप सूची", "Activities List", var_type="list", source="activities")
 
-# A16: User Group (3)
+# A16: Yearly Plan — 10-Year Activity Breakdown (8)
+_reg("ya_available", "A", "वार्षिक योजना उपलब्ध", "Yearly Plan Available",
+     var_type="boolean", source="yearly_activities")
+_reg("ya_year_summary", "A", "वर्ष अनुसार क्रियाकलाप सारांश",
+     "Year-wise Activity Summary", var_type="list", source="yearly_activities")
+_reg("ya_plan_matrix", "A", "१० वर्षे योजना तालिका (क्रियाकलाप × वर्ष)",
+     "10-Year Plan Matrix (Activity × Year)", var_type="list", source="yearly_activities")
+_reg("ya_program_budget", "A", "कार्यक्रम अनुसार बजेट विवरण",
+     "Program-wise Budget Breakdown", var_type="list", source="yearly_activities")
+_reg("ya_total_budget_by_year", "A", "वर्ष अनुसार कुल बजेट",
+     "Total Budget per Year", var_type="dict", source="yearly_activities")
+_reg("ya_total_ten_year_budget", "A", "१० वर्षे कुल बजेट",
+     "Total 10-Year Budget", var_type="number", source="yearly_activities")
+_reg("ya_program_pie_data", "A", "कार्यक्रम अनुसार बजेट पाई डाटा",
+     "Program Budget Pie Data", var_type="dict", source="yearly_activities")
+_reg("ya_budget_year_trend", "A", "वर्ष अनुसार बजेट प्रवृत्ति",
+     "Budget Year Trend", var_type="dict", source="yearly_activities")
+_reg("ya_activity_plan_detail", "A", "क्रियाकलाप योजना विस्तृत विवरण",
+     "Activity Plan Detail (CSV-style)", var_type="list", source="yearly_activities")
+
+# A17: User Group (3)
 _reg("ug_available", "A", "उपभोक्ता समूह डाटा उपलब्ध", "User Group Available", var_type="boolean", source="user_group")
 _reg("ug_total_settlements", "A", "कुल बस्ती", "Total Settlements", var_type="number", source="user_group")
 _reg("ug_buildings", "A", "बस्ती विवरण", "Settlement Details", var_type="list", source="user_group")
 
 # A17: Additional Committee (0 — reuses A13)
+
+# A18: Compartments (6)
+_reg("compartment_message", "A",
+     "कम्पार्टमेन्ट सन्देश", "Compartment Message",
+     source="compartment")
+_reg("compartment_summary", "A",
+     "कम्पार्टमेन्ट सारांश", "Compartment Summary",
+     var_type="list", source="compartment")
+_reg("compartment_detail", "A",
+     "कम्पार्टमेन्ट विवरण", "Compartment Detail",
+     var_type="list", source="compartment")
+_reg("compartment_species_composition", "A",
+     "कम्पार्टमेन्ट प्रजाति संरचना", "Compartment Species Composition",
+     var_type="list", source="compartment")
+_reg("compartment_area_breakdown", "A",
+     "कम्पार्टमेन्ट क्षेत्रफल विवरण", "Compartment Area Breakdown",
+     var_type="list", source="compartment")
+_reg("compartment_dbh_distribution", "A",
+     "कम्पार्टमेन्ट DBH वितरण", "Compartment DBH Distribution",
+     var_type="list", source="compartment")
 
 # ═══════════════════════════════════════════════════════
 # Category B: Hybrid Variables (11)
@@ -377,6 +485,30 @@ _reg("section_17_penalties", "E", "वन अपराध (पाठ)", "Penalti
 _reg("section_18_misc", "E", "विविध (पाठ)", "Miscellaneous Text", source="template", auto_populate=True, resolver="resolve_section_content")
 
 # ═══════════════════════════════════════════════════════
+# Section Generator Variables (20) — auto-generated Nepali narratives
+# ═══════════════════════════════════════════════════════
+_reg("section:forest_summary", "A", "वन सारांश विवरण", "Forest Summary Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:slope_analysis", "A", "भिरालो विश्लेषण विवरण", "Slope Analysis Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:elevation_profile", "A", "उचाइ विवरण", "Elevation Profile Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:aspect_analysis", "A", "दिशा विश्लेषण विवरण", "Aspect Analysis Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:forest_health", "A", "वन स्वास्थ्य विवरण", "Forest Health Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:forest_type", "A", "वन प्रकार विवरण", "Forest Type Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:species_potential", "A", "सम्भावित प्रजाति विवरण", "Potential Species Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:actual_species", "A", "वास्तविक प्रजाति विवरण", "Actual Species Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:biodiversity", "A", "जैविक विविधता विवरण", "Biodiversity Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:canopy_structure", "A", "वन मुकुट विवरण", "Canopy Structure Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:biomass_carbon", "A", "जैविक पदार्थ तथा कार्बन विवरण", "Biomass & Carbon Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:climate_conditions", "A", "मौसम अवस्था विवरण", "Climate Conditions Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:land_cover", "A", "भू-आवरण विवरण", "Land Cover Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:forest_loss", "A", "वन क्षति विवरण", "Forest Loss Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:fire_loss", "A", "आगलागी क्षति विवरण", "Fire Loss Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:forest_quality", "A", "वन गुणस्तर विवरण (नासा)", "Forest Quality Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:soil_analysis", "A", "माटो विश्लेषण विवरण", "Soil Analysis Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:location_context", "A", "स्थान तथा सन्दर्भ विवरण", "Location & Context Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:species_distribution", "A", "प्रजाति वितरण विवरण", "Species Distribution Section", var_type="string", source="section_generator", auto_populate=True)
+_reg("section:accessible_forest", "A", "पहुँचयोग्य वन क्षेत्र विवरण", "Accessible Forest Section", var_type="string", source="section_generator", auto_populate=True)
+
+# ═══════════════════════════════════════════════════════
 # Category F: Template Variables (6)
 # ═══════════════════════════════════════════════════════
 _reg("document_version", "F", "दस्तावेज संस्करण", "Document Version", auto_populate=True, resolver="resolve_template")
@@ -403,6 +535,38 @@ _reg("chart:block_area_bar", "A", "ब्लक क्षेत्रफल ब�
 _reg("chart:hh_prosperity_pie", "A", "समृद्धि पाई चार्ट", "Prosperity Pie Chart", var_type="dict", source="household")
 _reg("chart:hh_caste_bar", "A", "जाति बार चार्ट", "Caste Bar Chart", var_type="dict", source="household")
 _reg("chart:budget_bar", "A", "बजेट बार चार्ट", "Budget Bar Chart", var_type="dict", source="activities")
+_reg("chart:ya_budget_year_bar", "A", "वर्ष अनुसार बजेट बार चार्ट",
+     "Year-wise Budget Bar Chart", var_type="dict", source="yearly_activities")
+_reg("chart:ya_program_pie", "A", "कार्यक्रम अनुसार बजेट पाई चार्ट",
+     "Program-wise Budget Pie Chart", var_type="dict", source="yearly_activities")
+_reg("chart:dbh_class_bar", "A",
+     "ब्यास क्लास अनुसार प्रति हेक्टर मौज्दात (खाँवा र रूख)",
+     "DBH Class Growing Stock Bar Chart (Pole & Tree)",
+     var_type="dict", source="field_inventory")
+_reg("chart:dbh_class_count_bar", "A",
+     "ब्यास क्लास अनुसार प्रति हेक्टर रूख संख्या (खाँवा र रूख)",
+     "DBH Class Tree Count Bar Chart (Pole & Tree)",
+     var_type="dict", source="field_inventory")
+
+# ═══════════════════════════════════════════════════════
+# Fieldbook Variables
+# ═══════════════════════════════════════════════════════
+_FIELDBOOK_VARS = [
+    ("fieldbook_total_points",       "जम्मा फिल्डबुक बिन्दु",                 "Total Fieldbook Points"),
+    ("fieldbook_vertex_count",       "मुख्य बिन्दु संख्या",                   "Vertex Point Count"),
+    ("fieldbook_interpolated_count", "अन्तरसम्मिलित बिन्दु संख्या",           "Interpolated Point Count"),
+    ("fieldbook_perimeter_m",        "वन परिधि (मिटर)",                       "Forest Perimeter (m)"),
+    ("fieldbook_avg_elevation_m",    "औसत उचाइ (मिटर)",                       "Average Elevation (m)"),
+    ("fieldbook_min_elevation_m",    "न्यूनतम उचाइ (मिटर)",                   "Minimum Elevation (m)"),
+    ("fieldbook_max_elevation_m",    "अधिकतम उचाइ (मिटर)",                    "Maximum Elevation (m)"),
+    ("fieldbook_points",             "फिल्डबुक बिन्दु विवरण तालिका",          "Fieldbook Points Table"),
+    ("fieldbook_block_summary",      "ब्लक अनुसार फिल्डबुक बिन्दु विवरण",    "Block-wise Fieldbook Points"),
+    ("fieldbook_narration",          "फिल्डबुक विवरण (अनुच्छेद)",             "Fieldbook Narration"),
+]
+for _fk, _fne, _fen in _FIELDBOOK_VARS:
+    _vtype = "list" if _fk in ("fieldbook_points", "fieldbook_block_summary") else "string"
+    _src = "section_generator" if _fk == "fieldbook_narration" else "fieldbook"
+    _reg(_fk, "A", _fne, _fen, var_type=_vtype, source=_src)
 
 # ═══════════════════════════════════════════════════════
 # Map Variables
@@ -418,6 +582,10 @@ _MAP_TYPES = [
     ("map:dem",           "उचाइ नक्सा",             "Elevation Map"),
     ("map:aspect",        "दिशा नक्सा",             "Aspect Map"),
     ("map:canopy",        "वन छाना नक्सा",          "Canopy Cover Map"),
+    ("map:sampling_plot",           "नमुना प्लट नक्सा",                "Sample Plot Map"),
+    ("map:sampling_plot_topo",      "स्थलाकृतिक नमुना प्लट नक्सा",     "Sample Plot Map (Topo)"),
+    ("map:sampling_plot_satellite", "उपग्रह नमुना प्लट नक्सा",         "Sample Plot Map (Satellite)"),
+    ("map:fieldbook",               "फिल्डबुक बाटो नक्सा",             "Fieldbook Path Map"),
 ]
 for _mkey, _mne, _men in _MAP_TYPES:
     _reg(_mkey, "A", _mne, _men, var_type="dict", source="maps")

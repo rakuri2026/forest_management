@@ -1,6 +1,5 @@
 import Papa from 'papaparse';
 import proj4 from 'proj4';
-import { parseString } from 'xml2js';
 
 // Define common EPSG codes used in Nepal
 proj4.defs([
@@ -129,76 +128,72 @@ export const parseGPXFile = (file: File): Promise<GPSPoint[]> => {
     reader.onload = (e) => {
       const xmlText = e.target?.result as string;
 
-      parseString(xmlText, { explicitArray: false }, (err, result) => {
-        if (err) {
-          reject(new Error(`GPX parsing error: ${err.message}`));
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, 'text/xml');
+
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) {
+          reject(new Error(`GPX parsing error: ${parseError.textContent}`));
           return;
         }
 
-        try {
-          const points: GPSPoint[] = [];
+        const points: GPSPoint[] = [];
 
-          // Parse waypoints (wpt)
-          if (result.gpx?.wpt) {
-            const waypoints = Array.isArray(result.gpx.wpt) ? result.gpx.wpt : [result.gpx.wpt];
-            waypoints.forEach((wpt: any, index: number) => {
-              points.push({
-                id: `gpx-wpt-${index}`,
-                latitude: parseFloat(wpt.$.lat),
-                longitude: parseFloat(wpt.$.lon),
-                name: wpt.name || `Waypoint ${index + 1}`,
-                elevation: wpt.ele ? parseFloat(wpt.ele) : undefined,
-                order: index,
-              });
-            });
-          }
+        // Parse waypoints (wpt)
+        const waypoints = doc.querySelectorAll('wpt');
+        waypoints.forEach((wpt, index) => {
+          points.push({
+            id: `gpx-wpt-${index}`,
+            latitude: parseFloat(wpt.getAttribute('lat')!),
+            longitude: parseFloat(wpt.getAttribute('lon')!),
+            name: wpt.querySelector('name')?.textContent || `Waypoint ${index + 1}`,
+            elevation: wpt.querySelector('ele')?.textContent
+              ? parseFloat(wpt.querySelector('ele')!.textContent!)
+              : undefined,
+            order: index,
+          });
+        });
 
-          // Parse track points (trkpt)
-          if (result.gpx?.trk?.trkseg?.trkpt) {
-            const trackpoints = Array.isArray(result.gpx.trk.trkseg.trkpt)
-              ? result.gpx.trk.trkseg.trkpt
-              : [result.gpx.trk.trkseg.trkpt];
+        // Parse track points (trkpt)
+        const trackpoints = doc.querySelectorAll('trkpt');
+        trackpoints.forEach((trkpt, index) => {
+          points.push({
+            id: `gpx-trk-${index}`,
+            latitude: parseFloat(trkpt.getAttribute('lat')!),
+            longitude: parseFloat(trkpt.getAttribute('lon')!),
+            name: `Track Point ${index + 1}`,
+            elevation: trkpt.querySelector('ele')?.textContent
+              ? parseFloat(trkpt.querySelector('ele')!.textContent!)
+              : undefined,
+            order: points.length + index,
+          });
+        });
 
-            trackpoints.forEach((trkpt: any, index: number) => {
-              points.push({
-                id: `gpx-trk-${index}`,
-                latitude: parseFloat(trkpt.$.lat),
-                longitude: parseFloat(trkpt.$.lon),
-                name: `Track Point ${index + 1}`,
-                elevation: trkpt.ele ? parseFloat(trkpt.ele) : undefined,
-                order: points.length + index,
-              });
-            });
-          }
+        // Parse route points (rtept)
+        const routepoints = doc.querySelectorAll('rtept');
+        routepoints.forEach((rtept, index) => {
+          points.push({
+            id: `gpx-rte-${index}`,
+            latitude: parseFloat(rtept.getAttribute('lat')!),
+            longitude: parseFloat(rtept.getAttribute('lon')!),
+            name: rtept.querySelector('name')?.textContent || `Route Point ${index + 1}`,
+            elevation: rtept.querySelector('ele')?.textContent
+              ? parseFloat(rtept.querySelector('ele')!.textContent!)
+              : undefined,
+            order: points.length + index,
+          });
+        });
 
-          // Parse route points (rtept)
-          if (result.gpx?.rte?.rtept) {
-            const routepoints = Array.isArray(result.gpx.rte.rtept)
-              ? result.gpx.rte.rtept
-              : [result.gpx.rte.rtept];
-
-            routepoints.forEach((rtept: any, index: number) => {
-              points.push({
-                id: `gpx-rte-${index}`,
-                latitude: parseFloat(rtept.$.lat),
-                longitude: parseFloat(rtept.$.lon),
-                name: rtept.name || `Route Point ${index + 1}`,
-                elevation: rtept.ele ? parseFloat(rtept.ele) : undefined,
-                order: points.length + index,
-              });
-            });
-          }
-
-          if (points.length === 0) {
-            reject(new Error('No GPS points found in GPX file'));
-            return;
-          }
-
-          resolve(points);
-        } catch (error) {
-          reject(new Error(`Error extracting GPX data: ${error}`));
+        if (points.length === 0) {
+          reject(new Error('No GPS points found in GPX file'));
+          return;
         }
-      });
+
+        resolve(points);
+      } catch (error) {
+        reject(new Error(`Error parsing GPX data: ${error}`));
+      }
     };
 
     reader.onerror = () => {

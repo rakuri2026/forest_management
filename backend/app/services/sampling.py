@@ -1088,7 +1088,7 @@ def create_sampling_design(
     total_sampled_area_hectares = Decimal(str(total_sampled_area_sqm / 10000.0))
     sampling_percentage = Decimal(str((total_sampled_area_sqm / (float(total_forest_area) * 10000.0)) * 100))
 
-    return SamplingGenerateResponse(
+    response = SamplingGenerateResponse(
         sampling_design_id=sampling_design.id,
         calculation_id=calculation_id,
         sampling_type=sampling_type,
@@ -1102,6 +1102,12 @@ def create_sampling_design(
         sampling_percentage=sampling_percentage,
         blocks_info=blocks_info
     )
+
+    # Persist computed data so it loads instantly on page revisit
+    sampling_design.result_data = response.model_dump(mode='json')
+    db.add(sampling_design)
+
+    return response
 
 
 def get_sampling_points_geojson(db: Session, design_id: UUID) -> dict:
@@ -2014,7 +2020,7 @@ def create_sampling_design_guideline_2061(
         actual_intensity = Decimal("0")
         sampling_percentage = Decimal("0")
 
-    return SamplingGenerateResponse(
+    response = SamplingGenerateResponse(
         sampling_design_id=sampling_design.id,
         calculation_id=calculation_id,
         sampling_type="systematic",
@@ -2028,6 +2034,12 @@ def create_sampling_design_guideline_2061(
         sampling_percentage=sampling_percentage,
         blocks_info=blocks_info
     )
+
+    # Persist computed data so it loads instantly on page revisit
+    sampling_design.result_data = response.model_dump(mode='json')
+    db.add(sampling_design)
+
+    return response
 
 
 def assign_blocks_to_sampling(db: Session, design_id: UUID, calculation_id: UUID):

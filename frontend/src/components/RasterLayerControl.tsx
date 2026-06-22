@@ -550,6 +550,14 @@ function generateDynamicForestTypeLegend(forestTypePercentages: Record<string, n
         );
       }
 
+      // If still no match, try matching first word of type name (handles legacy data with old names)
+      if (!matchedClass) {
+        const firstWord = typeName.split(/[\s\-/]+/)[0].toLowerCase();
+        matchedClass = forestTypeClasses.find(cls =>
+          cls.name.toLowerCase().startsWith(firstWord)
+        );
+      }
+
       if (matchedClass) {
         console.log(`[Forest Type] Matched "${typeName}" -> color ${matchedClass.color}`);
         legendItems.push({
@@ -558,10 +566,15 @@ function generateDynamicForestTypeLegend(forestTypePercentages: Record<string, n
           range: `${percentage.toFixed(1)}%`
         });
       } else {
-        // FALLBACK: If no match found, still show it with a default color
-        console.warn(`Forest type "${typeName}" not found in color map, using fallback grey`);
+        // FALLBACK: If no match found, assign a deterministic color from a palette
+        const fallbackPalette = ['#E6194B', '#3CB44B', '#FFE119', '#4363D8', '#F58231',
+                                 '#911EB4', '#42D4F4', '#F032E6', '#BFEF45', '#469990',
+                                 '#DCBEFF', '#9A6324', '#800000', '#A9A9A9', '#000075'];
+        const hash = typeName.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        const fallbackColor = fallbackPalette[hash % fallbackPalette.length];
+        console.warn(`Forest type "${typeName}" not found in color map, using hash-based color ${fallbackColor}`);
         legendItems.push({
-          color: '#808080',  // Grey fallback
+          color: fallbackColor,
           label: typeName.replace(' Forest', '').replace(' forest', ''),
           range: `${percentage.toFixed(1)}%`
         });

@@ -904,7 +904,7 @@ def generate_field_inventory_dfo_summary(
     # ── Excel hover comments for Sheet 3 ──
     s3c = {
         3: "Total growing stock (net timber volume) per hectare. This is the merchantable stem volume that serves as the basis for biomass expansion. Growing stock is the standing volume of timber measured in cubic meters per hectare.",
-        4: "Above-Ground Biomass in tonnes per hectare. Calculated as Growing Stock × Weighted Wood Density × Biomass Expansion Factor (BEF=1.40). The BEF accounts for bark, branches, foliage, and other above-ground components not included in stem volume. IPCC Tier 2 methodology for tropical broadleaf forests.",
+        4: "Above-Ground Biomass in tonnes per hectare. Calculated as Gross Volume (VOB) × Weighted Wood Density × Biomass Expansion Factor (BEF=1.3). BEF and R/S from IPCC 2006 GL Vol 4 Table 4.4 (tropical moist deciduous forest). VOB = gross merchantable stem volume, NOT net_volume.",
         5: "Below-Ground Biomass (roots) in tonnes per hectare. Calculated as AGB × Root-to-Shoot Ratio (0.24). Root-to-shoot ratio of 0.24 means root biomass is 24% of above-ground biomass, based on IPCC default values for tropical moist forest ecosystems.",
         6: "Total tree biomass per hectare, combining above and below-ground components. Formula: AGB + BGB. This represents the complete carbon pool in living tree biomass, used for carbon stock estimation under REDD+ and IPCC guidelines.",
         7: "Total carbon stock in tonnes of carbon per hectare. Formula: Total Biomass × Carbon Fraction (0.47). The carbon fraction of 0.47 means 47% of dry tree biomass is elemental carbon, following IPCC 2006 Guidelines Table 4.3 for tropical forests.",
@@ -1263,11 +1263,11 @@ def generate_field_inventory_dfo_summary(
          "Total net timber volume per hectare.\n"
          "= total_growing_stock_m3_per_ha from block summary.\n"
          "Input value for biomass expansion."),
-        ("कार्बन सारांश", "D", "ए.जी.बी. (टन/हे.)", "AGB (t/ha)", "Static",
-         "Above-Ground Biomass in tonnes per hectare.\n"
-         "= Growing_Stock × Weighted_Wood_Density × BEF.\n"
-         "Where BEF (Biomass Expansion Factor) = 1.40 (IPCC default for tropical broadleaf).\n"
-         "AGB converts stem volume into total above-ground tree biomass including bark, branches, foliage."),
+         ("कार्बन सारांश", "D", "ए.जी.बी. (टन/हे.)", "AGB (t/ha)", "Static",
+          "Above-Ground Biomass in tonnes per hectare (IPCC Tier 2).\n"
+          "AGB = VOB × WD × BEF where VOB = gross_volume, BEF = 1.3 (IPCC 2006 GL Table 4.4).\n"
+          "VOB is gross merchantable stem volume (NOT net_volume).\n"
+          "BEF of 1.3 converts stem volume to total above-ground biomass for tropical moist deciduous forest."),
         ("कार्बन सारांश", "E", "बी.जी.बी. (टन/हे.)", "BGB (t/ha)", "Static",
          "Below-Ground Biomass (roots) in tonnes per hectare.\n"
          "= AGB × Root-to-Shoot Ratio (0.24 for tropical moist forest, IPCC Table 4.4).\n"

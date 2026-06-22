@@ -1006,6 +1006,26 @@ async def get_chart_data(
             "title": f"{forest_name} - प्रजाति संरचना (Species Composition)",
             "get_data": lambda rd: _chart_species_composition_pie_fi(rd, forest_name),
         },
+        "forest_health_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Forest Health Distribution",
+            "get_data": lambda rd: _chart_forest_health_pie(rd, forest_name),
+        },
+        "aspect_rose": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Aspect Distribution",
+            "get_data": lambda rd: _chart_aspect_pie(rd, forest_name),
+        },
+        "soil_bar": {
+            "chart_type": "bar",
+            "title": f"{forest_name} - Soil Distribution",
+            "get_data": lambda rd: _chart_soil_bar(rd, forest_name),
+        },
+        "nasa_forest_2020_pie": {
+            "chart_type": "pie",
+            "title": f"{forest_name} - Forest Quality (NASA 2020)",
+            "get_data": lambda rd: _chart_nasa_forest_2020_pie(rd, forest_name),
+        },
     }
 
     if chart_type not in chart_configs:
@@ -1130,8 +1150,9 @@ def _chart_slope_pie(raw: dict, forest_name: str) -> dict:
     labels = list(sp.keys())
     values = list(sp.values())
     color_map = {
-        "Flat": "#27ae60", "Gentle": "#f1c40f", "Moderate": "#e67e22",
-        "Steep": "#e74c3c", "Very Steep": "#c0392b",
+        "gentle": "#84cc16", "moderate": "#eab308",
+        "steep": "#f97316", "very_steep": "#ef4444",
+        "flat": "#22c55e", "Flat": "#22c55e",
     }
     colors = [color_map.get(l, "#95a5a6") for l in labels]
     return {
@@ -1153,7 +1174,10 @@ def _chart_canopy_pie(raw: dict, forest_name: str) -> dict:
         return None
     labels = list(cp.keys())
     values = list(cp.values())
-    color_map = {"Open": "#d5f5e3", "Medium": "#82e0aa", "Dense": "#27ae60", "Very Dense": "#1a5c2e"}
+    color_map = {
+        "tree": "#059669", "pole_trees": "#10b981", "regeneration": "#84cc16", "non_forest": "#94a3b8",
+        "dense": "#059669", "medium": "#10b981", "sparse": "#84cc16",
+    }
     colors = [color_map.get(l, "#95a5a6") for l in labels]
     return {
         "labels": labels,
@@ -1175,12 +1199,18 @@ def _chart_landcover_pie(raw: dict, forest_name: str) -> dict:
     sorted_lc = sorted(lc.items(), key=lambda x: x[1], reverse=True)[:6]
     labels = [x[0] for x in sorted_lc]
     values = [x[1] for x in sorted_lc]
+    landcover_color_map = {
+        "Tree cover": "#006400", "Shrubland": "#FFBB22", "Grassland": "#FFFF4C",
+        "Cropland": "#F096FF", "Built-up": "#FA0000", "Bare/sparse vegetation": "#B4B4B4",
+        "Permanent water bodies": "#0064C8", "Snow and ice": "#E0E0E0",
+    }
+    lc_colors = [landcover_color_map.get(l, "#95a5a6") for l in labels]
     return {
         "labels": labels,
         "datasets": [{
             "label": "Land Cover",
             "data": values,
-            "backgroundColor": ["#27ae60", "#3498db", "#f39c12", "#e74c3c", "#95a5a6", "#9b59b6"],
+            "backgroundColor": lc_colors,
             "borderColor": "#fff",
             "borderWidth": 1,
         }],
@@ -1203,6 +1233,103 @@ def _chart_species_composition_pie_fi(raw: dict, forest_name: str) -> dict:
             "label": "Species Composition (%)",
             "data": values,
             "backgroundColor": colors[:len(labels)],
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_forest_health_pie(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    fh = ra.get("forest_health", {}).get("percentages", {})
+    if not fh:
+        return None
+    labels = list(fh.keys())
+    values = list(fh.values())
+    color_map = {
+        "excellent": "#228B22", "healthy": "#90EE90", "moderate": "#FFD700",
+        "poor": "#FF8C00", "stressed": "#DC143C",
+    }
+    colors = [color_map.get(l, "#95a5a6") for l in labels]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Forest Health",
+            "data": values,
+            "backgroundColor": colors,
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_aspect_pie(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    ap = ra.get("aspect", {}).get("percentages", {})
+    if not ap:
+        return None
+    labels = list(ap.keys())
+    values = list(ap.values())
+    color_map = {
+        "N": "#3498db", "NE": "#2ecc71", "E": "#f1c40f",
+        "SE": "#e67e22", "S": "#e74c3c", "SW": "#9b59b6",
+        "W": "#1abc9c", "NW": "#95a5a6",
+    }
+    colors = [color_map.get(l, "#95a5a6") for l in labels]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Aspect",
+            "data": values,
+            "backgroundColor": colors,
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_soil_bar(raw: dict, forest_name: str) -> dict:
+    ra = raw.get("raster_analysis", {})
+    sp = ra.get("soil", {}).get("percentages", {})
+    if not sp:
+        return None
+    labels = list(sp.keys())
+    values = list(sp.values())
+    colors = ["#8B4513", "#A0522D", "#CD853F", "#D2691E", "#DEB887", "#D2B48C"][:len(labels)]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Soil (%)",
+            "data": values,
+            "backgroundColor": colors,
+            "borderColor": "#fff",
+            "borderWidth": 1,
+        }],
+    }
+
+
+def _chart_nasa_forest_2020_pie(raw: dict, forest_name: str) -> dict:
+    rd = raw.get("result_data", {})
+    pct = rd.get("whole_nasa_forest_2020_percentages", {})
+    if not pct or not isinstance(pct, dict):
+        return None
+    items = {k: v for k, v in pct.items() if v > 0}
+    if not items:
+        return None
+    labels = list(items.keys())
+    values = list(items.values())
+    color_map = {
+        "Primary Forest": "#00FF00",
+        "Young Secondary Forest": "#FF0000",
+        "Old Secondary Forest": "#6666FF",
+    }
+    colors = [color_map.get(l, "#999999") for l in labels]
+    return {
+        "labels": labels,
+        "datasets": [{
+            "label": "Forest Quality",
+            "data": values,
+            "backgroundColor": colors,
             "borderColor": "#fff",
             "borderWidth": 1,
         }],
@@ -1324,6 +1451,11 @@ async def export_operational_plan(
     plan = _check_plan_access(plan_id, current_user, db)
     if refresh_cache:
         clear_map_cache(calculation_id=plan.calculation_id)
+        from app.models.op_data_cache import OpDataCache
+        db.query(OpDataCache).filter(
+            OpDataCache.calculation_id == plan.calculation_id
+        ).delete()
+        db.commit()
 
     sections = plan.sections or {}
     tree_list = _dict_list_to_tree(sections.get("tree", []))

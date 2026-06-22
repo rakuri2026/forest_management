@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { compartmentApi, inventoryApi, forestApi } from '../../services/api';
 import { AvailableBlock, SplitConfig, SplitPreviewResponse } from './types';
 import { CompartmentTreeView } from './CompartmentTreeView';
@@ -11,22 +11,23 @@ import 'leaflet/dist/leaflet.css';
 import BaseMapSelector from '../MapCreation/BaseMapSelector';
 import { generateExportFileName, CONTENT_TYPES } from '../../utils/fileNaming';
 
-// DBH Class colors and sizes (1/3 of original)
-const DBH_CLASS_CONFIG: Record<string, { color: string; fillColor: string; radius: number; label: string }> = {
-  'Seedling (0.1-4)': { color: '#8b5cf6', fillColor: '#a78bfa', radius: 1, label: 'पुनरोत्पादन' },
-  'Sapling (4-10)': { color: '#3b82f6', fillColor: '#60a5fa', radius: 1, label: 'बोटविरुवा' },
-  'Small pole (10-20)': { color: '#22c55e', fillColor: '#4ade80', radius: 1.5, label: 'सानो खाँट' },
-  'Large pole (20-30)': { color: '#eab308', fillColor: '#facc15', radius: 2, label: 'ठूलो खाँट' },
-  'Small tree (30-40)': { color: '#f97316', fillColor: '#fb923c', radius: 2, label: 'सानो रूख' },
-  'Medium tree (40-50)': { color: '#ef4444', fillColor: '#f87171', radius: 2.5, label: 'मध्यम रूख' },
-  'Large tree (50-60)': { color: '#dc2626', fillColor: '#fca5a5', radius: 3, label: 'ठूलो रूख' },
-  'Very large tree (>60)': { color: '#991b1b', fillColor: '#fecaca', radius: 3, label: 'अति ठूलो रूख' },
+// DBH Class colors and sizes — 8 classes per user specification
+const DBH_CLASS_CONFIG: Record<string, { color: string; fillColor: string; radius: number; labelNp: string; labelEn: string }> = {
+  'Seedling (0-4)':    { color: '#8b5cf6', fillColor: '#a78bfa', radius: 1,   labelNp: 'विरूवा',        labelEn: 'Seedling (0-4)' },
+  'Sapling (4-10)':    { color: '#3b82f6', fillColor: '#60a5fa', radius: 1.5, labelNp: 'लाथ्रा',        labelEn: 'Sapling (4-10)' },
+  'Sm. Pole (10-20)':  { color: '#22c55e', fillColor: '#4ade80', radius: 2,   labelNp: 'सानो पोल',     labelEn: 'Sm. Pole (10-20)' },
+  'Lg. Pole (20-30)':  { color: '#eab308', fillColor: '#facc15', radius: 2.5, labelNp: 'ठुलो पोल',     labelEn: 'Lg. Pole (20-30)' },
+  'Sm. Tree (30-40)':  { color: '#f97316', fillColor: '#fb923c', radius: 3,   labelNp: 'सानो रूख',     labelEn: 'Sm. Tree (30-40)' },
+  'Med. Tree (40-50)': { color: '#ef4444', fillColor: '#f87171', radius: 3.5, labelNp: 'मध्यम रूख',    labelEn: 'Med. Tree (40-50)' },
+  'Lg. Tree (50-60)':  { color: '#dc2626', fillColor: '#fca5a5', radius: 4,   labelNp: 'ठुलो रूख',     labelEn: 'Lg. Tree (50-60)' },
+  'V. Lg. Tree (60+)': { color: '#991b1b', fillColor: '#fecaca', radius: 5,   labelNp: 'धेरै ठुलो रूख', labelEn: 'V. Lg. Tree (60+)' },
 };
 
 // Default config for unknown classes
-const DEFAULT_DBH_CONFIG = { color: '#6b7280', fillColor: '#9ca3af', radius: 3, label: 'अन्य' };
+const DEFAULT_DBH_CONFIG = { color: '#6b7280', fillColor: '#9ca3af', radius: 3, labelNp: 'अन्य', labelEn: 'Unknown' };
 
 // Component to create grid overlay based on grid cells from backend API
+// Click a cell to see mother tree info (if one exists in that cell).
 function GridOverlay({ 
   inventoryId, 
   show 
@@ -39,37 +40,15 @@ function GridOverlay({
   const [metadata, setMetadata] = useState<any>(null);
   
   useEffect(() => {
-    console.log('[GridOverlay] Rendering - show:', show, 'inventoryId:', inventoryId);
-    
-    // Clear existing grid first
-    map.eachLayer((layer: any) => {
-      if (layer.options && (layer.options.isGridCell || layer.options.isGridLine)) {
-        map.removeLayer(layer);
-      }
-    });
-    
-    // Clear grid labels
-    map.eachLayer((layer: any) => {
-      if (layer instanceof L.Marker && layer.options && layer.options.icon && 
-          layer.options.icon.options && layer.options.icon.options.className === 'grid-label') {
-        map.removeLayer(layer);
-      }
-    });
-    
     if (!show || !inventoryId) {
-      console.log('[GridOverlay] Skipping - no show or inventoryId');
       setGridCells([]);
       setMetadata(null);
       return;
     }
     
-    // Fetch grid cells from API
     const fetchGridCells = async () => {
       try {
-        console.log('[GridOverlay] Fetching grid cells for inventory:', inventoryId);
         const data = await inventoryApi.getGridCells(inventoryId);
-        console.log('[GridOverlay] Grid cells fetched:', data);
-        
         if (data && data.features) {
           setGridCells(data.features);
           setMetadata(data.metadata);
@@ -83,15 +62,12 @@ function GridOverlay({
         setMetadata(null);
       }
     };
-    
     fetchGridCells();
-  }, [show, inventoryId, map]);
+  }, [show, inventoryId]);
   
-  // Render grid cells when they change
+  // Render grid cells with click → mother tree popup
   useEffect(() => {
     if (gridCells.length === 0) return;
-    
-    console.log('[GridOverlay] Rendering', gridCells.length, 'grid cells from API');
     
     const gridGroup = L.layerGroup();
     (gridGroup as any).options.isGridCell = true;
@@ -100,54 +76,43 @@ function GridOverlay({
       const geom = cell.geometry;
       if (!geom || !geom.coordinates) return;
       
-      // Convert GeoJSON to Leaflet polygon
       const coords = geom.coordinates[0].map((c: number[]) => [c[1], c[0]]);
+      const mt = cell.properties?.mother_tree;
       
       const polygon = L.polygon(coords, {
         color: '#94a3b8',
         weight: 1,
         fillColor: '#cbd5e1',
         fillOpacity: 0.2,
-        interactive: false
+        interactive: true,
       });
       (polygon as any).options.isGridCell = true;
-      gridGroup.addLayer(polygon);
       
-      // Add cell_id label at centroid
       const cellId = cell.properties?.cell_id;
-      if (cellId !== undefined) {
-        let latSum = 0, lonSum = 0;
-        coords.forEach((c: number[]) => {
-          latSum += c[0];
-          lonSum += c[1];
-        });
-        const centerLat = latSum / coords.length;
-        const centerLon = lonSum / coords.length;
+      polygon.on('click', () => {
+        const popupContent = mt
+          ? `<div style="font-size:12px;line-height:1.6;min-width:180px;">
+               <b style="font-size:14px;">Mother Tree</b><br/>
+               <b>Species:</b> ${mt.species || '—'}<br/>
+               <b>DBH:</b> ${mt.dbh_cm?.toFixed(1) || '—'} cm<br/>
+               <b>Height:</b> ${mt.height_m?.toFixed(1) || '—'} m<br/>
+               <b>Volume:</b> ${mt.volume_m3?.toFixed(3) || '—'} m³<br/>
+               <b>Net Timber:</b> ${mt.net_volume_m3?.toFixed(3) || '—'} m³<br/>
+               <b>Fuelwood:</b> ${mt.firewood_m3?.toFixed(3) || '—'} m³
+             </div>`
+          : `<div style="font-size:12px;color:#64748b;padding:4px;">Grid Cell #${cellId} — No mother tree</div>`;
         
-        const marker = L.marker([centerLat, centerLon], {
-          icon: L.divIcon({
-            className: 'grid-label',
-            html: `<div style="font-size:9px;color:#64748b;background:rgba(255,255,255,0.8);padding:1px 2px;border-radius:2px;">${cellId}</div>`,
-            iconSize: [35, 15]
-          })
-        });
-        marker.addTo(map);
-      }
+        polygon.bindPopup(popupContent).openPopup();
+      });
+      
+      gridGroup.addLayer(polygon);
     });
     
     gridGroup.addTo(map);
     
-    console.log('[GridOverlay] Grid cells added from API');
-    
     return () => {
       map.eachLayer((layer: any) => {
         if (layer.options && layer.options.isGridCell) {
-          map.removeLayer(layer);
-        }
-      });
-      map.eachLayer((layer: any) => {
-        if (layer instanceof L.Marker && layer.options && layer.options.icon && 
-            layer.options.icon.options && layer.options.icon.options.className === 'grid-label') {
           map.removeLayer(layer);
         }
       });
@@ -278,10 +243,20 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
   const [showTrees, setShowTrees] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [showMotherTrees, setShowMotherTrees] = useState(false);
+  const [showCompartments, setShowCompartments] = useState(true);
   const [gridSpacing, setGridSpacing] = useState(20);
   const [trees, setTrees] = useState<any[]>([]);
   const [inventoryId, setInventoryId] = useState<string | null>(null);
 
+  const [visibleDbhClasses, setVisibleDbhClasses] = useState<Set<string>>(new Set());
+  
+  // Compute which DBH classes actually exist in the current tree data (dynamic legend)
+  const availableClasses = useMemo(() => {
+    const classes = new Set<string>();
+    trees.forEach(t => { if (t.dbh_class) classes.add(t.dbh_class); });
+    return classes;
+  }, [trees]);
+  
   const [showReassignmentDialog, setShowReassignmentDialog] = useState(false);
   const [reassignmentBlockId, setReassignmentBlockId] = useState<string | null>(null);
   const [reassignmentBlockName, setReassignmentBlockName] = useState<string>('');
@@ -680,11 +655,10 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
     ];
   };
 
-  // Get bounds for map fitting - prioritize compartments
-  const getMapBounds = () => {
+  // Memoized bounds — only recomputes when allFeatures changes, not on every toggle
+  const mapBounds = useMemo(() => {
     if (allFeatures.length === 0) return null;
     
-    // Find compartments to zoom to
     const compartments = allFeatures.filter(f => f.is_compartment);
     const featuresToUse = compartments.length > 0 ? compartments : allFeatures;
     
@@ -706,7 +680,7 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
     if (minLat === 90 || isNaN(minLat) || isNaN(maxLat) || isNaN(minLon) || isNaN(maxLon)) return null;
     
     return [[minLat, minLon], [maxLat, maxLon]];
-  };
+  }, [allFeatures]);
 
   return (
     <div className="h-full flex flex-col">
@@ -788,12 +762,12 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
           >
             <BaseMapSelector baseMap={baseMap} />
             
-            <MapBoundsController bounds={getMapBounds()} />
+            <MapBoundsController bounds={mapBounds} />
             
             <GridOverlay inventoryId={inventoryId} show={showGrid} />
             
             {/* Render all blocks and compartments */}
-            {allFeatures.map((feature) => {
+            {showCompartments && allFeatures.map((feature) => {
               const geom = feature.geometry;
               if (geom?.coordinates?.[0]?.[0] && (isNaN(geom.coordinates[0][0][0]) || isNaN(geom.coordinates[0][0][1]))) return null;
               return (
@@ -811,10 +785,10 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
               );
             })}
             
-            {/* Add tree points if visible */}
+            {/* Add tree points if visible — only render checked DBH classes */}
             {showTrees && trees.length > 0 && (
               <>
-                {trees.map((tree) => {
+                {trees.filter(tree => tree.dbh_class && visibleDbhClasses.has(tree.dbh_class)).map((tree) => {
                   // Get DBH class config based on dbh_class property
                   const dbhClass = tree.dbh_class || 'Unknown';
                   const config = DBH_CLASS_CONFIG[dbhClass] || DEFAULT_DBH_CONFIG;
@@ -906,7 +880,7 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
             )}
             
             {/* Add labels */}
-            <PolygonLabels features={allFeatures} />
+            {showCompartments && <PolygonLabels features={allFeatures} />}
           </MapContainer>
           
           {/* Tree toggle button and legend */}
@@ -923,22 +897,49 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
                 </svg>
-                {showTrees ? 'Hide Trees' : `Show Trees (${trees.length})`}
+                {showTrees 
+                  ? `Hide Trees (${trees.filter(t => t.dbh_class && visibleDbhClasses.has(t.dbh_class)).length} showing)`
+                  : `Show Trees (${trees.length})`
+                }
               </button>
               
-              {/* DBH Class Legend - shown when trees are visible */}
+              {/* DBH Class Legend — dynamic checkboxes, only classes present in data */}
               {showTrees && (
-                <div className="bg-white/95 p-2 rounded-lg shadow-lg text-xs max-h-40 overflow-y-auto">
+                <div className="bg-white/95 p-2 rounded-lg shadow-lg text-xs max-h-60 overflow-y-auto min-w-[220px]">
                   <p className="font-medium text-gray-700 mb-1">DBH Classification / डीबीएच वर्गीकरण</p>
-                  {Object.entries(DBH_CLASS_CONFIG).map(([key, config]) => (
-                    <div key={key} className="flex items-center gap-2 py-0.5">
-                      <span 
-                        className="w-3 h-3 rounded-full" 
-                        style={{ backgroundColor: config.fillColor, border: `1px solid ${config.color}` }}
-                      />
-                      <span className="text-gray-600 truncate">{config.label}</span>
-                    </div>
-                  ))}
+                  {availableClasses.size === 0 && (
+                    <p className="text-gray-400 italic">No DBH data available</p>
+                  )}
+                  {availableClasses.size > 0 && visibleDbhClasses.size === 0 && (
+                    <p className="text-gray-400 mb-1 italic">Check a class to show trees</p>
+                  )}
+                  {Object.entries(DBH_CLASS_CONFIG)
+                    .filter(([key]) => availableClasses.has(key))
+                    .map(([key, config]) => {
+                      const isVisible = visibleDbhClasses.has(key);
+                      const count = trees.filter(t => t.dbh_class === key).length;
+                      return (
+                        <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-gray-50 rounded px-1">
+                          <input
+                            type="checkbox"
+                            checked={isVisible}
+                            onChange={() => {
+                              const next = new Set(visibleDbhClasses);
+                              isVisible ? next.delete(key) : next.add(key);
+                              setVisibleDbhClasses(next);
+                            }}
+                            className="accent-amber-500 w-3.5 h-3.5"
+                          />
+                          <span 
+                            className="w-4 h-4 rounded-full flex-shrink-0" 
+                            style={{ backgroundColor: config.fillColor, border: `2px solid ${config.color}`, opacity: isVisible ? 1 : 0.4 }}
+                          />
+                          <span className="text-gray-700 font-medium">{config.labelNp}</span>
+                          <span className="text-gray-400">{config.labelEn}</span>
+                          {count > 0 && <span className="text-gray-400 ml-auto">{count}</span>}
+                        </label>
+                      );
+                    })}
                 </div>
               )}
               
@@ -957,6 +958,21 @@ export function CompartmentTab({ calculationId, parentBlocks }: CompartmentTabPr
                 {showMotherTrees ? 'Hide Mother Trees' : 'Show Mother Trees'}
               </button>
               
+              {/* Compartments/Blocks toggle button */}
+              <button
+                onClick={() => setShowCompartments(!showCompartments)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg transition-all ${
+                  showCompartments 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-white text-gray-700 border border-gray-300'
+                }`}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+                {showCompartments ? 'Hide Compartments' : 'Show Compartments'}
+              </button>
+
               {/* Grid toggle button */}
               <button
                 onClick={() => setShowGrid(!showGrid)}

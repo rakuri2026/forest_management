@@ -15,7 +15,6 @@ import {
   Space,
   Divider,
   Collapse,
-  Tooltip,
   Dropdown,
   Typography,
   Tag,
@@ -30,12 +29,19 @@ import {
   DownOutlined,
   UpOutlined,
   ReloadOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  BarChartOutlined
 } from '@ant-design/icons';
+import {
+  BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, Legend,
+} from 'recharts';
 import { yearlyActivitiesApi, forestApi } from '../../services/api';
 import DrawingCanvas from './DrawingCanvas';
 import './YearlyActivitiesPage.css';
 import { downloadBlob } from '../../utils/download';
+import CopyTag from '../DetailDescription/CopyTag';
 
 const { Text, Title } = Typography;
 const { Panel } = Collapse;
@@ -50,6 +56,7 @@ interface YearlyActivitiesPageProps {
 interface ProposedActivity {
   id: string;
   potential_activity_id: string;
+  potential_activity?: any;
   activity: string;
   program: string;
   unit: string;
@@ -76,6 +83,7 @@ interface DrawnFeature {
   geometry: any;
   properties: {
     name?: string;
+    label?: string;
     year?: number;
     area_sqm?: number;
     length_m?: number;
@@ -780,6 +788,46 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
     };
   }, [activityConfigs]);
 
+  // OP document preview data — mirrors the backend _collect_yearly_activities_data()
+  const opPreview = useMemo(() => {
+    const planYears = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    // Year-wise budget summary
+    const yearSummary = planYears.map(y => {
+      let yearBudget = 0, yearQty = 0, yearCount = 0;
+      activityConfigs.forEach(c => {
+        const yb = c.year_budgets[y - 1];
+        if (yb) {
+          const b = Number(yb.budget) || 0;
+          const q = Number(yb.quantity) || 0;
+          yearBudget += b;
+          yearQty += q;
+          if (b > 0 || q > 0) yearCount++;
+        }
+      });
+      return { year: y, activity_count: yearCount, total_quantity: yearQty, total_budget: yearBudget };
+    });
+    let cumulative = 0;
+    const yearChartData = yearSummary.map(ys => {
+      cumulative += ys.total_budget;
+      return { year: `Y${ys.year}`, budget: ys.total_budget, cumulative, label: `Year ${ys.year}` };
+    });
+    const totalBudgetAll = cumulative;
+
+    // Program-wise pie data
+    const progMap: Record<string, number> = {};
+    activityConfigs.forEach(c => {
+      const prog = c.program || 'Uncategorized';
+      const total = c.year_budgets.reduce((s, yb) => s + (Number(yb.budget) || 0), 0);
+      progMap[prog] = (progMap[prog] || 0) + total;
+    });
+    const programPieData = Object.entries(progMap)
+      .filter(([, v]) => v > 0)
+      .sort(([, a], [, b]) => b - a)
+      .map(([program, budget]) => ({ program, budget }));
+
+    return { yearSummary, yearChartData, programPieData, totalBudgetAll };
+  }, [activityConfigs]);
+
   // Build combined matrix rows (all potential activities + proposed activities)
   const matrixRows = useMemo<MatrixRow[]>(() => {
     const rows: MatrixRow[] = [];
@@ -921,7 +969,10 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
       {/* Header */}
       <div className="page-header">
         <div className="header-info">
-          <Title level={4}>Yearly Activities Planning</Title>
+          <Title level={4}>
+            Yearly Activities Planning
+            <CopyTag label="{{ya_activity_plan_detail}}" value="{{ya_activity_plan_detail}}" variant="section" />
+          </Title>
           <Text strong>Forest: {forestName}</Text>
           <Text type="secondary"> | Area: {Number(area || 0).toFixed(1)} ha</Text>
         </div>
@@ -1061,6 +1112,97 @@ const YearlyActivitiesPage: React.FC<YearlyActivitiesPageProps> = ({
           ))}
         </div>
       </div>
+
+      {/* OP Document Preview Section */}
+      {activityConfigs.length > 0 && (
+        <Card
+          className="op-preview-card"
+          size="small"
+          title={
+            <Space>
+              <BarChartOutlined />
+              <span>OP Document Preview — 10-Year Plan Summary</span>
+            </Space>
+          }
+        >
+          <Row gutter={[16, 16]}>
+            {/* Year-wise Budget Bar Chart */}
+            <Col xs={24} lg={14}>
+              <div className="op-preview-chart">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Text strong style={{ fontSize: 13 }}>Year-wise Budget (NPR)</Text>
+                  <CopyTag label="{{chart:ya_budget_year_bar}}" value="{{chart:ya_budget_year_bar}}" variant="variable" />
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={opPreview.yearChartData} margin={{ top: 8, right: 16, left: 16, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="year" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${Math.round(v / 1000)}K`} />
+                    <RechartsTooltip formatter={(value: number) => `NPR ${value.toLocaleString()}`} />
+                    <Bar dataKey="budget" radius={[4, 4, 0, 0]}>
+                      {opPreview.yearChartData.map((entry, i) => (
+                        <Cell key={i} fill={['#2ecc71','#27ae60','#1abc9c','#16a085','#3498db','#2980b9','#9b59b6','#8e44ad','#e67e22','#d35400'][i]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Col>
+
+            {/* Program-wise Budget Pie Chart */}
+            <Col xs={24} lg={10}>
+              <div className="op-preview-chart">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Text strong style={{ fontSize: 13 }}>Program Budget Share</Text>
+                  <CopyTag label="{{chart:ya_program_pie}}" value="{{chart:ya_program_pie}}" variant="variable" />
+                </div>
+                {opPreview.programPieData.length > 0 && (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={opPreview.programPieData}
+                        dataKey="budget"
+                        nameKey="program"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={70}
+                        innerRadius={30}
+                        label={(entry: any) => `${entry.program} (${Math.round(entry.budget / opPreview.totalBudgetAll * 100)}%)`}
+                        labelLine={false}
+                      >
+                        {opPreview.programPieData.map((_, i) => (
+                          <Cell key={i} fill={['#27ae60','#2980b9','#e67e22','#e74c3c','#9b59b6','#f1c40f','#1abc9c','#2c3e50','#d35400','#8e44ad'][i % 10]} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip formatter={(value: number) => `NPR ${value.toLocaleString()}`} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </Col>
+          </Row>
+
+          {/* Year Summary Table — matches {{ya_year_summary}} */}
+          <Divider style={{ margin: '12px 0' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Text strong style={{ fontSize: 13 }}>Year-wise Summary</Text>
+            <CopyTag label="{{ya_year_summary}}" value="{{ya_year_summary}}" variant="variable" />
+          </div>
+          <Table
+            size="small"
+            dataSource={opPreview.yearSummary}
+            rowKey="year"
+            pagination={false}
+            bordered
+            columns={[
+              { title: 'Year', dataIndex: 'year', width: 60, align: 'center' },
+              { title: 'Activities', dataIndex: 'activity_count', width: 80, align: 'center' },
+              { title: 'Total Qty', dataIndex: 'total_quantity', width: 100, align: 'right', render: (v: number) => v.toFixed(2) },
+              { title: 'Budget (NPR)', dataIndex: 'total_budget', align: 'right', render: (v: number) => v.toLocaleString() },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* Activity Detail Full-Screen Drawer */}
       <Drawer

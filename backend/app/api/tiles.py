@@ -643,21 +643,43 @@ async def get_canopy_mask_tile(
     x: int,
     y: int,
     alpha: int = Query(default=180, ge=0, le=255, description="Transparency (0=transparent, 255=opaque)"),
+    show_red: bool = Query(default=True, alias="red", description="Show red class (no canopy)"),
+    show_blue: bool = Query(default=True, alias="blue", description="Show blue class (low canopy 1-15m)"),
+    show_green: bool = Query(default=True, alias="green", description="Show green class (tall canopy >15m)"),
+    db: Session = Depends(get_db),
 ):
     """
     Get canopy height tile - reads from local canopy_height5m.tif
 
-    Displays 3 reclassified classes:
+    Displays 3 reclassified classes (clipped to forest boundary):
       Class 1 (red):   pixel value = 0     (background/nodata)
       Class 2 (blue):  pixel value = 1-15  (low canopy)
       Class 3 (green): pixel value > 15    (tall canopy)
 
     **Returns:**
-    - PNG image (256x256 pixels) with colored canopy classes
+    - PNG image (256x256 pixels) with colored canopy classes inside forest boundary
     """
     try:
+        from sqlalchemy import text
         import io
         from PIL import Image, ImageDraw
+        from shapely.geometry import Point
+        from shapely import wkt
+
+        # Get boundary WKT
+        boundary_query = text("""
+            SELECT ST_AsText(boundary_geom) as wkt
+            FROM calculations
+            WHERE id = :calc_id
+        """)
+
+        boundary_result = db.execute(boundary_query, {"calc_id": calculation_id}).first()
+
+        if not boundary_result or not boundary_result.wkt:
+            raise HTTPException(status_code=404, detail="Calculation not found")
+
+        boundary_wkt = boundary_result.wkt
+        boundary_geom = wkt.loads(boundary_wkt)
 
         ds = _get_canopy_dataset()
 
@@ -686,10 +708,17 @@ async def get_canopy_mask_tile(
             3: (0, 255, 0, alpha),    # green - value>15
         }
 
+        show_map = {1: show_red, 2: show_blue, 3: show_green}
+
         for i in range(sample_size):
             for j in range(sample_size):
                 lon = lon_min + (i + 0.5) * lon_step
                 lat = lat_min + (j + 0.5) * lat_step
+
+                # Skip cells outside forest boundary
+                point = Point(lon, lat)
+                if not boundary_geom.contains(point):
+                    continue
 
                 row, col = ds.index(lon, lat)
 
@@ -702,6 +731,9 @@ async def get_canopy_mask_tile(
                         cls = 2
                     else:
                         cls = 3
+
+                    if not show_map[cls]:
+                        continue
 
                     color = color_map[cls]
                     x1 = i * cell_size

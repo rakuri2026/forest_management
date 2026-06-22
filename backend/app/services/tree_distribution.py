@@ -23,12 +23,14 @@ from sqlalchemy import text
 from geoalchemy2.shape import to_shape
 from shapely.geometry import Point, Polygon, MultiPolygon, box
 from shapely.ops import unary_union
+import numpy as np
 import geopandas as gpd
 import pandas as pd
 
 from ..models.calculation import Calculation
 from ..models.synthetic_tree_model import SyntheticTreeModel
 from ..models.sampling import SamplingDesign
+from .volume_calculator import calculate_tree_volumes
 
 # Debug logging for volume calculation comparison
 DEBUG_VOLUME_CALC = os.environ.get('DEBUG_VOLUME_CALC', 'false').lower() == 'true'
@@ -95,6 +97,15 @@ TREE_DENSITY_BY_FOREST_TYPE = {
         (30, 100): 170,
     },
 }
+
+
+def get_species_regulation(species_code: Any, scientific_name: str) -> str:
+    code = int(species_code) if species_code and str(species_code).strip() else 0
+    if code == 22:
+        return "Terai spp"
+    elif code == 23:
+        return "Hill spp"
+    return scientific_name
 
 
 def get_tree_density(canopy_height: float, forest_type: str, max_density: int = MAX_TREES_PER_HA) -> int:
@@ -273,157 +284,8 @@ def calculate_dbh_from_height(height: float, species: Dict[str, Any]) -> float:
     return round(dbh, 1)
 
 
-def calculate_tree_volumes(
-    dbh: float,
-    height: float,
-    tree_class: int,
-    species_coefficients: Dict[str, Any]
-) -> Dict[str, float]:
-    """
-    Calculate tree volumes using Forest Regulation 2079 formulas
-
-    Args:
-        dbh: Diameter at breast height in centimeters
-        height: Tree height in meters
-        tree_class: Tree class (1, 2, 3, or 4)
-        species_coefficients: Dictionary with species coefficients (a, b, c, s, m, a1, b1)
-
-    Returns:
-        Dictionary with volume components:
-        - stem_volume: Stem volume in m³
-        - branch_volume: Branch volume in m³
-        - tree_volume: Total tree volume in m³
-        - gross_volume: Gross timber volume in m³ (from stem only)
-        - net_volume: Net timber volume in m³ (after waste)
-        - firewood_m3: Firewood volume in m³
-    """
-    # Debug logging
-    _debug_log(f"INPUT: dbh={dbh}, height={height}, tree_class={tree_class}")
-    _debug_log(f"SPECIES_COEFFS: {species_coefficients.get('scientific_name', 'unknown')}")
-    _debug_log(f"COEFFS: a={species_coefficients.get('a')}, b={species_coefficients.get('b')}, c={species_coefficients.get('c')}, a1={species_coefficients.get('a1')}, b1={species_coefficients.get('b1')}, s={species_coefficients.get('s')}, m={species_coefficients.get('m')}, bg={species_coefficients.get('bg')}")
-    
-    # Skip if regeneration (DBH < 10 cm)
-    if dbh < 10:
-        return {
-            'stem_volume': 0.0,
-            'branch_volume': 0.0,
-            'tree_volume': 0.0,
-            'gross_volume': 0.0,
-            'net_volume': 0.0,
-            'firewood_m3': 0.0
-        }
-
-    coef = species_coefficients
-
-    # 1. Calculate stem volume (Forest Regulation 2079, Table 1)
-    # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
-    if coef.get('a') is not None and coef.get('b') is not None and coef.get('c') is not None:
-        log_dbh = math.log(dbh)
-        log_height = math.log(height)
-        exp_value = coef['a'] + coef['b'] * log_dbh + coef['c'] * log_height
-        stem_volume = math.exp(exp_value) / 1000.0  # Convert to m³
-        
-        _debug_log(f"STEM: log(dbh)={log_dbh}, log(height)={log_height}, exp={exp_value}, stem_vol={stem_volume}")
-    else:
-        stem_volume = 0.0
-        _debug_log("STEM: Using default 0.0 (missing coefficients)")
-
-    # 2. Calculate branch volume (Forest Regulation 2079, Table 2)
-    # Formula: Branch Volume = Stem Volume × Branch Ratio
-    # Based on Sharma and Pukala, 1990
-    # s = small (sano), m = medium (machilo), bg = big (bara)
-    s = coef.get('s')
-    m = coef.get('m')
-    bg = coef.get('bg')
-    
-    if s is not None and m is not None and bg is not None:
-        # Use interpolation formula based on DBH class
-        if dbh < 10:
-            # Small trees: use s coefficient
-            branch_ratio = float(s)
-        elif dbh <= 40:
-            # 10-40 cm: linear interpolation between s and m
-            branch_ratio = ((dbh - 10) * float(m) + (40 - dbh) * float(s)) / 30.0
-        elif dbh <= 70:
-            # 40-70 cm: linear interpolation between m and bg
-            branch_ratio = ((dbh - 40) * float(bg) + (70 - dbh) * float(m)) / 30.0
-        else:
-            # >70 cm: use bg coefficient
-            branch_ratio = float(bg)
-        branch_volume = stem_volume * branch_ratio
-    elif s is not None and m is not None:
-        # Fallback: use average of s and m
-        branch_ratio = (float(s) + float(m)) / 2.0
-        branch_volume = stem_volume * branch_ratio
-    elif coef.get('b') is not None:
-        # Fallback: approximate from b coefficient
-        branch_ratio = abs(float(coef['b'])) * 0.1
-        branch_volume = stem_volume * branch_ratio
-    else:
-        # Final fallback: 20% default
-        branch_ratio = 0.2
-        branch_volume = stem_volume * 0.2
-
-    if DEBUG_VOLUME_CALC:
-        _debug_log(f"BRANCH: s={s}, m={m}, bg={bg}, ratio={branch_ratio}, branch_vol={branch_volume}")
-
-    # 3. Total tree volume
-    tree_volume = stem_volume + branch_volume
-
-    # 4. Calculate gross timber volume (Forest Regulation 2079, Section 4)
-    # Formula: Gross Timber = Stem Volume - 10cm Top Stem Volume
-    # NOTE: Gross timber comes ONLY from stem, branches go to firewood
-    if coef.get('a1') is not None and coef.get('b1') is not None:
-        cm10_dia_ratio = math.exp(coef['a1'] + coef['b1'] * math.log(dbh))
-        cm10_top_volume = stem_volume * cm10_dia_ratio  # From stem only
-        gross_volume = stem_volume - cm10_top_volume
-        
-        _debug_log(f"GROSS: a1={coef.get('a1')}, b1={coef.get('b1')}, cm10_ratio={cm10_dia_ratio}, cm10_vol={cm10_top_volume}, gross_vol={gross_volume}")
-    else:
-        gross_volume = stem_volume * 0.85  # Fallback: 85% merchantable
-        _debug_log(f"GROSS: Using fallback 0.85, gross_vol={gross_volume}")
-
-    # 5. Calculate net timber volume (Forest Regulation 2079, Section 5)
-    # Apply waste factors based on tree class
-    # Class 1: 80% net (20% waste)
-    # Class 2: 60% net (40% waste)
-    # Class 3: 30% net (70% waste)
-    # Class 4: 0% net (100% firewood)
-    if tree_class == 1:
-        net_volume = gross_volume * 0.80
-        waste_factor = 0.80
-    elif tree_class == 2:
-        net_volume = gross_volume * 0.60
-        waste_factor = 0.60
-    elif tree_class == 3:
-        net_volume = gross_volume * 0.30
-        waste_factor = 0.30
-    elif tree_class == 4:
-        net_volume = 0.0
-        waste_factor = 0.0
-    else:
-        net_volume = gross_volume * 0.60  # Default to class 2
-        waste_factor = 0.60
-
-    if DEBUG_VOLUME_CALC:
-        _debug_log(f"[TREE_MODEL_VOLUME] NET: class={tree_class}, waste_factor={waste_factor}, gross_vol={gross_volume}, net_vol={net_volume}")
-
-    # 6. Calculate firewood volume
-    # Firewood = All branches + Stem waste
-    firewood_m3 = tree_volume - net_volume
-
-    if DEBUG_VOLUME_CALC:
-        _debug_log(f"[TREE_MODEL_VOLUME] FIREWOOD: tree_vol={tree_volume}, net_vol={net_volume}, firewood={firewood_m3}")
-        _debug_log(f"[TREE_MODEL_VOLUME] FINAL: stem={stem_volume}, branch={branch_volume}, tree={tree_volume}, gross={gross_volume}, net={net_volume}, firewood={firewood_m3}")
-
-    return {
-        'stem_volume': round(stem_volume, 6),
-        'branch_volume': round(branch_volume, 6),
-        'tree_volume': round(tree_volume, 6),
-        'gross_volume': round(gross_volume, 6),
-        'net_volume': round(net_volume, 6),
-        'firewood_m3': round(firewood_m3, 6)
-    }
+# calculate_tree_volumes() is imported from .volume_calculator
+# Single shared source of truth for all three tabs.
 
 
 def calculate_tree_biomass(dbh: float, height: Optional[float], species: Dict[str, Any]) -> float:
@@ -518,6 +380,103 @@ def get_species_role(availability_rank: int) -> str:
         5: 'rare'
     }
     return rank_to_role.get(availability_rank, 'associate')
+
+
+def group_species_by_role(species_list: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Group species by their role based on availability_rank
+
+    Returns:
+        Dict with keys: 'dominant', 'co-dominant', 'associate', 'occasional', 'rare'
+    """
+    rank_to_role = {1: 'dominant', 2: 'co-dominant', 3: 'associate', 4: 'occasional', 5: 'rare'}
+    groups = {role: [] for role in rank_to_role.values()}
+    for sp in species_list:
+        rank = sp.get('availability_rank', 3)
+        role = rank_to_role.get(rank, 'associate')
+        groups[role].append(sp)
+    return groups
+
+
+def weighted_random_choice_with_ratio(
+    species_list: List[Dict[str, Any]],
+    role_target_ratio: Optional[Dict[str, float]] = None
+) -> Dict[str, Any]:
+    """
+    Select species with optional role-ratio override.
+
+    Mode 1 — No ratio (default): Same as weighted_random_choice().
+    Uses availability_rank across ALL species (current behavior).
+
+    Mode 2 — Ratio provided:
+    1. Pick role first using target ratio (roulette wheel)
+    2. Within the role group, pick species using frequency-weighted ranks
+       Formula: within_role_weight = (6 - rank) * (frequency_percent / 100 + 0.5)
+
+    Args:
+        species_list: List of species dicts with 'availability_rank', 'frequency_percent'
+        role_target_ratio: e.g. {'dominant': 0.50, 'co-dominant': 0.30, ...}
+                          or None for default behavior
+
+    Returns:
+        Selected species dictionary
+    """
+    if not species_list:
+        raise ValueError("Species list is empty")
+
+    # Mode 1: Default — use existing weighted_random_choice logic
+    if role_target_ratio is None:
+        return weighted_random_choice(species_list)
+
+    # Mode 2: Role-ratio override
+    # Step 1: Group species by role
+    rank_to_role = {1: 'dominant', 2: 'co-dominant', 3: 'associate', 4: 'occasional', 5: 'rare'}
+    role_to_ranks = {role: [r for r, rl in rank_to_role.items() if rl == role] for role in role_target_ratio}
+
+    role_groups = {}
+    for sp in species_list:
+        rank = sp.get('availability_rank', 3)
+        role = rank_to_role.get(rank, 'associate')
+        if role not in role_groups:
+            role_groups[role] = []
+        role_groups[role].append(sp)
+
+    # Step 2: Pick role by target ratio
+    roles = list(role_target_ratio.keys())
+    ratios = [role_target_ratio[r] for r in roles]
+    total_ratio = sum(ratios)
+    r = random.uniform(0, total_ratio)
+    cumulative = 0.0
+    selected_role = roles[-1]
+    for role, ratio in zip(roles, ratios):
+        cumulative += ratio
+        if r <= cumulative:
+            selected_role = role
+            break
+
+    # Step 3: Get species in selected role
+    role_species = role_groups.get(selected_role, [])
+    if not role_species:
+        # Fallback: if no species found for selected role, pick from any
+        role_species = species_list
+
+    # Step 4: Within-role weighted selection
+    weights = []
+    for sp in role_species:
+        rank = sp.get('availability_rank', 3)
+        freq = sp.get('frequency_percent', 50) or 50
+        weight = (6 - rank) * (freq / 100.0 + 0.5)
+        weights.append(max(weight, 0.1))
+
+    total_weight = sum(weights)
+    r2 = random.uniform(0, total_weight)
+    cumulative = 0.0
+    for sp, weight in zip(role_species, weights):
+        cumulative += weight
+        if r2 <= cumulative:
+            return sp
+
+    return role_species[-1] if role_species else species_list[-1]
 
 
 def extract_canopy_pixels(boundary_wkt: str, db: Session) -> List[Dict[str, Any]]:
@@ -1612,8 +1571,8 @@ def generate_synthetic_trees(
     # Use filtered tree species for tree model generation
     species_list = tree_species_only
 
-    forest_type = result_data.get('forest_type', {}).get('dominant_type', 'Unknown')
-    area_hectares = result_data.get('area', {}).get('hectares', 0)
+    forest_type = result_data.get('forest_type_dominant', 'Unknown')
+    area_hectares = result_data.get('area_hectares', 0)
 
     # Step 1.2: Load species coefficients for volume calculations
     report(11, "Loading species coefficients")
@@ -1621,20 +1580,24 @@ def generate_synthetic_trees(
 
     # Load species coefficients from database
     from sqlalchemy import text as sql_text
+    species_code_map = {}
     coef_query = sql_text("""
-        SELECT scientific_name, a, b, c, s, m, a1, b1
+        SELECT scientific_name, species_code, a, b, c, s, m, bg, a1, b1, full_stem_merchantable
         FROM tree_species_coefficients
     """)
     coef_result = db.execute(coef_query)
     for row in coef_result:
+        species_code_map[row.scientific_name] = row.species_code
         species_coefficients[row.scientific_name] = {
             'a': row.a,
             'b': row.b,
             'c': row.c,
             's': row.s,
             'm': row.m,
+            'bg': row.bg,
             'a1': row.a1,
-            'b1': row.b1
+            'b1': row.b1,
+            'full_stem_merchantable': bool(row.full_stem_merchantable) if row.full_stem_merchantable is not None else False,
         }
 
     # Step 1.5: Check if sampling design exists (REQUIRED)
@@ -1751,7 +1714,8 @@ def generate_synthetic_trees(
             trees.append({
                 'tree_id': tree_id,
                 'geometry': (x, y),
-                'species_code': species.get('species_code'),
+                'species_code': species_code_map.get(scientific_name, ''),
+                'species_regulation': get_species_regulation(species_code_map.get(scientific_name, ''), scientific_name or ''),
                 'species_scientific': scientific_name,
                 'species_local': species.get('local_name'),
                 'species_role': role,
@@ -2030,6 +1994,17 @@ def generate_synthetic_trees(
     total_growing_stock_all = pole_timber_per_ha_all + tree_timber_per_ha_all
     total_volume_per_ha_all = pole_timber_per_ha_all + pole_firewood_per_ha_all + tree_timber_per_ha_all + tree_firewood_per_ha_all
 
+    # DBH class per-hectare counts (overall forest level)
+    if sampling_design.total_points > 0:
+        overall_dbh_per_ha = {
+            'regeneration_1_4cm': round((len(unestablished) / sampling_design.total_points) * 1000, 1),
+            'sapling_4_10cm': round((len(established) / sampling_design.total_points) * 400, 1),
+            'pole_10_30cm': round((len(pole_trees_all) / sampling_design.total_points) * 100, 1),
+            'tree_above_30cm': round((len(tree_trees_all) / sampling_design.total_points) * 20, 1),
+        }
+    else:
+        overall_dbh_per_ha = {}
+
     statistics = {
         'total_trees': len(trees),
         'total_trees_generated': total_trees_generated,  # Before filtering
@@ -2074,6 +2049,7 @@ def generate_synthetic_trees(
         'total_growing_stock_m3_per_ha': round(total_growing_stock_all, 2),
         # Total volume (timber + firewood)
         'volume_per_ha': round(total_volume_per_ha_all, 2),
+        'dbh_per_ha': overall_dbh_per_ha,  # Overall DBH class counts per hectare
         'block_dbh_distribution': block_dbh_distribution,  # Block-wise DBH class distribution
     }
 
@@ -2095,4 +2071,741 @@ def generate_synthetic_trees(
         'statistics': statistics,
         'processing_time_seconds': int(processing_time),
         'config': config
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ALL TREE EXPORT — Full-extent tree generation (1 row = 1 tree, flat format)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ALL_TREE_PIXEL_AREA_HA = 0.0025  # 5m × 5m = 25 m² = 0.0025 ha
+
+
+def _probabilistic_round(value: float) -> int:
+    """
+    Round a float probabilistically.
+
+    e.g. 1.25 → 1 (75% chance), 2 (25% chance)
+    """
+    base = int(math.floor(value))
+    frac = value - base
+    return base + (1 if random.random() < frac else 0)
+
+
+def export_to_gpkg_flat(
+    trees: List[Dict[str, Any]],
+    calculation_id: uuid.UUID,
+    db: Session = None,
+    output_dir: str = "exports"
+) -> Tuple[str, float]:
+    """
+    Export trees to GPKG in FLAT format (1 row = 1 tree).
+
+    NOT the regulation format — no regen/sapling/pole/tree column split.
+
+    Args:
+        trees: List of tree dictionaries
+        calculation_id: UUID of calculation
+        db: Database session (optional, for forest name)
+        output_dir: Directory to save GPKG files
+
+    Returns:
+        Tuple of (filepath, file_size_mb)
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    forest_name = "forest"
+    if db is not None:
+        try:
+            calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+            if calc and calc.forest_name:
+                forest_name = calc.forest_name.replace(' ', '_')
+                forest_name = ''.join(c for c in forest_name if c.isalnum() or c == '_')
+        except Exception:
+            pass
+
+    timestamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{forest_name}_AllTrees_{timestamp}.gpkg"
+    filepath = os.path.join(output_dir, filename)
+
+    records = []
+    for tree in trees:
+        geom = tree.get('geometry')
+        records.append({
+            'tree_id': tree.get('tree_id'),
+            'block_name': tree.get('block_name', ''),
+            'species_code': tree.get('species_code', ''),
+            'species_regulation': tree.get('species_regulation', ''),
+            'species_scientific': tree.get('species_scientific', ''),
+            'species_local': tree.get('species_local', ''),
+            'species_role': tree.get('species_role', ''),
+            'height_m': tree.get('height_m'),
+            'dbh_cm': tree.get('dbh_cm'),
+            'tree_class': tree.get('tree_class'),
+            'canopy_height_source': tree.get('canopy_height_source'),
+            'forest_type': tree.get('forest_type', ''),
+            'stem_volume_m3': tree.get('stem_volume', 0.0),
+            'branch_volume_m3': tree.get('branch_volume', 0.0),
+            'tree_volume_m3': tree.get('tree_volume', 0.0),
+            'gross_volume_m3': tree.get('gross_volume', 0.0),
+            'net_volume_m3': tree.get('net_volume', 0.0),
+            'firewood_m3': tree.get('firewood_m3', 0.0),
+            'longitude': geom[0] if geom else None,
+            'latitude': geom[1] if geom else None,
+            'generated_date': tree.get('generated_date', ''),
+            'model_version': tree.get('model_version', ''),
+            'notes': tree.get('notes', ''),
+            'geometry': Point(geom) if geom else None,
+        })
+
+    gdf = gpd.GeoDataFrame(records, crs='EPSG:4326')
+    column_order = [
+        'tree_id', 'block_name', 'species_code', 'species_regulation', 'species_scientific',
+        'species_local', 'species_role', 'height_m', 'dbh_cm', 'tree_class',
+        'canopy_height_source', 'forest_type',
+        'stem_volume_m3', 'branch_volume_m3', 'tree_volume_m3',
+        'gross_volume_m3', 'net_volume_m3', 'firewood_m3',
+        'longitude', 'latitude', 'generated_date', 'model_version', 'notes',
+        'geometry'
+    ]
+    gdf = gdf[[c for c in column_order if c in gdf.columns]]
+    gdf.to_file(filepath, driver='GPKG', layer='all_trees')
+
+    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+    return filepath, file_size_mb
+
+
+def export_to_excel_flat(
+    trees: List[Dict[str, Any]],
+    calculation_id: uuid.UUID,
+    db: Session = None,
+    output_dir: str = "exports"
+) -> Tuple[str, float]:
+    """
+    Export trees to Excel in FLAT format.
+
+    Sheet 1: "Tree Data" — 1 row = 1 tree, flat columns
+    Sheet 2: "Summary" — Block-wise statistics
+
+    Args:
+        trees: List of tree dictionaries
+        calculation_id: UUID of calculation
+        db: Database session
+        output_dir: Directory to save Excel files
+
+    Returns:
+        Tuple of (filepath, file_size_mb)
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    forest_name = "forest"
+    if db is not None:
+        try:
+            calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+            if calc and calc.forest_name:
+                forest_name = calc.forest_name.replace(' ', '_')
+                forest_name = ''.join(c for c in forest_name if c.isalnum() or c == '_')
+        except Exception:
+            pass
+
+    timestamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{forest_name}_AllTrees_{timestamp}.xlsx"
+    filepath = os.path.join(output_dir, filename)
+
+    # Sheet 1: Tree Data (flat)
+    rows = []
+    for tree in trees:
+        geom = tree.get('geometry')
+        rows.append({
+            'tree_id': tree.get('tree_id'),
+            'block_name': tree.get('block_name', ''),
+            'species_code': tree.get('species_code', ''),
+            'species_scientific': tree.get('species_scientific', ''),
+            'species_local': tree.get('species_local', ''),
+            'species_role': tree.get('species_role', ''),
+            'height_m': tree.get('height_m'),
+            'dbh_cm': tree.get('dbh_cm'),
+            'tree_class': tree.get('tree_class'),
+            'canopy_height_source': tree.get('canopy_height_source'),
+            'forest_type': tree.get('forest_type', ''),
+            'stem_volume_m3': tree.get('stem_volume', 0.0),
+            'branch_volume_m3': tree.get('branch_volume', 0.0),
+            'tree_volume_m3': tree.get('tree_volume', 0.0),
+            'gross_volume_m3': tree.get('gross_volume', 0.0),
+            'net_volume_m3': tree.get('net_volume', 0.0),
+            'firewood_m3': tree.get('firewood_m3', 0.0),
+            'longitude': geom[0] if geom else None,
+            'latitude': geom[1] if geom else None,
+        })
+
+    df_trees = pd.DataFrame(rows)
+
+    # Sheet 2: Summary by block
+    summary_rows = []
+    for block_name in df_trees['block_name'].unique():
+        block_df = df_trees[df_trees['block_name'] == block_name]
+        total = len(block_df)
+        mature = len(block_df[block_df['dbh_cm'] >= 10])
+        pole = len(block_df[(block_df['dbh_cm'] >= 10) & (block_df['dbh_cm'] < 30)])
+        tree_large = len(block_df[block_df['dbh_cm'] >= 30])
+        total_vol = block_df['tree_volume_m3'].sum()
+        net_timber = block_df['net_volume_m3'].sum()
+        firewood = block_df['firewood_m3'].sum()
+        summary_rows.append({
+            'block_name': block_name,
+            'total_trees': total,
+            'pole_trees_10_30cm': pole,
+            'trees_above_30cm': tree_large,
+            'total_volume_m3': round(total_vol, 2),
+            'net_timber_m3': round(net_timber, 2),
+            'firewood_m3': round(firewood, 2),
+        })
+
+    df_summary = pd.DataFrame(summary_rows)
+
+    with pd.ExcelWriter(filepath, engine='xlsxwriter') as writer:
+        df_trees.to_excel(writer, sheet_name='Tree Data', index=False)
+        df_summary.to_excel(writer, sheet_name='Summary', index=False)
+
+        workbook = writer.book
+        header_fmt = workbook.add_format({
+            'bg_color': '#2F4F4F', 'font_color': '#FFFFFF', 'bold': True,
+            'align': 'center', 'valign': 'vcenter', 'border': 0,
+        })
+        for ws_name in ['Tree Data', 'Summary']:
+            ws = writer.sheets[ws_name]
+            for col_num, _ in enumerate(
+                df_trees.columns if ws_name == 'Tree Data' else df_summary.columns
+            ):
+                ws.write(0, col_num, _, header_fmt)
+            ws.autofilter(0, 0, len(df_trees) if ws_name == 'Tree Data' else len(df_summary),
+                          len(df_trees.columns if ws_name == 'Tree Data' else df_summary.columns) - 1)
+    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+    return filepath, file_size_mb
+
+
+def export_to_csv_flat(
+    trees: List[Dict[str, Any]],
+    calculation_id: uuid.UUID,
+    db: Session = None,
+    output_dir: str = "exports"
+) -> Tuple[str, float]:
+    """
+    Export trees to CSV in FLAT format (1 row = 1 tree).
+
+    Args:
+        trees: List of tree dictionaries
+        calculation_id: UUID of calculation
+        db: Database session
+        output_dir: Directory to save CSV files
+
+    Returns:
+        Tuple of (filepath, file_size_mb)
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    forest_name = "forest"
+    if db is not None:
+        try:
+            calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+            if calc and calc.forest_name:
+                forest_name = calc.forest_name.replace(' ', '_')
+                forest_name = ''.join(c for c in forest_name if c.isalnum() or c == '_')
+        except Exception:
+            pass
+
+    timestamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{forest_name}_AllTrees_{timestamp}.csv"
+    filepath = os.path.join(output_dir, filename)
+
+    rows = []
+    for tree in trees:
+        geom = tree.get('geometry')
+        rows.append({
+            'tree_id': tree.get('tree_id'),
+            'block_name': tree.get('block_name', ''),
+            'species_code': tree.get('species_code', ''),
+            'species_scientific': tree.get('species_scientific', ''),
+            'species_local': tree.get('species_local', ''),
+            'species_role': tree.get('species_role', ''),
+            'height_m': tree.get('height_m'),
+            'dbh_cm': tree.get('dbh_cm'),
+            'tree_class': tree.get('tree_class'),
+            'canopy_height_source': tree.get('canopy_height_source'),
+            'forest_type': tree.get('forest_type', ''),
+            'stem_volume_m3': tree.get('stem_volume', 0.0),
+            'branch_volume_m3': tree.get('branch_volume', 0.0),
+            'tree_volume_m3': tree.get('tree_volume', 0.0),
+            'gross_volume_m3': tree.get('gross_volume', 0.0),
+            'net_volume_m3': tree.get('net_volume', 0.0),
+            'firewood_m3': tree.get('firewood_m3', 0.0),
+            'longitude': geom[0] if geom else None,
+            'latitude': geom[1] if geom else None,
+        })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(filepath, index=False)
+
+    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+    return filepath, file_size_mb
+
+
+def generate_full_extent_trees(
+    calculation_id: uuid.UUID,
+    db: Session,
+    config: Optional[Dict[str, Any]] = None,
+    progress_callback: Optional[callable] = None
+) -> Dict[str, Any]:
+    """
+    Generate ALL trees within the forest boundary from canopy height raster.
+
+    Unlike generate_synthetic_trees() which only creates trees within sample
+    plot buffers, this function processes EVERY valid pixel in the forest
+    boundary and creates trees across the entire extent.
+
+    One row = one tree (flat format), not the regulation split format.
+
+    Args:
+        calculation_id: UUID of calculation with boundary
+        db: Database session
+        config: Optional configuration overrides
+        progress_callback: Optional function(percent, step)
+
+    Returns:
+        Dictionary with generation results and statistics
+    """
+    start_time = datetime.now()
+
+    default_config = {
+        'min_dbh_cm': MIN_DBH_CM,
+        'min_height_m': MIN_HEIGHT_M,
+        'max_trees_per_ha': MAX_TREES_PER_HA,
+        'algorithm_version': 'v1.0',
+        'species_role_target_ratio': None,
+    }
+    config = {**default_config, **(config or {})}
+
+    def report(percent: int, step: str):
+        if progress_callback:
+            progress_callback(percent, step)
+
+    # Step 1: Load calculation
+    report(5, "Loading calculation data")
+    calculation = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calculation:
+        raise ValueError(f"Calculation {calculation_id} not found")
+
+    result_data = calculation.result_data or {}
+    species_list = result_data.get('potential_species', [])
+    if not species_list:
+        raise ValueError("No species data found in calculation")
+
+    # Filter to tree species only
+    tree_species_only = [sp for sp in species_list if sp.get('is_tree_species', True)]
+    if not tree_species_only:
+        raise ValueError(f"No tree species found. Total: {len(species_list)}, none classified as trees.")
+    if len(tree_species_only) < len(species_list):
+        print(f"INFO: Filtered out {len(species_list) - len(tree_species_only)} non-tree species.")
+    species_list = tree_species_only
+
+    # Step 2: Get boundary geometry
+    report(10, "Loading boundary geometry")
+    if not calculation.boundary_geom:
+        raise ValueError("Calculation has no boundary geometry")
+
+    from geoalchemy2.shape import to_shape
+    boundary_shape = to_shape(calculation.boundary_geom)
+    forest_type = result_data.get('forest_type_dominant', 'Unknown')
+
+    # Step 3: Load species coefficients
+    report(12, "Loading species coefficients")
+    from sqlalchemy import text as sql_text
+    species_coefficients = {}
+    coef_query = sql_text("""
+        SELECT scientific_name, species_code, a, b, c, s, m, bg, a1, b1,
+               typical_hd_ratio_min, typical_hd_ratio_max,
+               max_dbh_cm, max_height_m, growth_rate, full_stem_merchantable
+        FROM tree_species_coefficients
+    """)
+    for row in db.execute(coef_query):
+        species_coefficients[row.scientific_name] = {
+            'species_code': row.species_code,
+            'a': row.a, 'b': row.b, 'c': row.c,
+            's': row.s, 'm': row.m, 'bg': row.bg,
+            'a1': row.a1, 'b1': row.b1,
+            'typical_hd_ratio_min': row.typical_hd_ratio_min,
+            'typical_hd_ratio_max': row.typical_hd_ratio_max,
+            'max_dbh_cm': row.max_dbh_cm, 'max_height_m': row.max_height_m,
+            'growth_rate': row.growth_rate,
+            'full_stem_merchantable': bool(row.full_stem_merchantable) if row.full_stem_merchantable is not None else False,
+        }
+
+    # Merge coefficients into species list for DBH/height calculations
+    for sp in species_list:
+        sci_name = sp.get('scientific_name')
+        if sci_name and sci_name in species_coefficients:
+            sp.update(species_coefficients[sci_name])
+
+    # Step 4: Extract all pixels from TIFF within boundary
+    report(20, "Extracting canopy height pixels from TIFF")
+    import rasterio
+    from rasterio.mask import mask as rio_mask
+    from shapely.geometry import mapping
+
+    tiff_path = r"D:\forest_management\canopy_height5m.tif"
+
+    with rasterio.open(tiff_path) as src:
+        out_image, out_transform = rio_mask(
+            src,
+            [mapping(boundary_shape)],
+            crop=True,
+            nodata=0,
+            all_touched=False,
+        )
+        height_band = out_image[0]
+
+    # Collect valid pixels with height > 0
+    import numpy as np
+    valid_rows, valid_cols = np.where(height_band > 0)
+    valid_pixels = []
+    for row, col in zip(valid_rows, valid_cols):
+        height = float(height_band[row, col])
+        if height < config['min_height_m']:
+            continue
+        # Get pixel bounds in geographic coordinates
+        x_ul, y_ul = rasterio.transform.xy(out_transform, row, col, offset='ul')
+        x_lr, y_lr = rasterio.transform.xy(out_transform, row, col, offset='lr')
+        # Normalize bounds (handle negative x step)
+        min_x, max_x = (x_ul, x_lr) if x_ul < x_lr else (x_lr, x_ul)
+        min_y, max_y = (y_lr, y_ul) if y_lr < y_ul else (y_ul, y_lr)
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        valid_pixels.append({
+            'height': height,
+            'center': (center_x, center_y),
+            'bounds': (min_x, min_y, max_x, max_y),
+        })
+
+    if not valid_pixels:
+        raise ValueError(
+            "No valid canopy height pixels found within the forest boundary. "
+            "Ensure the TIFF overlaps with the boundary and contains height values > 0."
+        )
+
+    report(30, f"Found {len(valid_pixels)} pixels. Generating trees...")
+    print(f"INFO: Processing {len(valid_pixels)} valid pixels across the forest boundary.")
+
+    # Step 5: Generate trees for each pixel
+    trees = []
+    tree_id = 1
+    total_pixels = len(valid_pixels)
+
+    # Pre-group species by role if ratio override is provided
+    role_target_ratio = config.get('species_role_target_ratio')
+
+    for idx, pixel in enumerate(valid_pixels):
+        if (idx + 1) % max(1, total_pixels // 10) == 0:
+            pct = 30 + int((idx + 1) / total_pixels * 45)
+            report(pct, f"Generating trees: {idx + 1}/{total_pixels} pixels")
+
+        canopy_height = pixel['height']
+        trees_per_ha = get_tree_density(canopy_height, forest_type, config['max_trees_per_ha'])
+        if trees_per_ha == 0:
+            continue
+
+        raw_trees_per_pixel = trees_per_ha * ALL_TREE_PIXEL_AREA_HA
+        num_trees = _probabilistic_round(raw_trees_per_pixel)
+        if num_trees == 0:
+            continue
+
+        for _ in range(num_trees):
+            # Random position within pixel bounds
+            x, y = generate_random_point_in_pixel(pixel['bounds'])
+
+            # Select species (with optional ratio override)
+            species = weighted_random_choice_with_ratio(species_list, role_target_ratio)
+            role = get_species_role(species.get('availability_rank', 3))
+
+            # Assign height
+            tree_height = assign_tree_height(canopy_height, species, role)
+
+            # Calculate DBH
+            dbh = calculate_dbh_from_height(tree_height, species)
+
+            # Filter by thresholds
+            max_dbh = config.get('max_dbh_cm')
+            if dbh < config['min_dbh_cm'] or (max_dbh and dbh > max_dbh) or tree_height < config['min_height_m']:
+                continue
+
+            # Assign tree class
+            tree_class = assign_tree_class(dbh, tree_height, species)
+
+            # Calculate volumes
+            volumes = {'stem_volume': 0.0, 'branch_volume': 0.0, 'tree_volume': 0.0,
+                       'gross_volume': 0.0, 'net_volume': 0.0, 'firewood_m3': 0.0}
+
+            scientific_name = species.get('scientific_name')
+            if scientific_name and scientific_name in species_coefficients:
+                volumes = calculate_tree_volumes(
+                    dbh=dbh,
+                    height=tree_height,
+                    tree_class=tree_class,
+                    species_coefficients=species_coefficients[scientific_name]
+                )
+
+            trees.append({
+                'tree_id': tree_id,
+                'geometry': (x, y),
+                'species_code': species.get('species_code'),
+                'species_regulation': get_species_regulation(species.get('species_code'), scientific_name or ''),
+                'species_scientific': scientific_name,
+                'species_local': species.get('local_name'),
+                'species_role': role,
+                'height_m': tree_height,
+                'dbh_cm': dbh,
+                'tree_class': tree_class,
+                'canopy_height_source': canopy_height,
+                'forest_type': forest_type,
+                'block_name': calculation.block_name or '',
+                'generated_date': datetime.now().isoformat(),
+                'model_version': config['algorithm_version'],
+                'notes': 'SYNTHETIC DATA - Generated from canopy height model',
+                'stem_volume': volumes['stem_volume'],
+                'branch_volume': volumes['branch_volume'],
+                'tree_volume': volumes['tree_volume'],
+                'gross_volume': volumes['gross_volume'],
+                'net_volume': volumes['net_volume'],
+                'firewood_m3': volumes['firewood_m3'],
+            })
+            tree_id += 1
+
+    if not trees:
+        raise ValueError("No trees generated — all pixels resulted in zero trees after filtering. "
+                         "Try lowering min_dbh_cm or min_height_m.")
+
+    # Step 6: Spatial join — assign block names
+    report(78, "Assigning block names via spatial join")
+    trees = assign_block_names_to_trees(trees, result_data)
+
+    total_trees = len(trees)
+    report(80, f"Generated {total_trees} trees across the forest boundary")
+
+    # Step 7: Export GPKG only (primary format)
+    report(85, "Exporting to GPKG")
+    gpkg_filepath, gpkg_size_mb = export_to_gpkg_flat(trees, calculation_id, db=db)
+    # Excel and CSV skipped — GPKG is the canonical flat format
+
+    # Step 8: Statistics
+    report(95, "Calculating statistics")
+
+    area_hectares = result_data.get('area_hectares', 0)
+    dbhs = [t['dbh_cm'] for t in trees]
+    heights = [t['height_m'] for t in trees if t.get('height_m') is not None]
+
+    # Species role distribution
+    role_dist = {}
+    for t in trees:
+        r = t.get('species_role', 'unknown')
+        role_dist[r] = role_dist.get(r, 0) + 1
+
+    # DBH class distribution
+    dbh_classes = {
+        'unestablished_regen_1_4cm': len([t for t in trees if t['dbh_cm'] < 4]),
+        'established_regen_4_10cm': len([t for t in trees if 4 <= t['dbh_cm'] < 10]),
+        'small_pole_10_20cm': len([t for t in trees if 10 <= t['dbh_cm'] < 20]),
+        'large_pole_20_30cm': len([t for t in trees if 20 <= t['dbh_cm'] < 30]),
+        'small_tree_30_40cm': len([t for t in trees if 30 <= t['dbh_cm'] < 40]),
+        'medium_tree_40_50cm': len([t for t in trees if 40 <= t['dbh_cm'] < 50]),
+        'large_tree_50_60cm': len([t for t in trees if 50 <= t['dbh_cm'] < 60]),
+        'very_large_tree_60plus': len([t for t in trees if t['dbh_cm'] >= 60]),
+    }
+
+    # Block-wise stats
+    trees_by_block = {}
+    for t in trees:
+        bname = t.get('block_name', 'Unknown')
+        if bname not in trees_by_block:
+            trees_by_block[bname] = []
+        trees_by_block[bname].append(t)
+
+    block_stats = {}
+    for bname, btrees in trees_by_block.items():
+        b_vol = sum(t.get('tree_volume', 0.0) for t in btrees)
+        b_net = sum(t.get('net_volume', 0.0) for t in btrees)
+        b_fire = sum(t.get('firewood_m3', 0.0) for t in btrees)
+        block_stats[bname] = {
+            'total_trees': len(btrees),
+            'total_volume_m3': round(b_vol, 2),
+            'net_timber_m3': round(b_net, 2),
+            'firewood_m3': round(b_fire, 2),
+        }
+
+    statistics = {
+        'total_trees': total_trees,
+        'area_hectares': area_hectares,
+        'trees_per_hectare': round(total_trees / area_hectares, 2) if area_hectares > 0 else 0,
+        'min_dbh_cm': min(dbhs),
+        'max_dbh_cm': max(dbhs),
+        'mean_dbh_cm': round(sum(dbhs) / len(dbhs), 2),
+        'min_height_m': min(heights) if heights else 0,
+        'max_height_m': max(heights) if heights else 0,
+        'mean_height_m': round(sum(heights) / len(heights), 2) if heights else 0,
+        'species_count': len(set(t.get('species_scientific') for t in trees if t.get('species_scientific'))),
+        'total_pixels_processed': len(valid_pixels),
+        'species_role_distribution': role_dist,
+        'dbh_class_distribution': dbh_classes,
+        'block_wise_stats': block_stats,
+        'total_stem_volume_m3': round(sum(t.get('stem_volume', 0.0) for t in trees), 2),
+        'total_branch_volume_m3': round(sum(t.get('branch_volume', 0.0) for t in trees), 2),
+        'total_tree_volume_m3': round(sum(t.get('tree_volume', 0.0) for t in trees), 2),
+        'total_gross_volume_m3': round(sum(t.get('gross_volume', 0.0) for t in trees), 2),
+        'total_net_volume_m3': round(sum(t.get('net_volume', 0.0) for t in trees), 2),
+        'total_firewood_m3': round(sum(t.get('firewood_m3', 0.0) for t in trees), 2),
+    }
+
+    processing_time = (datetime.now() - start_time).total_seconds()
+    report(100, "Complete")
+
+    return {
+        'gpkg_filepath': gpkg_filepath,
+        'gpkg_filename': os.path.basename(gpkg_filepath),
+        'gpkg_size_mb': gpkg_size_mb,
+        'statistics': statistics,
+        'processing_time_seconds': int(processing_time),
+        'config': config,
+    }
+
+
+def extract_sample_plot_trees(
+    all_tree_gpkg_path: str,
+    calculation_id: uuid.UUID,
+    db: Session,
+    output_dir: str = "exports",
+    output_filename: Optional[str] = None,
+    plot_buffer_meters: float = 12.62,
+) -> Dict[str, Any]:
+    """
+    Extract trees from the all-tree GPKG that fall within sample plot buffers.
+
+    This provides a consistent sample-plot subset from the full-extent tree model,
+    enabling plot-by-plot comparison with field inventory measurements.
+
+    Args:
+        all_tree_gpkg_path: Path to the all-tree GPKG file
+        calculation_id: UUID of calculation
+        db: Database session
+        output_dir: Directory to save output
+        plot_buffer_meters: Buffer radius in meters (default 12.62 ≈ 500m² plot)
+
+    Returns:
+        Dictionary with results including path and statistics
+    """
+    start_time = datetime.now()
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from geoalchemy2.shape import to_shape
+
+    if not os.path.exists(all_tree_gpkg_path):
+        raise ValueError(f"All-tree GPKG not found: {all_tree_gpkg_path}")
+
+    # Step 1: Read the all-tree GPKG
+    gdf_all = gpd.read_file(all_tree_gpkg_path, layer='all_trees')
+    print(f"Loaded {len(gdf_all)} trees from all-tree GPKG")
+
+    # Step 2: Get sampling design
+    from ..models.sampling import SamplingDesign
+    sampling_design = db.query(SamplingDesign).filter(
+        SamplingDesign.calculation_id == calculation_id
+    ).first()
+
+    if not sampling_design or not sampling_design.points_geometry:
+        raise ValueError("No sampling design found for this calculation")
+
+    # Step 3: Extract plot centers and create buffers
+    sample_points_geom = to_shape(sampling_design.points_geometry)
+    plot_assignments = sampling_design.points_block_assignment or []
+    buffer_deg = plot_buffer_meters / 111320.0
+
+    plot_buffers = []
+    if hasattr(sample_points_geom, 'geoms'):
+        for idx, point in enumerate(sample_points_geom.geoms):
+            plot_info = next((p for p in plot_assignments if p.get('point_index') == idx), None)
+            plot_number = plot_info.get('plot_number', idx + 1) if plot_info else idx + 1
+            plot_buffers.append({
+                'plot_number': str(plot_number),
+                'buffer': point.buffer(buffer_deg),
+                'center': (point.x, point.y),
+            })
+    else:
+        plot_buffers.append({
+            'plot_number': '1',
+            'buffer': sample_points_geom.buffer(buffer_deg),
+            'center': (sample_points_geom.x, sample_points_geom.y),
+        })
+
+    print(f"Found {len(plot_buffers)} sample plots")
+
+    # Step 4: Spatial filter — trees within each plot buffer
+    gdf_filtered = gpd.GeoDataFrame(
+        {'plot_number': [], 'tree_id': [], 'geometry': []}, crs='EPSG:4326'
+    )
+    for plot in plot_buffers:
+        buffer_shape = plot['buffer']
+        mask = gdf_all.within(buffer_shape)
+        plot_trees = gdf_all[mask].copy()
+        plot_trees['plot_number'] = plot['plot_number']
+        gdf_filtered = gpd.GeoDataFrame(
+            pd.concat([gdf_filtered, plot_trees], ignore_index=True),
+            crs='EPSG:4326',
+        )
+
+    total_extracted = len(gdf_filtered)
+    if total_extracted == 0:
+        raise ValueError("No trees found within sample plot buffers")
+
+    print(f"Extracted {total_extracted} trees within {len(plot_buffers)} plots")
+
+    # Step 5: Move plot_number column to front
+    cols = ['plot_number'] + [c for c in gdf_filtered.columns if c != 'plot_number' and c != 'geometry'] + ['geometry']
+    gdf_filtered = gdf_filtered[[c for c in cols if c in gdf_filtered.columns]]
+
+    # Step 6: Write output GPKG
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    forest_name = "forest"
+    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if calc and calc.forest_name:
+        forest_name = calc.forest_name.replace(' ', '_')
+        forest_name = ''.join(c for c in forest_name if c.isalnum() or c == '_')
+
+    if output_filename:
+        filename = output_filename
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d")
+        filename = f"{forest_name}_AllTrees_SamplePlots_{timestamp}.gpkg"
+    filepath = os.path.join(output_dir, filename)
+    gdf_filtered.to_file(filepath, driver='GPKG', layer='sample_plot_trees')
+    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+
+    # Step 7: Per-plot statistics
+    plot_stats = {}
+    for plot in plot_buffers:
+        pn = plot['plot_number']
+        plot_trees = gdf_filtered[gdf_filtered['plot_number'] == pn]
+        plot_stats[pn] = {
+            'tree_count': len(plot_trees),
+            'mean_dbh_cm': round(plot_trees['dbh_cm'].mean(), 2) if len(plot_trees) > 0 else 0,
+            'mean_height_m': round(plot_trees['height_m'].mean(), 2) if len(plot_trees) > 0 else 0,
+            'total_volume_m3': round(plot_trees['tree_volume_m3'].sum(), 2) if len(plot_trees) > 0 and 'tree_volume_m3' in plot_trees.columns else 0,
+        }
+
+    processing_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        'filepath': filepath,
+        'filename': filename,
+        'size_mb': round(file_size_mb, 2),
+        'total_trees_extracted': total_extracted,
+        'total_plots': len(plot_buffers),
+        'plot_statistics': plot_stats,
+        'processing_time_seconds': int(processing_time),
     }

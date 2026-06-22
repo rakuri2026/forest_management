@@ -813,7 +813,8 @@ async def create_forest_from_map(
                     geometry=func.ST_GeomFromText(block_geom_wkt, 4326),
                     area_hectares=block_data.get("area_hectares", 0),
                     index=idx,
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
+                    division_level=0
                 )
                 db.add(forest_block)
 
@@ -2873,9 +2874,6 @@ async def update_sub_area(
                 sub_areas[i]["blockName"] = request.block_name
             if request.is_excluded is not None:
                 sub_areas[i]["isExcluded"] = request.is_excluded
-            if request.area_hectares is not None:
-                sub_areas[i]["area_hectares"] = request.area_hectares
-                sub_areas[i]["area_sqm"] = request.area_hectares * 10000
             if request.geometry is not None:
                 try:
                     # Validate geometry
@@ -2915,34 +2913,21 @@ async def update_sub_area(
                     sub_areas[i]["geometry"] = sub_area_geojson
                     print(f"[update_sub_area] Stored geometry in sub_areas[{i}]: {str(sub_area_geojson)[:200]}")
                     
-                    # Recalculate area from new geometry (skip if already provided)
-                    if request.area_hectares and request.area_hectares > 0:
-                        area_ha = request.area_hectares
+                    # Always recalculate area from the new geometry (server is authoritative)
+                    try:
+                        from ..utils.geometry_utils import calculate_area_geodesic_from_shapely
+                        area_sqm, area_ha = calculate_area_geodesic_from_shapely(geom_shape)
+                        print(f"[update_sub_area] Recalculated area: {area_sqm:.4f} sqm, {area_ha:.4f} ha")
+                    except Exception as e2:
+                        import traceback
+                        print(f"[update_sub_area] Area calculation error: {e2}")
+                        traceback.print_exc()
+                        logger.warning(f"Failed to recalculate area for sub-area: {e2}")
+                        # Rough deg² → ha conversion at Nepal's latitude (~28°N)
+                        import math as _math
+                        _clat = _math.cos(_math.radians(geom_shape.centroid.y))
+                        area_ha = abs(geom_shape.area) * 111320 * 111320 * _clat / 10000
                         area_sqm = area_ha * 10000
-                        print(f"[update_sub_area] Using PROVIDED area: {area_ha} ha")
-                    else:
-                        try:
-                            from geoalchemy2.shape import to_shape
-                            import pyproj
-                            
-                            print(f"[update_sub_area] Shapely geom area (degrees^2): {geom_shape.area}")
-                            
-                            # Use pyproj for accurate geodesic area calculation
-                            geodesic = pyproj.Geod(ellps='WGS84')
-                            
-                            # Calculate geodesic area
-                            area_sqm, _ = geodesic.geometry_area_perimeter(geom_shape)
-                            area_sqm = abs(area_sqm)  # Ensure positive
-                            area_ha = area_sqm / 10000  # Convert to hectares
-                            
-                            print(f"[update_sub_area] Geodesic area: {area_sqm} sqm, {area_ha} ha")
-                        except Exception as e2:
-                            import traceback
-                            print(f"[update_sub_area] Error in area calculation: {e2}")
-                            traceback.print_exc()
-                            logger.warning(f"Failed to recalculate area for sub-area: {e2}")
-                            area_sqm = sub_areas[i].get("area_sqm", 0)
-                            area_ha = sub_areas[i].get("area_hectares", 0)
                     
                     sub_areas[i]["area_sqm"] = round(area_sqm, 4)
                     sub_areas[i]["area_hectares"] = round(area_ha, 4)
@@ -3555,7 +3540,8 @@ async def create_single_default_block(
         geometry=func.ST_GeomFromText(boundary_wkt, 4326),
         area_hectares=area_hectares,
         index=0,
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
+        division_level=0
     )
     db.add(forest_block)
 
@@ -3668,7 +3654,8 @@ async def create_blocks_from_polygons(
             name=block_req.name,
             geometry=polygon_query.polygon_geom,
             area_hectares=polygon_query.area_hectares,
-            index=block_req.polygon_index
+            index=block_req.polygon_index,
+            division_level=0
         )
         db.add(block)
         created_blocks.append(block)

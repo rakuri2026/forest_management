@@ -46,6 +46,14 @@ class SamplingDesign(Base):
     # Format: [{"point_index": 0, "block_number": 1, "block_name": "Ward 5"}, ...]
     points_block_assignment = Column(JSONB, nullable=True)
 
+    # Computed summary data from generation (total_blocks, blocks_info, sampling_percentage, etc.)
+    # Stored to avoid recalculation on page reload
+    result_data = Column(JSONB, nullable=True)
+
+    # Cached computed points with elevation, UTM, boundary distance, etc.
+    # Stored after first calculation to avoid expensive recomputation
+    points_data = Column(JSONB, nullable=True)
+
     # Per-block sampling parameters (Option 2: Single design with overrides)
     # Default parameters applied to all blocks unless overridden
     # Format: {"sampling_type": "systematic", "intensity_percent": 0.5, "min_samples": 5, ...}

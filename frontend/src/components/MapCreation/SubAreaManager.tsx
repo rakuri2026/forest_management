@@ -76,6 +76,7 @@ const SubAreaDrawingControls: React.FC<{
   onSubAreaEdit: (subAreaId: string, geometry: any) => void;
   onSubAreaDelete: (subAreaId: string) => void;
   onLiveAreaChange?: (area: number) => void;
+  onSubAreaSelect?: (subAreaId: string | null) => void;
 }> = ({
   blocks,
   outerBoundary,
@@ -86,6 +87,7 @@ const SubAreaDrawingControls: React.FC<{
   onSubAreaEdit,
   onSubAreaDelete,
   onLiveAreaChange,
+  onSubAreaSelect,
 }) => {
   const map = useMap();
   const layersRef = useRef<Map<string, L.Layer>>(new Map());
@@ -94,10 +96,10 @@ const SubAreaDrawingControls: React.FC<{
   const [liveArea, setLiveArea] = useState<number>(0);
 
   // Stabilize callbacks to prevent effect re-triggering
-  const callbacksRef = useRef({ onSubAreaCreated, onSubAreaEdit, onSubAreaDelete });
+  const callbacksRef = useRef({ onSubAreaCreated, onSubAreaEdit, onSubAreaDelete, onSubAreaSelect });
   useEffect(() => {
-    callbacksRef.current = { onSubAreaCreated, onSubAreaEdit, onSubAreaDelete };
-  }, [onSubAreaCreated, onSubAreaEdit, onSubAreaDelete]);
+    callbacksRef.current = { onSubAreaCreated, onSubAreaEdit, onSubAreaDelete, onSubAreaSelect };
+  }, [onSubAreaCreated, onSubAreaEdit, onSubAreaDelete, onSubAreaSelect]);
 
   // Propagate live area to parent
   useEffect(() => {
@@ -166,6 +168,10 @@ const SubAreaDrawingControls: React.FC<{
           fillOpacity: 0.3,
           weight: 3,
         });
+        setTimeout(() => {
+          const el = map.getContainer().querySelector<HTMLElement>('.leaflet-pm-touch-hint');
+          if (el) el.style.opacity = '0.05';
+        }, 50);
       }
     };
 
@@ -406,15 +412,12 @@ const SubAreaDrawingControls: React.FC<{
         pmIgnore: false,
       });
 
-      // Add popup with sub-area info
-      const excludedNote = isExcluded ? '<br/><strong style="color: red;">EXCLUDED FROM FOREST</strong>' : '';
-      geoJsonLayer.bindPopup(
-        `<strong>${subArea.name}</strong><br/>` +
-        `Category: ${category?.label || subArea.category}<br/>` +
-        `Area: ${formatArea(subArea.area)}<br/>` +
-        `Block: ${subArea.blockName || 'Unknown'}` +
-        excludedNote
-      );
+      // Add click handler to select sub-area
+      geoJsonLayer.on('click', () => {
+        if (callbacksRef.current.onSubAreaSelect) {
+          callbacksRef.current.onSubAreaSelect(subArea.id);
+        }
+      });
 
       // Add to map
       geoJsonLayer.addTo(map);
@@ -450,6 +453,9 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
   const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
   const [slopeMinClass, setSlopeMinClass] = useState<number>(4);
   const [showCanopyMask, setShowCanopyMask] = useState<boolean>(false);
+  const [canopyShowRed, setCanopyShowRed] = useState<boolean>(true);
+  const [canopyShowBlue, setCanopyShowBlue] = useState<boolean>(true);
+  const [canopyShowGreen, setCanopyShowGreen] = useState<boolean>(true);
   const [liveArea, setLiveArea] = useState<number>(0);
 
   // Validate sub-areas whenever they change
@@ -735,14 +741,34 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
                 className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 mr-2"
               />
               <label htmlFor="showCanopy" className="text-sm font-medium text-gray-800">
-                Show Canopy (&gt;15m)
+                Show Canopy Mask
               </label>
             </div>
             <HelpTooltip 
-              helpText="When enabled, areas with tree canopy height > 15m will be highlighted in green." 
+              helpText="Clips canopy height data to forest boundary. Red=No canopy, Blue=Low (1-15m), Green=Tall (>15m)." 
               position="top" 
             />
           </div>
+          {showCanopyMask && (
+            <div className="mt-3 space-y-2 pl-1">
+              <div className="text-xs font-semibold text-gray-600 mb-1">Legend &amp; Filters:</div>
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={canopyShowRed} onChange={(e) => setCanopyShowRed(e.target.checked)} className="w-3 h-3 rounded border-gray-300" />
+                <span className="inline-block w-4 h-4 rounded-sm" style={{backgroundColor: 'rgba(255,0,0,0.8)'}}></span>
+                <span><strong>Red</strong> — No Canopy (bare ground, water)</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={canopyShowBlue} onChange={(e) => setCanopyShowBlue(e.target.checked)} className="w-3 h-3 rounded border-gray-300" />
+                <span className="inline-block w-4 h-4 rounded-sm" style={{backgroundColor: 'rgba(0,0,255,0.8)'}}></span>
+                <span><strong>Blue</strong> — Low Canopy (1-15m)</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={canopyShowGreen} onChange={(e) => setCanopyShowGreen(e.target.checked)} className="w-3 h-3 rounded border-gray-300" />
+                <span className="inline-block w-4 h-4 rounded-sm" style={{backgroundColor: 'rgba(0,255,0,0.8)'}}></span>
+                <span><strong>Green</strong> — Tall Canopy (&gt;15m)</span>
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Error Messages */}
@@ -993,10 +1019,10 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
               />
             )}
 
-            {/* Canopy Mask Layer - shows trees >15m in green */}
+            {/* Canopy Mask Layer - clipped to forest boundary with color filters */}
             {showCanopyMask && calculationId && (
               <TileLayer
-                url={`/api/calculations/${calculationId}/canopy-mask/{z}/{x}/{y}.png?alpha=150`}
+                url={`/api/calculations/${calculationId}/canopy-mask/{z}/{x}/{y}.png?alpha=150&red=${canopyShowRed}&blue=${canopyShowBlue}&green=${canopyShowGreen}`}
                 opacity={0.7}
                 zIndex={5}
                 minZoom={13}
@@ -1029,6 +1055,7 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
               onSubAreaEdit={handleSubAreaEdit}
               onSubAreaDelete={handleSubAreaDelete}
               onLiveAreaChange={setLiveArea}
+              onSubAreaSelect={setSelectedSubAreaId}
             />
           </MapContainer>
 
@@ -1054,6 +1081,40 @@ const SubAreaManager: React.FC<SubAreaManagerProps> = ({
               </div>
             )}
         </div>
+
+        {/* Status Bar */}
+        {selectedSubAreaId && (() => {
+          const sa = subAreas.find(s => s.id === selectedSubAreaId);
+          if (!sa) return null;
+          const category = SUB_AREA_CATEGORIES.find(c => c.value === sa.category);
+          const isExcluded = sa.isExcluded || false;
+          return (
+            <div style={{
+              backgroundColor: 'rgba(31, 41, 55, 0.85)',
+              color: '#e5e7eb',
+              padding: '6px 16px',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              minHeight: '32px',
+              borderRadius: '0 0 8px 8px',
+              backdropFilter: 'blur(4px)',
+              marginTop: '4px',
+            }}>
+              <span style={{ fontWeight: 600, color: '#ffffff' }}>{sa.name}</span>
+              <span style={{ color: category?.color || '#9ca3af' }}>●</span>
+              <span>{category?.label || sa.category}</span>
+              <span style={{ color: '#9ca3af' }}>|</span>
+              <span>Area: {formatArea(sa.area)}</span>
+              <span style={{ color: '#9ca3af' }}>|</span>
+              <span>Block: {sa.blockName || 'Unknown'}</span>
+              {isExcluded && (
+                <span style={{ color: '#f87171', fontWeight: 600 }}>EXCLUDED FROM FOREST</span>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

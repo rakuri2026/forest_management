@@ -17,18 +17,44 @@ interface BlockOverride {
   min_distance_meters?: number;
 }
 
+function VarHint({ name, className = '' }: { name: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer select-none 
+        ${copied ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'} ${className}`}
+      onClick={() => {
+        navigator.clipboard.writeText(`{{${name}}}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      title={`Copy {{${name}}}`}
+    >
+      {copied ? '✓ Copied!' : `{{${name}}}`}
+    </span>
+  );
+}
+
 export function SamplingTab({ calculationId }: SamplingTabProps) {
-  const [designs, setDesigns] = useState<any[]>([]);
+  const STORAGE_PREFIX = `samplingtab_${calculationId}`;
+  const [designs, setDesigns] = useState<any[]>(() => {
+    try { return JSON.parse(sessionStorage.getItem(`${STORAGE_PREFIX}_designs`) || '[]'); }
+    catch { return []; }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showSuccessSummary, setShowSuccessSummary] = useState(false);
-  const [successResult, setSuccessResult] = useState<any>(null);
+  const [successResult, setSuccessResult] = useState<any>(() => {
+    try { return JSON.parse(sessionStorage.getItem(`${STORAGE_PREFIX}_result`) || 'null'); }
+    catch { return null; }
+  });
 
   // Sampling points table
-  const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null);
-  const [samplingPoints, setSamplingPoints] = useState<any[]>([]);
+  const [samplingPoints, setSamplingPoints] = useState<any[]>(() => {
+    try { return JSON.parse(sessionStorage.getItem(`${STORAGE_PREFIX}_points`) || '[]'); }
+    catch { return []; }
+  });
   const [loadingPoints, setLoadingPoints] = useState(false);
 
   // Navigation support options (Phase 2 enhancement)
@@ -114,36 +140,51 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
   };
 
   const loadDesigns = async () => {
-    setLoading(true);
+    // Only show loading spinner on initial load (no cached data)
+    const needsLoading = designs.length === 0;
+    if (needsLoading) setLoading(true);
     setError(null);
     try {
       const data = await samplingApi.list(calculationId);
       setDesigns(data);
+      sessionStorage.setItem(`${STORAGE_PREFIX}_designs`, JSON.stringify(data));
 
-      // Auto-load sampling points for the first design by default
-      if (data.length > 0 && !selectedDesignId) {
+      if (data.length === 0) {
+        setSuccessResult(null);
+        setSamplingPoints([]);
+        sessionStorage.removeItem(`${STORAGE_PREFIX}_result`);
+        sessionStorage.removeItem(`${STORAGE_PREFIX}_points`);
+      } else {
+        // Restore persisted summary from most recent design's result_data
+        if (data[0].result_data) {
+          setSuccessResult(data[0].result_data);
+          sessionStorage.setItem(`${STORAGE_PREFIX}_result`, JSON.stringify(data[0].result_data));
+        }
+        // Auto-load sampling points for the first design
         loadSamplingPoints(data[0].id);
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load sampling designs');
     } finally {
-      setLoading(false);
+      if (needsLoading) setLoading(false);
     }
   };
 
   const loadSamplingPoints = async (designId: string) => {
-    setLoadingPoints(true);
+    // Only show loading spinner if no cached points
+    const needsLoading = samplingPoints.length === 0;
+    if (needsLoading) setLoadingPoints(true);
     try {
       const data = await samplingApi.getPoints(designId, {
         include_elevation: includeElevation,
         include_topographic_features: includeTopoFeatures,
       });
       setSamplingPoints(data.points || []);
-      setSelectedDesignId(designId);
+      sessionStorage.setItem(`${STORAGE_PREFIX}_points`, JSON.stringify(data.points || []));
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to load sampling points');
     } finally {
-      setLoadingPoints(false);
+      if (needsLoading) setLoadingPoints(false);
     }
   };
 
@@ -253,7 +294,6 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
       // Store result and show success summary
       setSuccessResult(result);
-      setShowSuccessSummary(true);
       setShowCreateForm(false);
 
       try {
@@ -287,6 +327,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
 
     try {
       await samplingApi.delete(designId);
+      setSuccessResult(null);
       await loadDesigns();
       alert('Sampling design deleted successfully');
     } catch (err: any) {
@@ -1058,40 +1099,31 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
         </div>
       )}
 
-      {/* Success Summary Modal */}
-      {showSuccessSummary && successResult && (
+      {/* Success Summary */}
+      {successResult && (
         <div className="bg-white rounded-lg shadow-lg p-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-green-700">
               ✓ Sampling Design Created Successfully
             </h3>
-            <button
-              onClick={() => {
-                setShowSuccessSummary(false);
-                setSuccessResult(null);
-              }}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              ✕
-            </button>
           </div>
 
           {/* Summary Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
             <div>
-              <div className="text-sm text-gray-600">Total Points</div>
+              <div className="text-sm text-gray-600">Total Points <VarHint name="sampling_total_points" /></div>
               <div className="text-xl font-bold">{successResult.total_points}</div>
             </div>
             <div>
-              <div className="text-sm text-gray-600">Total Blocks</div>
+              <div className="text-sm text-gray-600">Total Blocks <VarHint name="sampling_total_blocks" /></div>
               <div className="text-xl font-bold">{successResult.total_blocks}</div>
             </div>
             <div>
-              <div className="text-sm text-gray-600">Requested Intensity</div>
+              <div className="text-sm text-gray-600">Requested Intensity <VarHint name="sampling_requested_intensity" /></div>
               <div className="text-xl font-bold">{successResult.requested_intensity_percent}%</div>
             </div>
             <div>
-              <div className="text-sm text-gray-600">Actual Sampling</div>
+              <div className="text-sm text-gray-600">Actual Sampling <VarHint name="sampling_actual_intensity" /></div>
               <div className="text-xl font-bold">
                 {parseFloat(successResult.sampling_percentage || 0).toFixed(2)}%
               </div>
@@ -1254,7 +1286,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
           {/* Per-Block Summary Table */}
           {successResult.blocks_info && successResult.blocks_info.length > 0 && (
             <div>
-              <h4 className="text-md font-semibold mb-3">Per-Block Summary</h4>
+              <h4 className="text-md font-semibold mb-3">Per-Block Summary <VarHint name="sampling_block_summary" /></h4>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
                   <thead className="bg-gray-50">
@@ -1333,17 +1365,6 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
             </div>
           )}
 
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={() => {
-                setShowSuccessSummary(false);
-                setSuccessResult(null);
-              }}
-              className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
-            >
-              Close
-            </button>
-          </div>
         </div>
       )}
 
@@ -1372,24 +1393,24 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
                       <div>
-                        <div className="text-gray-600">Total Points</div>
+                        <div className="text-gray-600">Total Points <VarHint name="sampling_total_points" /></div>
                         <div className="font-semibold">{design.total_points}</div>
                       </div>
                       {design.total_blocks && (
                         <div>
-                          <div className="text-gray-600">Total Blocks</div>
+                          <div className="text-gray-600">Total Blocks <VarHint name="sampling_total_blocks" /></div>
                           <div className="font-semibold">{design.total_blocks}</div>
                         </div>
                       )}
                       {design.requested_intensity_percent && (
                         <div>
-                          <div className="text-gray-600">Requested Intensity</div>
+                          <div className="text-gray-600">Requested Intensity <VarHint name="sampling_requested_intensity" /></div>
                           <div className="font-semibold">{design.requested_intensity_percent}%</div>
                         </div>
                       )}
                       {design.plot_area_sqm && (
                         <div>
-                          <div className="text-gray-600">Plot Area</div>
+                          <div className="text-gray-600">Plot Area <VarHint name="sampling_plot_area_sqm" /></div>
                           <div className="font-semibold">{parseFloat(design.plot_area_sqm).toFixed(2)} m²</div>
                         </div>
                       )}
@@ -1398,7 +1419,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                     {/* Per-Block Summary Table */}
                     {design.blocks_info && design.blocks_info.length > 0 && (
                       <div className="mt-4 border-t pt-4">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-3">Per-Block Summary:</h4>
+                        <h4 className="text-sm font-semibold text-gray-700 mb-3">Per-Block Summary: <VarHint name="sampling_block_summary" /></h4>
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-xs border border-gray-200 rounded">
                             <thead className="bg-gray-50">
@@ -1496,10 +1517,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                           checked={includeElevation}
                           onChange={(e) => {
                             setIncludeElevation(e.target.checked);
-                            // Reload points if currently viewing them
-                            if (selectedDesignId === design.id && samplingPoints.length > 0) {
-                              setTimeout(() => loadSamplingPoints(design.id), 100);
-                            }
+                            setTimeout(() => loadSamplingPoints(design.id), 100);
                           }}
                           className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                         />
@@ -1511,10 +1529,7 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                           checked={includeTopoFeatures}
                           onChange={(e) => {
                             setIncludeTopoFeatures(e.target.checked);
-                            // Reload points if currently viewing them
-                            if (selectedDesignId === design.id && samplingPoints.length > 0) {
-                              setTimeout(() => loadSamplingPoints(design.id), 100);
-                            }
+                            setTimeout(() => loadSamplingPoints(design.id), 100);
                           }}
                           className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                         />
@@ -1525,23 +1540,6 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                       Help field crews navigate to sampling points with elevation and topographic landmarks
                     </p>
                   </div>
-
-                  {/* Toggle Points Button */}
-                  <button
-                    onClick={() => {
-                      if (selectedDesignId === design.id && samplingPoints.length > 0) {
-                        setSelectedDesignId(null);
-                        setSamplingPoints([]);
-                      } else {
-                        loadSamplingPoints(design.id);
-                      }
-                    }}
-                    className="w-full bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700"
-                  >
-                    {selectedDesignId === design.id && samplingPoints.length > 0
-                      ? '▲ Hide Sampling Points'
-                      : '▼ View Sampling Points'}
-                  </button>
 
                   {/* Export Buttons */}
                   <div className="flex gap-2">
@@ -1573,11 +1571,11 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                 </div>
 
                 {/* Sampling Points Table */}
-                {selectedDesignId === design.id && samplingPoints.length > 0 && (
+                {samplingPoints.length > 0 && (
                   <div className="mt-6 border-t pt-6">
                     <div className="flex justify-between items-center mb-4">
                       <h4 className="text-md font-semibold text-gray-700">
-                        Sampling Points ({samplingPoints.length} total)
+                        Sampling Points ({samplingPoints.length} total) <VarHint name="sampling_point_locations" />
                       </h4>
                       {samplingPoints.length > 100 && (
                         <span className="text-sm text-gray-600">
@@ -1659,6 +1657,21 @@ export function SamplingTab({ calculationId }: SamplingTabProps) {
                         )}
                       </div>
                     )}
+
+                    {/* OP Document Map Variables — insert into template near here */}
+                    <div className="mt-8 bg-blue-50 rounded-lg p-3 border border-blue-200">
+                      <div className="text-sm font-semibold text-blue-800 mb-2">
+                        📋 नक्सा भेरिएबलहरू / Map Variables
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <VarHint name="map:sampling_plot" />
+                        <VarHint name="map:sampling_plot_topo" />
+                        <VarHint name="map:sampling_plot_satellite" />
+                      </div>
+                      <div className="text-[10px] text-blue-600 mt-1">
+                        Click to copy. Paste into OP document template where you want the map.
+                      </div>
+                    </div>
 
                     {/* Interactive Map Visualization */}
                     <div className="mt-8">

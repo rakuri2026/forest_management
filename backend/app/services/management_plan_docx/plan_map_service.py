@@ -6,6 +6,7 @@ import logging
 from typing import Optional, Tuple, List, Dict
 from uuid import UUID
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon, shape
 from geoalchemy2.shape import to_shape
 
@@ -26,32 +27,41 @@ logger = logging.getLogger(__name__)
 MAP_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads", "maps_cache")
 
 
-def _map_cache_path(calculation_id: UUID, layer_name: str) -> str:
+def _map_cache_path(calculation_id: UUID, layer_name: str, dpi: int = None) -> str:
+    if dpi is None:
+        import sys
+        dpi = sys.modules[__name__].DPI
     cid = str(calculation_id)
     sub = os.path.join(MAP_CACHE_DIR, cid)
     os.makedirs(sub, exist_ok=True)
-    return os.path.join(sub, f"{layer_name}.png")
+    return os.path.join(sub, f"{layer_name}_dpi{dpi}.png")
 
 
-def _map_cache_get(calculation_id: UUID, layer_name: str) -> Optional[io.BytesIO]:
-    path = _map_cache_path(calculation_id, layer_name)
+def _map_cache_get(calculation_id: UUID, layer_name: str, dpi: int = None) -> Optional[io.BytesIO]:
+    if dpi is None:
+        import sys
+        dpi = sys.modules[__name__].DPI
+    path = _map_cache_path(calculation_id, layer_name, dpi)
     if os.path.exists(path):
         try:
             with open(path, "rb") as f:
                 buf = io.BytesIO(f.read())
-            logger.info(f"Map cache HIT: {layer_name} for {calculation_id}")
+            logger.info(f"Map cache HIT: {layer_name} for {calculation_id} dpi={dpi}")
             return buf
         except Exception as e:
             logger.warning(f"Map cache read failed: {e}")
     return None
 
 
-def _map_cache_set(calculation_id: UUID, layer_name: str, buf: io.BytesIO):
-    path = _map_cache_path(calculation_id, layer_name)
+def _map_cache_set(calculation_id: UUID, layer_name: str, buf: io.BytesIO, dpi: int = None):
+    if dpi is None:
+        import sys
+        dpi = sys.modules[__name__].DPI
+    path = _map_cache_path(calculation_id, layer_name, dpi)
     try:
         with open(path, "wb") as f:
             f.write(buf.getvalue())
-        logger.info(f"Map cache SAVED: {layer_name} -> {path}")
+        logger.info(f"Map cache SAVED: {layer_name} -> {path} dpi={dpi}")
     except Exception as e:
         logger.warning(f"Map cache write failed: {e}")
 
@@ -110,7 +120,7 @@ def _dev_fontprop(size: int = 14):
 FIG_SIZE_MM = 150
 FIG_SIZE_INCHES = (FIG_SIZE_MM / 25.4, FIG_SIZE_MM / 25.4)
 TILE_SIZE = 256
-DPI = 200
+DPI = 150
 RASTER_ALPHA = 0.55
 BOUNDARY_FILL_ALPHA = 0.25
 BLOCK_FILL_ALPHA = 0.20
@@ -126,20 +136,30 @@ BASEMAP_SOURCES = {
     "canopy":        cx.providers.OpenStreetMap.Mapnik,
     "biomass":       cx.providers.OpenStreetMap.Mapnik,
     "soil_texture":  cx.providers.OpenStreetMap.Mapnik,
+    "sampling_plot":         cx.providers.OpenStreetMap.Mapnik,
+    "sampling_plot_topo":    cx.providers.OpenTopoMap,
+    "sampling_plot_satellite": cx.providers.Esri.WorldImagery,
+    "fieldbook":               cx.providers.OpenTopoMap,
 }
 
 LAYER_LABELS = {
-    "boundary":      {"ne": "सिमाना नक्सा",          "en": "Boundary Map"},
-    "forest_type":   {"ne": "वन प्रकार नक्सा",       "en": "Forest Type Map"},
-    "forest_health": {"ne": "वन स्वास्थ्य नक्सा",    "en": "Forest Health Map"},
-    "slope":         {"ne": "भिरालो नक्सा",          "en": "Slope Map"},
-    "biomass":       {"ne": "बायोमास नक्सा",         "en": "Biomass Map"},
-    "landcover":     {"ne": "भू-आवरण नक्सा",          "en": "Land Cover Map"},
-    "soil_texture":  {"ne": "माटो बनावट नक्सा",      "en": "Soil Texture Map"},
-    "dem":           {"ne": "उचाइ नक्सा",             "en": "Elevation Map"},
-    "aspect":        {"ne": "दिशा नक्सा",             "en": "Aspect Map"},
-    "canopy":        {"ne": "वन छाना नक्सा",          "en": "Canopy Cover Map"},
+    "boundary":                {"ne": "सिमाना नक्सा",                   "en": "Boundary Map"},
+    "forest_type":             {"ne": "वन प्रकार नक्सा",                "en": "Forest Type Map"},
+    "forest_health":           {"ne": "वन स्वास्थ्य नक्सा",             "en": "Forest Health Map"},
+    "slope":                   {"ne": "भिरालो नक्सा",                   "en": "Slope Map"},
+    "biomass":                 {"ne": "बायोमास नक्सा",                  "en": "Biomass Map"},
+    "landcover":               {"ne": "भू-आवरण नक्सा",                   "en": "Land Cover Map"},
+    "soil_texture":            {"ne": "माटो बनावट नक्सा",               "en": "Soil Texture Map"},
+    "dem":                     {"ne": "उचाइ नक्सा",                      "en": "Elevation Map"},
+    "aspect":                  {"ne": "दिशा नक्सा",                      "en": "Aspect Map"},
+    "canopy":                  {"ne": "वन छाना नक्सा",                   "en": "Canopy Cover Map"},
+    "sampling_plot":           {"ne": "नमुना प्लट नक्सा",                "en": "Sample Plot Map"},
+    "sampling_plot_topo":      {"ne": "स्थलाकृतिक नमुना प्लट नक्सा",     "en": "Sample Plot Map (Topo)"},
+    "sampling_plot_satellite": {"ne": "उपग्रह नमुना प्लट नक्सा",         "en": "Sample Plot Map (Satellite)"},
+    "fieldbook":               {"ne": "फिल्डबुक बाटो नक्सा",              "en": "Fieldbook Path Map"},
 }
+
+_SAMPLING_PLOT_LAYERS = {"sampling_plot", "sampling_plot_topo", "sampling_plot_satellite"}
 
 BLOCK_COLORS = [
     '#2e7d32', '#1565c0', '#795548', '#f9a825',
@@ -188,6 +208,59 @@ def _get_blocks_with_geometry(db: Session, calculation_id: UUID) -> List[Dict]:
     return result
 
 
+def _get_sample_plots(db: Session, calculation_id: UUID) -> List[Dict]:
+    from ...models.sampling import SamplingDesign
+    from shapely import wkt as shapely_wkt
+
+    designs = db.query(SamplingDesign).filter(
+        SamplingDesign.calculation_id == calculation_id,
+        SamplingDesign.points_geometry.isnot(None),
+    ).order_by(SamplingDesign.created_at).all()
+    if not designs:
+        return []
+
+    design = designs[0]
+
+    # Prefer cached points_data (has lon/lat, point_index, block_name)
+    cached = design.points_data or {}
+    cached_points = cached.get("points") if isinstance(cached, dict) else None
+    if cached_points:
+        plots = []
+        for pt in cached_points:
+            lon = pt.get("longitude") or pt.get("lon")
+            lat = pt.get("latitude") or pt.get("lat")
+            if lon is None or lat is None:
+                continue
+            plots.append({
+                "lon": float(lon),
+                "lat": float(lat),
+                "label": str(pt.get("plot_number", pt.get("point_index", ""))),
+                "block_name": pt.get("block_name", ""),
+            })
+        return plots
+
+    # Fallback: extract from points_geometry MULTIPOINT
+    block_assignment = design.points_block_assignment or []
+    result = db.execute(
+        text("SELECT ST_AsText(points_geometry) FROM public.sampling_designs WHERE id = :id"),
+        {"id": str(design.id)},
+    ).first()
+    if not result or not result[0]:
+        return []
+
+    multipoint = shapely_wkt.loads(result[0])
+    plots = []
+    for i, point in enumerate(multipoint.geoms):
+        block_info = next((b for b in block_assignment if b.get("point_index") == i), None)
+        plots.append({
+            "lon": point.x,
+            "lat": point.y,
+            "label": str(i + 1),
+            "block_name": (block_info or {}).get("block_name", ""),
+        })
+    return plots
+
+
 def _add_basemap(ax, layer_name: str, alpha: float = 0.6):
     source = BASEMAP_SOURCES.get(layer_name, cx.providers.OpenStreetMap.Mapnik)
     try:
@@ -226,18 +299,26 @@ def _add_raster_overlay(ax, db: Session, calculation_id: UUID, layer_name: str, 
         comp_max_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y_start / n))))
         comp_min_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y_end + 1) / n))))
 
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        tile_coords = [(tx, ty) for ty in range(y_start, y_end + 1) for tx in range(x_start, x_end + 1)]
+        tile_results = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_map = {}
+            for tx, ty in tile_coords:
+                future = executor.submit(tile_service.get_tile,
+                                         calculation_id=calc_id_str, layer_name=layer_name,
+                                         z=zoom, x=tx, y=ty, alpha=255)
+                future_map[future] = (tx, ty)
+            for future in as_completed(future_map):
+                tx, ty = future_map[future]
+                try:
+                    tb = future.result()
+                    tile_results[(tx, ty)] = np.array(PILImage.open(io.BytesIO(tb)).convert("RGBA"))
+                except Exception:
+                    tile_results[(tx, ty)] = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
         rows = []
         for ty in range(y_start, y_end + 1):
-            row_tiles = []
-            for tx in range(x_start, x_end + 1):
-                try:
-                    tb = tile_service.get_tile(
-                        calculation_id=calc_id_str, layer_name=layer_name,
-                        z=zoom, x=tx, y=ty, alpha=255
-                    )
-                    row_tiles.append(np.array(PILImage.open(io.BytesIO(tb)).convert("RGBA")))
-                except Exception:
-                    row_tiles.append(np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8))
+            row_tiles = [tile_results[(tx, ty)] for tx in range(x_start, x_end + 1)]
             rows.append(np.hstack(row_tiles))
         raster_img = np.vstack(rows) if len(rows) > 1 else rows[0]
 
@@ -259,19 +340,17 @@ def _add_block_polygons_with_labels(ax, blocks: List[Dict]):
 
         if isinstance(geom, ShapelyPolygon):
             xs, ys = geom.exterior.xy
-            ax.fill(xs, ys, color=color, alpha=BLOCK_FILL_ALPHA,
-                    edgecolor=color, linewidth=1.5, zorder=3)
+            ax.plot(xs, ys, color=color, linewidth=2.0, zorder=3)
             for ring in geom.interiors:
                 rx, ry = ring.xy
-                ax.fill(rx, ry, color='white', alpha=0.75, edgecolor='#888', linewidth=0.5, zorder=3)
+                ax.plot(rx, ry, color='#888', linewidth=0.8, linestyle='--', zorder=3)
         elif isinstance(geom, MultiPolygon):
             for part in geom.geoms:
                 xs, ys = part.exterior.xy
-                ax.fill(xs, ys, color=color, alpha=BLOCK_FILL_ALPHA,
-                        edgecolor=color, linewidth=1.5, zorder=3)
+                ax.plot(xs, ys, color=color, linewidth=2.0, zorder=3)
                 for ring in part.interiors:
                     rx, ry = ring.xy
-                    ax.fill(rx, ry, color='white', alpha=0.75, edgecolor='#888', linewidth=0.5, zorder=3)
+                    ax.plot(rx, ry, color='#888', linewidth=0.8, linestyle='--', zorder=3)
 
         ax.annotate(
             blk["name"],
@@ -291,6 +370,121 @@ def _add_block_polygons_with_labels(ax, blocks: List[Dict]):
             ),
             zorder=6,
         )
+
+
+def _add_sample_plots(ax, plots: List[Dict]):
+    for pt in plots:
+        ax.scatter(
+            pt["lon"], pt["lat"],
+            s=160, marker='o', facecolors='none', edgecolors='#ffd600',
+            linewidth=2.0, zorder=7
+        )
+        ax.annotate(
+            pt["label"],
+            xy=(pt["lon"], pt["lat"]),
+            fontsize=8, fontweight='bold', color='#000000',
+            ha='center', va='center',
+            zorder=8,
+        )
+
+
+def _add_fieldbook_features(ax, db: Session, calculation_id: UUID):
+    from ...models.fieldbook import Fieldbook
+    from shapely import wkt as shapely_wkt
+
+    points = db.query(Fieldbook).filter(
+        Fieldbook.calculation_id == calculation_id
+    ).order_by(Fieldbook.point_number).all()
+    if not points:
+        return
+
+    # Distinct colors per forest block
+    block_names = sorted(set(p.block_name or "Unknown" for p in points))
+    palette = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
+               '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4',
+               '#469990', '#dcbeff', '#9A6324', '#800000', '#aaffc3']
+    block_color = {bn: palette[i % len(palette)] for i, bn in enumerate(block_names)}
+
+    # Plot points per block with block-specific colors
+    for bn in block_names:
+        blk = [p for p in points if (p.block_name or "Unknown") == bn]
+        c = block_color[bn]
+        # Vertex points: filled circles
+        vv = [p for p in blk if p.point_type == "vertex"]
+        if vv:
+            ax.scatter([float(p.longitude) for p in vv],
+                       [float(p.latitude) for p in vv],
+                       s=40, marker='o', color=c,
+                       edgecolors='#000000', linewidth=1.0, zorder=7, label=bn)
+        # Interpolated points: hollow circles
+        ii = [p for p in blk if p.point_type == "interpolated"]
+        if ii:
+            ax.scatter([float(p.longitude) for p in ii],
+                       [float(p.latitude) for p in ii],
+                       s=25, marker='o', facecolors='none',
+                       edgecolors=c, linewidth=1.5, zorder=7)
+
+    # Vertex-only labels with 8-direction collision avoidance
+    _label_offsets = [
+        (0, 6, 'center', 'bottom'),    # above (default)
+        (6, 0, 'left', 'center'),       # right
+        (-6, 0, 'right', 'center'),     # left
+        (0, -6, 'center', 'top'),       # below
+        (6, 6, 'left', 'bottom'),       # top-right
+        (-6, 6, 'right', 'bottom'),     # top-left
+        (6, -6, 'left', 'top'),         # bottom-right
+        (-6, -6, 'right', 'top'),       # bottom-left
+    ]
+    fs_pt = 6
+    cw_pt = 3.5
+    lh_pt = fs_pt + 2
+    pad_pt = 1.5
+    dpi = ax.figure.dpi if hasattr(ax, 'figure') else 100
+    placed_bboxes = []
+    for p in points:
+        if p.point_type != "vertex":
+            continue
+        label = str(p.point_number)
+        lon, lat = float(p.longitude), float(p.latitude)
+        lw_pt = len(label) * cw_pt + pad_pt * 2
+        anchor = ax.transData.transform((lon, lat))
+        placed = False
+        for dx_pt, dy_pt, ha, va in _label_offsets:
+            ox = anchor[0] + dx_pt * dpi / 72
+            oy = anchor[1] + dy_pt * dpi / 72
+            w = lw_pt * dpi / 72
+            h = lh_pt * dpi / 72
+            if ha == 'center':
+                x0, x1 = ox - w / 2, ox + w / 2
+            elif ha == 'left':
+                x0, x1 = ox, ox + w
+            else:
+                x0, x1 = ox - w, ox
+            if va == 'bottom':
+                y0, y1 = oy, oy + h
+            elif va == 'center':
+                y0, y1 = oy - h / 2, oy + h / 2
+            else:
+                y0, y1 = oy - h, oy
+            collision = any(
+                not (x1 <= bx0 or x0 >= bx1 or y1 <= by0 or y0 >= by1)
+                for bx0, bx1, by0, by1 in placed_bboxes
+            )
+            if not collision:
+                ax.annotate(label, xy=(lon, lat),
+                            xytext=(dx_pt, dy_pt), textcoords='offset points',
+                            fontsize=fs_pt, fontweight='bold', color='#000000',
+                            ha=ha, va=va, zorder=8)
+                placed_bboxes.append((x0, x1, y0, y1))
+                placed = True
+                break
+
+    # Legend for block colors
+    handles = [mpatches.Patch(facecolor=block_color[bn], edgecolor='black', label=bn)
+               for bn in block_names]
+    if handles:
+        ax.legend(handles=handles, loc='lower right', fontsize=7,
+                  title='Forest Block', title_fontsize=8)
 
 
 def _add_boundary_outline(ax, boundary_geom):
@@ -391,6 +585,10 @@ def _add_legend(ax, layer_name: str):
             ((244/255, 164/255, 96/255, 0.85), "Silt Loam"),
             ((160/255, 82/255, 45/255, 0.85), "Clay Loam"),
         ],
+        "sampling_plot": [
+            ((46/255, 125/255, 50/255, 0.85), "Forest Block"),
+            ((255/255, 87/255, 34/255, 0.85), "Sample Plot"),
+        ],
     }
 
     items = legend_map.get(layer_name)
@@ -438,7 +636,7 @@ def generate_standard_map(
         BytesIO containing PNG image
     """
     if use_cache:
-        cached = _map_cache_get(calculation_id, layer_name)
+        cached = _map_cache_get(calculation_id, layer_name, dpi)
         if cached:
             return cached
 
@@ -457,7 +655,7 @@ def generate_standard_map(
 
     if use_cache:
         buf.seek(0)
-        _map_cache_set(calculation_id, layer_name, buf)
+        _map_cache_set(calculation_id, layer_name, buf, dpi)
     buf.seek(0)
     return buf
 
@@ -478,7 +676,15 @@ def _generate_map_inner(
     lon_width = max_lon - min_lon
     lat_height = max_lat - min_lat
 
-    fig, ax = plt.subplots(figsize=FIG_SIZE_INCHES, dpi=dpi)
+    # Compute figure size preserving data aspect ratio
+    base_width_inches = FIG_SIZE_MM / 25.4
+    aspect = lon_width / lat_height if lat_height > 0 else 1.0
+    fig_width = base_width_inches
+    fig_height = base_width_inches / aspect
+    # Clamp to reasonable range so very elongated shapes don't break layout
+    fig_height = max(base_width_inches * 0.5, min(fig_height, base_width_inches * 2.0))
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
     fig.subplots_adjust(left=0.02, right=0.98, top=0.92, bottom=0.06)
 
     boundary_geom = _get_forest_geometry(db, calculation_id)
@@ -487,12 +693,14 @@ def _generate_map_inner(
     pad_y = lat_height * 0.05
     ax.set_xlim(min_lon - pad_x, max_lon + pad_x)
     ax.set_ylim(min_lat - pad_y, max_lat + pad_y)
+    ax.set_aspect('equal')
 
     # 1. Basemap
     _add_basemap(ax, layer_name, alpha=0.6)
 
-    # 2. Raster overlay (skip for boundary layer — it has no raster tiles)
-    if layer_name != "boundary":
+    _NO_RASTER_LAYERS = {"boundary", "fieldbook"} | _SAMPLING_PLOT_LAYERS
+    # 2. Raster overlay (skip for boundary, fieldbook, and sampling_plot layers)
+    if layer_name not in _NO_RASTER_LAYERS:
         _add_raster_overlay(ax, db, calculation_id, layer_name, bbox, dpi)
 
     # 3. Block polygons with name labels — on EVERY map
@@ -500,31 +708,38 @@ def _generate_map_inner(
     if blocks:
         _add_block_polygons_with_labels(ax, blocks)
 
-    # 4. Boundary outline
+    # 4. Sample plot points (for all sampling_plot layer variants)
+    if layer_name in _SAMPLING_PLOT_LAYERS:
+        plots = _get_sample_plots(db, calculation_id)
+        if plots:
+            _add_sample_plots(ax, plots)
+
+    # 4b. Fieldbook features (fieldbook layer only)
+    if layer_name == "fieldbook":
+        _add_fieldbook_features(ax, db, calculation_id)
+
+    # 5. Boundary outline
     _add_boundary_outline(ax, boundary_geom)
 
-    # 5. Coordinate grid (5x5 lines + labels)
+    # 6. Coordinate grid (5x5 lines + labels)
     _add_grid(ax, min_lon, max_lon, min_lat, max_lat)
 
-    # 6. Hide axis ticks
+    # 7. Hide axis ticks
     ax.axis('off')
 
-    # 7. Title
+    # 8. Title (Nepali main + English sub — single block, no overlap)
     label_info = LAYER_LABELS.get(layer_name, {})
     title_ne = label_info.get("ne", layer_name)
     title_en = label_info.get("en", layer_name)
-    title = f"{forest_name} — {title_ne}" if forest_name else title_ne
-    ax.set_title(title, fontsize=18, fontweight='bold', pad=12, color='#1b5e20',
-                 fontproperties=_dev_fontprop(18))
+    prefix = f"{forest_name} — " if forest_name else ""
+    title = f"{prefix}{title_ne}\n{title_en}"
+    ax.set_title(title, fontsize=16, fontweight='bold', pad=10, color='#1b5e20',
+                 fontproperties=_dev_fontprop(16), linespacing=1.4)
 
-    # English subtitle
-    fig.text(0.5, 0.94, title_en, ha='center', va='bottom',
-             fontsize=10, color='#888888', style='italic')
-
-    # 8. North arrow (NO scale bar — grid provides scale)
+    # 9. North arrow (NO scale bar — grid provides scale)
     _add_north_arrow(ax)
 
-    # 9. Legend
+    # 10. Legend
     if layer_name != "boundary":
         _add_legend(ax, layer_name)
 

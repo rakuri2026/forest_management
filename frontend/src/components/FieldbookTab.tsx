@@ -6,6 +6,24 @@ interface FieldbookTabProps {
   calculationId: string;
 }
 
+function VarHint({ name, className = '' }: { name: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer select-none 
+        ${copied ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'} ${className}`}
+      onClick={() => {
+        navigator.clipboard.writeText(`{{${name}}}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      title={`Copy {{${name}}}`}
+    >
+      {copied ? '✓ Copied!' : `{{${name}}}`}
+    </span>
+  );
+}
+
 export function FieldbookTab({ calculationId }: FieldbookTabProps) {
   const [fieldbook, setFieldbook] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -226,8 +244,20 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
-                <div className="text-gray-600">Total Points</div>
+                <div className="text-gray-600">Total Points <VarHint name="fieldbook_total_points" /></div>
                 <div className="text-lg font-semibold">{fieldbook.total_count}</div>
+              </div>
+              <div>
+                <div className="text-gray-600">Vertices <VarHint name="fieldbook_vertex_count" /></div>
+                <div className="text-lg font-semibold">{fieldbook.total_vertices ?? '-'}</div>
+              </div>
+              <div>
+                <div className="text-gray-600">Interpolated <VarHint name="fieldbook_interpolated_count" /></div>
+                <div className="text-lg font-semibold">{fieldbook.interpolated_points ?? '-'}</div>
+              </div>
+              <div>
+                <div className="text-gray-600">Perimeter (m) <VarHint name="fieldbook_perimeter_m" /></div>
+                <div className="text-lg font-semibold">{fieldbook.total_perimeter_meters ? parseFloat(fieldbook.total_perimeter_meters).toLocaleString() : '-'}</div>
               </div>
             </div>
 
@@ -277,7 +307,11 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
       {fieldbook && fieldbook.points && fieldbook.points.length > 0 && (
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold">Fieldbook Points ({fieldbook.total_count})</h3>
+            <h3 className="text-lg font-semibold">
+              Fieldbook Points ({fieldbook.total_count})
+              <VarHint name="fieldbook_points" className="ml-2" />
+              <VarHint name="fieldbook_block_summary" className="ml-1" />
+            </h3>
             <p className="text-xs text-gray-500 mt-1">
               Elevation arrows: ↑ rise, ↓ fall, → flat. Topographic features (nearest ridge/river) shown with distance and direction.
             </p>
@@ -435,6 +469,26 @@ export function FieldbookTab({ calculationId }: FieldbookTabProps) {
               <div className="w-full text-blue-700 font-medium">
                 💡 Showing topographic features (nearest ridge/river) with distance and direction. Export CSV/Excel for full dataset.
               </div>
+            </div>
+          </div>
+
+          {/* OP Document Variables */}
+          <div className="px-6 py-3 bg-purple-50 border-t border-purple-100">
+            <div className="text-xs font-semibold text-purple-800 mb-2">
+              📋 OP Document Fieldbook Variables — click to copy
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <VarHint name="fieldbook_narration" />
+              <VarHint name="fieldbook_total_points" />
+              <VarHint name="fieldbook_vertex_count" />
+              <VarHint name="fieldbook_interpolated_count" />
+              <VarHint name="fieldbook_perimeter_m" />
+              <VarHint name="fieldbook_avg_elevation_m" />
+              <VarHint name="fieldbook_min_elevation_m" />
+              <VarHint name="fieldbook_max_elevation_m" />
+              <VarHint name="fieldbook_points" />
+              <VarHint name="fieldbook_block_summary" />
+              <VarHint name="map:fieldbook" />
             </div>
           </div>
         </div>

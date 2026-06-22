@@ -11,6 +11,10 @@ from sqlalchemy import func, text
 from datetime import datetime
 from shapely.geometry import shape, mapping
 from shapely.ops import unary_union
+from shapely import wkt as shapely_wkt
+import numpy as np
+import rasterio
+from rasterio.mask import mask as rio_mask
 
 from ..models.calculation import Calculation
 
@@ -1143,95 +1147,72 @@ def analyze_aspect(calculation_id: UUID, db: Session) -> Dict[str, Any]:
     return {"aspect_dominant": None, "aspect_percentages": {}}
 
 
-def analyze_canopy_height(calculation_id: UUID, db: Session) -> Dict[str, Any]:
-    """Analyze canopy height raster - actual height values in meters
+CANOPY_TIF_PATH = r"D:\forest_management\canopy_height5m.tif"
 
-    Canopy height raster contains height values 0-41m:
-    0m = Non-forest (agricultural land, open areas, water, etc.)
-    1-5m = Bush or shrub land
-    6-15m = Pole sized forest
-    >15m = High forest
-    """
+def _canopy_from_rasterio(geometry_geojson: dict) -> Dict[str, Any]:
+    """Analyze canopy height using rasterio directly from TIF file.
+    Classifies pixels into: non_forest (1m), regeneration (2-5m),
+    pole_trees (6-15m), tree (>15m).
+    Value 0 = source NoData (uint8 raster) — excluded from analysis."""
     try:
-        query = text("""
-            SELECT
-                CASE
-                    WHEN (pvc).value = 0 THEN 'non_forest'
-                    WHEN (pvc).value > 0 AND (pvc).value <= 5 THEN 'bush_regenerated'
-                    WHEN (pvc).value > 5 AND (pvc).value <= 15 THEN 'pole_trees'
-                    WHEN (pvc).value > 15 THEN 'high_forest'
-                END as canopy_class,
-                SUM((pvc).count) as pixel_count,
-                AVG((pvc).value) as avg_height
-            FROM (
-                SELECT ST_ValueCount(ST_Clip(rast, boundary_geom)) as pvc
-                FROM rasters.canopy_height, public.calculations
-                WHERE calculations.id = :calc_id
-                  AND ST_Intersects(rast, boundary_geom)
-            ) as subquery
-            WHERE (pvc).value IS NOT NULL
-              AND (pvc).value >= 0
-              AND (pvc).value <= 50
-            GROUP BY canopy_class
+        with rasterio.open(CANOPY_TIF_PATH) as src:
+            out_image, _ = rio_mask(src, [geometry_geojson], crop=True)
+            data = out_image[0]
+            if hasattr(data, 'mask'):
+                valid = data.compressed()
+            else:
+                valid = data.flatten()
+            valid = valid[(valid > 0) & (valid <= 50)]
+
+            if len(valid) == 0:
+                return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None, "canopy_min_m": None, "canopy_max_m": None}
+
+            non_forest = int((valid == 1).sum())
+            bush = int(((valid >= 2) & (valid <= 5)).sum())
+            pole = int(((valid >= 6) & (valid <= 15)).sum())
+            tree = int((valid > 15).sum())
+            total = len(valid)
+
+            percentages = {}
+            if non_forest > 0: percentages['non_forest'] = round(non_forest / total * 100, 2)
+            if bush > 0: percentages['regeneration'] = round(bush / total * 100, 2)
+            if pole > 0: percentages['pole_trees'] = round(pole / total * 100, 2)
+            if tree > 0: percentages['tree'] = round(tree / total * 100, 2)
+
+            dominant = max(percentages, key=percentages.get) if percentages else None
+            canopy_mean = round(float(valid.mean()), 1) if len(valid) > 0 else 0
+            canopy_min = round(float(valid.min()), 1) if len(valid) > 0 else 0
+            canopy_max = round(float(valid.max()), 1) if len(valid) > 0 else 0
+
+            return {
+                "canopy_dominant_class": dominant,
+                "canopy_percentages": percentages,
+                "canopy_mean_m": canopy_mean,
+                "canopy_min_m": canopy_min,
+                "canopy_max_m": canopy_max
+            }
+    except Exception as e:
+        print(f"Error in _canopy_from_rasterio: {e}")
+        return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None, "canopy_min_m": None, "canopy_max_m": None}
+
+
+def analyze_canopy_height(calculation_id: UUID, db: Session) -> Dict[str, Any]:
+    """Analyze canopy height raster - reads directly from TIF file via rasterio"""
+    try:
+        geojson_query = text("""
+            SELECT ST_AsGeoJSON(boundary_geom) as geojson
+            FROM public.calculations
+            WHERE id = :calc_id
         """)
+        row = db.execute(geojson_query, {"calc_id": str(calculation_id)}).first()
+        if not row or not row.geojson:
+            return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None, "canopy_min_m": None, "canopy_max_m": None}
 
-        results = db.execute(query, {"calc_id": str(calculation_id)}).fetchall()
-
-        if not results:
-            return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None}
-
-        total_pixels = sum(r.pixel_count for r in results)
-        canopy_percentages = {}
-        dominant_class = None
-        max_percentage = 0
-
-        for r in results:
-            class_name = r.canopy_class
-            percentage = (r.pixel_count / total_pixels * 100) if total_pixels > 0 else 0
-            canopy_percentages[class_name] = round(percentage, 2)
-
-            if percentage > max_percentage:
-                max_percentage = percentage
-                dominant_class = class_name
-
-        # Calculate weighted mean height (including all pixels)
-        total_weighted_height = sum(r.avg_height * r.pixel_count for r in results)
-        canopy_mean_m = round(total_weighted_height / total_pixels, 1) if total_pixels > 0 else None
-
-        # Get min and max canopy height for dynamic legend
-        canopy_min_m = None
-        canopy_max_m = None
-        try:
-            minmax_query = text("""
-                SELECT
-                    (stats).min as canopy_min,
-                    (stats).max as canopy_max
-                FROM (
-                    SELECT ST_SummaryStats(ST_Union(ST_Clip(rast, boundary_geom))) as stats
-                    FROM rasters.canopy_height, public.calculations
-                    WHERE calculations.id = :calc_id
-                      AND ST_Intersects(rast, boundary_geom)
-                ) as subquery
-                WHERE (stats).count > 0
-            """)
-            minmax_result = db.execute(minmax_query, {"calc_id": str(calculation_id)}).first()
-            if minmax_result:
-                canopy_min_m = round(minmax_result.canopy_min, 1) if minmax_result.canopy_min else None
-                canopy_max_m = round(minmax_result.canopy_max, 1) if minmax_result.canopy_max else None
-        except Exception as e:
-            print(f"Error getting canopy min/max: {e}")
-
-        return {
-            "canopy_dominant_class": dominant_class,
-            "canopy_percentages": canopy_percentages,
-            "canopy_mean_m": canopy_mean_m,
-            "canopy_min_m": canopy_min_m,
-            "canopy_max_m": canopy_max_m
-        }
+        geometry = json.loads(row.geojson)
+        return _canopy_from_rasterio(geometry)
     except Exception as e:
         print(f"Error analyzing canopy height: {e}")
-
-    return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None, "canopy_min_m": None, "canopy_max_m": None}
+        return {"canopy_dominant_class": None, "canopy_percentages": {}, "canopy_mean_m": None, "canopy_min_m": None, "canopy_max_m": None}
 
 
 def analyze_agb(calculation_id: UUID, db: Session) -> Dict[str, Any]:
@@ -1350,39 +1331,60 @@ def analyze_forest_type(calculation_id: UUID, db: Session) -> Dict[str, Any]:
 
     Forest type classes (FRTC, Kathmandu):
     1 = Shorea robusta Forest
-    2 = Tropical Mixed Broadleaved Forest
-    3 = Subtropical Mixed Broadleaved Forest
-    ... (26 total classes)
+    2 = Alnus nepalensis Forest
+    3 = Schima-Castanopsis Forest
+    4 = Quercus semecarpifolia Forest
+    5 = Larix/Abies spectabilis Forest
+    6 = Pinus wallichiana-Tsuga dumosa Forest
+    7 = Plantation (Pinus-Eucalyptus) Forest
+    8 = Ficus-Other Tropical Riverine Forest
+    9 = Tropical Mixed Broadleaved Forest
+    10 = Quercus-Pinus Forest
+    11 = Abies spectabilis Forest
+    12 = Pinus roxburghii-Mixed Broadleaved Forest
+    13 = Pinus wallichiana Forest
+    14 = Warm Temperate Mixed Broadleaved Forest
+    15 = Upper Temperate Quercus Forest
+    16 = Rhododendron arboreum Forest
+    17 = Temperate Rhododendron Mixed Broadleaved Forest
+    18 = Dalbergia sissoo-Senegelia catechu Forest
+    19 = Terminalia-Tropical Mixed Broadleaved Forest
+    20 = Temperate Mixed Broadleaved Forest
+    21 = Tropical Deciduous Indigenous Riverine Forest
+    22 = Tropical Riverine Forest
+    23 = Lower Temperate Mixed robusta Forest
+    24 = Pinus roxburghii-Shorea robusta Forest
+    25 = Lower Temperate Pinus roxburghii-Quercus Forest
     26 = Data Not Available
     """
     try:
-        # Mapping from codes to forest type names
+        # Mapping from codes to forest type names (matches tile service and block-level analysis)
         forest_type_map = {
-            1: "Shorea robusta",
-            2: "Tropical Mixed Broadleaved",
-            3: "Subtropical Mixed Broadleaved",
-            4: "Shorea robusta-Mixed Broadleaved",
-            5: "Abies Mixed",
-            6: "Upper Temperate Coniferous",
-            7: "Cool Temperate Mixed Broadleaved",
-            8: "Castanopsis Lower Temperate Mixed Broadleaved",
-            9: "Pinus roxburghii",
-            10: "Alnus",
-            11: "Schima",
-            12: "Pinus roxburghii-Mixed Broadleaved",
-            13: "Pinus wallichiana",
-            14: "Warm Temperate Mixed Broadleaved",
-            15: "Upper Temperate Quercus",
-            16: "Rhododendron arboreum",
-            17: "Temperate Rhododendron Mixed Broadleaved",
-            18: "Dalbergia sissoo-Senegalia catechu",
-            19: "Terminalia-Tropical Mixed Broadleaved",
-            20: "Temperate Mixed Broadleaved",
-            21: "Tropical Deciduous Indigenous Riverine",
-            22: "Tropical Riverine",
-            23: "Lower Temperate Mixed robusta",
-            24: "Pinus roxburghii-Shorea robusta",
-            25: "Lower Temperate Pinus roxburghii-Quercus",
+            1: "Shorea robusta Forest",
+            2: "Alnus nepalensis Forest",
+            3: "Schima-Castanopsis Forest",
+            4: "Quercus semecarpifolia Forest",
+            5: "Larix/Abies spectabilis Forest",
+            6: "Pinus wallichiana-Tsuga dumosa Forest",
+            7: "Plantation (Pinus-Eucalyptus) Forest",
+            8: "Ficus-Other Tropical Riverine Forest",
+            9: "Tropical Mixed Broadleaved Forest",
+            10: "Quercus-Pinus Forest",
+            11: "Abies spectabilis Forest",
+            12: "Pinus roxburghii-Mixed Broadleaved Forest",
+            13: "Pinus wallichiana Forest",
+            14: "Warm Temperate Mixed Broadleaved Forest",
+            15: "Upper Temperate Quercus Forest",
+            16: "Rhododendron arboreum Forest",
+            17: "Temperate Rhododendron Mixed Broadleaved Forest",
+            18: "Dalbergia sissoo-Senegelia catechu Forest",
+            19: "Terminalia-Tropical Mixed Broadleaved Forest",
+            20: "Temperate Mixed Broadleaved Forest",
+            21: "Tropical Deciduous Indigenous Riverine Forest",
+            22: "Tropical Riverine Forest",
+            23: "Lower Temperate Mixed robusta Forest",
+            24: "Pinus roxburghii-Shorea robusta Forest",
+            25: "Lower Temperate Pinus roxburghii-Quercus Forest",
             26: "Data Not Available"
         }
 
@@ -2650,108 +2652,14 @@ def analyze_aspect_geometry(wkt: str, db: Session) -> Dict[str, Any]:
 
 
 def analyze_canopy_height_geometry(wkt: str, db: Session) -> Dict[str, Any]:
-    """Analyze canopy height for a specific geometry
-
-    Canopy height raster contains actual height values in meters (0-41m):
-    0m = Non-forest (agricultural land, open areas, water, etc.)
-    1-5m = Bush or shrub land
-    6-15m = Pole sized forest
-    >15m = High forest (tree sized)
-
-    Uses conservative pixel containment: only pixels whose center point
-    is FULLY CONTAINED within the polygon boundary are counted.
-    This matches QGIS zonal statistics behavior more closely.
-    """
+    """Analyze canopy height for a specific geometry using rasterio from TIF file"""
     try:
-        # Use ST_PixelAsPolygons with geom parameter to get pixel center points
-        # Filter to only include pixels where center is CONTAINED (not just intersects)
-        query = text("""
-            WITH boundary AS (
-                SELECT ST_GeomFromText(:wkt, 4326) as geom
-            ),
-            all_pixels AS (
-                SELECT
-                    (pix).val as height,
-                    (pix).geom as pixel_center
-                FROM (
-                    SELECT ST_PixelAsPolygons(rast) as pix
-                    FROM rasters.canopy_height, boundary
-                    WHERE ST_Intersects(rast, geom)
-                ) as subq
-            )
-            SELECT
-                CASE
-                    WHEN height = 0 THEN 'non_forest'
-                    WHEN height > 0 AND height <= 5 THEN 'bush_regenerated'
-                    WHEN height > 5 AND height <= 15 THEN 'pole_trees'
-                    WHEN height > 15 THEN 'high_forest'
-                END as canopy_class,
-                COUNT(*) as pixel_count,
-                AVG(height) as avg_height
-            FROM all_pixels, boundary
-            WHERE ST_Contains(boundary.geom, ST_Centroid(pixel_center))
-              AND height IS NOT NULL
-              AND height >= 0
-              AND height <= 50
-            GROUP BY canopy_class
-        """)
-
-        results = db.execute(query, {"wkt": wkt}).fetchall()
-
-        if results:
-            total_pixels = sum(r.pixel_count for r in results)
-            percentages = {r.canopy_class: round((r.pixel_count / total_pixels) * 100, 2) for r in results}
-            dominant = max(percentages.items(), key=lambda x: x[1])[0]
-
-            # Calculate weighted mean height (including all pixels)
-            total_weighted_height = sum(r.avg_height * r.pixel_count for r in results)
-            canopy_mean_m = round(total_weighted_height / total_pixels, 1) if total_pixels > 0 else None
-
-            # Get min and max canopy height for dynamic legend
-            canopy_min_m = None
-            canopy_max_m = None
-            try:
-                minmax_query = text("""
-                    WITH boundary AS (
-                        SELECT ST_GeomFromText(:wkt, 4326) as geom
-                    ),
-                    all_pixels AS (
-                        SELECT
-                            (pix).val as height,
-                            (pix).geom as pixel_center
-                        FROM (
-                            SELECT ST_PixelAsPolygons(rast) as pix
-                            FROM rasters.canopy_height, boundary
-                            WHERE ST_Intersects(rast, geom)
-                        ) as subq
-                    )
-                    SELECT
-                        MIN(height) as canopy_min,
-                        MAX(height) as canopy_max
-                    FROM all_pixels, boundary
-                    WHERE ST_Contains(boundary.geom, ST_Centroid(pixel_center))
-                      AND height IS NOT NULL
-                      AND height >= 0
-                      AND height <= 50
-                """)
-                minmax_result = db.execute(minmax_query, {"wkt": wkt}).first()
-                if minmax_result:
-                    canopy_min_m = round(minmax_result.canopy_min, 1) if minmax_result.canopy_min else None
-                    canopy_max_m = round(minmax_result.canopy_max, 1) if minmax_result.canopy_max else None
-            except Exception as e:
-                print(f"Error getting canopy min/max: {e}")
-
-            return {
-                "canopy_mean_m": canopy_mean_m,
-                "canopy_dominant_class": dominant,
-                "canopy_percentages": percentages,
-                "canopy_min_m": canopy_min_m,
-                "canopy_max_m": canopy_max_m
-            }
+        geom = shapely_wkt.loads(wkt)
+        geojson = mapping(geom)
+        return _canopy_from_rasterio(geojson)
     except Exception as e:
-        print(f"Error analyzing canopy height: {e}")
-
-    return {"canopy_mean_m": None, "canopy_dominant_class": None, "canopy_percentages": {}, "canopy_min_m": None, "canopy_max_m": None}
+        print(f"Error analyzing canopy height geometry: {e}")
+        return {"canopy_mean_m": None, "canopy_dominant_class": None, "canopy_percentages": {}, "canopy_min_m": None, "canopy_max_m": None}
 
 
 def analyze_agb_geometry(wkt: str, db: Session) -> Dict[str, Any]:

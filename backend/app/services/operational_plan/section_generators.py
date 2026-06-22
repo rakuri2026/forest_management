@@ -1,0 +1,684 @@
+from typing import Any, Dict, Optional
+from app.utils.number_format import format_devanagari as fmt
+
+
+def _deep_get(data: dict, path: str, default: Any = None) -> Any:
+    current = data
+    for key in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            return default
+        if current is None:
+            return default
+    return current
+
+
+def _get_rd(raw_data: dict) -> dict:
+    return raw_data.get("result_data", {})
+
+
+def _bi(raw_data: dict) -> dict:
+    return raw_data.get("basic_info", {})
+
+
+def _ra(raw_data: dict) -> dict:
+    return raw_data.get("raster_analysis", {})
+
+
+# ─── 1. Forest Summary ──────────────────────────────────────────
+def generate_forest_summary(raw_data: dict) -> Optional[str]:
+    bi = _bi(raw_data)
+    raster = _ra(raw_data)
+    rd = _get_rd(raw_data)
+    blocks = raw_data.get("blocks", {})
+    area = bi.get("effective_area_hectares") or bi.get("total_area_hectares") or 0
+    bc = rd.get("total_blocks") or blocks.get("total_blocks") or 0
+    elev = _deep_get(raster, "elevation.mean_m", 0)
+    carbon_mg = _deep_get(raster, "biomass.carbon_stock", 0)
+    forest_health = _deep_get(raster, "forest_health.dominant", "")
+    HEALTH_MAP = {
+        "good": "राम्रो", "fair": "मध्यम", "poor": "कमजोर",
+        "degraded": "क्षरित", "very_good": "धेरै राम्रो",
+    }
+    health_np = HEALTH_MAP.get(forest_health, forest_health or "—")
+    if not area and not bc and not elev:
+        return None
+    return (
+        f"यस वनको कुल क्षेत्रफल {fmt(area)} हेक्टर रहेको छ। "
+        f"यस वनमा {fmt(bc, 0)} वटा वन खण्डहरू रहेका छन्। "
+        f"वनको औसत उचाइ {fmt(elev, 0)} मिटर रहेको छ। "
+        f"कुल कार्बन भण्डार {fmt(carbon_mg)} मेगाग्राम रहेको छ। "
+        f"वन स्वास्थ्य \"{health_np}\" अवस्थामा रहेको छ।"
+    )
+
+
+# ─── 2. Slope Analysis ──────────────────────────────────────────
+def generate_slope_analysis(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    slope = raster.get("slope", {})
+    dominant = slope.get("dominant_class", "")
+    percentages = slope.get("percentages", {})
+    if not dominant and not percentages:
+        return None
+    SLOPE_MAP = {
+        "flat": "समतल (Flat)", "gentle": "हल्का (Gentle)",
+        "moderate": "मध्यम (Moderate)", "steep": "भिरालो (Steep)",
+        "very_steep": "अति भिरालो (Very Steep)",
+    }
+    dominant_np = SLOPE_MAP.get(dominant, dominant or "—")
+    dom_pct = percentages.get(dominant, 0)
+    return (
+        f"यस वनको प्रमुख भिरालो \"{dominant_np}\" वर्ग रहेको छ, "
+        f"जसले कुल क्षेत्रफलको {fmt(dom_pct, 1)}% ओगटेको छ। "
+        f"भिरालोको आधारमा जमिनलाई पाँच वर्गमा बाँडिएको छ: समतल (Flat), "
+        f"हल्का (Gentle), मध्यम (Moderate), भिरालो (Steep), र अति भिरालो (Very Steep)। "
+        f"हल्का भिरालो जमिनमा सजिलै नमुना प्लट राख्न सकिन्छ भने "
+        f"भिरालो र अति भिरालो जमिनमा नमुना सङ्कलन गर्न कठिनाई हुन्छ।"
+    )
+
+
+# ─── 3. Elevation Profile ───────────────────────────────────────
+def generate_elevation_profile(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    elev = raster.get("elevation", {})
+    mean = elev.get("mean_m", 0)
+    min_ = elev.get("min_m", 0)
+    max_ = elev.get("max_m", 0)
+    if not mean and not min_ and not max_:
+        return None
+    range_val = max_ - min_
+    return (
+        f"यस वनको औसत उचाइ {fmt(mean, 0)} मिटर रहेको छ। "
+        f"न्यूनतम उचाइ {fmt(min_, 0)} मिटर र अधिकतम उचाइ {fmt(max_, 0)} मिटर रहेको छ। "
+        f"उचाइको फरक {fmt(range_val, 0)} मिटर रहेको छ, जसले यस वनमा "
+        f"विविध वनस्पति तथा वातावरणीय अवस्था रहेको संकेत गर्दछ।"
+    )
+
+
+# ─── 4. Aspect Analysis ─────────────────────────────────────────
+def generate_aspect_analysis(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    aspect = raster.get("aspect", {})
+    dominant = aspect.get("dominant", "")
+    if not dominant:
+        return None
+    ASPECT_MAP = {
+        "N": "उत्तर (North)", "NE": "उत्तर-पूर्व (North-East)",
+        "E": "पूर्व (East)", "SE": "दक्षिण-पूर्व (South-East)",
+        "S": "दक्षिण (South)", "SW": "दक्षिण-पश्चिम (South-West)",
+        "W": "पश्चिम (West)", "NW": "उत्तर-पश्चिम (North-West)",
+    }
+    dominant_np = ASPECT_MAP.get(dominant, dominant or "—")
+    return (
+        f"यस वनको प्रमुख दिशा \"{dominant_np}\" रहेको छ। "
+        f"दिशा (Aspect) ले भिरालो कुन दिशातिर फर्केको छ भन्ने देखाउँदछ। "
+        f"दक्षिणतर्फ फर्केको भिरालोमा घाम बढी लाग्छ भने उत्तरतर्फ फर्केको भिरालोमा चिसो हुन्छ।"
+    )
+
+
+# ─── 5. Forest Health ───────────────────────────────────────────
+def generate_forest_health(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    fh = raster.get("forest_health", {})
+    dominant = fh.get("dominant", "")
+    percentages = fh.get("percentages", {})
+    if not dominant and not percentages:
+        return None
+    HEALTH_MAP = {
+        "excellent": "उत्कृष्ट", "good": "राम्रो",
+        "fair": "मध्यम", "poor": "कमजोर", "degraded": "क्षरित",
+        "stressed": "तनावग्रस्त",
+    }
+    dominant_np = HEALTH_MAP.get(dominant, dominant or "—")
+    dom_pct = percentages.get(dominant, 0)
+    return (
+        f"यस वनको समग्र स्वास्थ्य अवस्था \"{dominant_np}\" रहेको छ, "
+        f"जसले कुल क्षेत्रफलको {fmt(dom_pct, 1)}% ओगटेको छ। "
+        f"वन स्वास्थ्यलाई NDVI (Normalized Difference Vegetation Index) को आधारमा "
+        f"पाँच वर्गमा विभाजन गरिएको छ: उत्कृष्ट (Excellent), राम्रो (Good), "
+        f"मध्यम (Moderate), कमजोर (Poor), र क्षरित (Degraded)।"
+    )
+
+
+# ─── 6. Forest Type ─────────────────────────────────────────────
+def generate_forest_type(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    ft = raster.get("forest_type", {})
+    dominant = ft.get("dominant", "")
+    if not dominant:
+        return None
+    return (
+        f"यस वनको प्रमुख वन प्रकार \"{dominant}\" रहेको छ। "
+        f"नेपालको FRTC (Forest Resource and Training Centre) वर्गीकरण प्रणाली "
+        f"अनुसार यस वनमा विभिन्न प्रकारका वनहरू पाइन्छन्।"
+    )
+
+
+# ─── 7. Potential Species ───────────────────────────────────────
+def generate_potential_species(raw_data: dict) -> Optional[str]:
+    species = raw_data.get("species", {})
+    species_list = species.get("species_list", [])
+    if not species_list or not isinstance(species_list, list):
+        return None
+    total = len(species_list)
+    by_role: Dict[str, list] = {}
+    by_ft: Dict[str, list] = {}
+    for s in species_list:
+        role = s.get("role", "Associate")
+        name = s.get("local_name") or s.get("scientific_name", "")
+        by_role.setdefault(role, []).append(name)
+        for ft in (s.get("forest_types") or []):
+            by_ft.setdefault(ft, []).append(name)
+
+    role_order = ["Dominant", "Co-dominant", "Associate", "Occasional", "Rare"]
+    role_labels = {
+        "Dominant": "प्रमुख प्रजाती", "Co-dominant": "सह-प्रमुख प्रजाती",
+        "Associate": "सहयोगी प्रजाती", "Occasional": "विरलै हुने प्रजाती",
+        "Rare": "दुर्लभ प्रजाती",
+    }
+    role_lines = []
+    for r in role_order:
+        names = by_role.get(r, [])
+        if names:
+            role_lines.append(f"• {role_labels[r]}: {', '.join(names)}")
+    role_text = "\n".join(role_lines) if role_lines else ""
+
+    ft_lines = [
+        f"• {ft}: {len(names)} प्रजातिहरू"
+        for ft, names in sorted(by_ft.items(), key=lambda x: -len(x[1]))
+    ]
+    ft_text = "\n".join(ft_lines) if ft_lines else ""
+
+    return (
+        f"यस वनको वन प्रकार अनुसार जम्मा {fmt(total, 0)} प्रजातिका रूखहरू "
+        f"सम्भावित रूपमा पाउन सकिन्छ। यस क्षेत्रमा वृक्षारोपण गर्न सकिने प्रजाती "
+        f"छनोट गर्दा यि प्रजातीलाइ प्राथमिकता दिन सकिन्छ।\n\n"
+        f"वन प्रकार अनुसार:\n{ft_text}\n\n"
+        f"भूमिका अनुसार प्रजातिहरू:\n{role_text}"
+    )
+
+
+# ─── 8. Actual Species (from field inventory) ────────────────────
+def generate_actual_species(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    if not fi.get("available"):
+        return None
+    species_block = fi.get("fi_species_block_growing_stock", [])
+    if not species_block:
+        return None
+    per_species: Dict[str, dict] = {}
+    for row in species_block:
+        sci = row.get("species_scientific", "")
+        loc = row.get("species_local", "") or sci
+        if sci not in per_species:
+            per_species[sci] = {"loc": loc, "count": 0.0}
+        per_species[sci]["count"] += row.get("count_per_ha", 0)
+    total_sp = len(per_species)
+    sorted_sp = sorted(per_species.values(), key=lambda x: -x["count"])
+    top = [f"• {s['loc']}: {fmt(s['count'], 0)} /ha" for s in sorted_sp[:10]]
+    top_text = "\n".join(top)
+    return (
+        f"यस वनको स्थलगत सर्वेक्षणबाट जम्मा {fmt(total_sp, 0)} प्रजातिका "
+        f"रूखहरू फेला परेका छन्। प्रमुख प्रजातिहरू:\n{top_text}"
+    )
+
+
+# ─── 9. Biodiversity ─────────────────────────────────────────────
+def generate_biodiversity(raw_data: dict) -> Optional[str]:
+    bio = raw_data.get("biodiversity", {})
+    species = bio.get("species", [])
+    if not species or not isinstance(species, list):
+        return None
+    total = len(species)
+    sub_cat: Dict[str, int] = {}
+    iucn: Dict[str, int] = {}
+    veg_count = animal_count = 0
+    for rec in species:
+        s = rec.get("species") or rec
+        cat = s.get("sub_category", "other") or "other"
+        sub_cat[cat] = sub_cat.get(cat, 0) + 1
+        i = s.get("iucn_status", "DD") or "DD"
+        iucn[i] = iucn.get(i, 0) + 1
+        if s.get("category") == "vegetation":
+            veg_count += 1
+        else:
+            animal_count += 1
+    cat_list = "\n".join(
+        f"• {cat}: {fmt(cnt, 0)}" for cat, cnt in
+        sorted(sub_cat.items(), key=lambda x: -x[1])
+    )
+    iucn_order = ["CR", "EN", "VU", "NT", "LC", "DD"]
+    iucn_labels = {
+        "CR": "संकटग्रस्त", "EN": "लोपोन्मुख", "VU": "असुरक्षित",
+        "NT": "नजिकै खतरा", "LC": "कम चासो", "DD": "अपर्याप्त",
+    }
+    iucn_list = "\n".join(
+        f"• {iucn_labels.get(ic, ic)}: {fmt(iucn[ic], 0)}"
+        for ic in iucn_order if ic in iucn
+    )
+    return (
+        f"यस वनको जैविक विविधता अन्तर्गत जम्मा {fmt(total, 0)} प्रजातिहरू "
+        f"पाइन्छन्। वनस्पति प्रजाति {fmt(veg_count, 0)} र जनावर प्रजाति "
+        f"{fmt(animal_count, 0)} रहेका छन्।\n\n"
+        f"प्रकार अनुसार:\n{cat_list}\n\n"
+        f"संरक्षण स्थिति अनुसार:\n{iucn_list}"
+    )
+
+
+# ─── 10. Canopy Structure ───────────────────────────────────────
+def generate_canopy_structure(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    canopy = raster.get("canopy", {})
+    dominant = canopy.get("dominant_class", "")
+    mean_h = canopy.get("mean_m", 0)
+    if not dominant and not mean_h:
+        return None
+    CANOPY_MAP = {
+        "non_forest": "गैर-वन", "regeneration": "पुनरुत्थान",
+        "pole_trees": "पोल रूख", "tree": "रूख",
+    }
+    dominant_np = CANOPY_MAP.get(dominant, dominant or "—")
+    return (
+        f"यस वनको प्रमुख वन छत्र वर्ग \"{dominant_np}\" रहेको छ। "
+        f"वन छत्रको औसत उचाइ {fmt(mean_h, 1)} मिटर रहेको छ। "
+        f"वन छत्रले वनको संरचना र रूखको घनत्व देखाउँदछ।"
+    )
+
+
+# ─── 11. Biomass & Carbon ────────────────────────────────────────
+def generate_biomass_carbon(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    biomass = raster.get("biomass", {})
+    agb_mean = biomass.get("agb_mean", 0)
+    agb_total = biomass.get("agb_total", 0)
+    carbon = biomass.get("carbon_stock", 0)
+    if not agb_mean and not agb_total:
+        return None
+    return (
+        f"यस वनको कुल वायवीय जैविक पदार्थ (Above Ground Biomass) "
+        f"{fmt(agb_total)} मेगाग्राम रहेको छ। प्रतिहेक्टर औसत {fmt(agb_mean, 1)} "
+        f"मेगाग्राम रहेको छ। कुल कार्बन भण्डार (AGB को ५०%) {fmt(carbon)} "
+        f"मेगाग्राम रहेको छ। कार्बन भण्डारले वनले वातावरणमा रहेको कार्बनलाई "
+        f"कति मात्रामा सोसेर राखेको छ भन्ने देखाउँदछ।"
+    )
+
+
+# ─── 12. Climate Conditions ──────────────────────────────────────
+def generate_climate_conditions(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    temp = _deep_get(raster, "temperature.mean_c", 0)
+    precip = _deep_get(raster, "precipitation.mean_mm", 0)
+    if not temp and not precip:
+        return None
+    return (
+        f"यस वनको वार्षिक औसत तापक्रम {fmt(temp, 1)}°C रहेको छ। "
+        f"वार्षिक औसत वर्षा {fmt(precip, 0)} मिलिमिटर रहेको छ। "
+        f"यी मौसमी अवस्थाहरूले यस वनको वनस्पति, माटो र समग्र "
+        f"पारिस्थितिकी प्रणालीलाई प्रभाव पार्दछन्।"
+    )
+
+
+# ─── 13. Land Cover ─────────────────────────────────────────────
+def generate_land_cover(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    lc = raster.get("landcover", {})
+    dominant = lc.get("dominant", "")
+    if not dominant:
+        return None
+    return (
+        f"यस वनको प्रमुख भू-आवरण \"{dominant}\" रहेको छ। भू-आवरणले जमिनको "
+        f"प्रयोग र प्राकृतिक अवस्था देखाउँदछ। यस वनमा रूख आवरण (Tree Cover), "
+        f"झाडी (Shrubland), घाँसे मैदान (Grassland), खेती योग्य (Cropland), "
+        f"बस्ती (Built-up), पानी (Water) लगायत विभिन्न प्रकारका भू-आवरणहरू पाइन्छन्।"
+    )
+
+
+# ─── 14. Forest Loss ────────────────────────────────────────────
+def generate_forest_loss(raw_data: dict) -> Optional[str]:
+    raster = _ra(raw_data)
+    fl = raster.get("forest_loss_gain", {})
+    loss_ha = fl.get("loss_hectares", 0)
+    rd = _get_rd(raw_data)
+    area = rd.get("area_hectares", 0) or _bi(raw_data).get("total_area_hectares", 0)
+    if not loss_ha:
+        loss_ha = rd.get("forest_loss_hectares", 0)
+    if not loss_ha:
+        return None
+    pct = (loss_ha / area * 100) if area else 0
+    return (
+        f"सन् २००१ देखि २०२४ सम्म यस वनको कुल {fmt(loss_ha, 2)} हेक्टर "
+        f"({fmt(pct, 1)}%) क्षेत्रमा वन क्षति भएको छ। यो जानकारी "
+        f"Hansen Global Forest Change डाटाबाट प्राप्त गरिएको हो। "
+        f"वन क्षति मुख्यतया मानवीय क्रियाकलाप, आगलागी र प्राकृतिक कारणले हुने गर्दछ।"
+    )
+
+
+# ─── 15. Fire Loss ──────────────────────────────────────────────
+def generate_fire_loss(raw_data: dict) -> Optional[str]:
+    rd = _get_rd(raw_data)
+    loss_ha = rd.get("fire_loss_hectares", 0)
+    if not loss_ha:
+        return None
+    area = rd.get("area_hectares", 0) or _bi(raw_data).get("total_area_hectares", 0)
+    pct = (loss_ha / area * 100) if area else 0
+    return (
+        f"सन् २००१ देखि २०२४ सम्म यस वनको कुल {fmt(loss_ha, 2)} हेक्टर "
+        f"({fmt(pct, 1)}%) क्षेत्र आगलागीबाट क्षतिग्रस्त भएको छ। "
+        f"आगलागी वनको लागि प्रमुख जोखिम हो, जसले वनस्पति, वन्यजन्तु "
+        f"र माटोको गुणस्तरमा गम्भीर असर पार्दछ।"
+    )
+
+
+# ─── 16. Forest Quality (NASA 2020) ─────────────────────────────
+def generate_forest_quality(raw_data: dict) -> Optional[str]:
+    rd = _get_rd(raw_data)
+    pct = rd.get("whole_nasa_forest_2020_percentages", {})
+    dominant = rd.get("whole_nasa_forest_2020_dominant", "")
+    if not pct or not isinstance(pct, dict) or not any(v for v in pct.values()):
+        return None
+    QUALITY_NP = {
+        "Primary Forest": "प्राथमिक वन",
+        "Young Secondary Forest": "कम उमेरको दोस्रो पुस्ताको वन",
+        "Old Secondary Forest": "पुरानो दोस्रो पुस्ताको वन",
+    }
+    entries = sorted(
+        [(k, v) for k, v in pct.items() if v > 0],
+        key=lambda x: -x[1]
+    )
+    dominant_np = QUALITY_NP.get(dominant, dominant or "—")
+    parts = []
+    for k, v in entries:
+        np = QUALITY_NP.get(k, k)
+        desc = (
+            "पुरानो वन, सर्वाधिक कार्बन" if "primary" in k.lower()
+            else "पुनरुत्थान हुँदै गरेको, कम कार्बन" if "young" in k.lower()
+            else "परिपक्क दोस्रो पुस्ताको वन, मध्यम कार्बन" if "old" in k.lower()
+            else ""
+        )
+        parts.append(f"{np} {fmt(v, 1)}% ({desc})")
+    breakdown = ", ".join(parts)
+    area = rd.get("area_hectares", 0)
+    primary_pct = pct.get("Primary Forest", 0) if isinstance(pct, dict) else 0
+    primary_area = (area * primary_pct / 100) if area else None
+    area_note = (
+        f"यस वनको करिब {fmt(primary_area, 2)} हेक्टर क्षेत्र प्राथमिक वनले "
+        f"ढाकेको छ, जुन कार्बन भण्डारणको दृष्टिले अत्यन्त महत्वपूर्ण छ।"
+    ) if primary_area else ""
+    return (
+        f"यस वनको प्रमुख वन गुणस्तर \"{dominant_np}\" रहेको छ। वन गुणस्तर "
+        f"वितरण यस प्रकार रहेको छ: {breakdown}।\n\n"
+        f"प्राथमिक वन (Primary Forest) पुरानो तथा अत्यधिक कार्बन भण्डार भएको "
+        f"वन हो। प्राथमिक वनले दोस्रो पुस्ताको वनको तुलनामा २ देखि ३ गुणा बढी "
+        f"कार्बन भण्डारण गर्न सक्दछ। {area_note} यो तथ्यांक नासा (NASA/ORNL DAAC) "
+        f"३० मिटर रिजोलुसनको २०२० सालको उपग्रह तथ्यांकमा आधारित छ।"
+    )
+
+
+# ─── 17. Soil Analysis ──────────────────────────────────────────
+def generate_soil_analysis(raw_data: dict) -> Optional[str]:
+    rd = _get_rd(raw_data)
+    texture = rd.get("soil_texture", "")
+    if not texture:
+        return None
+    SOIL_TEXTURE_NP = {
+        "sand": "बालुवे", "loamy sand": "बालुवे दोमट",
+        "sandy loam": "बालुवे दोमट", "loam": "दोमट",
+        "silt loam": "ग्राबेले दोमट", "silt": "ग्राबेले",
+        "sandy clay loam": "बालुवे चिल्लो दोमट",
+        "clay loam": "चिल्लो दोमट", "silty clay loam": "ग्राबेले चिल्लो दोमट",
+        "sandy clay": "बालुवे चिल्लो", "silty clay": "ग्राबेले चिल्लो",
+        "clay": "चिल्लो",
+    }
+    texture_np = SOIL_TEXTURE_NP.get(texture.lower().strip(), texture)
+    props = rd.get("soil_properties", {})
+    clay = props.get("clay_pct", 0)
+    sand = props.get("sand_pct", 0)
+    silt = props.get("silt_pct", 0)
+    ph = props.get("ph_h2o", rd.get("soil_ph", ""))
+    fertility = rd.get("fertility_class", "")
+    fert_score = rd.get("fertility_score", "")
+    carbon_stock = rd.get("carbon_stock_t_ha", "")
+    nitrogen = props.get("nitrogen_cg_kg", "")
+    cec = props.get("cec_mmol_kg", "")
+    return (
+        f"यस वनको माटोको बनावट \"{texture_np}\" रहेको छ। माटोको भौतिक "
+        f"संरचनामा माटोको कण (Clay) {fmt(clay, 1)}%, बालुवा (Sand) "
+        f"{fmt(sand, 1)}%, र ग्राबेल (Silt) {fmt(silt, 1)}% रहेको छ। "
+        f"माटोको pH मान {fmt(ph, 1) if isinstance(ph, (int, float)) else ph} "
+        f"रहेको छ। माटोको उर्वराशक्ति \"{fertility}\" ({fert_score}/100) रहेको छ। "
+        f"माटोको जैविक कार्बन भण्डार {fmt(carbon_stock, 1) if isinstance(carbon_stock, (int, float)) else carbon_stock} t/ha रहेको छ। "
+        f"माटोको नाइट्रोजन {fmt(nitrogen, 1) if isinstance(nitrogen, (int, float)) else nitrogen} cg/kg "
+        f"र CEC {fmt(cec, 0) if isinstance(cec, (int, float)) else cec} mmol/kg रहेको छ।"
+    )
+
+
+# ─── 18. Location & Context ─────────────────────────────────────
+def generate_location_context(raw_data: dict) -> Optional[str]:
+    bi = _bi(raw_data)
+    province = bi.get("province", "")
+    district = bi.get("district", "")
+    municipality = bi.get("municipality", "")
+    ward = bi.get("ward", "")
+    watershed = bi.get("watershed", "")
+    river = bi.get("major_river_basin", "")
+    if not district and not municipality:
+        return None
+    return (
+        f"यस वन {province} प्रदेश, {district} जिल्ला, {municipality} - "
+        f"वडा नं. {ward} मा अवस्थित छ। यो वन {watershed} जलाधार र {river} "
+        f"प्रमुख नदी बेसिन अन्तर्गत पर्दछ।"
+    )
+
+
+# ─── 19. Species Distribution ────────────────────────────────────
+def generate_species_distribution(raw_data: dict) -> Optional[str]:
+    species = raw_data.get("species", {})
+    total = species.get("total_species", 0)
+    rd = _get_rd(raw_data)
+    total2 = rd.get("total_species", 0)
+    total = total or total2
+    if not total:
+        return None
+    return (
+        f"यस वनमा जम्मा {fmt(total, 0)} प्रजातिका रूखहरू पाइन्छन्। "
+        f"यी प्रजातिहरू विभिन्न वन खण्डहरूमा फैलिएका छन्। "
+        f"तल प्रमुख प्रजातिहरूको सूची दिइएको छ।"
+    )
+
+
+# ─── 20. Accessible Forest Area ─────────────────────────────────
+def generate_accessible_forest(raw_data: dict) -> Optional[str]:
+    rd = _get_rd(raw_data)
+    blocks = rd.get("blocks", [])
+    if not blocks:
+        return None
+    total_accessible = sum(
+        b.get("accessible_forest_area_ha", 0) or 0 for b in blocks
+    )
+    total_inaccessible = sum(
+        b.get("inaccessible_steep_forest_ha", 0) or 0 for b in blocks
+    )
+    total_non_forest = sum(
+        b.get("non_forest_area_ha", 0) or 0 for b in blocks
+    )
+    total = total_accessible + total_inaccessible + total_non_forest
+    if not total:
+        return None
+    ap = total_accessible / total * 100 if total else 0
+    ip = total_inaccessible / total * 100 if total else 0
+    np_ = total_non_forest / total * 100 if total else 0
+    return (
+        f"यस वनको कुल क्षेत्रफलमध्ये {fmt(total_accessible, 2)} हेक्टर "
+        f"({fmt(ap, 1)}%) क्षेत्र नमुना प्लट राख्नको लागि पहुँचयोग्य रहेको छ। "
+        f"दुर्गम वन क्षेत्र {fmt(total_inaccessible, 2)} हेक्टर "
+        f"({fmt(ip, 1)}%) र वन नभएको क्षेत्र {fmt(total_non_forest, 2)} हेक्टर "
+        f"({fmt(np_, 1)}%) रहेको छ।"
+    )
+
+
+# ─── 21. Field Inventory Narration ───────────────────────────────
+def generate_field_inventory_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    if not fi.get("available") or not fi.get("total_sample_plots"):
+        return None
+
+    plots = fmt(fi.get("total_sample_plots", 0), 0)
+    blocks = fmt(fi.get("total_blocks", 0), 0)
+    regen = fmt(fi.get("fi_regeneration_per_ha", 0), 0)
+    sapling = fmt(fi.get("fi_sapling_per_ha", 0), 0)
+    pole = fmt(fi.get("fi_pole_per_ha", 0), 0)
+    tree = fmt(fi.get("fi_tree_per_ha", 0), 0)
+    gs = fmt(fi.get("fi_growing_stock_m3_per_ha", 0), 2)
+    ba = fmt(fi.get("fi_basal_area_m2_per_ha", 0), 2)
+    agb = fmt(fi.get("fi_agb_t_per_ha", 0), 2)
+    bgb = fmt(fi.get("fi_bgb_t_per_ha", 0), 2)
+    tb = fmt(fi.get("fi_total_biomass_t_per_ha", 0), 2)
+    c = fmt(fi.get("fi_carbon_stock_tc_per_ha", 0), 2)
+    co2 = fmt(fi.get("fi_co2_equivalent_tco2_per_ha", 0), 2)
+    mai_pct = fmt(fi.get("fi_mai_percent", 0), 1)
+    den = fmt(fi.get("fi_weighted_wood_density", 0), 3)
+    fc = fi.get("fi_forest_condition", "—")
+
+    # Get MAI/AAH from grand total row in block summaries
+    block_summaries = fi.get("fi_block_summaries", [])
+    grand = block_summaries[-1] if len(block_summaries) > 1 and "Grand" in str(block_summaries[-1].get("block_name", "")) else None
+    mai_vol = fmt(grand.get("mai_total_m3_per_ha", 0), 2) if grand else "—"
+    aah_vol = fmt(grand.get("aah_total_m3_per_ha", 0), 2) if grand else "—"
+    aah_pct = fmt(grand.get("aah_multiplier_percent", 0), 0) if grand else "—"
+
+    return (
+        f"यस वनको कुल {plots} वटा नमुना प्लटहरू ({blocks} वटा ब्लक) मा गरिएको "
+        f"क्षेत्र सर्वेक्षण अनुसार प्रति हेक्टर {regen} वटा विरुवा, "
+        f"{sapling} वटा लाथ्रा, {pole} वटा खाँवा र {tree} वटा रूख रहेको पाइयो। "
+        f"कुल वृद्धि मौज्दात {gs} घनमिटर प्रति हेक्टर र बेसल एरिया "
+        f"{ba} वर्गमिटर प्रति हेक्टर रहेको छ। प्रति हेक्टर जमिन माथिको "
+        f"बायोमास {agb} टन र जमिन मुनिको बायोमास {bgb} टन "
+        f"(जम्मा {tb} टन) रहेको छ। कुल कार्बन भण्डार {c} टन कार्बन "
+        f"प्रति हेक्टर र कार्बन डाइअक्साइड समतुल्य {co2} टन प्रति हेक्टर "
+        f"रहेको छ। वनको अवस्था \"{fc}\" रहेको छ भने औसत वार्षिक वृद्धि "
+        f"{mai_pct}% र काठ घनत्व {den} टन प्रति घनमिटर रहेको छ। "
+    )
+
+
+def generate_sampling_narration(raw_data: dict) -> Optional[str]:
+    sampling = raw_data.get("sampling", {})
+    if not sampling.get("available"):
+        return None
+    designs = sampling.get("designs", [])
+    if not designs:
+        return None
+    d = designs[0]
+    pts = d.get("total_points") or 0
+    blks = d.get("total_blocks") or 0
+    forest_ha = d.get("forest_area_hectares") or 0
+    plot_shape = d.get("plot_shape") or "circular"
+    plot_size = d.get("plot_area_sqm") or 0
+    requested = d.get("requested_intensity_percent") or 0
+    actual = d.get("sampling_percentage") or 0
+    samp_type = d.get("sampling_type") or "systematic"
+    blocks_info = d.get("blocks_info") or []
+
+    if not pts and not blks:
+        return None
+
+    SHAPE_MAP = {"circular": "वृत्ताकार", "square": "वर्गाकार", "rectangular": "आयताकार"}
+    TYPE_MAP = {"systematic": "व्यवस्थित", "random": "अनियमित", "stratified": "स्तरीकृत"}
+    shape_np = SHAPE_MAP.get(plot_shape, plot_shape)
+    type_np = TYPE_MAP.get(samp_type, samp_type)
+
+    systematic_count = sum(1 for b in blocks_info if b.get("sampling_method") == "systematic")
+    random_count = sum(1 for b in blocks_info if b.get("sampling_method") == "random")
+
+    parts = [
+        f"यस सामुदायिक वनको कुल {fmt(blks, 0)} वटा खण्डमा जम्मा {fmt(pts, 0)} "
+        f"गोटा नमुना प्लट रहेका छन्। कुल वन क्षेत्रफल {fmt(forest_ha, 2)} हेक्टर मध्ये "
+        f"{fmt(requested, 1)} प्रतिशत इन्टेन्सिटीमा स्याम्पलिङ गर्न खोजिएकोमा "
+        f"वास्तविक स्याम्पल {fmt(actual, 2)} प्रतिशत हुन आएको छ।"
+    ]
+
+    if plot_size:
+        parts.append(
+            f"प्रत्येक नमुना प्लटको क्षेत्रफल {fmt(plot_size, 0)} वर्गमिटर र "
+            f"प्लटको आकार {shape_np} रहेको छ।"
+        )
+
+    if systematic_count > 0 or random_count > 0:
+        method_parts = []
+        if systematic_count > 0:
+            method_parts.append(f"{fmt(systematic_count, 0)} वटा खण्डमा व्यवस्थित (Systematic) विधि")
+        if random_count > 0:
+            method_parts.append(f"{fmt(random_count, 0)} वटा खण्डमा अनियमित (Random) विधि")
+        parts.append("स्याम्पलिङका लागि " + " तथा ".join(method_parts) + " प्रयोग गरिएको छ।")
+
+    return " ".join(parts)
+
+
+def generate_fieldbook_narration(raw_data: dict) -> Optional[str]:
+    fb = raw_data.get("fieldbook", {})
+    if not fb.get("available"):
+        return None
+    total = fb.get("total_points", 0)
+    vtx = fb.get("vertex_count", 0)
+    ipol = fb.get("interpolated_count", 0)
+    perim = fb.get("perimeter_m", 0)
+    avg_el = fb.get("avg_elevation_m")
+    min_el = fb.get("min_elevation_m")
+    max_el = fb.get("max_elevation_m")
+
+    parts = [
+        f"यस सामुदायिक वनको वरिपरि जम्मा {fmt(total, 0)} वटा फिल्डबुक "
+        f"बिन्दुहरू रहेका छन्, जसमध्ये {fmt(vtx, 0)} मुख्य बिन्दु (Vertex) र "
+        f"{fmt(ipol, 0)} अन्तरसम्मिलित बिन्दु (Interpolated) छन्।"
+    ]
+
+    if perim:
+        parts.append(
+            f"वनको कुल परिधि {fmt(perim, 0)} मिटर लामो रहेको छ।"
+        )
+
+    if avg_el is not None and min_el is not None and max_el is not None:
+        parts.append(
+            f"यस वनको औसत उचाइ {fmt(avg_el, 0)} मिटर रहेको छ, जुन न्यूनतम "
+            f"{fmt(min_el, 0)} मिटर देखि अधिकतम {fmt(max_el, 0)} मिटर सम्म रहेको छ।"
+        )
+
+    return " ".join(parts)
+
+
+SECTION_GENERATORS = {
+    "section:forest_summary": generate_forest_summary,
+    "section:slope_analysis": generate_slope_analysis,
+    "section:elevation_profile": generate_elevation_profile,
+    "section:aspect_analysis": generate_aspect_analysis,
+    "section:forest_health": generate_forest_health,
+    "section:forest_type": generate_forest_type,
+    "section:species_potential": generate_potential_species,
+    "section:actual_species": generate_actual_species,
+    "section:biodiversity": generate_biodiversity,
+    "section:canopy_structure": generate_canopy_structure,
+    "section:biomass_carbon": generate_biomass_carbon,
+    "section:climate_conditions": generate_climate_conditions,
+    "section:land_cover": generate_land_cover,
+    "section:forest_loss": generate_forest_loss,
+    "section:fire_loss": generate_fire_loss,
+    "section:forest_quality": generate_forest_quality,
+    "section:soil_analysis": generate_soil_analysis,
+    "section:location_context": generate_location_context,
+    "section:species_distribution": generate_species_distribution,
+    "section:accessible_forest": generate_accessible_forest,
+    "section:field_inventory_narration": generate_field_inventory_narration,
+    "section:sampling_narration": generate_sampling_narration,
+    "section:fieldbook_narration": generate_fieldbook_narration,
+}
+
+
+def collect_section_content(raw_data: dict) -> dict:
+    sections = {}
+    for key, gen_fn in SECTION_GENERATORS.items():
+        try:
+            result = gen_fn(raw_data)
+            sections[key] = result if result else None
+        except Exception:
+            sections[key] = None
+    return sections

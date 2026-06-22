@@ -40,7 +40,7 @@ import time
 
 from .core.config import settings
 from .core.database import check_db_connection, Base, engine
-from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router
+from .api import auth_router, forests_router, inventory_router, species_router, tree_models_router, all_tree_exports_router
 from .api import fieldbook, sampling, fieldbook_list, sampling_list, biodiversity, field_inventory
 from .api import location_search, tiles, user_group, household_info, forest_committee, yearly_activities
 from .api import compartments
@@ -206,6 +206,13 @@ app.include_router(
     tree_models_router,
     prefix="/api",
     tags=["Tree Distribution Models"]
+)
+
+# Include all-tree exports router
+app.include_router(
+    all_tree_exports_router,
+    prefix="/api",
+    tags=["All Tree Export"]
 )
 
 # Include field inventory router

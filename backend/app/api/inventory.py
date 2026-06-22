@@ -10,6 +10,8 @@ from uuid import UUID
 import pandas as pd
 import numpy as np
 import io
+import os
+import tempfile
 
 from ..core.database import get_db
 from ..models.user import User
@@ -45,6 +47,105 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
+
+
+def read_upload_file(content: bytes, filename: str, nrows: Optional[int] = None) -> pd.DataFrame:
+    """
+    Read an uploaded file (CSV, Excel, or GeoPackage) into a pandas DataFrame.
+    Automatically detects format by extension and falls back if parsing fails.
+    GeoPackage geometry columns are extracted into LONGITUDE/LATITUDE columns.
+    Returns a DataFrame with Nepali digits normalized in string columns.
+    """
+    fname = filename.lower()
+
+    def try_csv(data) -> Optional[pd.DataFrame]:
+        encodings = ["utf-8", "latin-1", "cp1252", "cp437", "utf-16"]
+        for enc in encodings:
+            try:
+                df = pd.read_csv(io.BytesIO(data), nrows=nrows, encoding=enc)
+                if not df.empty:
+                    return df
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+            except Exception:
+                continue
+        return None
+
+    def try_excel(data) -> Optional[pd.DataFrame]:
+        try:
+            df = pd.read_excel(io.BytesIO(data), nrows=nrows)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+        try:
+            df = pd.read_excel(io.BytesIO(data), engine="openpyxl", nrows=nrows)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+        return None
+
+    def try_geopackage(data) -> Optional[pd.DataFrame]:
+        try:
+            import geopandas as gpd
+
+            with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+            try:
+                gdf = gpd.read_file(tmp_path, rows=nrows)
+            finally:
+                os.unlink(tmp_path)
+
+            if gdf.empty:
+                return None
+
+            geom_col = gdf.geometry.name
+            if geom_col and geom_col in gdf.columns and hasattr(gdf[geom_col].dtype, "name") and gdf[geom_col].dtype.name == "geometry":
+                gdf["LONGITUDE"] = gdf[geom_col].apply(
+                    lambda g: g.x if g is not None and not g.is_empty else None
+                )
+                gdf["LATITUDE"] = gdf[geom_col].apply(
+                    lambda g: g.y if g is not None and not g.is_empty else None
+                )
+                gdf = gdf.drop(columns=[geom_col])
+
+            return pd.DataFrame(gdf)
+        except Exception as e:
+            logger.warning(f"GPKG read failed (will not fallback to CSV/Excel): {e}")
+            return None
+
+    if fname.endswith(".csv"):
+        df = try_csv(content)
+        if df is None:
+            df = try_excel(content)
+    elif fname.endswith((".xlsx", ".xls")):
+        df = try_excel(content)
+        if df is None:
+            df = try_csv(content)
+    elif fname.endswith(".gpkg"):
+        df = try_geopackage(content)
+        if df is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not read GeoPackage file. Ensure the file is valid and geopandas is installed."
+            )
+    else:
+        df = try_csv(content)
+        if df is None:
+            df = try_excel(content)
+        if df is None:
+            df = try_geopackage(content)
+
+    if df is None or df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read file. Supported formats: CSV, Excel (.xlsx/.xls), GeoPackage (.gpkg)."
+        )
+
+    df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
+    return df
 
 
 def convert_numpy_types(obj: Any) -> Any:
@@ -131,27 +232,22 @@ async def preview_column_mapping(
 
     Use this endpoint BEFORE uploading inventory data to confirm column mapping.
     """
-    # Validate file type
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported"
-        )
-
-    # Read CSV file (first 10 rows for preview)
+    # Read file (CSV or Excel) - first 10 rows for preview
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content), nrows=10)
+        df = read_upload_file(content, file.filename, nrows=10)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Error reading CSV file: {str(e)}"
+            detail=f"Error reading file: {str(e)}"
         )
 
     if len(df) == 0:
         raise HTTPException(
             status_code=400,
-            detail="CSV file is empty"
+            detail="File is empty"
         )
 
     # Get automatic mapping merged with user preferences
@@ -166,6 +262,19 @@ async def preview_column_mapping(
             status_code=500,
             detail=f"Error analyzing columns: {str(e)}"
         )
+
+    # Auto-resolve any remaining duplicates: keep the shortest column name
+    if mapping_result["duplicates"]:
+        mapper = ColumnMapper()
+        for std_col, csv_cols in list(mapping_result["duplicates"].items()):
+            best = min(csv_cols, key=len)
+            for csv_col in csv_cols:
+                if csv_col != best:
+                    del mapping_result["mapped"][csv_col]
+                    del mapping_result["confidence"][csv_col]
+                    if csv_col not in mapping_result["unmapped"]:
+                        mapping_result["unmapped"].append(csv_col)
+        mapping_result["duplicates"] = mapper._check_duplicates(mapping_result["mapped"])
 
     # Prepare sample data (first 5 rows)
     sample_data = df.head(5).replace({np.nan: None}).to_dict('records')
@@ -226,13 +335,6 @@ async def confirm_and_upload_with_mapping(
         grid_spacing_meters: Grid spacing for plot creation
         projection_epsg: Optional projection EPSG code
     """
-    # Validate file type
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported"
-        )
-
     # Parse mapping JSON
     import json
     try:
@@ -243,15 +345,16 @@ async def confirm_and_upload_with_mapping(
             detail="Invalid mapping JSON format"
         )
 
-    # Read CSV file
+    # Read file (CSV or Excel)
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
-        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
+        df = read_upload_file(content, file.filename)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Error reading CSV file: {str(e)}"
+            detail=f"Error reading file: {str(e)}"
         )
 
     # Validate and apply mapping
@@ -580,22 +683,16 @@ async def upload_inventory(
             db.delete(existing_mapping)
             db.commit()
 
-    # Validate file type
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported"
-        )
-
-    # Read CSV file
+    # Read file (CSV or Excel)
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
-        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
+        df = read_upload_file(content, file.filename)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Error reading CSV file: {str(e)}"
+            detail=f"Error reading file: {str(e)}"
         )
 
     # Validate data
@@ -786,14 +883,16 @@ async def process_inventory(
             detail=f"Inventory cannot be processed. Current status: {inventory.status}"
         )
 
-    # Read CSV file
+    # Read file (CSV or Excel)
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        df = read_upload_file(content, file.filename)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Error reading CSV file: {str(e)}"
+            detail=f"Error reading file: {str(e)}"
         )
 
     # Apply column mapping if it was saved during upload
@@ -929,16 +1028,17 @@ async def get_inventory_summary(
     species_distribution = {row[0]: row[1] for row in species_query.fetchall()}
 
     # Get DBH classes using subquery
+    # Uses Nepal forest inventory standards: seedling <4, sapling 4-10, pole 10-30, mature >30
     dbh_query = db.execute(
         text("""
         SELECT dbh_class, COUNT(*) as count
         FROM (
             SELECT
                 CASE
-                    WHEN dia_cm < 10 THEN 'Seedling (<10cm)'
-                    WHEN dia_cm < 20 THEN 'Sapling (10-20cm)'
-                    WHEN dia_cm < 40 THEN 'Pole (20-40cm)'
-                    ELSE 'Mature (>40cm)'
+                    WHEN dia_cm < 4 THEN 'Seedling (<4cm)'
+                    WHEN dia_cm < 10 THEN 'Sapling (4-10cm)'
+                    WHEN dia_cm < 30 THEN 'Pole (10-30cm)'
+                    ELSE 'Mature (>30cm)'
                 END as dbh_class
             FROM public.inventory_trees
             WHERE inventory_calculation_id = :inventory_id AND dia_cm IS NOT NULL
@@ -1325,14 +1425,16 @@ async def accept_corrections(
             detail="Inventory not linked to a calculation boundary. Please ensure you uploaded the file with a calculation_id."
         )
 
-    # Read CSV
+    # Read file (CSV, Excel, or GeoPackage)
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
-        logger.info(f"CSV read successfully: {len(df)} rows, columns: {list(df.columns)}")
+        df = read_upload_file(content, file.filename)
+        logger.info(f"File read successfully: {len(df)} rows, columns: {list(df.columns)}")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error reading CSV: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        logger.error(f"Error reading file: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 
     # Validate again
     validator = InventoryValidator(db)
@@ -1515,3 +1617,174 @@ async def update_tree_block_subarea(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{inventory_id}/grid-cells")
+async def get_grid_cells(
+    inventory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get grid cell polygons for a processed inventory.
+
+    Reconstructs the grid from stored origin/dimensions (saved during
+    mother tree identification) and returns cells clipped to the
+    forest boundary as GeoJSON.
+
+    Returns 404 if inventory not found or grid not yet generated.
+    """
+    from sqlalchemy import text
+    import json
+
+    inventory = db.query(InventoryCalculation).filter(
+        InventoryCalculation.id == inventory_id,
+        InventoryCalculation.user_id == current_user.id
+    ).first()
+
+    if not inventory:
+        raise HTTPException(status_code=404, detail="Inventory not found")
+
+    if not inventory.calculation_id:
+        raise HTTPException(status_code=400, detail="Inventory has no associated calculation")
+
+    # Compute grid origin on-the-fly if not yet stored (handles pre-existing inventories)
+    if not all([inventory.grid_origin_x, inventory.grid_origin_y,
+                inventory.grid_num_cols, inventory.grid_num_rows]):
+        inv_id_str = str(inventory_id)
+        bounds = db.execute(text("""
+            SELECT
+                ST_XMin(ST_Extent(ST_Transform(location::geometry, :epsg))) AS xmin,
+                ST_YMin(ST_Extent(ST_Transform(location::geometry, :epsg))) AS ymin,
+                ST_XMax(ST_Extent(ST_Transform(location::geometry, :epsg))) AS xmax,
+                ST_YMax(ST_Extent(ST_Transform(location::geometry, :epsg))) AS ymax
+            FROM public.inventory_trees
+            WHERE inventory_calculation_id = :inv_id
+              AND dia_cm > 30
+              AND remark != 'Seedling'
+        """), {
+            "inv_id": inv_id_str,
+            "epsg": inventory.projection_epsg
+        }).first()
+
+        if not bounds or bounds.xmin is None:
+            raise HTTPException(status_code=404, detail="No eligible trees found for grid generation")
+
+        xmin, ymin, xmax, ymax = bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax
+        num_cols = int((xmax - xmin) / inventory.grid_spacing_meters) + 1
+        num_rows = int((ymax - ymin) / inventory.grid_spacing_meters) + 1
+
+        # Persist for subsequent requests
+        db.execute(text("""
+            UPDATE public.inventory_calculations
+            SET grid_origin_x = :ox, grid_origin_y = :oy,
+                grid_num_cols = :nc, grid_num_rows = :nr
+            WHERE id = :inv_id
+        """), {
+            "ox": xmin, "oy": ymin, "nc": num_cols, "nr": num_rows,
+            "inv_id": inv_id_str
+        })
+        db.commit()
+
+        # Refresh the ORM object
+        db.refresh(inventory)
+
+    # Get forest boundary WKT directly from DB
+    calc_id_str = str(inventory.calculation_id)
+    boundary_wkt = db.execute(
+        text("SELECT ST_AsText(boundary_geom) FROM calculations WHERE id = :calc_id"),
+        {"calc_id": calc_id_str}
+    ).scalar()
+
+    if not boundary_wkt:
+        raise HTTPException(status_code=404, detail="Calculation boundary not found")
+
+    inv_id_str = str(inventory_id)
+
+    # Reconstruct grid cells from stored params, clip to boundary,
+    # and spatially JOIN mother tree data (one tree per cell)
+    rows = db.execute(text("""
+        WITH
+        col_series AS (
+            SELECT generate_series(0, :num_cols - 1) AS col
+        ),
+        row_series AS (
+            SELECT generate_series(0, :num_rows - 1) AS row
+        ),
+        grid AS (
+            SELECT
+                row_number() OVER (ORDER BY col, row) AS cell_id,
+                ST_SetSRID(ST_MakeEnvelope(
+                    :origin_x + col::double precision * :grid_size,
+                    :origin_y + row::double precision * :grid_size,
+                    :origin_x + (col::double precision + 1) * :grid_size,
+                    :origin_y + (row::double precision + 1) * :grid_size
+                ), :projection_epsg) AS geom
+            FROM col_series, row_series
+        )
+        SELECT
+            g.cell_id,
+            ST_AsGeoJSON(ST_Transform(g.geom, 4326), 6) AS geojson,
+            mt.id AS mother_tree_id,
+            mt.species AS mother_tree_species,
+            mt.dia_cm AS mother_tree_dbh,
+            mt.height_m AS mother_tree_height,
+            mt.tree_volume AS mother_tree_volume,
+            mt.net_volume AS mother_tree_net_volume,
+            mt.firewood_m3 AS mother_tree_firewood
+        FROM grid g
+        LEFT JOIN public.inventory_trees mt
+            ON mt.inventory_calculation_id = :inventory_id
+            AND mt.remark = 'Mother Tree'
+            AND ST_Contains(g.geom, ST_Transform(mt.location::geometry, :projection_epsg))
+        WHERE ST_Intersects(
+            g.geom,
+            ST_Transform(
+                ST_SetSRID(ST_GeomFromText(:boundary_wkt), 4326),
+                :projection_epsg
+            )
+        )
+        ORDER BY g.cell_id
+    """), {
+        "origin_x": inventory.grid_origin_x,
+        "origin_y": inventory.grid_origin_y,
+        "num_cols": inventory.grid_num_cols,
+        "num_rows": inventory.grid_num_rows,
+        "grid_size": inventory.grid_spacing_meters,
+        "projection_epsg": inventory.projection_epsg,
+        "boundary_wkt": boundary_wkt,
+        "inventory_id": inv_id_str,
+    }).fetchall()
+
+    features = []
+    for row in rows:
+        props = {"cell_id": row.cell_id}
+        if row.mother_tree_id:
+            props["mother_tree"] = {
+                "id": str(row.mother_tree_id),
+                "species": row.mother_tree_species,
+                "dbh_cm": row.mother_tree_dbh,
+                "height_m": row.mother_tree_height,
+                "volume_m3": row.mother_tree_volume,
+                "net_volume_m3": row.mother_tree_net_volume,
+                "firewood_m3": row.mother_tree_firewood,
+            }
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geojson),
+            "properties": props,
+        })
+
+    return {
+        "features": features,
+        "metadata": {
+            "grid_spacing_meters": inventory.grid_spacing_meters,
+            "origin_x": inventory.grid_origin_x,
+            "origin_y": inventory.grid_origin_y,
+            "num_cols": inventory.grid_num_cols,
+            "num_rows": inventory.grid_num_rows,
+            "total_cells": inventory.grid_num_cols * inventory.grid_num_rows,
+            "cells_within_boundary": len(features),
+            "projection_epsg": inventory.projection_epsg,
+        }
+    }

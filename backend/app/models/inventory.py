@@ -82,6 +82,10 @@ class InventoryCalculation(Base):
     # Grid settings for mother tree selection
     grid_spacing_meters = Column(Float, default=20.0, nullable=False)
     projection_epsg = Column(Integer, default=32644, nullable=False)
+    grid_origin_x = Column(Float, nullable=True)
+    grid_origin_y = Column(Float, nullable=True)
+    grid_num_cols = Column(Integer, nullable=True)
+    grid_num_rows = Column(Integer, nullable=True)
 
     # Column mapping (stores user's column mapping for processing)
     column_mapping = Column(JSONB, nullable=True)
@@ -158,7 +162,7 @@ class InventoryTree(Base):
 
     # Diameter classification
     stand_type = Column(String(20), nullable=True)  # 'Regeneration', 'Pole', 'Tree'
-    dbh_class = Column(String(50), nullable=True)   # 'Small pole (10-20)', etc.
+    dbh_class = Column(String(50), nullable=True)   # 'Sm. Pole (10-20)', 'Lg. Tree (50-60)', etc.
 
     # Metadata
     local_name = Column(String(100), nullable=True)

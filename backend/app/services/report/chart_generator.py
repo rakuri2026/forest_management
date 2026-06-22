@@ -9,9 +9,21 @@ from io import BytesIO
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import numpy as np
 
 from app.utils.number_format import format_devanagari
+
+# ── Devanagari font setup ──
+for _font_name in ['Nirmala UI', 'Mangal', 'Arial Unicode MS', 'Noto Sans Devanagari']:
+    try:
+        _fp = fm.findfont(_font_name, fallback_to_default=False)
+        if _fp:
+            fm.fontManager.addfont(_fp)
+            plt.rcParams['font.family'] = _font_name
+            break
+    except Exception:
+        continue
 
 
 def _dev_pct(pct):
@@ -48,15 +60,21 @@ def generate_species_pie(species_list: List[Dict], forest_name: str = "", top_n:
     labels = [s.get('scientific_name', 'Unknown')[:20] for s in sorted_species]
     sizes = [1] * len(sorted_species)
 
-    colors = plt.cm.Set3(np.linspace(0, 1, len(labels)))
+    species_colors = ['#2ecc71', '#3498db', '#e67e22', '#9b59b6', '#f1c40f', '#1abc9c', '#e74c3c', '#95a5a6']
 
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels, autopct='', startangle=90,
-        colors=colors, textprops={'fontsize': 8}
+    wedges, texts = ax.pie(
+        sizes, labels=None, startangle=90,
+        colors=species_colors[:len(labels)],
+    )
+    ax.legend(
+        wedges, labels, loc='lower center',
+        bbox_to_anchor=(0.5, -0.2), ncol=min(2, len(labels)),
+        fontsize=6, frameon=False,
     )
 
     title = f'{forest_name} - Species Composition (Top {top_n})' if forest_name else f'Species Composition (Top {top_n})'
-    ax.set_title(title, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
+    fig.subplots_adjust(bottom=0.3)
 
     return _save_or_base64(fig, output_path)
 
@@ -71,14 +89,21 @@ def generate_forest_type_pie(forest_type_percentages: Dict, forest_name: str = "
     labels = list(forest_type_percentages.keys())
     sizes = list(forest_type_percentages.values())
 
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels, autopct=_dev_pct if language == "NP" else '%1.1f%%', startangle=90,
-        colors=plt.cm.Greens(np.linspace(0.3, 0.9, len(labels))),
-        textprops={'fontsize': 9}
+    ft_colors = ['#1a5c2e', '#27ae60', '#82e0aa', '#d5f5e3', '#2ecc71', '#a9dfbf']
+    wedges, texts = ax.pie(
+        sizes, labels=None, startangle=90,
+        colors=ft_colors[:len(labels)],
+    )
+    legend_labels = [f"{l} ({_dev_pct(s) if language == 'NP' else f'{s:.1f}%'})" for l, s in zip(labels, sizes)]
+    ax.legend(
+        wedges, legend_labels, loc='lower center',
+        bbox_to_anchor=(0.5, -0.18), ncol=min(2, len(labels)),
+        fontsize=7, frameon=False,
     )
 
     title = f'{forest_name} - Forest Type Distribution' if forest_name else 'Forest Type Distribution'
-    ax.set_title(title, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
+    fig.subplots_adjust(bottom=0.28)
 
     return _save_or_base64(fig, output_path)
 
@@ -93,18 +118,28 @@ def generate_slope_pie(slope_percentages: Dict, dominant: str = "", forest_name:
     labels = list(slope_percentages.keys())
     sizes = list(slope_percentages.values())
 
-    # Color gradient: green (flat) to red (steep)
-    color_map = {'Flat': '#27ae60', 'Gentle': '#f1c40f', 'Moderate': '#e67e22', 'Steep': '#e74c3c', 'Very Steep': '#c0392b'}
+    # Color gradient: green (flat) to red (steep) — lowercase keys match analysis.py
+    color_map = {
+        'gentle': '#84cc16', 'moderate': '#eab308',
+        'steep': '#f97316', 'very_steep': '#ef4444',
+        'flat': '#22c55e', 'Flat': '#22c55e',
+    }
     colors = [color_map.get(l, '#95a5a6') for l in labels]
 
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels,         autopct=_dev_pct if language == "NP" else '%1.1f%%', colors=colors, startangle=90,
-        textprops={'fontsize': 9}
+    wedges, texts = ax.pie(
+        sizes, labels=None, startangle=90, colors=colors,
+    )
+    legend_labels = [f"{l} ({_dev_pct(s) if language == 'NP' else f'{s:.1f}%'})" for l, s in zip(labels, sizes)]
+    ax.legend(
+        wedges, legend_labels, loc='lower center',
+        bbox_to_anchor=(0.5, -0.18), ncol=min(2, len(labels)),
+        fontsize=8, frameon=False,
     )
 
     dom_text = f' (Dominant: {dominant})' if dominant else ''
     title = f'{forest_name} - Slope Classification{dom_text}' if forest_name else f'Slope Classification{dom_text}'
-    ax.set_title(title, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
+    fig.subplots_adjust(bottom=0.28)
 
     return _save_or_base64(fig, output_path)
 
@@ -119,17 +154,27 @@ def generate_canopy_pie(canopy_percentages: Dict, dominant: str = "", forest_nam
     labels = list(canopy_percentages.keys())
     sizes = list(canopy_percentages.values())
 
-    color_map = {'Open': '#d5f5e3', 'Medium': '#82e0aa', 'Dense': '#27ae60', 'Very Dense': '#1a5c2e'}
+    # Keys match analysis.py: non_forest(1m), regeneration(2-5m), pole_trees(6-15m), tree(>15m)
+    color_map = {
+        'tree': '#059669', 'pole_trees': '#10b981', 'regeneration': '#84cc16', 'non_forest': '#94a3b8',
+        'dense': '#059669', 'medium': '#10b981', 'sparse': '#84cc16', 'open': '#d5f5e3',
+    }
     colors = [color_map.get(l, '#95a5a6') for l in labels]
 
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels, autopct=_dev_pct if language == "NP" else '%1.1f%%', colors=colors, startangle=90,
-        textprops={'fontsize': 9}
+    wedges, texts = ax.pie(
+        sizes, labels=None, startangle=90, colors=colors,
+    )
+    legend_labels = [f"{l} ({_dev_pct(s) if language == 'NP' else f'{s:.1f}%'})" for l, s in zip(labels, sizes)]
+    ax.legend(
+        wedges, legend_labels, loc='lower center',
+        bbox_to_anchor=(0.5, -0.18), ncol=min(2, len(labels)),
+        fontsize=8, frameon=False,
     )
 
     dom_text = f' (Dominant: {dominant})' if dominant else ''
     title = f'{forest_name} - Canopy Cover{dom_text}' if forest_name else f'Canopy Cover{dom_text}'
-    ax.set_title(title, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
+    fig.subplots_adjust(bottom=0.28)
 
     return _save_or_base64(fig, output_path)
 
@@ -146,15 +191,33 @@ def generate_landcover_pie(landcover_percentages: Dict, dominant: str = "", fore
     labels = [lc[0] for lc in sorted_lc]
     sizes = [lc[1] for lc in sorted_lc]
 
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels, autopct=_dev_pct if language == "NP" else '%1.1f%%', startangle=90,
-        colors=plt.cm.terrain(np.linspace(0.2, 0.9, len(labels))),
-        textprops={'fontsize': 8}
+    landcover_color_map = {
+        "Tree cover": "#006400", "tree_cover": "#006400",
+        "Shrubland": "#FFBB22", "shrubland": "#FFBB22",
+        "Grassland": "#FFFF4C", "grassland": "#FFFF4C",
+        "Cropland": "#F096FF", "cropland": "#F096FF",
+        "Built-up": "#FA0000", "built_up": "#FA0000", "built-up": "#FA0000",
+        "Bare/sparse vegetation": "#B4B4B4", "bare": "#B4B4B4",
+        "Permanent water bodies": "#0064C8", "water": "#0064C8",
+        "Snow and ice": "#E0E0E0", "Snow": "#E0E0E0",
+        "Herbaceous wetland": "#00C8C8",
+        "Mangroves": "#006464",
+    }
+    lc_colors = [landcover_color_map.get(l, "#95a5a6") for l in labels]
+    wedges, texts = ax.pie(
+        sizes, labels=None, startangle=90, colors=lc_colors,
+    )
+    legend_labels = [f"{l} ({_dev_pct(s) if language == 'NP' else f'{s:.1f}%'})" for l, s in zip(labels, sizes)]
+    ax.legend(
+        wedges, legend_labels, loc='lower center',
+        bbox_to_anchor=(0.5, -0.18), ncol=min(3, len(labels)),
+        fontsize=7, frameon=False,
     )
 
     dom_text = f' (Dominant: {dominant})' if dominant else ''
     title = f'{forest_name} - Land Cover{dom_text}' if forest_name else f'Land Cover{dom_text}'
-    ax.set_title(title, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=12)
+    fig.subplots_adjust(bottom=0.28)
 
     return _save_or_base64(fig, output_path)
 

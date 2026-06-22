@@ -22,6 +22,8 @@ from ..models.field_inventory import (
 )
 from ..models.inventory import TreeSpeciesCoefficient
 from ..utils.diameter_classifier import DiameterClassifier
+from .volume_calculator import calculate_tree_volumes as shared_calculate_volumes
+from .carbon_calculator import calculate_all as calculate_carbon_all, IPCC_BEF, IPCC_RS
 
 logger = logging.getLogger(__name__)
 
@@ -504,103 +506,13 @@ class FieldInventoryService:
                 height_m = measurement.dbh_cm * 0.8
                 height_estimated = True
 
-            # Calculate volumes (Forest Regulation 2079 compliant)
+            # Normalize tree class to int (1-4) before calling the shared calculator
             dbh_cm = float(measurement.dbh_cm)
-
-            # Debug logging
-            _debug_log(f"INPUT: dbh={dbh_cm}, height={height_m}, height_estimated={height_estimated}, class={measurement.tree_class}")
-            _debug_log(f"SPECIES: {species}")
-            _debug_log(f"COEFFS: a={coef.get('a')}, b={coef.get('b')}, c={coef.get('c')}, a1={coef.get('a1')}, b1={coef.get('b1')}, s={coef.get('s')}, m={coef.get('m')}, bg={coef.get('bg')}")
-
-            # 1. Stem volume (काण्डको आयतन)
-            # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
-            # Source: Forest Regulation 2079, Table 1
-            if coef['a'] is not None and coef['b'] is not None and coef['c'] is not None:
-                log_dbh = math.log(dbh_cm)
-                log_height = math.log(height_m)
-                exp_value = coef['a'] + coef['b'] * log_dbh + coef['c'] * log_height
-                stem_volume = math.exp(exp_value) / 1000.0
-                
-                if DEBUG_VOLUME_CALC:
-                    _debug_log(f"[FIELD_INV_VOLUME] STEM: log(dbh)={log_dbh}, log(height)={log_height}, exp={exp_value}, stem_vol={stem_volume}")
-            else:
-                stem_volume = 0.0
-                if DEBUG_VOLUME_CALC:
-                    _debug_log(f"[FIELD_INV_VOLUME] STEM: Using default 0.0 (missing coefficients)")
-
-            # 2. Branch volume (हाँगाको आयतन)
-            # Formula: Branch Volume = Stem Volume × Branch Ratio
-            # Source: Forest Regulation 2079, Table 2
-            # Based on Sharma and Pukala, 1990
-            # s = small (sano), m = medium (machilo), bg = big (bara)
-            s = coef.get('s')
-            m = coef.get('m')
-            bg = coef.get('bg')
-            
-            if s is not None and m is not None and bg is not None:
-                # Use interpolation formula based on DBH class
-                if dbh_cm < 10:
-                    branch_ratio = float(s)
-                elif dbh_cm <= 40:
-                    branch_ratio = ((dbh_cm - 10) * float(m) + (40 - dbh_cm) * float(s)) / 30.0
-                elif dbh_cm <= 70:
-                    branch_ratio = ((dbh_cm - 40) * float(bg) + (70 - dbh_cm) * float(m)) / 30.0
-                else:
-                    branch_ratio = float(bg)
-                branch_volume = stem_volume * branch_ratio
-            elif s is not None and m is not None:
-                branch_ratio = (float(s) + float(m)) / 2.0
-                branch_volume = stem_volume * branch_ratio
-            elif coef.get('b') is not None:
-                branch_ratio = abs(float(coef['b'])) * 0.1
-                branch_volume = stem_volume * branch_ratio
-            else:
-                branch_ratio = 0.2
-                branch_volume = stem_volume * 0.2
-
-            _debug_log(f"[FIELD_INV_VOLUME] BRANCH: s={s}, m={m}, bg={bg}, ratio={branch_ratio}, branch_vol={branch_volume}")
-
-            # 3. Total tree volume (रुखको आयतन)
-            # Formula: Tree Volume = Stem Volume + Branch Volume
-            # Source: Forest Regulation 2079, Section 3(ii)
-            tree_volume = stem_volume + branch_volume
-
-            # 4. Gross timber volume (काठको मूल आयतन)
-            # Formula: Gross Timber = Stem Volume - 10cm Top Stem Volume
-            # Source: Forest Regulation 2079, Section 4
-            # NOTE: Gross timber comes ONLY from stem, branches go to firewood
-            # For FSM species (e.g. Acacia catechu/Khair), entire stem is merchantable
-            if coef.get('full_stem_merchantable'):
-                gross_volume = stem_volume
-                if DEBUG_VOLUME_CALC:
-                    _debug_log(f"[FIELD_INV_VOLUME] GROSS: FSM=true, gross_vol=stem_vol={gross_volume}")
-            elif coef['a1'] is not None and coef['b1'] is not None:
-                cm10_dia_ratio = math.exp(coef['a1'] + coef['b1'] * math.log(dbh_cm))
-                cm10_top_volume = stem_volume * cm10_dia_ratio  # Use stem_volume (not tree_volume)
-                gross_volume = stem_volume - cm10_top_volume   # Use stem_volume (not tree_volume)
-                
-                if DEBUG_VOLUME_CALC:
-                    _debug_log(f"[FIELD_INV_VOLUME] GROSS: a1={coef['a1']}, b1={coef['b1']}, cm10_ratio={cm10_dia_ratio}, cm10_vol={cm10_top_volume}, gross_vol={gross_volume}")
-            else:
-                gross_volume = stem_volume * 0.85
-                if DEBUG_VOLUME_CALC:
-                    _debug_log(f"[FIELD_INV_VOLUME] GROSS: Using fallback 0.85, gross_vol={gross_volume}")
-
-            # 5. Net timber volume (काठको नेट आयतन)
-            # Apply waste factors based on tree class (दर्जा)
-            # Source: Forest Regulation 2079, Section 5
-            # All formats normalize to lowercase letter: a, b, c, d
-
-            # Convert class value to string, handling float format from Excel CSV
             tree_class_raw = measurement.tree_class or 'b'
             try:
-                # Try to convert to float then int to handle "1.0" → 1
                 tree_class = str(int(float(tree_class_raw)))
             except (ValueError, TypeError):
-                # If conversion fails, use as string (for 'i', 'ii', 'a', 'b', etc.)
                 tree_class = str(tree_class_raw).strip().lower()
-
-            # Normalize class values
             class_mapping = {
                 '1': 1, 'i': 1, 'a': 1,
                 '2': 2, 'ii': 2, 'b': 2,
@@ -608,45 +520,31 @@ class FieldInventoryService:
                 '4': 4, 'iv': 4, 'd': 4,
             }
             normalized_class = class_mapping.get(tree_class, 2)
-            
-            if normalized_class == 1:
-                net_volume = gross_volume * 0.80  # Class 1: 20% waste
-                waste_factor = 0.80
-            elif normalized_class == 2:
-                net_volume = gross_volume * 0.60  # Class 2: 40% waste
-                waste_factor = 0.60
-            elif normalized_class == 3:
-                net_volume = gross_volume * 0.30  # Class 3: 70% waste
-                waste_factor = 0.30
-            elif normalized_class == 4:
-                net_volume = 0.0  # Class 4: All firewood
-                waste_factor = 0.0
-            else:
-                net_volume = gross_volume * 0.60  # Default: Class 2
-                waste_factor = 0.60
 
-            _debug_log(f"NET: original_class={measurement.tree_class}, normalized_class={normalized_class}, waste_factor={waste_factor}, gross_vol={gross_volume}, net_vol={net_volume}")
+            _debug_log(f"INPUT: dbh={dbh_cm}, height={height_m}, height_estimated={height_estimated}, normalized_class={normalized_class}")
+            _debug_log(f"SPECIES: {species}")
+            _debug_log(f"COEFFS: a={coef.get('a')}, b={coef.get('b')}, c={coef.get('c')}, a1={coef.get('a1')}, b1={coef.get('b1')}, s={coef.get('s')}, m={coef.get('m')}, bg={coef.get('bg')}, fsm={coef.get('full_stem_merchantable')}")
 
-            # 6. Firewood volume
-            firewood_m3 = tree_volume - net_volume
+            # Call the shared volume calculator (single source of truth)
+            volumes = shared_calculate_volumes(dbh_cm, height_m, normalized_class, coef)
 
-            _debug_log(f"FIREWOOD: tree_vol={tree_volume}, net_vol={net_volume}, firewood={firewood_m3}")
-            _debug_log(f"FINAL: stem={stem_volume}, branch={branch_volume}, tree={tree_volume}, gross={gross_volume}, net={net_volume}, firewood={firewood_m3}")
+            _debug_log(f"NET: original_class={measurement.tree_class}, normalized_class={normalized_class}, net_vol={volumes['net_volume']}")
+            _debug_log(f"FINAL: stem={volumes['stem_volume']}, branch={volumes['branch_volume']}, tree={volumes['tree_volume']}, gross={volumes['gross_volume']}, net={volumes['net_volume']}, firewood={volumes['firewood_m3']}")
 
-            # 7. Convert to cubic feet
-            net_volume_cft = net_volume * 35.3147
+            # Convert to cubic feet
+            net_volume_cft = volumes['net_volume'] * 35.3147
 
             # 8. Firewood in chatta
-            firewood_chatta = firewood_m3 / 0.267
+            firewood_chatta = volumes['firewood_m3'] / 0.267
 
             # Update measurement
-            measurement.stem_volume = round(stem_volume, 6)
-            measurement.branch_volume = round(branch_volume, 6)
-            measurement.tree_volume = round(tree_volume, 6)
-            measurement.gross_volume = round(gross_volume, 6)
-            measurement.net_volume = round(net_volume, 6)
+            measurement.stem_volume = round(volumes['stem_volume'], 6)
+            measurement.branch_volume = round(volumes['branch_volume'], 6)
+            measurement.tree_volume = round(volumes['tree_volume'], 6)
+            measurement.gross_volume = round(volumes['gross_volume'], 6)
+            measurement.net_volume = round(volumes['net_volume'], 6)
             measurement.net_volume_cft = round(net_volume_cft, 6)
-            measurement.firewood_m3 = round(firewood_m3, 6)
+            measurement.firewood_m3 = round(volumes['firewood_m3'], 6)
             measurement.firewood_chatta = round(firewood_chatta, 6)
 
         self.db.commit()
@@ -710,15 +608,19 @@ class FieldInventoryService:
             tree_basal_per_ha = (tree_stats['basal_area'] / tree_area) * 10000 if tree_stats['basal_area'] > 0 else 0
             total_basal_area_m2_per_ha = pole_basal_per_ha + tree_basal_per_ha
 
-            # Total growing stock (timber only)
+            # Total growing stock (timber only, for DFO reporting)
             total_growing_stock = pole_timber_per_ha + tree_timber_per_ha
 
-            # Calculate carbon metrics (IPCC/REDD+)
+            # Gross volume (merchantable stem) per-ha — for IPCC AGB calculation
+            pole_gross_per_ha = (pole_stats['gross_volume'] / pole_area) * 10000 if pole_stats['gross_volume'] > 0 else 0
+            tree_gross_per_ha = (tree_stats['gross_volume'] / tree_area) * 10000 if tree_stats['gross_volume'] > 0 else 0
+            total_gross_per_ha = pole_gross_per_ha + tree_gross_per_ha
+
+            # Calculate carbon metrics using IPCC Tier 2 methodology
+            # AGB = VOB × WD × BEF where VOB = gross_volume (merchantable stem)
             carbon_metrics = self._calculate_carbon_metrics(
                 plot_ids=plot_ids,
-                pole_timber_per_ha=pole_timber_per_ha,
-                tree_timber_per_ha=tree_timber_per_ha,
-                total_growing_stock=total_growing_stock
+                total_gross_per_ha=total_gross_per_ha
             )
 
             # Calculate satellite-derived volume from AGB raster
@@ -771,67 +673,63 @@ class FieldInventoryService:
         ).all()
 
         if not measurements:
-            return {'count': 0, 'net_volume': 0, 'firewood': 0, 'basal_area': 0}
+            return {'count': 0, 'net_volume': 0, 'firewood': 0, 'basal_area': 0, 'gross_volume': 0}
 
         # Sum counts and volumes
         total_count = sum(m.count for m in measurements)
         total_net_volume = sum(float(m.net_volume or 0) for m in measurements)
         total_firewood = sum(float(m.firewood_m3 or 0) for m in measurements)
         total_basal_area = sum(float(m.basal_area_m2 or 0) * m.count for m in measurements)
+        total_gross_volume = sum(float(m.gross_volume or 0) for m in measurements)
 
         # Calculate averages per plot
         avg_count = total_count / total_plots
         avg_net_volume = total_net_volume / total_plots
         avg_firewood = total_firewood / total_plots
         avg_basal_area = total_basal_area / total_plots
+        avg_gross_volume = total_gross_volume / total_plots
 
         return {
             'count': avg_count,
             'net_volume': avg_net_volume,
             'firewood': avg_firewood,
-            'basal_area': avg_basal_area
+            'basal_area': avg_basal_area,
+            'gross_volume': avg_gross_volume
         }
 
     def _calculate_carbon_metrics(
         self,
         plot_ids: List[UUID],
-        pole_timber_per_ha: float,
-        tree_timber_per_ha: float,
-        total_growing_stock: float
+        total_gross_per_ha: float
     ) -> Dict[str, float]:
         """
-        Calculate carbon metrics using IPCC/REDD+ methodology
+        Calculate carbon metrics using IPCC Tier 2 methodology.
 
-        Formula:
-        - AGB (Above-Ground Biomass) = Volume × Wood Density × BEF
-        - BGB (Below-Ground Biomass) = AGB × Root-to-Shoot Ratio
-        - Total Biomass = AGB + BGB
-        - Carbon Stock = Total Biomass × Carbon Fraction
-        - CO2 Equivalent = Carbon Stock × 3.67
+        Formulas (IPCC 2006 Guidelines, Vol 4, Ch 4):
+          AGB = VOB × WD × BEF           [Eq 2.2.1]
+          BGB = AGB × R/S                 [Eq 2.2.2]
+          Total Biomass = AGB + BGB
+          Carbon Stock = Total Biomass × CF     [Table 4.3]
+          CO2e = Carbon Stock × 3.67
 
-        IPCC Constants:
-        - BEF (Biomass Expansion Factor): 1.40 (tropical broadleaf forests)
-        - Root-to-Shoot Ratio: 0.24 (24% of AGB)
-        - Carbon Fraction: 0.47 (47% of biomass is carbon)
-        - CO2/C Ratio: 3.67 (molecular weight ratio)
+        Where:
+          VOB = Gross merchantable stem volume (gross_volume in DB)
+          WD  = Species wood density (g/cm³ = t/m³)
+          BEF = 1.3   (Table 4.4 — tropical moist deciduous forest)
+          R/S = 0.24  (Table 4.4 — tropical moist forest)
+          CF  = 0.47  (Table 4.3 — tropical forest)
+
+        Density is computed as per-tree sum:
+          weighted_density = Σ(gross_volume × species_density) / Σ(gross_volume)
 
         Args:
             plot_ids: List of sample plot UUIDs
-            pole_timber_per_ha: Pole timber volume (m³/ha)
-            tree_timber_per_ha: Tree timber volume (m³/ha)
-            total_growing_stock: Total timber volume (m³/ha)
+            total_gross_per_ha: Total gross merchantable volume (m³/ha)
 
         Returns:
             Dictionary with carbon metrics
         """
-        # IPCC default constants
-        BEF = 1.40  # Biomass Expansion Factor (tropical broadleaf)
-        ROOT_SHOOT_RATIO = 0.24  # Below-ground / Above-ground ratio
-        CARBON_FRACTION = 0.47  # 47% of biomass is carbon
-        CO2_TO_C_RATIO = 3.67  # Molecular weight ratio (44/12)
-
-        # If no volume, return zeros
-        if total_growing_stock <= 0:
+        if total_gross_per_ha <= 0:
             return {
                 'weighted_density': 0.0,
                 'agb_t_per_ha': 0.0,
@@ -845,54 +743,44 @@ class FieldInventoryService:
         measurements = self.db.query(FieldInventoryMeasurement).filter(
             FieldInventoryMeasurement.sample_plot_id.in_(plot_ids),
             FieldInventoryMeasurement.stand_type.in_(['Pole', 'Tree']),
-            FieldInventoryMeasurement.net_volume.isnot(None),
-            FieldInventoryMeasurement.net_volume > 0
+            FieldInventoryMeasurement.gross_volume.isnot(None),
+            FieldInventoryMeasurement.gross_volume > 0
         ).all()
 
-        # Calculate volume-weighted wood density
-        total_volume_in_plots = 0.0
+        # Per-tree sum: Σ(gross_volume × species_density) and Σ(gross_volume)
+        total_gross_volume = 0.0
         weighted_density_sum = 0.0
 
         for m in measurements:
             species_name = m.species_scientific
-            volume = float(m.net_volume or 0)
+            gross_vol = float(m.gross_volume or 0)
 
-            # Get wood density for this species
-            wood_density = 0.65  # Default if species not found
+            wood_density = 0.65
             if species_name in self.species_coefficients:
                 wood_density = self.species_coefficients[species_name].get('wood_density', 0.65)
 
-            total_volume_in_plots += volume
-            weighted_density_sum += volume * wood_density
+            total_gross_volume += gross_vol
+            weighted_density_sum += gross_vol * wood_density
 
-        # Calculate weighted average density (in t/m³, which equals g/cm³)
-        if total_volume_in_plots > 0:
-            weighted_density = weighted_density_sum / total_volume_in_plots
+        # Calculate gross-volume-weighted average density (t/m³)
+        if total_gross_volume > 0:
+            weighted_density = weighted_density_sum / total_gross_volume
         else:
-            weighted_density = 0.65  # Default tropical forest average
+            weighted_density = 0.65
 
-        # Calculate carbon metrics using per-hectare volume
-        # Volume is already in m³/ha, density is in t/m³
-        agb_t_per_ha = total_growing_stock * weighted_density * BEF
-        bgb_t_per_ha = agb_t_per_ha * ROOT_SHOOT_RATIO
-        total_biomass_t_per_ha = agb_t_per_ha + bgb_t_per_ha
-        carbon_stock_tc_per_ha = total_biomass_t_per_ha * CARBON_FRACTION
-        co2_equivalent_tco2_per_ha = carbon_stock_tc_per_ha * CO2_TO_C_RATIO
+        # Calculate all carbon metrics using shared IPCC calculator
+        carbon = calculate_carbon_all(total_gross_per_ha, weighted_density)
 
         logger.info(
-            f"[CARBON] Volume={total_growing_stock:.2f} m³/ha, "
+            f"[CARBON] GrossVol={total_gross_per_ha:.2f} m³/ha, "
             f"Density={weighted_density:.3f} t/m³, "
-            f"AGB={agb_t_per_ha:.2f} t/ha, "
-            f"CO2e={co2_equivalent_tco2_per_ha:.2f} tCO2/ha"
+            f"AGB={carbon['agb_t_per_ha']:.2f} t/ha, "
+            f"CO2e={carbon['co2_equivalent_tco2_per_ha']:.2f} tCO2/ha"
         )
 
         return {
             'weighted_density': round(weighted_density, 3),
-            'agb_t_per_ha': round(agb_t_per_ha, 6),
-            'bgb_t_per_ha': round(bgb_t_per_ha, 6),
-            'total_biomass_t_per_ha': round(total_biomass_t_per_ha, 6),
-            'carbon_stock_tc_per_ha': round(carbon_stock_tc_per_ha, 6),
-            'co2_equivalent_tco2_per_ha': round(co2_equivalent_tco2_per_ha, 6)
+            **carbon
         }
 
     def _calculate_satellite_volume_for_block(self, calculation_id: UUID, block_name: str) -> Optional[float]:
@@ -962,7 +850,38 @@ class FieldInventoryService:
             return None
 
     async def _assess_forest_condition(self, block_summaries: List[FieldInventoryBlockSummary]):
-        """Assess forest condition for each block"""
+        """
+        Assess regeneration_condition and forest_condition for each block.
+
+        == Algorithm Reference (Forest Regulation 2075/2079, Nepal) ==
+
+        A) Regeneration Condition (पुनरोत्पादनको अवस्था)
+           Based on per-hectare counts of regeneration (0-4 cm DBH) AND
+           saplings (4-10 cm DBH). Both thresholds must be met (AND logic):
+
+           राम्रो (Good):
+             Regen per ha >= 5000 AND Sapling per ha >= 2000
+           मध्यम (Moderate):
+             Regen per ha >= 2000 AND Sapling per ha >= 800
+           कमजोर (Weak):
+             All other cases
+
+        B) Forest Condition (वनको अवस्था)
+           3×3 matrix combining Growing Stock (m³/ha) with Regeneration Condition:
+
+                        Regen=राम्रो   Regen=मध्यम   Regen=कमजोर
+                        (Good)       (Moderate)    (Weak)
+           GS > 200     राम्रो       राम्रो        मध्यम
+           GS 50-200    राम्रो       मध्यम        कमजोर
+           GS < 50      मध्यम       कमजोर        कमजोर
+
+        Input columns (per-ha, from _calculate_per_hectare):
+          regeneration_per_ha    — count/ha of regeneration (0-4 cm DBH)
+          sapling_per_ha         — count/ha of saplings (4-10 cm DBH)
+          total_growing_stock_m3_per_ha — net timber volume (pole+tree), m³/ha
+
+        These follow Nepal Forest Regulation 2079 assessment criteria.
+        """
         logger.info("[FOREST_CONDITION] Assessing forest condition...")
 
         for block in block_summaries:
@@ -1012,7 +931,26 @@ class FieldInventoryService:
         logger.info("[FOREST_CONDITION] Forest condition assessment complete")
 
     async def _calculate_mai(self, block_summaries: List[FieldInventoryBlockSummary], field_inventory_id: UUID):
-        """Calculate Mean Annual Increment for each block"""
+        """
+        Calculate Mean Annual Increment (MAI %) for each block.
+
+        == Algorithm ==
+
+        A) Determine dominant growth rate:
+           Count the top 5 species by measurement frequency in the block.
+           Each species' growth rate comes from tree_species_coefficients.
+           The growth rate with the highest count wins.
+
+        B) MAI % = f(growth_rate, forest_condition) — 3×3 matrix:
+
+                        राम्रो (Good)   मध्यम (Moderate)   कमजोर (Weak)
+           Fast            5.0%            4.0%             3.0%
+           Moderate        4.0%            3.0%             2.0%
+           Slow            3.0%            2.0%             1.0%
+
+        This determines the annual volume increment percentage applied
+        to growing stock for MAI and AAH calculations.
+        """
         logger.info("[MAI] Calculating Mean Annual Increment...")
 
         for block in block_summaries:

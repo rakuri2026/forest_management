@@ -551,6 +551,58 @@ export const treeModelApi = {
   },
 };
 
+export const allTreeExportApi = {
+  generate: async (calculationId: string, config?: {
+    min_dbh_cm?: number;
+    max_dbh_cm?: number;
+    min_height_m?: number;
+    max_trees_per_ha?: number;
+    algorithm_version?: string;
+    species_role_target_ratio?: Record<string, number> | null;
+  }) => {
+    const response = await api.post(`/api/calculations/${calculationId}/generate-all-trees`, {
+      config: config || null
+    });
+    return response.data;
+  },
+
+  getExport: async (exportId: string) => {
+    const response = await api.get(`/api/all-tree-exports/${exportId}`);
+    return response.data;
+  },
+
+  listExports: async (calculationId: string) => {
+    const response = await api.get(`/api/calculations/${calculationId}/all-tree-exports`);
+    return response.data;
+  },
+
+  downloadGpkg: async (exportId: string) => {
+    const response = await api.get(`/api/all-tree-exports/${exportId}/download`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  downloadExcel: async (exportId: string) => {
+    const response = await api.get(`/api/all-tree-exports/${exportId}/download-excel`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  downloadCsv: async (exportId: string) => {
+    const response = await api.get(`/api/all-tree-exports/${exportId}/download-csv`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  delete: async (exportId: string) => {
+    const response = await api.delete(`/api/all-tree-exports/${exportId}`);
+    return response.data;
+  },
+};
+
 export default api;
 
 
@@ -2358,6 +2410,13 @@ export const operationalPlanApi = {
 
   savePlanAsTemplate: async (planId: string, data: { name: string; description?: string; tree?: any[]; is_default?: boolean; visibility?: string; tags?: string[] }): Promise<any> => {
     const response = await api.post(`/api/operational-plans/${planId}/save-as-template`, data);
+    return response.data;
+  },
+};
+
+export const biodiversityApi = {
+  getCalculationSpecies: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/biodiversity/calculations/${calculationId}/species`);
     return response.data;
   },
 };

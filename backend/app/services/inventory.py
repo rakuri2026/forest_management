@@ -2,7 +2,6 @@
 Inventory service - Tree volume calculations and mother tree selection
 Based on allometric equations for Nepal tree species
 """
-import math
 import pandas as pd
 # import geopandas as gpd  # Temporarily disabled - requires GDAL
 # from shapely.geometry import Point, Polygon, box  # Temporarily disabled
@@ -21,6 +20,7 @@ from ..models.inventory import (
     TreeSpeciesCoefficient
 )
 from ..utils.diameter_classifier import DiameterClassifier
+from .volume_calculator import calculate_tree_volumes as shared_calculate_volumes
 
 
 class InventoryService:
@@ -183,6 +183,10 @@ class InventoryService:
         # Determine physiographic zone (disabled for performance - defaults to Hill spp)
         physiographic_zone = None
 
+        # Ensure species column can hold strings (not int64 from numeric codes)
+        if df[species_col].dtype in ('int64', 'float64', 'Int64', 'Int32', 'int32'):
+            df[species_col] = df[species_col].astype(str)
+
         # Add local_name column if it doesn't exist
         if 'local_name' not in df.columns:
             df['local_name'] = ''
@@ -246,161 +250,65 @@ class InventoryService:
         df['firewood_m3'] = 0.0
         df['firewood_chatta'] = 0.0
 
+        # Normalize tree class to int (1-4) for the shared calculator
+        _class_to_int = {'a': 1, 'b': 2, 'c': 3, 'd': 4}
+
         for idx, row in df.iterrows():
             species = row[species_col]
             dbh_cm = row[diameter_col]
 
-            # REGENERATION: Skip volume calculation for trees < 10 cm (too small for commercial use)
             if dbh_cm < 10:
-                # All volumes remain 0.0 (already initialized)
                 continue
 
-            # Get species coefficients
             if species not in self.species_coefficients:
-                # Skip if species not found (should not happen after validation)
                 continue
 
             coef = self.species_coefficients[species]
 
-            # Get or estimate height (avoid Series ambiguity)
+            # Get or estimate height
             height_val = None
             if height_col and height_col in df.columns:
                 height_val = row[height_col]
+            height_m = float(height_val) if (height_val and pd.notna(height_val)) else dbh_cm * 0.8
 
-            if height_val and pd.notna(height_val):
-                height_m = float(height_val)
-            else:
-                # Estimate height using default H/D ratio
-                height_m = dbh_cm * 0.8  # Default ratio for missing heights
-
-            # 1. Calculate stem volume (काण्डको आयतन)
-            # Formula: V = exp(a + b*ln(DBH) + c*ln(H)) / 1000
-            # Source: Forest Regulation 2079, Table 1
-            if coef['a'] is not None and coef['b'] is not None and coef['c'] is not None:
-                stem_volume = math.exp(
-                    coef['a'] +
-                    coef['b'] * math.log(dbh_cm) +
-                    coef['c'] * math.log(height_m)
-                ) / 1000.0  # Convert to m³
-            else:
-                # Use generic formula for species without coefficients
-                stem_volume = 0.0
-
-            # 2. Calculate branch volume (हाँगाको आयतन)
-            # Formula: Branch Volume = Stem Volume × Branch Ratio
-            # Source: Forest Regulation 2079, Table 2
-            # Based on Sharma and Pukala, 1990
-            # s = small (sano), m = medium (machilo), bg = big (bara)
-            s = coef.get('s')
-            m = coef.get('m')
-            bg = coef.get('bg')
-            
-            if s is not None and m is not None and bg is not None:
-                # Use interpolation formula based on DBH class
-                if dbh_cm < 10:
-                    branch_ratio = float(s)
-                elif dbh_cm <= 40:
-                    branch_ratio = ((dbh_cm - 10) * float(m) + (40 - dbh_cm) * float(s)) / 30.0
-                elif dbh_cm <= 70:
-                    branch_ratio = ((dbh_cm - 40) * float(bg) + (70 - dbh_cm) * float(m)) / 30.0
-                else:
-                    branch_ratio = float(bg)
-                branch_volume = stem_volume * branch_ratio
-            elif s is not None and m is not None:
-                branch_ratio = (float(s) + float(m)) / 2.0
-                branch_volume = stem_volume * branch_ratio
-            elif coef.get('b') is not None:
-                branch_ratio = abs(float(coef['b'])) * 0.1
-                branch_volume = stem_volume * branch_ratio
-            else:
-                branch_volume = stem_volume * 0.2
-
-            # 3. Total tree volume (रुखको आयतन)
-            # Formula: Tree Volume = Stem Volume + Branch Volume
-            # Source: Forest Regulation 2079, Section 3(ii)
-            tree_volume = stem_volume + branch_volume
-
-            # 4. Calculate gross timber volume (काठको मूल आयतन)
-            # Formula: Gross Timber = Stem Volume - 10cm Top Diameter Stem Volume
-            # Source: Forest Regulation 2079, Section 4 (काठको मूल आयतन)
-            # NOTE: Gross timber comes ONLY from stem (trunk), not branches
-            # Branches go directly to firewood category
-            # Remove top portion of stem where diameter < 10 cm (non-merchantable)
-            if coef['a1'] is not None and coef['b1'] is not None:
-                # Calculate 10cm top diameter ratio
-                cm10_dia_ratio = math.exp(
-                    coef['a1'] + coef['b1'] * math.log(dbh_cm)
-                )
-                # Apply ratio to STEM volume (regulation uses stem, not tree)
-                cm10_top_volume = stem_volume * cm10_dia_ratio
-                gross_volume = stem_volume - cm10_top_volume
-            else:
-                # Fallback: Assume 85% of stem volume is merchantable
-                gross_volume = stem_volume * 0.85
-
-            # 5. Calculate net timber volume (काठको नेट आयतन)
-            # Apply waste factors based on tree class (दर्जा)
-            # Source: Forest Regulation 2079, Section 5 (दर्जा अनुसार नेट आयतन)
-
-            # Get class value safely (avoid Series ambiguity)
+            # Normalize tree class to int (1-4)
             class_val = None
             if class_col is not None and class_col in df.columns:
                 try:
                     class_val = row[class_col]
-                    # Handle empty strings or NaN
                     if pd.isna(class_val) or (isinstance(class_val, str) and str(class_val).strip() == ''):
                         class_val = None
                 except (KeyError, TypeError):
                     class_val = None
 
-            # Use class for waste calculation (default to Class 2 if not provided)
             if class_val is not None:
                 tc_raw = str(class_val).strip()
                 try:
                     tc_num = str(int(float(tc_raw)))
-                    tree_class = {'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(tc_num, tc_num)
+                    tc_letter = {'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(tc_num, 'b')
                 except (ValueError, TypeError):
                     tc_lower = tc_raw.lower()
-                    tree_class = {'i': 'a', 'ii': 'b', 'iii': 'c', 'iv': 'd',
-                                  'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd'}.get(tc_lower, tc_lower)
+                    tc_letter = {'i': 'a', 'ii': 'b', 'iii': 'c', 'iv': 'd',
+                                 'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd'}.get(tc_lower, 'b')
             else:
-                tree_class = 'b'  # Default to Class 2 (moderate quality)
+                tc_letter = 'b'
 
-            # Apply waste factor based on class (Forest Regulation 2079)
-            # Class 1 (पहिलो दर्जा): 80% net, 20% waste
-            # Class 2 (दोस्रो दर्जा): 60% net, 40% waste
-            # Class 3 (तेस्रो दर्जा): 30% net, 70% waste
-            # Class 4 (चौथो दर्जा): 0% timber (all firewood)
-            if tree_class == 'a':
-                net_volume = gross_volume * 0.80  # 20% waste
-            elif tree_class == 'b':
-                net_volume = gross_volume * 0.60  # 40% waste
-            elif tree_class == 'c':
-                net_volume = gross_volume * 0.30  # 70% waste
-            elif tree_class == 'd':
-                net_volume = 0.0  # All firewood (100% waste)
-            else:
-                # Unknown class: default to Class 2 (moderate)
-                net_volume = gross_volume * 0.60
+            tree_class_int = _class_to_int.get(tc_letter, 2)
 
-            # 6. Convert net volume to cubic feet
-            net_volume_cft = net_volume * 35.3147
+            # Call the shared volume calculator (single source of truth)
+            volumes = shared_calculate_volumes(dbh_cm, height_m, tree_class_int, coef)
 
-            # 7. Calculate firewood volume
-            firewood_m3 = tree_volume - net_volume
+            # Additional conversions (cft, chatta)
+            net_volume_cft = volumes['net_volume'] * 35.3147
+            firewood_chatta = volumes['firewood_m3'] / 0.267
 
-            # 8. Convert firewood to chatta (local unit)
-            # 1 chatta ≈ 9.445 cubic feet ≈ 0.267 m³
-            firewood_chatta = firewood_m3 / 0.267
-
-            # Store in DataFrame
-            df.at[idx, 'stem_volume'] = stem_volume
-            df.at[idx, 'branch_volume'] = branch_volume
-            df.at[idx, 'tree_volume'] = tree_volume
-            df.at[idx, 'gross_volume'] = gross_volume
-            df.at[idx, 'net_volume'] = net_volume
+            df.at[idx, 'stem_volume'] = volumes['stem_volume']
+            df.at[idx, 'branch_volume'] = volumes['branch_volume']
+            df.at[idx, 'tree_volume'] = volumes['tree_volume']
+            df.at[idx, 'gross_volume'] = volumes['gross_volume']
+            df.at[idx, 'net_volume'] = volumes['net_volume']
             df.at[idx, 'net_volume_cft'] = net_volume_cft
-            df.at[idx, 'firewood_m3'] = firewood_m3
+            df.at[idx, 'firewood_m3'] = volumes['firewood_m3']
             df.at[idx, 'firewood_chatta'] = firewood_chatta
 
         return df
@@ -634,22 +542,50 @@ class InventoryService:
 
             # Detect column names (case-insensitive)
             df.columns = df.columns.str.lower()
+
+            # Deduplicate columns — after lowercasing, two columns like "LATITUDE" and "latitude"
+            # become identical, and df[col] returns a DataFrame/Series instead of a scalar.
+            if df.columns.duplicated().any():
+                dups = df.columns[df.columns.duplicated()].unique().tolist()
+                print(f"[INVENTORY] Removing duplicate columns after lowercasing: {dups}")
+                df = df.loc[:, ~df.columns.duplicated(keep='first')]
+
             print(f"[INVENTORY] Available columns: {list(df.columns)}")
 
             # Map possible column names
-            species_col = next((col for col in df.columns if 'species' in col or 'scientific' in col), 'species')
-            diameter_col = next((col for col in df.columns if 'dia' in col or 'dbh' in col), 'dia_cm')
-            height_col = next((col for col in df.columns if 'height' in col), 'height_m')
-            class_col = next((col for col in df.columns if 'class' in col or 'quality' in col), 'class')
-            lon_col = next((col for col in df.columns if 'lon' in col or col == 'x'), 'longitude')
-            lat_col = next((col for col in df.columns if 'lat' in col or col == 'y'), 'latitude')
+            # Prefer exact standard column names (from mapping) before substring matching
+            # to avoid false positives like 'lat' in 'species_regulation'
+            species_col = 'species' if 'species' in df.columns else next((col for col in df.columns if 'species' in col or 'scientific' in col), 'species')
+            diameter_col = 'dia_cm' if 'dia_cm' in df.columns else next((col for col in df.columns if 'dia' in col or 'dbh' in col), 'dia_cm')
+            height_col = 'height_m' if 'height_m' in df.columns else next((col for col in df.columns if 'height' in col and 'species' not in col and 'scientific' not in col), 'height_m')
+            class_col = 'class' if 'class' in df.columns else next((col for col in df.columns if 'class' in col or 'quality' in col), 'class')
+            lon_col = 'longitude' if 'longitude' in df.columns else next((col for col in df.columns if ('lon' in col or col == 'x') and 'species' not in col and 'scientific' not in col), 'longitude')
+            lat_col = 'latitude' if 'latitude' in df.columns else next((col for col in df.columns if ('lat' in col or col == 'y') and 'species' not in col and 'scientific' not in col), 'latitude')
 
             print(f"[INVENTORY] Column mapping: species={species_col}, dia={diameter_col}, height={height_col}, class={class_col}, lon={lon_col}, lat={lat_col}")
+
+            # DIAGNOSTIC: First-row values BEFORE species conversion
+            if len(df) > 0:
+                first = df.iloc[0]
+                print(f"[DIAG_BEFORE] species({species_col})={repr(first.get(species_col, 'N/A'))}")
+                print(f"[DIAG_BEFORE] dia({diameter_col})={repr(first.get(diameter_col, 'N/A'))}")
+                print(f"[DIAG_BEFORE] height({height_col})={repr(first.get(height_col, 'N/A'))}")
+                print(f"[DIAG_BEFORE] lon({lon_col})={repr(first.get(lon_col, 'N/A'))}")
+                print(f"[DIAG_BEFORE] lat({lat_col})={repr(first.get(lat_col, 'N/A'))}")
 
             # 1. Convert species codes and local names to scientific names
             print(f"[INVENTORY] Step 1/5: Converting species codes to scientific names...")
             df = await self._convert_species_to_scientific(df, species_col, inventory.calculation_id)
             print(f"[INVENTORY] Step 1/5: Species conversion completed")
+
+            # DIAGNOSTIC: First-row values AFTER species conversion
+            if len(df) > 0:
+                first = df.iloc[0]
+                print(f"[DIAG_AFTER] species({species_col})={repr(first.get(species_col, 'N/A'))}")
+                print(f"[DIAG_AFTER] dia({diameter_col})={repr(first.get(diameter_col, 'N/A'))}")
+                print(f"[DIAG_AFTER] height({height_col})={repr(first.get(height_col, 'N/A'))}")
+                print(f"[DIAG_AFTER] lon({lon_col})={repr(first.get(lon_col, 'N/A'))}")
+                print(f"[DIAG_AFTER] lat({lat_col})={repr(first.get(lat_col, 'N/A'))}")
 
             # 2. Calculate volumes for all trees
             print(f"[INVENTORY] Step 2/6: Calculating volumes...")
@@ -688,6 +624,22 @@ class InventoryService:
 
             # 6. Store trees in database FIRST (needed for PostGIS mother tree selection)
             print(f"[INVENTORY] Step 6/7: Storing {len(df)} trees in database...")
+
+            # DIAGNOSTIC: Print first row values for critical columns
+            if len(df) > 0:
+                first = df.iloc[0]
+                print(f"[DIAG] species_col={species_col}, diameter_col={diameter_col}, height_col={height_col}")
+                print(f"[DIAG] lon_col={lon_col}, lat_col={lat_col}")
+                for c in [species_col, diameter_col, height_col, lon_col, lat_col]:
+                    if c in df.columns:
+                        print(f"[DIAG] {c}: value={repr(first[c])}, type={type(first[c]).__name__}, dtype={df[c].dtype}")
+                # Check for string values in numeric columns
+                for c in [diameter_col, height_col, lon_col, lat_col]:
+                    if c in df.columns and df[c].dtype == object:
+                        non_numeric = df[pd.to_numeric(df[c], errors='coerce').isna()][c].dropna().unique()[:5]
+                        if len(non_numeric) > 0:
+                            print(f"[DIAG] WARNING: column '{c}' has non-numeric values: {list(non_numeric)}")
+
             await self._store_trees_simple(
                 inventory_id, df, species_col, diameter_col, height_col,
                 class_col, lon_col, lat_col
@@ -788,13 +740,27 @@ class InventoryService:
 
         try:
             for idx, row in df.iterrows():
+                # Diagnostic: print first-row values for critical columns
+                if idx == 0:
+                    print(f"[STORE] First row — cols: species={species_col}, dia={diameter_col}, height={height_col}, class={class_col}, lon={lon_col}, lat={lat_col}")
+                    for c in [species_col, diameter_col, height_col, class_col, lon_col, lat_col]:
+                        if c in df.columns:
+                            print(f"[STORE] First row — {c} = {repr(row[c])} (type={type(row[c]).__name__})")
+                    print(f"[STORE] First row — stem_volume={row.get('stem_volume', 'MISSING')}")
+
                 # Get species and local name
                 species = row[species_col]
                 local_name = row.get('local_name', None) if 'local_name' in df.columns else None
 
-                # Get coordinates
-                lon = float(row[lon_col])
-                lat = float(row[lat_col])
+                # Get coordinates with diagnostic on failure
+                def _safe_float(val, col_name):
+                    try:
+                        return float(val)
+                    except (ValueError, TypeError) as e:
+                        raise ValueError(f"Cannot convert column '{col_name}' to float: value={repr(val)}, error={e}")
+
+                lon = _safe_float(row[lon_col], lon_col)
+                lat = _safe_float(row[lat_col], lat_col)
 
                 # Capture extra columns (preserve even if NULL)
                 extra_cols = {}
@@ -843,18 +809,18 @@ class InventoryService:
                 tree = InventoryTree(
                     inventory_calculation_id=inventory_id,
                     species=species,
-                    dia_cm=float(row[diameter_col]),
-                    height_m=float(height_val) if pd.notna(height_val) else None,
+                    dia_cm=_safe_float(row[diameter_col], diameter_col),
+                    height_m=_safe_float(height_val, 'height_m') if pd.notna(height_val) else None,
                     tree_class={'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(str(int(float(class_val))).strip()) if pd.notna(class_val) else None,
                     location=f'SRID=4326;POINT({lon} {lat})',
-                    stem_volume=float(row['stem_volume']),
-                    branch_volume=float(row['branch_volume']),
-                    tree_volume=float(row['tree_volume']),
-                    gross_volume=float(row['gross_volume']),
-                    net_volume=float(row['net_volume']),
-                    net_volume_cft=float(row['net_volume_cft']),
-                    firewood_m3=float(row['firewood_m3']),
-                    firewood_chatta=float(row['firewood_chatta']),
+                    stem_volume=_safe_float(row['stem_volume'], 'stem_volume'),
+                    branch_volume=_safe_float(row['branch_volume'], 'branch_volume'),
+                    tree_volume=_safe_float(row['tree_volume'], 'tree_volume'),
+                    gross_volume=_safe_float(row['gross_volume'], 'gross_volume'),
+                    net_volume=_safe_float(row['net_volume'], 'net_volume'),
+                    net_volume_cft=_safe_float(row['net_volume_cft'], 'net_volume_cft'),
+                    firewood_m3=_safe_float(row['firewood_m3'], 'firewood_m3'),
+                    firewood_chatta=_safe_float(row['firewood_chatta'], 'firewood_chatta'),
                     remark=row['remark'],
                     grid_cell_id=int(row['grid_cell_id']) if pd.notna(row['grid_cell_id']) else None,
                     stand_type=row.get('stand_type'),
@@ -951,8 +917,8 @@ class InventoryService:
         try:
             # Step 1: Create temporary table with eligible trees (DBH > 30 cm)
             # and transform to projected CRS
+            self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees"))
             self.db.execute(text("""
-                DROP TABLE IF EXISTS temp_eligible_trees;
                 CREATE TEMP TABLE temp_eligible_trees AS
                 SELECT
                     id,
@@ -984,45 +950,61 @@ class InventoryService:
             xmin, ymin, xmax, ymax = bounds_result
             print(f"Bounds in EPSG:{projection_epsg}: X({xmin:.2f}, {xmax:.2f}), Y({ymin:.2f}, {ymax:.2f})")
 
-            # Step 3: Generate grid cells using PostGIS
-            # ST_SquareGrid is available in PostGIS 3.1+
-            # If not available, we'll use manual grid generation
+            # Save grid origin and dimensions to inventory_calculations record
+            num_cols = int((xmax - xmin) / grid_spacing_meters) + 1
+            num_rows = int((ymax - ymin) / grid_spacing_meters) + 1
+            self.db.execute(text("""
+                UPDATE public.inventory_calculations
+                SET grid_origin_x = :origin_x,
+                    grid_origin_y = :origin_y,
+                    grid_num_cols = :num_cols,
+                    grid_num_rows = :num_rows
+                WHERE id = :inventory_id
+            """), {
+                "origin_x": xmin,
+                "origin_y": ymin,
+                "num_cols": num_cols,
+                "num_rows": num_rows,
+                "inventory_id": str(inventory_id)
+            })
+
+            # Step 3+4+5: Generate grid, find cells with trees, assign mother trees
+            # Uses single CTE chain to avoid temp table persistence issues
             try:
-                # Try using ST_SquareGrid (PostGIS 3.1+)
-                grid_query = text("""
-                    DROP TABLE IF EXISTS temp_grid_cells;
-                    CREATE TEMP TABLE temp_grid_cells AS
-                    WITH bounds AS (
-                        SELECT ST_SetSRID(ST_MakeEnvelope(:xmin, :ymin, :xmax, :ymax), :projection_epsg) AS geom
+                self.db.execute(text("""
+                    WITH grid_raw AS (
+                        SELECT (ST_SquareGrid(:grid_size, ST_SetSRID(ST_MakeEnvelope(:xmin, :ymin, :xmax, :ymax), :projection_epsg))).*
                     ),
                     grid AS (
-                        SELECT (ST_SquareGrid(:grid_size, geom)).*
-                        FROM bounds
+                        SELECT row_number() OVER () AS cell_id, geom, ST_Centroid(geom) AS centroid
+                        FROM grid_raw
+                    ),
+                    cells_with_trees AS (
+                        SELECT DISTINCT g.cell_id, g.centroid
+                        FROM grid g
+                        JOIN temp_eligible_trees t ON ST_Intersects(g.geom, t.geom_proj)
+                    ),
+                    nearest_trees AS (
+                        SELECT DISTINCT ON (c.cell_id) c.cell_id, t.id AS tree_id
+                        FROM cells_with_trees c
+                        CROSS JOIN LATERAL (
+                            SELECT id FROM temp_eligible_trees ORDER BY ST_Distance(c.centroid, geom_proj) LIMIT 1
+                        ) t
                     )
-                    SELECT
-                        row_number() OVER () AS cell_id,
-                        geom,
-                        ST_Centroid(geom) AS centroid
-                    FROM grid;
-                """)
-
-                self.db.execute(grid_query, {
-                    "xmin": xmin,
-                    "ymin": ymin,
-                    "xmax": xmax,
-                    "ymax": ymax,
+                    UPDATE public.inventory_trees
+                    SET remark = 'Mother Tree', grid_cell_id = nt.cell_id
+                    FROM nearest_trees nt
+                    WHERE inventory_trees.id = nt.tree_id
+                """), {
+                    "xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax,
                     "projection_epsg": projection_epsg,
-                    "grid_size": grid_spacing_meters
+                    "grid_size": grid_spacing_meters,
                 })
-                print(f"Generated grid using ST_SquareGrid")
+                print(f"Mother tree assignment via ST_SquareGrid")
 
             except Exception as e:
                 print(f"ST_SquareGrid not available, using manual grid generation: {e}")
-
-                # Fallback: Manual grid generation
                 self.db.execute(text("""
-                    DROP TABLE IF EXISTS temp_grid_cells;
-                    CREATE TEMP TABLE temp_grid_cells AS
                     WITH RECURSIVE
                     x_series AS (
                         SELECT :xmin + generate_series(0, CAST((:xmax - :xmin) / :grid_size AS INTEGER)) * :grid_size AS x
@@ -1030,67 +1012,36 @@ class InventoryService:
                     y_series AS (
                         SELECT :ymin + generate_series(0, CAST((:ymax - :ymin) / :grid_size AS INTEGER)) * :grid_size AS y
                     ),
-                    grid AS (
-                        SELECT
-                            row_number() OVER () AS cell_id,
-                            ST_SetSRID(
-                                ST_MakeEnvelope(
-                                    x, y,
-                                    x + :grid_size, y + :grid_size
-                                ),
-                                :projection_epsg
-                            ) AS geom
+                    grid_raw AS (
+                        SELECT ST_SetSRID(ST_MakeEnvelope(x, y, x + :grid_size, y + :grid_size), :projection_epsg) AS geom
                         FROM x_series, y_series
+                    ),
+                    grid AS (
+                        SELECT row_number() OVER () AS cell_id, geom, ST_Centroid(geom) AS centroid
+                        FROM grid_raw
+                    ),
+                    cells_with_trees AS (
+                        SELECT DISTINCT g.cell_id, g.centroid
+                        FROM grid g
+                        JOIN temp_eligible_trees t ON ST_Intersects(g.geom, t.geom_proj)
+                    ),
+                    nearest_trees AS (
+                        SELECT DISTINCT ON (c.cell_id) c.cell_id, t.id AS tree_id
+                        FROM cells_with_trees c
+                        CROSS JOIN LATERAL (
+                            SELECT id FROM temp_eligible_trees ORDER BY ST_Distance(c.centroid, geom_proj) LIMIT 1
+                        ) t
                     )
-                    SELECT
-                        cell_id,
-                        geom,
-                        ST_Centroid(geom) AS centroid
-                    FROM grid;
+                    UPDATE public.inventory_trees
+                    SET remark = 'Mother Tree', grid_cell_id = nt.cell_id
+                    FROM nearest_trees nt
+                    WHERE inventory_trees.id = nt.tree_id
                 """), {
-                    "xmin": xmin,
-                    "ymin": ymin,
-                    "xmax": xmax,
-                    "ymax": ymax,
+                    "xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax,
                     "projection_epsg": projection_epsg,
-                    "grid_size": grid_spacing_meters
+                    "grid_size": grid_spacing_meters,
                 })
-                print(f"Generated grid manually")
-
-            # Step 4: Find grid cells that contain trees
-            self.db.execute(text("""
-                DROP TABLE IF EXISTS temp_cells_with_trees;
-                CREATE TEMP TABLE temp_cells_with_trees AS
-                SELECT DISTINCT g.cell_id, g.centroid
-                FROM temp_grid_cells g
-                JOIN temp_eligible_trees t ON ST_Intersects(g.geom, t.geom_proj);
-            """))
-
-            cell_count = self.db.execute(text("SELECT COUNT(*) FROM temp_cells_with_trees")).scalar()
-            print(f"Found {cell_count} grid cells containing trees")
-
-            # Step 5: For each cell, find the tree nearest to its centroid
-            # and mark it as Mother Tree
-            self.db.execute(text("""
-                WITH nearest_trees AS (
-                    SELECT DISTINCT ON (c.cell_id)
-                        c.cell_id,
-                        t.id AS tree_id
-                    FROM temp_cells_with_trees c
-                    CROSS JOIN LATERAL (
-                        SELECT id, ST_Distance(c.centroid, geom_proj) AS distance
-                        FROM temp_eligible_trees
-                        ORDER BY ST_Distance(c.centroid, geom_proj)
-                        LIMIT 1
-                    ) t
-                )
-                UPDATE public.inventory_trees
-                SET
-                    remark = 'Mother Tree',
-                    grid_cell_id = nt.cell_id
-                FROM nearest_trees nt
-                WHERE inventory_trees.id = nt.tree_id;
-            """))
+                print(f"Mother tree assignment via manual grid")
 
             self.db.commit()
 
@@ -1103,7 +1054,7 @@ class InventoryService:
             """), {"inventory_id": str(inventory_id)}).scalar()
 
             # Clean up temp tables
-            self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees, temp_grid_cells, temp_cells_with_trees"))
+            self.db.execute(text("DROP TABLE IF EXISTS temp_eligible_trees"))
 
             return mother_tree_count
 

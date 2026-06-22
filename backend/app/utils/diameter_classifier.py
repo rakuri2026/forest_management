@@ -3,7 +3,7 @@ Diameter Classification Utility
 
 Classifies trees by diameter (DBH) into two systems:
 1. Simplified 3-category: Regeneration, Pole, Tree
-2. Detailed 7-category: Regeneration, Small pole, Large pole, Small tree, etc.
+2. Detailed 8-category: Seedling, Sapling, Small pole, Large pole, Small tree, Medium tree, Large tree, Very large tree
 
 Author: Forest Management System
 Date: February 13, 2026
@@ -23,16 +23,16 @@ class DiameterClassifier:
     @staticmethod
     def classify_simple(dbh: float) -> Optional[str]:
         """
-        Classify tree using simplified 3-category system
+        Classify tree using simplified 3-category system (Nepal forest standards)
 
         Args:
             dbh: Diameter at breast height in cm
 
         Returns:
-            - 'Regeneration' for 1-10 cm
+            - 'Sapling' for 4-10 cm
             - 'Pole' for 10-30 cm
             - 'Tree' for >30 cm
-            - None for invalid/null values
+            - None for <4 cm or invalid/null values
         """
         if pd.isna(dbh):
             return None
@@ -42,10 +42,10 @@ class DiameterClassifier:
         except (ValueError, TypeError):
             return None
 
-        if dbh_value < 1:
+        if dbh_value < 4:
             return None
-        elif 1 <= dbh_value < 10:
-            return "Regeneration"
+        elif 4 <= dbh_value < 10:
+            return "Sapling"
         elif 10 <= dbh_value < 30:
             return "Pole"
         elif dbh_value >= 30:
@@ -56,14 +56,13 @@ class DiameterClassifier:
     @staticmethod
     def classify_detailed(dbh: float) -> Optional[str]:
         """
-        Classify tree using detailed 7-category system
+        Classify tree using detailed 8-category system
 
         Args:
             dbh: Diameter at breast height in cm
 
         Returns:
-            Detailed category with range, e.g., 'Small pole (10-20)'
-            None for invalid/null values
+            Detailed classification string or None for invalid values
         """
         if pd.isna(dbh):
             return None
@@ -73,24 +72,26 @@ class DiameterClassifier:
         except (ValueError, TypeError):
             return None
 
-        if dbh_value < 1:
-            return None
-        elif 1 <= dbh_value < 10:
-            return "Regeneration"
+        if 0 <= dbh_value < 4:
+            return "Seedling (0-4)"
+        elif 4 <= dbh_value < 10:
+            return "Sapling (4-10)"
         elif 10 <= dbh_value < 20:
-            return "Small pole (10-20)"
+            return "Sm. Pole (10-20)"
         elif 20 <= dbh_value < 30:
-            return "Large pole (20-30)"
+            return "Lg. Pole (20-30)"
         elif 30 <= dbh_value < 40:
-            return "Small tree (30-40)"
+            return "Sm. Tree (30-40)"
         elif 40 <= dbh_value < 50:
-            return "Medium tree (40-50)"
+            return "Med. Tree (40-50)"
         elif 50 <= dbh_value < 60:
-            return "Large tree (50-60)"
+            return "Lg. Tree (50-60)"
         elif dbh_value >= 60:
-            return "Very large tree (>60)"
+            return "V. Lg. Tree (60+)"
         else:
             return None
+
+
 
     @staticmethod
     def classify_dataframe(df: pd.DataFrame, dia_column: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
@@ -136,13 +137,14 @@ class DiameterClassifier:
         # Calculate percentages for detailed classification
         detailed_stats = {}
         for category in [
-            'Regeneration',
-            'Small pole (10-20)',
-            'Large pole (20-30)',
-            'Small tree (30-40)',
-            'Medium tree (40-50)',
-            'Large tree (50-60)',
-            'Very large tree (>60)'
+            'Seedling (0-4)',
+            'Sapling (4-10)',
+            'Sm. Pole (10-20)',
+            'Lg. Pole (20-30)',
+            'Sm. Tree (30-40)',
+            'Med. Tree (40-50)',
+            'Lg. Tree (50-60)',
+            'V. Lg. Tree (60+)'
         ]:
             count = detailed_counts.get(category, 0)
             percentage = (count / total_classified * 100) if total_classified > 0 else 0
@@ -192,13 +194,14 @@ class DiameterClassifier:
 
         # Detailed distribution
         for category in [
-            'Regeneration',
-            'Small pole (10-20)',
-            'Large pole (20-30)',
-            'Small tree (30-40)',
-            'Medium tree (40-50)',
-            'Large tree (50-60)',
-            'Very large tree (>60)'
+            'Seedling (0-4)',
+            'Sapling (4-10)',
+            'Sm. Pole (10-20)',
+            'Lg. Pole (20-30)',
+            'Sm. Tree (30-40)',
+            'Med. Tree (40-50)',
+            'Lg. Tree (50-60)',
+            'V. Lg. Tree (60+)'
         ]:
             stats = report['detailed_distribution'].get(category, {'count': 0, 'percentage': 0})
             if stats['count'] > 0:  # Only show categories with trees

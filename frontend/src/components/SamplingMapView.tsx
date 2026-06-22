@@ -80,6 +80,16 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
   const [subAreas, setSubAreas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showBlocks, setShowBlocks] = useState(true);
+  const [showCompartments, setShowCompartments] = useState(true);
+  const [showSubCompartments, setShowSubCompartments] = useState(true);
+  const [showForestBoundary, setShowForestBoundary] = useState(true);
+  const [showRivers, setShowRivers] = useState(true);
+  const [showAccessibleForest, setShowAccessibleForest] = useState(true);
+  const [showSamplePlots, setShowSamplePlots] = useState(true);
+  const [showSubAreas, setShowSubAreas] = useState(true);
+  const [hoveredSubAreaId, setHoveredSubAreaId] = useState<string | null>(null);
+  const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
 
   useEffect(() => {
     loadMapLayers();
@@ -131,7 +141,7 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
 
   // Styles for different layers
   const boundaryStyle = {
-    color: '#2563eb',
+    color: '#7c3aed',
     weight: 3,
     opacity: 1,
     fillOpacity: 0
@@ -296,85 +306,21 @@ const hasInvalidCoords = (value: any): boolean => {
 
   return (
     <div className="relative">
-      {/* Map Legend */}
-      <div className="absolute top-4 left-4 z-[1000] bg-white rounded-lg shadow-lg p-3 border border-gray-300 max-w-xs max-h-[400px] overflow-y-auto">
-        <h3 className="text-sm font-bold text-gray-800 mb-2">Map Legend</h3>
-        <div className="space-y-1 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-blue-600 rounded"></div>
-            <span>Forest Boundary</span>
-          </div>
-          {mapLayers.accessible_forest && (
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-500 opacity-50 border border-green-600 rounded"></div>
-              <span>Accessible Forest Area</span>
-            </div>
+      {/* Filter Info */}
+      {mapLayers.filter_settings && (
+        <div className="absolute top-4 left-4 z-[1000] bg-white rounded-lg shadow-lg p-3 border border-gray-300 text-xs text-gray-600">
+          <div className="font-semibold mb-1">Active Filters:</div>
+          {mapLayers.filter_settings.filter_tree_cover && (
+            <div>✓ Tree Cover Only</div>
           )}
-          <div className="flex items-center gap-2">
-            <div style={{
-              width: '16px',
-              height: '16px',
-              backgroundColor: 'transparent',
-              border: '2px solid #fbbf24',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '9px',
-              fontWeight: 'bold',
-              color: 'white',
-              textShadow: '1px 1px 2px rgba(0,0,0,0.9)'
-            }}>1</div>
-            <span>Sample Plot Locations (numbered)</span>
-          </div>
-          
-          {/* Sub-Area Categories */}
-          {subAreas.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-gray-200">
-              <div className="font-semibold text-gray-700 mb-1">Sub-Areas:</div>
-              {uniqueCategories.map(category => {
-                const info = CATEGORY_COLORS[category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
-                const count = subAreas.filter(sa => sa.category === category).length;
-                return (
-                  <div key={category} className="flex items-center gap-2">
-                    <div 
-                      className="w-3 h-3 rounded"
-                      style={{ 
-                        backgroundColor: info.fill, 
-                        border: `1px solid ${info.border}`,
-                      }}
-                    />
-                    <span className="text-gray-600">{info.label}</span>
-                    <span className="text-gray-400">({count})</span>
-                  </div>
-                );
-              })}
-              <div className="flex items-center gap-2 mt-1">
-                <div className="w-3 h-3 rounded border border-dashed border-gray-400"></div>
-                <span className="text-gray-500 text-[10px]">Dashed = Excluded</span>
-              </div>
-            </div>
+          {mapLayers.filter_settings.filter_slope && (
+            <div>✓ Slope ≤ {mapLayers.filter_settings.max_slope_degrees}°</div>
+          )}
+          {!mapLayers.filter_settings.filter_tree_cover && !mapLayers.filter_settings.filter_slope && (
+            <div className="text-gray-500">No filters applied</div>
           )}
         </div>
-
-        {/* Filter Info */}
-        {mapLayers.filter_settings && (
-          <div className="mt-3 pt-3 border-t border-gray-200">
-            <div className="text-xs text-gray-600">
-              <div className="font-semibold mb-1">Active Filters:</div>
-              {mapLayers.filter_settings.filter_tree_cover && (
-                <div>✓ Tree Cover Only</div>
-              )}
-              {mapLayers.filter_settings.filter_slope && (
-                <div>✓ Slope ≤ {mapLayers.filter_settings.max_slope_degrees}°</div>
-              )}
-              {!mapLayers.filter_settings.filter_tree_cover && !mapLayers.filter_settings.filter_slope && (
-                <div className="text-gray-500">No filters applied</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* North Arrow */}
       <NorthArrow />
@@ -431,7 +377,7 @@ const hasInvalidCoords = (value: any): boolean => {
         </LayersControl>
 
         {/* Forest Boundary Layer */}
-        {mapLayers.boundary && (
+        {showForestBoundary && mapLayers.boundary && (
           <GeoJSON
             data={mapLayers.boundary}
             style={boundaryStyle}
@@ -465,7 +411,7 @@ const hasInvalidCoords = (value: any): boolean => {
         )}
 
         {/* Accessible Forest Area Layer */}
-        {mapLayers.accessible_forest && (
+        {showAccessibleForest && mapLayers.accessible_forest && (
           <GeoJSON
             data={mapLayers.accessible_forest}
             style={accessibleForestStyle}
@@ -482,20 +428,102 @@ const hasInvalidCoords = (value: any): boolean => {
           />
         )}
 
+        {/* Rivers Layer (clipped to forest boundary) */}
+        {showRivers && mapLayers.rivers && mapLayers.rivers.features && mapLayers.rivers.features.length > 0 && (
+          <GeoJSON
+            data={mapLayers.rivers}
+            style={{
+              color: '#06b6d4',
+              weight: 2,
+              opacity: 0.8
+            }}
+            onEachFeature={(feature, layer) => {
+              layer.bindPopup(`
+                <div class="text-sm">
+                  <strong style="color: #06b6d4">${feature.properties.name || 'River'}</strong>
+                </div>
+              `);
+            }}
+          />
+        )}
+
+        {/* Forest Blocks Layer (Blocks, Compartments, Sub-compartments) */}
+        {mapLayers.forest_blocks && mapLayers.forest_blocks.features && (
+          mapLayers.forest_blocks.features.map((feature: any, index: number) => {
+            const level = feature.properties.division_level || 0;
+            const blockId = feature.properties.id || `block-${index}`;
+            const centroid = getPolygonCentroid(feature.geometry.coordinates);
+            const isHovered = hoveredBlockId === blockId;
+
+            const showThis = level === 0 ? showBlocks : level === 1 ? showCompartments : showSubCompartments;
+            if (!showThis) return null;
+
+            const blockStyles: Record<number, any> = {
+              0: { color: '#2563eb', weight: 3, opacity: 0.9, fillColor: '#2563eb', fillOpacity: 0.06 },
+              1: { color: '#059669', weight: 2, opacity: 0.8, fillColor: '#059669', fillOpacity: 0.04 },
+              2: { color: '#d97706', weight: 1.5, opacity: 0.7, fillColor: '#d97706', fillOpacity: 0.03 },
+            };
+            const style = blockStyles[level] || blockStyles[0];
+
+            return (
+              <GeoJSON
+                key={blockId}
+                data={feature}
+                style={() => ({
+                  ...style,
+                  fillOpacity: isHovered ? (style.fillOpacity + 0.1) : style.fillOpacity,
+                  weight: isHovered ? style.weight + 1 : style.weight,
+                })}
+                onEachFeature={(feat, layer) => {
+                  layer.on({
+                    mouseover: () => setHoveredBlockId(blockId),
+                    mouseout: () => setHoveredBlockId(null),
+                  });
+                  layer.bindPopup(`
+                    <div class="text-sm">
+                      <strong>${feat.properties.name || 'Unnamed'}</strong><br/>
+                      <span class="text-xs text-gray-600">${feat.properties.level_name || `Level ${level}`}</span><br/>
+                      <span class="text-xs text-gray-500">${(feat.properties.area_hectares || 0).toFixed(2)} ha</span>
+                    </div>
+                  `);
+                }}
+              >
+                {isHovered && centroid && (
+                  <Marker
+                    position={centroid}
+                    icon={createBlockLabel(feature.properties.name || '')}
+                    interactive={false}
+                  />
+                )}
+              </GeoJSON>
+            );
+          })
+        )}
+
         {/* Sub-Area Layers with Labels */}
-        {subAreas.map((subArea, index) => {
+        {showSubAreas && subAreas.map((subArea, index) => {
           if (!subArea.geometry?.coordinates) return null;
           if (hasInvalidCoords(subArea.geometry.coordinates)) return null;
           const centroid = getPolygonCentroid(subArea.geometry.coordinates);
           const style = getSubAreaStyle(subArea.category, subArea.isExcluded);
           const info = CATEGORY_COLORS[subArea.category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
           
+          const subAreaId = subArea.id || `subarea-${index}`;
+          const isSubAreaHovered = hoveredSubAreaId === subAreaId;
+
           return (
             <GeoJSON
-              key={subArea.id || `subarea-${index}`}
+              key={subAreaId}
               data={subArea.geometry}
-              style={() => style}
+              style={() => ({
+                ...style,
+                fillOpacity: isSubAreaHovered ? (style.fillOpacity || 0.35) + 0.15 : style.fillOpacity,
+              })}
               onEachFeature={(feature, layer) => {
+                layer.on({
+                  mouseover: () => setHoveredSubAreaId(subAreaId),
+                  mouseout: () => setHoveredSubAreaId(null),
+                });
                 layer.bindPopup(`
                   <div class="text-sm">
                     <strong style="color: ${info.border}">${subArea.name}</strong><br/>
@@ -506,7 +534,7 @@ const hasInvalidCoords = (value: any): boolean => {
                 `);
               }}
             >
-              {centroid && (
+              {isSubAreaHovered && centroid && (
                 <Marker
                   position={centroid}
                   icon={createSubAreaLabel(
@@ -523,7 +551,7 @@ const hasInvalidCoords = (value: any): boolean => {
         })}
 
         {/* Sampling Points Layer - Numbered Markers */}
-        {mapLayers.sampling_points && mapLayers.sampling_points.features && (
+        {showSamplePlots && mapLayers.sampling_points && mapLayers.sampling_points.features && (
           mapLayers.sampling_points.features.map((feature: any, index: number) => {
             const coords = feature.geometry.coordinates;
             const lon = Number(coords[0]);
@@ -554,6 +582,112 @@ const hasInvalidCoords = (value: any): boolean => {
         {/* Map Controller */}
         <MapController geometry={mapLayers.boundary?.geometry} />
       </MapContainer>
+
+      {/* Map Legend - Below Map */}
+      <div className="mt-2 bg-white rounded-lg shadow-sm border border-gray-200 p-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+          <span className="font-semibold text-gray-700 mr-1">Legend:</span>
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showForestBoundary}
+              onChange={(e) => setShowForestBoundary(e.target.checked)}
+              className="rounded w-3 h-3"
+            />
+            <div className="w-5 h-0.5 rounded" style={{ borderTop: '3px solid #7c3aed' }}></div>
+            <span className="text-gray-600">Forest Boundary</span>
+          </label>
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showBlocks}
+              onChange={(e) => setShowBlocks(e.target.checked)}
+              className="rounded w-3 h-3"
+            />
+            <div className="w-3 h-0.5 rounded" style={{ borderTop: '2px solid #2563eb' }}></div>
+            <span className="text-gray-600">Block</span>
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showCompartments}
+              onChange={(e) => setShowCompartments(e.target.checked)}
+              className="rounded w-3 h-3"
+            />
+            <div className="w-3 h-0.5 rounded" style={{ borderTop: '2px solid #059669' }}></div>
+            <span className="text-gray-600">Compartment</span>
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showSubCompartments}
+              onChange={(e) => setShowSubCompartments(e.target.checked)}
+              className="rounded w-3 h-3"
+            />
+            <div className="w-3 h-0.5 rounded" style={{ borderTop: '2px solid #d97706' }}></div>
+            <span className="text-gray-600">Sub-compartment</span>
+          </label>
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showRivers}
+              onChange={(e) => setShowRivers(e.target.checked)}
+              className="rounded w-3 h-3"
+            />
+            <div className="w-3 h-0.5 rounded" style={{ borderTop: '2px solid #06b6d4' }}></div>
+            <span className="text-gray-600">River</span>
+          </label>
+
+          {mapLayers.accessible_forest && (
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showAccessibleForest}
+                onChange={(e) => setShowAccessibleForest(e.target.checked)}
+                className="rounded w-3 h-3"
+              />
+              <div className="w-3 h-3 bg-green-500 opacity-40 border border-green-600 rounded-sm"></div>
+              <span className="text-gray-600">Accessible Forest</span>
+            </label>
+          )}
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showSamplePlots}
+              onChange={(e) => setShowSamplePlots(e.target.checked)}
+              className="rounded w-3 h-3"
+            />
+            <div className="w-3 h-3 rounded-full border-2 border-yellow-400 bg-transparent"></div>
+            <span className="text-gray-600">Sample Plot</span>
+          </label>
+
+          {uniqueCategories.length > 0 && (
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showSubAreas}
+                onChange={(e) => setShowSubAreas(e.target.checked)}
+                className="rounded w-3 h-3"
+              />
+              <div className="flex items-center gap-1">
+                {uniqueCategories.map(category => {
+                  const info = CATEGORY_COLORS[category] || { fill: '#6b7280', border: '#4b5563', label: 'Other' };
+                  return (
+                    <span key={category} className="flex items-center gap-1">
+                      <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: info.fill, border: `1px solid ${info.border}` }}></div>
+                      <span className="text-gray-500">{info.label}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </label>
+          )}
+        </div>
+      </div>
 
       {/* Map Info Footer */}
       <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded p-2">

@@ -388,3 +388,32 @@
 .ant-drawer-body .card-content {
   padding-top: 8px;
 }
+
+/* OP Document Preview Card */
+.op-preview-card {
+  margin-bottom: 16px;
+  border: 1px solid #d6e4ff;
+  background: #fafcff;
+}
+
+.op-preview-card .ant-card-head {
+  background: #f0f5ff;
+  border-bottom: 1px solid #d6e4ff;
+}
+
+.op-preview-card .ant-card-head-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a3a5c;
+}
+
+.op-preview-chart {
+  background: white;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
+}
+
+.op-preview-card .ant-divider {
+  border-color: #d6e4ff;
+}

@@ -17,6 +17,7 @@ from .fieldbook import Fieldbook
 from .sampling import SamplingDesign
 from .biodiversity import BiodiversitySpecies, CalculationBiodiversity
 from .synthetic_tree_model import SyntheticTreeModel
+from .all_tree_export import AllTreeExport
 from .field_inventory import (
     FieldInventoryCalculation,
     FieldInventorySamplePlot,
@@ -30,6 +31,7 @@ from .forest_committee import ForestUserCommittee, AdvisoryCommittee, FinancialC
 from .compartment import CompartmentSplitHistory
 from .op_table import OPTableDefinition, OPTableData
 from .op_template import OPTemplate
+from .op_data_cache import OpDataCache
 
 __all__ = [
     "User",
@@ -53,6 +55,7 @@ __all__ = [
     "BiodiversitySpecies",
     "CalculationBiodiversity",
     "SyntheticTreeModel",
+    "AllTreeExport",
     "FieldInventoryCalculation",
     "FieldInventorySamplePlot",
     "FieldInventoryMeasurement",
@@ -68,4 +71,5 @@ __all__ = [
     "OPTableDefinition",
     "OPTableData",
     "OPTemplate",
+    "OpDataCache",
 ]

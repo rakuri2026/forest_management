@@ -282,6 +282,10 @@ class SamplingDesign(SamplingDesignBase):
         None,
         description="Per-block parameter overrides"
     )
+    result_data: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Computed summary data (blocks_info, totals, percentages) from generation"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

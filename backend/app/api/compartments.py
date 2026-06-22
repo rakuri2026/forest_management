@@ -39,6 +39,7 @@ from ..services.tree_reassignment import (
     auto_assign_trees_by_location,
     manual_assign_trees
 )
+from ..utils.diameter_classifier import DiameterClassifier
 from ..services.geometry_utils import (
     postgis_to_shapely,
     shapely_to_postgis,
@@ -1060,7 +1061,8 @@ async def execute_split(
                 parent_block_id=block.id,
                 compartment_code=comp_name,
                 area_sqm=comp_area_sqm,
-                color=COMPARTMENT_COLORS[i % len(COMPARTMENT_COLORS)]
+                color=COMPARTMENT_COLORS[i % len(COMPARTMENT_COLORS)],
+                division_level=1
             )
 
             db.add(compartment)
@@ -1434,24 +1436,9 @@ async def get_trees_for_map(
             try:
                 location = to_shape(tree.location)
                 
-                # Calculate DBH class based on diameter
+                # Calculate DBH class using shared classifier
                 dbh = float(tree.dia_cm) if tree.dia_cm else 0
-                if dbh < 4:
-                    dbh_class = 'Regeneration (0.1-4)'
-                elif dbh < 10:
-                    dbh_class = 'Sapling (4-10)'
-                elif dbh < 20:
-                    dbh_class = 'Small pole (10-20)'
-                elif dbh < 30:
-                    dbh_class = 'Large pole (20-30)'
-                elif dbh < 40:
-                    dbh_class = 'Small tree (30-40)'
-                elif dbh < 50:
-                    dbh_class = 'Medium tree (40-50)'
-                elif dbh < 60:
-                    dbh_class = 'Large tree (50-60)'
-                else:
-                    dbh_class = 'Very large tree (>60)'
+                dbh_class = DiameterClassifier.classify_detailed(dbh) or 'Unknown'
                 
                 tree_features.append({
                     "id": str(tree.id),

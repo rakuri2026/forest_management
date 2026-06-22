@@ -72,20 +72,35 @@ async def preview_column_mapping(
     """
     Preview automatic column mapping for uploaded CSV file
     """
-    if not file.filename.endswith('.csv') and not file.filename.endswith('.xlsx'):
-        raise HTTPException(status_code=400, detail="Only CSV and XLSX files are supported")
+    from app.utils.number_format import normalize_nepali_digits
 
     try:
         content = await file.read()
-        if file.filename.endswith('.xlsx'):
+        fname = file.filename.lower()
+        if fname.endswith('.xlsx') or fname.endswith('.xls'):
             df = pd.read_excel(io.BytesIO(content), nrows=10)
         else:
-            df = pd.read_csv(io.BytesIO(content), nrows=10)
+            encodings = ["utf-8", "latin-1", "cp1252", "cp437", "utf-16"]
+            df = None
+            for enc in encodings:
+                try:
+                    df = pd.read_csv(io.BytesIO(content), nrows=10, encoding=enc)
+                    if not df.empty:
+                        break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+                except Exception:
+                    continue
+            if df is None or df.empty:
+                raise HTTPException(status_code=400, detail="Could not read file. Supported formats: CSV, Excel (.xlsx/.xls).")
+        df = df.map(lambda v: normalize_nepali_digits(v) if isinstance(v, str) else v)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 
     if len(df) == 0:
-        raise HTTPException(status_code=400, detail="CSV file is empty")
+        raise HTTPException(status_code=400, detail="File is empty")
 
     # Return preview with column detection (clean NaN values)
     preview_data = {
@@ -401,6 +416,7 @@ async def get_species_breakdown(
                 m.stand_type,
                 SUM(m.count) as total_count,
                 SUM(COALESCE(m.net_volume, 0)) as total_timber,
+                SUM(COALESCE(m.gross_volume, 0)) as total_gross,
                 SUM(COALESCE(m.firewood_m3, 0)) as total_firewood,
                 SUM(COALESCE(m.basal_area_m2, 0) * m.count) as total_basal_area
             FROM public.field_inventory_sample_plots sp
@@ -422,7 +438,9 @@ async def get_species_breakdown(
             SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_timber ELSE 0 END) as pole_timber,
             SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_firewood ELSE 0 END) as pole_firewood,
             SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_timber ELSE 0 END) as tree_timber,
-            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_firewood ELSE 0 END) as tree_firewood
+            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_firewood ELSE 0 END) as tree_firewood,
+            SUM(CASE WHEN sd.stand_type = 'Pole' THEN sd.total_gross ELSE 0 END) as pole_gross,
+            SUM(CASE WHEN sd.stand_type = 'Tree' THEN sd.total_gross ELSE 0 END) as tree_gross
         FROM species_data sd
         JOIN block_total_plots btp ON btp.block_name = sd.block_name
         GROUP BY sd.block_name, sd.species_scientific, sd.species_local, btp.total_plots
@@ -440,11 +458,11 @@ async def get_species_breakdown(
     species_coef_results = db.execute(species_coefficients_query).fetchall()
     species_densities = {row.scientific_name: float(row.wood_density_gm_cm3 or 0.65) for row in species_coef_results}
 
-    # IPCC/REDD+ carbon calculation constants
-    BEF = 1.40  # Biomass Expansion Factor
-    ROOT_SHOOT_RATIO = 0.24  # Root-to-shoot ratio
-    CARBON_FRACTION = 0.47  # Carbon fraction in biomass
-    CO2_TO_C_RATIO = 3.67  # CO2 to C conversion
+    # IPCC 2006 Tier 2 constants (used for block-level totals where no per-species gross_vol available)
+    # AGB = VOB × WD × BEF; VOB = gross_volume per-ha; BEF = 1.3 (Table 4.4)
+    # Per-species entries use gross_volume_per_ha with species-specific density
+    CARBON_FRACTION = 0.47  # Table 4.3
+    CO2_TO_C_RATIO = 3.67
 
     # Process results to calculate per-hectare values and carbon metrics
     species_data = []
@@ -463,6 +481,11 @@ async def get_species_breakdown(
         tree_timber_per_ha = (float(row.tree_timber or 0) / total_plots / tree_area) * 10000 if row.tree_timber else 0
         tree_firewood_per_ha = (float(row.tree_firewood or 0) / total_plots / tree_area) * 10000 if row.tree_firewood else 0
 
+        # Gross volume per-ha (VOB for IPCC Tier 2 AGB calculation)
+        pole_gross_per_ha = (float(row.pole_gross or 0) / total_plots / pole_area) * 10000 if row.pole_gross else 0
+        tree_gross_per_ha = (float(row.tree_gross or 0) / total_plots / tree_area) * 10000 if row.tree_gross else 0
+        gross_volume_per_ha = pole_gross_per_ha + tree_gross_per_ha
+
         growing_stock = pole_timber_per_ha + tree_timber_per_ha
         total_volume = pole_timber_per_ha + pole_firewood_per_ha + tree_timber_per_ha + tree_firewood_per_ha
 
@@ -471,10 +494,11 @@ async def get_species_breakdown(
         tree_basal_per_ha = (float(row.tree_basal_area or 0) / total_plots / tree_area) * 10000 if row.tree_basal_area else 0
         basal_area_m2_per_ha = pole_basal_per_ha + tree_basal_per_ha
 
-        # Carbon calculations
-        wood_density = species_densities.get(row.species_scientific, 0.65)  # Default to 0.65 t/m³ if not found
-        agb_t_per_ha = growing_stock * wood_density * BEF
-        bgb_t_per_ha = agb_t_per_ha * ROOT_SHOOT_RATIO
+        # Carbon calculations — IPCC Tier 2 (IPCC 2006 GL Vol 4 Ch 4)
+        # AGB = VOB × WD × BEF where VOB = gross_volume, BEF = 1.3 (Table 4.4)
+        wood_density = species_densities.get(row.species_scientific, 0.65)
+        agb_t_per_ha = gross_volume_per_ha * wood_density * 1.3
+        bgb_t_per_ha = agb_t_per_ha * 0.24
         total_biomass_t_per_ha = agb_t_per_ha + bgb_t_per_ha
         carbon_stock_tC_per_ha = total_biomass_t_per_ha * CARBON_FRACTION
         co2_equivalent_tCO2_per_ha = carbon_stock_tC_per_ha * CO2_TO_C_RATIO
@@ -535,18 +559,28 @@ async def get_mai_aah(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Calculate MAI and AAH tables for field inventory
+    Calculate MAI and AAH tables for field inventory.
 
-    MAI (Mean Annual Increment) = Growing Stock × (MAI% / 100)
-    AAH (Annual Allowable Harvest) = MAI × AAH_Multiplier
+    == Algorithm ==
 
-    AAH Multipliers (user-configurable):
-    - Good forest: 75% (default)
-    - Moderate forest: 60% (default)
-    - Weak forest: 40% (default)
+    A) MAI (Mean Annual Increment — औसत वार्षिक वृद्धि):
+       MAI (m³/ha/yr) = Growing_Stock (m³/ha) × (MAI% / 100)
+       MAI% is determined by the 3×3 (Growth_Rate × Forest_Condition) matrix
+       — see _calculate_mai() docstring for full matrix.
 
-    Custom multipliers can be provided per block via custom_multipliers parameter
-    as JSON string: {"Block A": 80.0, "Block B": 55.0}
+    B) AAH (Annual Allowable Cut — वार्षिक स्वीकार्य कटान):
+       AAH (m³/ha/yr) = MAI × AAH_Multiplier
+
+       AAH_Multiplier depends on forest_condition:
+         राम्रो (Good)      → 75% (default, user-configurable)
+         मध्यम (Moderate)   → 60% (default, user-configurable)
+         कमजोर (Weak)       → 40% (default, user-configurable)
+
+       Per-block custom multipliers can be provided as JSON:
+       {"Block A": 80.0, "Block B": 55.0}
+
+    These follow Nepal Forest Regulation 2075/2079 guidelines for
+    sustainable harvest calculation.
     """
     # Parse custom multipliers if provided
     import json

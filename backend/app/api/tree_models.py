@@ -96,6 +96,9 @@ def background_tree_generation(
         # Block-wise distribution
         config_with_stats['block_dbh_distribution'] = stats.get('block_dbh_distribution', {})
         
+        # Overall DBH class density per hectare
+        config_with_stats['dbh_per_ha'] = stats.get('dbh_per_ha', {})
+        
         # Overall volume breakdown (matching field inventory method)
         config_with_stats['pole_timber_m3_per_ha'] = stats.get('pole_timber_m3_per_ha', 0)
         config_with_stats['pole_firewood_m3_per_ha'] = stats.get('pole_firewood_m3_per_ha', 0)
@@ -103,6 +106,7 @@ def background_tree_generation(
         config_with_stats['tree_firewood_m3_per_ha'] = stats.get('tree_firewood_m3_per_ha', 0)
         config_with_stats['total_growing_stock_m3_per_ha'] = stats.get('total_growing_stock_m3_per_ha', 0)
         config_with_stats['volume_per_ha'] = stats.get('volume_per_ha', 0)
+        config_with_stats['total_sample_plots'] = stats.get('total_sample_plots', 0)
         
         model.algorithm_config = config_with_stats
 

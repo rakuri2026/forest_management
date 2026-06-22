@@ -61,7 +61,11 @@ def get_default_seed_tree() -> List[TreeNode]:
                   _node("subsection", "सिमाना (चारकिल्ला)", "Boundary",
                         "यस वनको सिमाना: पूर्व {{boundary_features_east}}, पश्चिम {{boundary_features_south}}, उत्तर {{boundary_features_north}}, दक्षिण {{boundary_features_south}}।"),
                   _node("subsection", "क्षेत्रफल र नक्सा", "Area and Map",
-                        "कुल क्षेत्रफल {{total_area_hectares}} हेक्टर। प्रभावकारी क्षेत्रफल {{effective_area_hectares}} हेक्टर।"),
+                        "कुल क्षेत्रफल {{total_area_hectares}} हेक्टर। प्रभावकारी क्षेत्रफल {{effective_area_hectares}} हेक्टर।\n\n"
+                        "{{fieldbook_narration}}\n\n"
+                        "{{fieldbook_block_summary}}\n\n"
+                        "{{fieldbook_points}}\n\n"
+                        "{{map:fieldbook}}"),
                   _node("subsection", "भू-उपयोग", "Land Use",
                         "{{landcover_dominant}} मुख्य भू-उपयोग प्रकार हो।"),
               ]),
@@ -76,8 +80,17 @@ def get_default_seed_tree() -> List[TreeNode]:
                   _node("subsection", "वन श्रोत मापन विधी", "Measurement Method",
                         "वन श्रोत मापन {{sampling_type}} विधिबाट गरिएको थियो। "
                         "कुल {{sampling_total_points}} वटा नमूना प्लट राखिएका थिए। "
+                        "अनुरोध गरिएको नमूना इन्टेन्सिटी {{sampling_requested_intensity}}% र "
+                        "वास्तविक इन्टेन्सिटी {{sampling_actual_intensity}}% रहेको छ। "
                         "पोल (Pole) को लागि १०० वर्गमिटर र रूख (Tree) को लागि ५०० वर्गमिटर "
-                        "क्षेत्रफलको नमूना प्लट प्रयोग गरिएको थियो।"),
+                        "क्षेत्रफलको नमूना प्लट प्रयोग गरिएको थियो।\n\n"
+                        "ब्लक अनुसार नमुनाप्लट विवरण तलको तालिकामा प्रस्तुत गरिएको छ:\n\n"
+                        "{{sampling_block_summary}}\n\n"
+                        "नमुना प्लटहरूको स्थान विवरण तलको तालिकामा प्रस्तुत गरिएको छ:\n\n"
+                        "{{sampling_point_locations}}\n\n"
+                        "{{map:sampling_plot}}\n\n"
+                        "{{map:sampling_plot_topo}}\n\n"
+                        "{{map:sampling_plot_satellite}}"),
 
                   # ── ३.२: वनको किसिम ──
                   _node("subsection", "वनको किसिम", "Forest Type",
@@ -220,13 +233,29 @@ def get_default_seed_tree() -> List[TreeNode]:
 
         # ── Section ११: बजेट ──
         _node("section", "वार्षिक बजेट तथा कार्यक्रम", "Annual Budget and Program",
-              "कुल बजेट रु. {{activities_total_budget}} रहेको छ।"),
+              "{{ya_available}} कुल बजेट रु. {{ya_total_ten_year_budget}}।",
+              children=[
+                  _node("subsection", "वर्ष अनुसार बजेट वितरण", "Year-wise Budget Distribution",
+                        "{{chart:ya_budget_year_bar}}"),
+                  _node("subsection", "कार्यक्रम अनुसार बजेट", "Program-wise Budget",
+                        "{{chart:ya_program_pie}}"),
+                  _node("subsection", "वर्ष अनुसार बजेट सारांश", "Year-wise Budget Summary",
+                        "{{ya_year_summary}}"),
+                  _node("subsection", "क्रियाकलाप योजना विस्तृत विवरण", "Activity Plan Detail",
+                        "{{ya_activity_plan_detail}}"),
+              ]),
 
         # ── Section १२: वार्षिक क्रियाकलाप ──
         _node("section", "व्यवस्थापन कार्ययोजना अवधिको लागि वार्षिक क्रियाकलाप तथा बजेट", "Annual Activities",
               children=[
                   _node("subsection", "दश वर्षे कार्यक्रम", "Ten-year Program",
                         "{{plan_year_start}} देखि {{plan_year_end}} सम्मको कार्यक्रम।"),
+                  _node("subsection", "दश वर्षे क्रियाकलाप विवरण (गतिविधि × वर्ष)", "10-Year Activity Matrix",
+                        "{{ya_plan_matrix}}"),
+                  _node("subsection", "क्रियाकलाप योजना विस्तृत विवरण", "Activity Plan Detail",
+                        "{{ya_activity_plan_detail}}"),
+                  _node("subsection", "कार्यक्रम अनुसार बजेट विवरण", "Program-wise Budget Details",
+                        "{{ya_program_budget}}"),
               ]),
 
         # ── Section १३: सहकार्य ──

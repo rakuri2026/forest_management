@@ -17,6 +17,7 @@ from app.utils.auth import get_current_user
 from app.models.user import User
 from app.models.calculation import Calculation
 from app.models.sampling import SamplingDesign
+from app.models.forest_block import ForestBlock
 from app.schemas.sampling import (
     SamplingDesignCreate,
     SamplingDesignUpdate,
@@ -345,7 +346,10 @@ async def get_sampling_points(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
-    # Return JSON array of points with detailed information
+    # Return cached points if available (always — eliminates recomputation on tab switch / reload)
+    if design.points_data:
+        return design.points_data
+
     from shapely import wkt as shapely_wkt
     from pyproj import Transformer
 
@@ -380,8 +384,9 @@ async def get_sampling_points(
 
     # OPTIMIZATION: Pre-clip ridge/river data ONCE before the loop
     # This dramatically speeds up exports (20-100x faster!)
+    # Always compute on cache miss so cached data is complete
     clipped_features = None
-    if include_topographic_features:
+    if boundary_wkt:
         clipped_features = preclip_topographic_features(
             db=db,
             boundary_wkt=boundary_wkt,
@@ -438,15 +443,14 @@ async def get_sampling_points(
             except:
                 pass
 
-        # Extract elevation (ASLM - Above Sea Level Meter) if requested
-        elevation_m = None
-        if include_elevation:
-            elevation_m = extract_elevation_at_point(db, lon, lat)
+        # Extract elevation (ASLM - Above Sea Level Meter)
+        # Always computed on cache miss so cached data is complete
+        elevation_m = extract_elevation_at_point(db, lon, lat)
 
         # Find nearest topographic feature using OPTIMIZED pre-clipped data
+        # Always computed on cache miss so cached data is complete
         topo_feature = None
-        topo_context = None
-        if include_topographic_features and clipped_features:
+        if clipped_features:
             topo_feature = find_nearest_topographic_feature_optimized(
                 db=db,
                 longitude=lon,
@@ -457,13 +461,14 @@ async def get_sampling_points(
                 min_distance_threshold=min_feature_distance
             )
 
-            # Build topographic context string for display with NAMES
-            if topo_feature:
-                feature_name = topo_feature.get("feature_name", "unnamed feature")
-                distance = topo_feature.get("distance_meters", 0)
-                direction = topo_feature.get("direction", "")
-                # NEW: Include feature name!
-                topo_context = f"{int(distance)}m {direction} of {feature_name}"
+        # Build topographic context string for display with NAMES
+        topo_context = None
+        if topo_feature:
+            feature_name = topo_feature.get("feature_name", "unnamed feature")
+            distance = topo_feature.get("distance_meters", 0)
+            direction = topo_feature.get("direction", "")
+            # NEW: Include feature name!
+            topo_context = f"{int(distance)}m {direction} of {feature_name}"
 
         point_data = {
             "id": f"{design_id}_{i}",
@@ -479,22 +484,25 @@ async def get_sampling_points(
             "distance_from_boundary": safe_float(distance_from_boundary, 2),
         }
 
-        # Add elevation if calculated
-        if include_elevation:
-            point_data["elevation_m"] = safe_int(elevation_m)
-
-        # Add topographic context if calculated
-        if include_topographic_features:
-            point_data["topographic_context"] = topo_context
-            point_data["nearest_feature_type"] = topo_feature.get("feature_type") if topo_feature else None
-            point_data["nearest_feature_name"] = topo_feature.get("feature_name") if topo_feature else None  # NEW!
-            point_data["nearest_feature_distance_m"] = safe_int(topo_feature.get("distance_meters", 0) if topo_feature else None)
-            point_data["nearest_feature_direction"] = topo_feature.get("direction") if topo_feature else None
-            point_data["nearest_feature_bearing"] = safe_int(topo_feature.get("bearing_degrees", 0) if topo_feature else None)
+        # Always include elevation and topographic context in cached response
+        point_data["elevation_m"] = safe_int(elevation_m)
+        point_data["topographic_context"] = topo_context
+        point_data["nearest_feature_type"] = topo_feature.get("feature_type") if topo_feature else None
+        point_data["nearest_feature_name"] = topo_feature.get("feature_name") if topo_feature else None
+        point_data["nearest_feature_distance_m"] = safe_int(topo_feature.get("distance_meters", 0) if topo_feature else None)
+        point_data["nearest_feature_direction"] = topo_feature.get("direction") if topo_feature else None
+        point_data["nearest_feature_bearing"] = safe_int(topo_feature.get("bearing_degrees", 0) if topo_feature else None)
 
         points.append(point_data)
 
-    return {"points": points}
+    result = {"points": points}
+
+    # Cache computed points for instant loading on subsequent visits
+    design.points_data = result
+    db.add(design)
+    db.commit()
+
+    return result
 
 
 @router.put("/sampling/{design_id}", response_model=SamplingDesignSchema)
@@ -916,6 +924,74 @@ async def get_sampling_map_layers(
 
     boundary_geojson = json.loads(boundary_result.boundary_geojson)
 
+    # Get forest blocks (blocks, compartments, sub-compartments)
+    forest_blocks_geojson = None
+    from sqlalchemy import func as sa_func
+    blocks = db.query(
+        ForestBlock.id,
+        ForestBlock.name,
+        ForestBlock.division_level,
+        ForestBlock.area_hectares,
+        sa_func.ST_AsGeoJSON(ForestBlock.geometry).label('geojson')
+    ).filter(
+        ForestBlock.calculation_id == design.calculation_id
+    ).order_by(ForestBlock.division_level, ForestBlock.index).all()
+
+    if blocks:
+        block_features = []
+        for block in blocks:
+            block_geom = json.loads(block.geojson)
+            block_features.append({
+                "type": "Feature",
+                "geometry": block_geom,
+                "properties": {
+                    "id": str(block.id),
+                    "name": block.name,
+                    "division_level": block.division_level,
+                    "area_hectares": block.area_hectares,
+                    "level_name": {0: "Block", 1: "Compartment", 2: "Sub-compartment"}.get(block.division_level, f"Level {block.division_level}")
+                }
+            })
+        forest_blocks_geojson = {
+            "type": "FeatureCollection",
+            "features": block_features
+        }
+
+    # Get rivers clipped to forest boundary
+    rivers_geojson = None
+    try:
+        river_query = text("""
+            SELECT
+                COALESCE(NULLIF(TRIM(r."river name"), ''), 'River') as name,
+                ST_AsGeoJSON(ST_Intersection(r.shape, calc_geom.geom)) as geometry
+            FROM river.river84 r,
+                (SELECT boundary_geom as geom FROM public.calculations WHERE id = :calc_id) calc_geom
+            WHERE ST_Intersects(r.shape, calc_geom.geom)
+            LIMIT 50
+        """)
+        river_results = db.execute(river_query, {"calc_id": str(design.calculation_id)}).fetchall()
+        if river_results:
+            river_features = []
+            for r in river_results:
+                geom = json.loads(r.geometry)
+                if geom and geom.get('type') and geom['type'] != 'GeometryCollection':
+                    river_features.append({
+                        "type": "Feature",
+                        "geometry": geom,
+                        "properties": {
+                            "name": r.name or "River"
+                        }
+                    })
+            if river_features:
+                rivers_geojson = {
+                    "type": "FeatureCollection",
+                    "features": river_features
+                }
+    except Exception as e:
+        logger.warning(f"Failed to query rivers: {e}")
+        db.rollback()
+        rivers_geojson = None
+
     # Get accessible forest mask (if filters were applied)
     accessible_forest_geojson = None
     filter_info = design.default_parameters or {}
@@ -1006,6 +1082,8 @@ async def get_sampling_map_layers(
                 "layer_type": "accessible_forest"
             }
         } if accessible_forest_geojson else None,
+        "forest_blocks": forest_blocks_geojson,
+        "rivers": rivers_geojson,
         "sampling_points": points_geojson,
         "filter_settings": filter_info,
         "calculation_id": str(design.calculation_id)

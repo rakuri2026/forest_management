@@ -95,7 +95,7 @@ const SlopeSensitivityMock: React.FC = () => {
           onClick={() => setEnabledClasses([4])}
           className="flex-1 px-3 py-2 bg-red-50 hover:bg-red-100 rounded text-sm font-medium text-red-700 transition-colors"
         >
-          Extreme Only (>45°)
+          Extreme Only ({'>'}45°)
         </button>
         <button
           onClick={() => setEnabledClasses([])}

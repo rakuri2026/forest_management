@@ -13,7 +13,7 @@ from .data_collector import collect_all_op_data
 from app.utils.number_format import format_devanagari
 
 
-VARIABLE_PATTERN = re.compile(r"\{\{(\w+:?\w+)\}\}")
+VARIABLE_PATTERN = re.compile(r"\{\{(\w+(?::\w+)*)\}\}")
 _SENTINEL = object()
 
 
@@ -100,11 +100,29 @@ _KEY_ALIAS: Dict[tuple, str] = {
     # sampling (nested in designs[0])
     ("sampling", "sampling_type"): "designs.0.sampling_type",
     ("sampling", "sampling_total_points"): "designs.0.total_points",
+    ("sampling", "sampling_total_blocks"): "designs.0.total_blocks",
     ("sampling", "sampling_plot_shape"): "designs.0.plot_shape",
     ("sampling", "sampling_plot_radius_m"): "designs.0.plot_radius_meters",
     ("sampling", "sampling_intensity_per_ha"): "designs.0.intensity_per_hectare",
+    ("sampling", "sampling_requested_intensity"): "designs.0.requested_intensity_percent",
+    ("sampling", "sampling_actual_intensity"): "designs.0.sampling_percentage",
+    ("sampling", "sampling_block_summary"): "designs.0.blocks_info",
+    ("sampling", "sampling_point_locations"): "sampling_point_locations",
+    ("sampling", "sampling_forest_area_ha"): "designs.0.forest_area_hectares",
+    ("sampling", "sampling_plot_area_sqm"): "designs.0.plot_area_sqm",
+    ("sampling", "sampling_total_sampled_area_ha"): "designs.0.total_sampled_area_hectares",
     ("sampling", "fi_sampling_designs"): "designs",
 
+    # fieldbook
+    ("fieldbook", "fieldbook_total_points"): "total_points",
+    ("fieldbook", "fieldbook_vertex_count"): "vertex_count",
+    ("fieldbook", "fieldbook_interpolated_count"): "interpolated_count",
+    ("fieldbook", "fieldbook_perimeter_m"): "perimeter_m",
+    ("fieldbook", "fieldbook_avg_elevation_m"): "avg_elevation_m",
+    ("fieldbook", "fieldbook_min_elevation_m"): "min_elevation_m",
+    ("fieldbook", "fieldbook_max_elevation_m"): "max_elevation_m",
+    ("fieldbook", "fieldbook_points"): "points",
+    ("fieldbook", "fieldbook_block_summary"): "block_summary",
     # household (strip hh_ prefix)
     ("households", "hh_total_households"): "total_households",
     ("households", "hh_total_population"): "total_population",
@@ -145,6 +163,19 @@ _KEY_ALIAS: Dict[tuple, str] = {
     ("user_group", "ug_available"): "available",
     ("user_group", "ug_total_settlements"): "total_settlements",
     ("user_group", "ug_buildings"): "buildings",
+
+    # section_generators
+    ("section_generators", "fieldbook_narration"): "section:fieldbook_narration",
+    # yearly_plan (strip ya_ prefix)
+    ("yearly_plan", "ya_available"): "available",
+    ("yearly_plan", "ya_year_summary"): "year_summary",
+    ("yearly_plan", "ya_plan_matrix"): "plan_matrix",
+    ("yearly_plan", "ya_program_budget"): "program_budget",
+    ("yearly_plan", "ya_total_budget_by_year"): "total_budget_by_year",
+    ("yearly_plan", "ya_total_ten_year_budget"): "total_ten_year_budget",
+    ("yearly_plan", "ya_program_pie_data"): "program_pie_data",
+    ("yearly_plan", "ya_budget_year_trend"): "budget_year_trend",
+    ("yearly_plan", "ya_activity_plan_detail"): "activity_plan_detail",
 }
 
 
@@ -190,7 +221,7 @@ class VariableResolver:
     def resolve_node_content(self, content: str) -> str:
         def _replacer(match):
             var_name = match.group(1)
-            if var_name.startswith("chart:") or var_name.startswith("map:") or var_name.startswith("table:"):
+            if var_name.startswith("chart:") or var_name.startswith("map:") or var_name.startswith("table:") or var_name.endswith(":full"):
                 return match.group(0)
             var_def = VARIABLE_REGISTRY.get(var_name)
             if var_def is None:
@@ -242,12 +273,16 @@ class VariableResolver:
             "species": "species",
             "inventory": "inventory",
             "field_inventory": "field_inventory",
+            "fieldbook": "fieldbook",
             "sampling": "sampling",
             "household": "households",
             "committee": "committees",
             "biodiversity": "biodiversity",
             "activities": "activities",
+            "yearly_activities": "yearly_plan",
             "user_group": "user_group",
+            "section_generator": "section_generators",
+            "compartment": "compartment",
         }
         section = source_map.get(var_def.source, "basic_info")
         section_data = data.get(section, {})
@@ -493,6 +528,40 @@ class VariableResolver:
                         total = sum(yd.get("budget", 0) for yd in a.get("yearly_details", []))
                         values.append(total or a.get("default_quantity", 0))
                     return _bar_data(labels, values, "Budget (Rs)")
+                return None
+            elif chart_key == "ya_budget_year_bar":
+                yp = data.get("yearly_plan", {})
+                trend = yp.get("budget_year_trend", {})
+                if trend and isinstance(trend, dict):
+                    labels = [f"Year {k}" for k in sorted(trend.keys(), key=int)]
+                    values = [trend[k] for k in sorted(trend.keys(), key=int)]
+                    return _bar_data(labels, values, "Budget (Rs)")
+                return None
+            elif chart_key == "ya_program_pie":
+                yp = data.get("yearly_plan", {})
+                pie_data = yp.get("program_pie_data", {})
+                if pie_data and isinstance(pie_data, dict):
+                    prog_items = {k: v for k, v in pie_data.items() if v > 0}
+                    if prog_items:
+                        items = sorted(prog_items.items(), key=lambda x: x[1], reverse=True)
+                        labels = [k for k, _ in items]
+                        values = [v for _, v in items]
+                        colors = self._CHART_COLORS[:len(labels)]
+                        return {"type": "pie", "labels": labels, "datasets": [{"data": values, "backgroundColor": colors}]}
+                return None
+            elif chart_key == "dbh_class_bar":
+                chart_data = data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
+                if chart_data:
+                    labels = [d["label"] for d in chart_data]
+                    values = [d["count_per_ha"] for d in chart_data]
+                    return _bar_data(labels, values, "संख्या/हे.")
+                return None
+            elif chart_key == "dbh_class_count_bar":
+                chart_data = data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
+                if chart_data:
+                    labels = [d["label"] for d in chart_data]
+                    values = [d["count_per_ha"] for d in chart_data]
+                    return _bar_data(labels, values, "संख्या/हे.")
                 return None
         except Exception:
             return None

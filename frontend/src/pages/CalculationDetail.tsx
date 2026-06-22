@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { forestApi } from '../services/api';
+import { forestApi, fieldInventoryApi, biodiversityApi } from '../services/api';
 import type { Calculation } from '../types';
 import { EditableCell } from '../components/EditableCell';
 import { FieldbookTab } from '../components/FieldbookTab';
 import { SamplingTab } from '../components/SamplingTab';
-import TreeModelGenerator from '../components/TreeModelGenerator';
+import TreeModelGenerator, { TotalTreeExportAccordion } from '../components/TreeModelGenerator';
 import { TreeMappingTab } from '../components/TreeMappingTab';
 import BiodiversityTab from '../components/BiodiversityTab';
 import AnalysisTabContent from '../components/AnalysisTabContent';
@@ -16,9 +16,11 @@ import AnalysisOptionsPanel from '../components/AnalysisOptionsPanel';
 import { UserGroupMapTab } from '../components/UserGroupMapTab';
 import { TotalInventoryTab } from '../components/TotalInventoryTab';
 import { FieldInventoryTab } from '../components/FieldInventoryTab';
+import CopyTag from '../components/DetailDescription/CopyTag';
 import { ManagementPlanTab } from '../components/ManagementPlanTab';
 import OperationalPlanPage from './OperationalPlanPage';
 import { CompartmentTab } from '../components/Compartment';
+import DetailedDescriptionTab from '../components/DetailDescription/DetailedDescriptionTab';
 import YearlyActivitiesPage from '../components/YearlyActivities/YearlyActivitiesPage';
 import { DEFAULT_ANALYSIS_OPTIONS } from '../constants/analysisPresets';
 import type { AnalysisOptions } from '../constants/analysisPresets';
@@ -150,7 +152,7 @@ export default function CalculationDetail() {
   const [mapOrientation, setMapOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [boundaryVisible, setBoundaryVisible] = useState(true);
   const [basemap, setBasemap] = useState<'satellite' | 'osm' | 'terrain' | 'none'>('satellite');
-  const [activeTab, setActiveTab] = useState<'analysis' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities' | 'mgmtplan'>(
+  const [activeTab, setActiveTab] = useState<'analysis' | 'detaildescription' | 'fieldbook' | 'sampling' | 'treemodel' | 'treemapping' | 'biodiversity' | 'maps' | 'usergroup' | 'fieldinventory' | 'totalinventory' | 'subareas' | 'compartments' | 'yearlyactivities' | 'mgmtplan'>(
     'analysis'
   );
 
@@ -159,9 +161,6 @@ export default function CalculationDetail() {
   const [reanalysisOptions, setReanalysisOptions] = useState<AnalysisOptions>(DEFAULT_ANALYSIS_OPTIONS);
   const [reanalyzing, setReanalyzing] = useState(false);
 
-  // Species confirmation state (shared across whole forest and blocks)
-  const [optimisticConfirmations, setOptimisticConfirmations] = useState<Map<string, boolean>>(new Map());
-  const [confirmingSpecies, setConfirmingSpecies] = useState<Set<string>>(new Set());
 
   // NEW: Track which block species lists are expanded
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
@@ -180,6 +179,31 @@ export default function CalculationDetail() {
   const [blockAreaTotals, setBlockAreaTotals] = useState<any>(null);
   const [loadingBlockDetails, setLoadingBlockDetails] = useState(false);
   const [subAreaRefreshKey, setSubAreaRefreshKey] = useState(0);
+  const [fieldInventoryBreakdown, setFieldInventoryBreakdown] = useState<any[]>([]);
+  const [biodiversityData, setBiodiversityData] = useState<any>(null);
+
+  // Fetch field inventory species breakdown when calculation is loaded
+  useEffect(() => {
+    if (!calculation?.id) {
+      setFieldInventoryBreakdown([]);
+      return;
+    }
+    fieldInventoryApi.getByCalculation(calculation.id)
+      .then((fi: any) => fieldInventoryApi.getSpeciesBreakdown(fi.id))
+      .then((data: any) => setFieldInventoryBreakdown(data.species_breakdown || []))
+      .catch(() => setFieldInventoryBreakdown([]));
+  }, [calculation?.id]);
+
+  // Fetch biodiversity data when calculation is loaded
+  useEffect(() => {
+    if (!calculation?.id) {
+      setBiodiversityData(null);
+      return;
+    }
+    biodiversityApi.getCalculationSpecies(calculation.id)
+      .then((data: any) => setBiodiversityData(data))
+      .catch(() => setBiodiversityData(null));
+  }, [calculation?.id]);
 
   useEffect(() => {
     if (id) {
@@ -292,60 +316,7 @@ export default function CalculationDetail() {
     }
   };
 
-  // Helper function to get confirmed status (checks optimistic state first)
-  // NEW: Accepts optional blockName for block-specific confirmation status
-  const getConfirmedStatus = (species: any, blockName?: string): boolean => {
-    const scientificName = species.scientific_name;
-    const optimisticKey = blockName ? `${blockName}:${scientificName}` : scientificName;
 
-    if (optimisticConfirmations.has(optimisticKey)) {
-      return optimisticConfirmations.get(optimisticKey)!;
-    }
-    return species.confirmed ?? false;
-  };
-
-  // Handle species confirmation toggle (used by both whole forest and block species)
-  // NEW: Accepts blockName parameter for block-specific confirmation
-  const handleToggleSpeciesConfirmation = async (species: any, blockName?: string) => {
-    const scientificName = species.scientific_name;
-    const currentConfirmed = getConfirmedStatus(species);
-    const newConfirmed = !currentConfirmed;
-
-    // Create a unique key for optimistic updates (includes block context)
-    const optimisticKey = blockName ? `${blockName}:${scientificName}` : scientificName;
-
-    // Optimistic update - change UI immediately
-    setOptimisticConfirmations(prev => {
-      const newMap = new Map(prev);
-      newMap.set(optimisticKey, newConfirmed);
-      return newMap;
-    });
-
-    setConfirmingSpecies(prev => new Set(prev).add(optimisticKey));
-
-    try {
-      // NEW: Pass blockName to API for block-specific confirmation
-      await forestApi.toggleSpeciesConfirmation(id!, scientificName, newConfirmed, blockName);
-      // Success - optimistic update is correct, no page refresh needed
-    } catch (err: any) {
-      console.error('Error confirming species:', err);
-      const context = blockName ? ` in ${blockName}` : '';
-      alert(`Failed to update species${context}: ` + (err.response?.data?.detail || err.message));
-
-      // Revert optimistic update on error
-      setOptimisticConfirmations(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(optimisticKey);
-        return newMap;
-      });
-    } finally {
-      setConfirmingSpecies(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(optimisticKey);
-        return newSet;
-      });
-    }
-  };
 
   const handleReanalyze = async () => {
     if (!calculation) return;
@@ -754,6 +725,14 @@ export default function CalculationDetail() {
               />
             )}
 
+        {activeTab === 'detaildescription' && (
+          <DetailedDescriptionTab
+            calculation={calculation}
+            fieldInventoryBreakdown={fieldInventoryBreakdown}
+            biodiversityData={biodiversityData}
+          />
+        )}
+
         {activeTab === 'subareas' && (
           <div className="p-6">
             <div className="mb-4 flex justify-between items-center">
@@ -980,6 +959,19 @@ export default function CalculationDetail() {
                       </div>
                     )}
 
+                    {/* OP Document Variables */}
+                    {blocks.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="bg-gray-100 px-4 py-2 border-b border-gray-200">
+                          <h4 className="text-sm font-semibold text-gray-700">OP Document Variables</h4>
+                        </div>
+                        <div className="px-4 py-3 flex flex-wrap gap-2">
+                          <CopyTag label="{{sub_areas_detail}}" value="{{sub_areas_detail}}" variant="section" />
+                          <CopyTag label="{{block_area_detail_merged}}" value="{{block_area_detail_merged}}" variant="section" />
+                        </div>
+                      </div>
+                    )}
+
                     {/* Loading state for block area details */}
                     {loadingBlockDetails && blocks.length > 0 && (
                       <div className="mt-6 bg-white rounded-lg border border-gray-200 p-6 text-center">
@@ -1076,8 +1068,9 @@ export default function CalculationDetail() {
         )}
 
         {activeTab === 'treemodel' && (
-          <div className="p-6">
-            <TreeModelGenerator calculationId={calculation.id} onRefresh={loadCalculation} />
+          <div className="p-6 space-y-4">
+            <TreeModelGenerator calculationId={calculation.id} forestName={calculation.forest_name} onRefresh={loadCalculation} />
+            <TotalTreeExportAccordion calculationId={calculation.id} />
           </div>
         )}
 
@@ -1155,10 +1148,6 @@ export default function CalculationDetail() {
             handleSaveBlockField={handleSaveBlock}
             handleSaveBlockPercentages={handleSaveBlockPercentages}
             onRefresh={loadCalculation}
-            optimisticConfirmations={optimisticConfirmations}
-            confirmingSpecies={confirmingSpecies}
-            getConfirmedStatus={getConfirmedStatus}
-            handleToggleSpeciesConfirmation={handleToggleSpeciesConfirmation}
           />
         )}
 
@@ -2031,44 +2020,29 @@ export default function CalculationDetail() {
                             <td className="px-4 py-3 text-sm text-gray-900" colSpan={2}>
                               <div className="flex flex-wrap gap-2">
                                 {(() => {
-                                  // Use expandedBlocks state to track which blocks are expanded
                                   const blockKey = `block-${index}`;
                                   const isExpanded = expandedBlocks.has(blockKey);
                                   const speciesToShow = isExpanded ? block.potential_species : block.potential_species.slice(0, 8);
 
                                   return (
                                     <>
-                                      {speciesToShow.map((species: any, speciesIdx: number) => {
-                                        // NEW: Pass block.block_name for block-specific confirmation
-                                        const isConfirmed = getConfirmedStatus(species, block.block_name);
-                                        const optimisticKey = `${block.block_name}:${species.scientific_name}`;
-                                        const isConfirming = confirmingSpecies.has(optimisticKey);
-
-                                        return (
-                                          <div
-                                            key={speciesIdx}
-                                            onClick={() => !isConfirming && handleToggleSpeciesConfirmation(species, block.block_name)}
-                                            className={`inline-flex items-center rounded-md px-2 py-1 text-xs transition-all cursor-pointer ${
-                                              isConfirmed
-                                                ? 'bg-green-100 border-2 border-green-500 opacity-100'
-                                                : 'bg-gray-100 border-2 border-dashed border-gray-400 opacity-60'
-                                            } ${isConfirming ? 'opacity-50 cursor-wait' : 'hover:opacity-90'}`}
-                                            title={isConfirmed ? `Click to unconfirm in ${block.block_name}` : `Click to confirm in ${block.block_name}`}
-                                          >
-                                            <span className="font-semibold">{species.local_name}</span>
-                                            <span className={`ml-1 text-xs ${isConfirmed ? 'text-green-700' : 'text-gray-500'}`}>
-                                              ({species.scientific_name})
-                                            </span>
-                                            {species.economic_value === 'High' && (
-                                              <span className="ml-1 px-1 py-0.5 bg-green-200 text-green-800 rounded text-xs">$$</span>
-                                            )}
-                                            {species.economic_value === 'Medium' && (
-                                              <span className="ml-1 px-1 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">$</span>
-                                            )}
-                                            {isConfirming && <span className="ml-1">⏳</span>}
-                                          </div>
-                                        );
-                                      })}
+                                      {speciesToShow.map((species: any, speciesIdx: number) => (
+                                        <div
+                                          key={speciesIdx}
+                                          className="inline-flex items-center rounded-md px-2 py-1 text-xs bg-green-50 border border-green-300 transition-all"
+                                        >
+                                          <span className="font-semibold text-green-900">{species.local_name}</span>
+                                          <span className="ml-1 text-gray-500 italic">
+                                            ({species.scientific_name})
+                                          </span>
+                                          {species.economic_value === 'High' && (
+                                            <span className="ml-1 px-1 py-0.5 bg-green-200 text-green-800 rounded text-xs">$$</span>
+                                          )}
+                                          {species.economic_value === 'Medium' && (
+                                            <span className="ml-1 px-1 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs">$</span>
+                                          )}
+                                        </div>
+                                      ))}
                                       {block.potential_species.length > 8 && (
                                         <button
                                           onClick={(e) => {

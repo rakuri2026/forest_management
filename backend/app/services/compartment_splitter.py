@@ -674,10 +674,8 @@ class CompartmentSplitter:
             parent_geom = to_shape(parent_block.geometry)
             
             # Determine division level
-            if parent_block.division_level is None:
-                parent_block.division_level = 1 if parent_block.is_compartment else 0
-            
-            new_level = parent_block.division_level + division_level_increment
+            parent_level = parent_block.division_level or 1
+            new_level = parent_level + division_level_increment
             
             # Split based on method
             if method == 'parallel':

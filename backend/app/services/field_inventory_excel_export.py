@@ -157,8 +157,8 @@ DESCRIPTIONS = [
     (37, "Firewood (chatta)", "Formula", "= Fuelwood_m3 / 9.486. 1 chatta = 500 cft stacked x 67% packing = 9.486 m3."),
     (38, "Basal Area (m2)", "Formula", "= PI() * (DBH/200)^2."),
     (39, "DBH Class", "Formula", "Seedling to 60+ V.Lg.Tree."),
-    (40, "AGB (t)", "Formula", "Above-Ground Biomass. = TreeVol * WoodDensity * 1.3 (BEF). IPCC Tier 2 methodology."),
-    (41, "BGB (t)", "Formula", "Below-Ground Biomass (roots). = AGB * 0.26 (root-to-shoot ratio for tropical moist forest, IPCC)."),
+    (40, "AGB (t)", "Formula", "Above-Ground Biomass. = GrossTimber * WoodDensity * 1.3 (BEF=1.3, IPCC 2006 GL Table 4.4). VOB = gross merchantable stem."),
+    (41, "BGB (t)", "Formula", "Below-Ground Biomass (roots). = AGB * 0.24 (R/S=0.24, IPCC 2006 GL Table 4.4)."),
     (42, "Total Biomass (t)", "Formula", "= AGB + BGB. Total tree biomass (above + below ground)."),
     (43, "Carbon Stock (t C)", "Formula", "= TotalBiomass * 0.47 (IPCC carbon fraction for tropical forest)."),
     (44, "CO\u2082e (t)", "Formula", "= CarbonStock * 3.67 (44/12, CO\u2082/C molecular ratio). CO\u2082 equivalent sequestered."),
@@ -389,8 +389,8 @@ def generate_field_inventory_excel(
         36: "【DFO REPORT — FIREWOOD】Fuelwood Volume = TreeVol - NetTimber. All residual wood (branchwood + non-merchantable stem). Use this column for DFO firewood reporting.",
         37: "Firewood in Nepali chatta units. 1 chatta = 9.486 m3 (500 cft x 67% packing).",
         38: "Basal Area = pi x (DBH/200)^2.",
-        40: "AGB = TreeVol x WoodDensity x 1.3 (BEF). IPCC Tier 2.",
-        41: "BGB = AGB x 0.26 (root-to-shoot).",
+        40: "AGB = GrossTimber x WoodDensity x 1.3 (BEF=1.3, IPCC 2006 GL Table 4.4). VOB = gross merchantable stem volume.",
+        41: "BGB = AGB x 0.24 (R/S=0.24, IPCC 2006 GL Table 4.4).",
         42: "Total Biomass = AGB + BGB.",
         43: "【DFO REPORT — CARBON】Carbon Stock = TotalBiomass x 0.47. Use for carbon reporting.",
         44: "CO2e = CarbonStock x 3.67. Use for carbon offset reporting.",
@@ -568,14 +568,14 @@ def generate_field_inventory_excel(
             f'IF({H_}{dr}<50,"40-50 Med.Tree",IF({H_}{dr}<60,"50-60 Lg.Tree",'
             f'"60+ V.Lg.Tree"))))))))'
         )
-        # ── 40-44: Carbon (FORMULAS) ──
-        # AGB = TreeVol * WoodDensity * 1.3 (BEF — Biomass Expansion Factor)
+        # ── 40-44: Carbon (FORMULAS, IPCC Tier 2) ──
+        # AGB = GrossTimber * WoodDensity * 1.3 (BEF, IPCC 2006 Table 4.4)
         ws.cell(row=dr, column=40).value = (
-            f'=IF({is_vol},{TV}{dr}*{WD}{dr}*1.3,0)'
+            f'=IF({is_vol},{GT}{dr}*{WD}{dr}*1.3,0)'
         )
-        # BGB = AGB * 0.26 (root-to-shoot, tropical moist forest, IPCC)
+        # BGB = AGB * 0.24 (R/S ratio, IPCC 2006 Table 4.4)
         ws.cell(row=dr, column=41).value = (
-            f'=IF({is_vol},{AGB}{dr}*0.26,0)'
+            f'=IF({is_vol},{AGB}{dr}*0.24,0)'
         )
         # Total Biomass = AGB + BGB
         ws.cell(row=dr, column=42).value = (
@@ -733,10 +733,68 @@ def generate_field_inventory_excel(
         for c in range(1, 5):
             ws_desc.cell(row=ri, column=c).fill = fill
 
-    ws_desc.column_dimensions['A'].width = 5
-    ws_desc.column_dimensions['B'].width = 28
-    ws_desc.column_dimensions['C'].width = 18
-    ws_desc.column_dimensions['D'].width = 95
+    # ── IPCC Methodology Reference ──
+    ref_row = ri + 2
+    ws_desc.cell(row=ref_row, column=1, value="IPCC Methodology Reference").font = Font(name='Calibri', bold=True, size=12, color='2F5496')
+    ws_desc.merge_cells(f"A{ref_row}:D{ref_row}")
+    refs = [
+        ("Parameter", "Value", "Source", "Notes"),
+        ("VOB (Volume of growing stock)", "Gross merchantable stem volume (gross_volume = stem_vol + branch_vol)", "IPCC 2006 GL Vol 4 Ch 4 §2.2", "Excludes 10-cm top; NOT net_volume (quality-reduced)"),
+        ("BEF (Biomass Expansion Factor)", "1.3", "IPCC 2006 GL Vol 4 Table 4.4", "Tropical moist deciduous forest; converts VOB to AGB"),
+        ("R/S (Root-to-Shoot Ratio)", "0.24", "IPCC 2006 GL Vol 4 Table 4.4", "Tropical moist forest; AGB > 50 t/ha"),
+        ("CF (Carbon Fraction)", "0.47", "IPCC 2006 GL Vol 4 Table 4.3", "47% of biomass is carbon; tropical forest default"),
+        ("CO\u2082/C ratio", "3.67", "Molecular weight (44/12)", "CO\u2082 equivalent = C stock \u00d7 3.67"),
+        ("Wood Density", "Species-specific (g/cm\u00b3)", "Global Wood Density DB / local data", "Per-tree gross-volume-weighted sum across all species"),
+        ("AGB formula", "AGB = VOB \u00d7 WD \u00d7 BEF", "IPCC 2006 GL Vol 4 Eq 2.2.1", "Above-ground biomass in t/ha"),
+        ("BGB formula", "BGB = AGB \u00d7 R/S", "IPCC 2006 GL Vol 4 Eq 2.2.2", "Below-ground (root) biomass in t/ha"),
+    ]
+    ref_fill_header = PatternFill(start_color='2F5496', end_color='2F5496', fill_type='solid')
+    for ci, h in enumerate(refs[0], 1):
+        c = ws_desc.cell(row=ref_row + 1, column=ci, value=h)
+        c.font = Font(name='Calibri', bold=True, size=10, color='FFFFFF')
+        c.fill = ref_fill_header
+    for i, (param, val, src, notes) in enumerate(refs[1:], ref_row + 2):
+        ws_desc.cell(row=i, column=1, value=param).font = d_bold
+        ws_desc.cell(row=i, column=2, value=val).font = d_font
+        ws_desc.cell(row=i, column=3, value=src).font = d_font
+        ws_desc.cell(row=i, column=4, value=notes).font = d_font
+        for c in range(1, 5):
+            ws_desc.cell(row=i, column=c).alignment = Alignment(wrap_text=True)
+
+    # ── Forest Condition Assessment Algorithm ──
+    cond_row = i + 2
+    ws_desc.cell(row=cond_row, column=1, value="Regeneration & Forest Condition Algorithm").font = Font(name='Calibri', bold=True, size=12, color='2F5496')
+    ws_desc.merge_cells(f"A{cond_row}:D{cond_row}")
+
+    cond_notes = [
+        ("Assessment Criteria", "Source: Nepal Forest Regulation 2075/2079"),
+        ("", ""),
+        ("A) Regeneration Condition (पुनरोत्पादनको अवस्था)", "AND logic: both thresholds must be met"),
+        ("  राम्रो (Good)", "Regen (0-4 cm) >= 5000/ha AND Sapling (4-10 cm) >= 2000/ha"),
+        ("  मध्यम (Moderate)", "Regen >= 2000/ha AND Sapling >= 800/ha"),
+        ("  कमजोर (Weak)", "All other cases"),
+        ("", ""),
+        ("B) Forest Condition (वनको अवस्था)", "3x3 matrix: Growing Stock + Regeneration Condition"),
+        ("  GS > 200 m3/ha + Good regen", "=> राम्रो (Good)"),
+        ("  GS > 200 m3/ha + Moderate regen", "=> राम्रो (Good)"),
+        ("  GS > 200 m3/ha + Weak regen", "=> मध्यम (Moderate)"),
+        ("  GS 50-200 m3/ha + Good regen", "=> राम्रो (Good)"),
+        ("  GS 50-200 m3/ha + Moderate regen", "=> मध्यम (Moderate)"),
+        ("  GS 50-200 m3/ha + Weak regen", "=> कमजोर (Weak)"),
+        ("  GS < 50 m3/ha + Good regen", "=> मध्यम (Moderate)"),
+        ("  GS < 50 m3/ha + Moderate regen", "=> कमजोर (Weak)"),
+        ("  GS < 50 m3/ha + Weak regen", "=> कमजोर (Weak)"),
+    ]
+    for ri, (label, desc) in enumerate(cond_notes, cond_row + 1):
+        ws_desc.cell(row=ri, column=1, value=label).font = d_bold if label and not label.startswith(' ') else d_font
+        ws_desc.cell(row=ri, column=2, value=desc).font = d_font
+        for c in range(1, 5):
+            ws_desc.cell(row=ri, column=c).alignment = Alignment(wrap_text=True)
+
+    ws_desc.column_dimensions['A'].width = 50
+    ws_desc.column_dimensions['B'].width = 65
+    ws_desc.column_dimensions['C'].width = 40
+    ws_desc.column_dimensions['D'].width = 60
 
     output = io.BytesIO()
     wb.save(output)

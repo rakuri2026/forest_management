@@ -108,6 +108,7 @@ export function VerticalSidebar({ groups, activeTab, onTabChange, className = ''
 export function createTabGroups(_unifiedMappingEnabled: boolean = false): TabGroup[] {
   const forestDataTabs = [
     { id: 'analysis', label: 'Analysis' },
+    { id: 'detaildescription', label: 'Detail Description' },
     { id: 'subareas', label: 'Sub-Areas' },
     { id: 'compartments', label: 'Compartments' },
     { id: 'yearlyactivities', label: 'Yearly Activities' },
@@ -124,6 +125,7 @@ export function createTabGroups(_unifiedMappingEnabled: boolean = false): TabGro
       ),
       tabs: [
         { id: 'analysis', label: 'Analysis' },
+        { id: 'detaildescription', label: 'Detail Description' },
         { id: 'subareas', label: 'Sub-Areas' },
         { id: 'compartments', label: 'Compartments' },
         { id: 'yearlyactivities', label: 'Yearly Activities' },

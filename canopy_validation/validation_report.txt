@@ -1,0 +1,27 @@
+Canopy Height Validation Report
+==================================================
+Generated: 20260611_120957
+Raster: D:\forest_management\canopy_height5m.tif
+Pixel size: ~5m
+
+CLASSIFICATION:
+──────────────────────────────────────────────────
+  non_forest (0m)                4,929,990  (99.40%)
+  bush_regenerated (1-5m)          18,976  ( 0.38%)
+  pole_trees (6-15m)                9,805  ( 0.20%)
+  high_forest (>15m)                  758  ( 0.02%)
+
+  TOTAL                          4,959,529  (100.0%)
+
+HEIGHT STATS (non-zero):
+  Mean:   4.95 m
+  Min:    1.00 m
+  Max:    30.00 m
+  Median: 4.00 m
+  Std:    4.16 m
+
+QGIS INSTRUCTIONS:
+1. Open clipped_canopy.tif in QGIS
+2. Style: Singleband pseudocolor (RdYlGn or custom)
+3. Open classified_canopy.tif → Paletted/Unique values render
+4. Overlay your boundary polygon to verify alignment

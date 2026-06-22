@@ -109,14 +109,24 @@ def merge_auto_mapping_with_preferences(
     # Get user preferences
     user_prefs = get_user_column_preferences(db, user_id)
 
-    # Merge: user preferences override auto-mapping for unmapped columns
+    # Merge: user preferences override auto-mapping
+    # For each user preference, remove any existing mapping to the same standard column
+    # to prevent duplicates (e.g., both "longitude" and "LONGITUDE" mapping to "LONGITUDE")
     for csv_col in csv_columns:
         if csv_col in user_prefs:
-            # User has a saved preference for this exact column name
-            auto_result["mapped"][csv_col] = user_prefs[csv_col]
-            auto_result["confidence"][csv_col] = 100  # User-confirmed = 100%
+            std_col = user_prefs[csv_col]
+            other_cols = [
+                c for c, s in list(auto_result["mapped"].items())
+                if s == std_col and c != csv_col
+            ]
+            for c in other_cols:
+                del auto_result["mapped"][c]
+                del auto_result["confidence"][c]
+                if c not in auto_result["unmapped"]:
+                    auto_result["unmapped"].append(c)
 
-            # Remove from unmapped if it was there
+            auto_result["mapped"][csv_col] = std_col
+            auto_result["confidence"][csv_col] = 100
             if csv_col in auto_result["unmapped"]:
                 auto_result["unmapped"].remove(csv_col)
 
@@ -125,7 +135,7 @@ def merge_auto_mapping_with_preferences(
         auto_result["mapped"]
     )
 
-    # Recalculate duplicates after merge
+    # Duplicates should be empty after our clean-up above, but recalculate to be safe
     auto_result["duplicates"] = mapper._check_duplicates(
         auto_result["mapped"]
     )

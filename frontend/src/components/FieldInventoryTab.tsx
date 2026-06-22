@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { fieldInventoryApi } from '../services/api';
 import { downloadFromApi, downloadBlob } from '../utils/download';
+import { toNepaliDigit } from '../constants/nepaliLabels';
+import HelpTooltip from './HelpTooltip';
+import CopyTag from './DetailDescription/CopyTag';
 
 interface FieldInventoryTabProps {
   calculationId: string;
@@ -518,11 +521,11 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
               <div>
                 <p className="text-sm text-gray-500">Total Sample Plots</p>
-                <p className="mt-1 text-3xl font-bold text-gray-900">{summary.total_sample_plots || 0}</p>
+                <p className="mt-1 text-3xl font-bold text-gray-900">{toNepaliDigit(summary.total_sample_plots || 0, 0)}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Total Blocks</p>
-                <p className="mt-1 text-3xl font-bold text-gray-900">{summary.total_blocks || 0}</p>
+                <p className="mt-1 text-3xl font-bold text-gray-900">{toNepaliDigit(summary.total_blocks || 0, 0)}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Status</p>
@@ -531,7 +534,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
               <div>
                 <p className="text-sm text-gray-500">Processing Time</p>
                 <p className="mt-1 text-lg font-semibold text-gray-900">
-                  {summary.processing_time_seconds ? `${Number(summary.processing_time_seconds).toFixed(2)}s` : 'N/A'}
+                  {summary.processing_time_seconds ? `${toNepaliDigit(Number(summary.processing_time_seconds), 2)}s` : 'N/A'}
                 </p>
               </div>
             </div>
@@ -539,59 +542,93 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
             {/* Forest-Wide Summary */}
             {summary && summary.total_blocks > 0 && (
               <div className="mt-6 mb-6 bg-gradient-to-r from-green-50 to-teal-50 rounded-lg border-2 border-green-400 p-6 shadow-lg">
-                <h3 className="text-xl font-bold text-green-800 mb-4 flex items-center">
+                <h3 className="text-xl font-bold text-green-800 mb-4 flex items-center flex-wrap gap-2">
                   <svg className="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z"/>
                     <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z"/>
                     <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z"/>
                   </svg>
-                  Community Forest Summary (Entire Forest)
+                  {forestName} सामुदायिक वनको समग्र वन श्रोत सर्भेक्षण साराँश
+                  <CopyTag
+                    label="{{section:field_inventory_narration}}"
+                    value="{{section:field_inventory_narration}}"
+                    variant="section"
+                  />
                 </h3>
+
+                {/* Nepali Narration Paragraph */}
+                <div className="mb-6 p-4 bg-white/70 rounded-lg border border-green-200">
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    यस वनको कुल {toNepaliDigit(summary.total_sample_plots || 0, 0)} वटा नमुना प्लटहरू 
+                    ({toNepaliDigit(summary.total_blocks || 0, 0)} वटा ब्लक) मा गरिएको क्षेत्र सर्वेक्षण अनुसार 
+                    प्रति हेक्टर {toNepaliDigit(summary.total_regeneration_per_ha || 0, 0)} वटा विरुवा, 
+                    {toNepaliDigit(summary.total_sapling_per_ha || 0, 0)} वटा लाथ्रा, 
+                    {toNepaliDigit(summary.total_pole_per_ha || 0, 0)} वटा खाँवा र 
+                    {toNepaliDigit(summary.total_tree_per_ha || 0, 0)} वटा रूख रहेको पाइयो। 
+                    कुल वृद्धि मौज्दात {toNepaliDigit(Number(summary.total_growing_stock_m3_per_ha || 0), 2)} 
+                    घनमिटर प्रति हेक्टर र बेसल एरिया 
+                    {toNepaliDigit(Number(summary.average_basal_area_m2_per_ha || 0), 2)} 
+                    वर्गमिटर प्रति हेक्टर रहेको छ। प्रति हेक्टर जमिन माथिको बायोमास 
+                    {toNepaliDigit(Number(summary.average_agb_t_per_ha || 0), 2)} टन र 
+                    जमिन मुनिको बायोमास {toNepaliDigit(Number(summary.average_bgb_t_per_ha || 0), 2)} 
+                    टन (जम्मा {toNepaliDigit(Number(summary.average_total_biomass_t_per_ha || 0), 2)} टन) 
+                    रहेको छ। कुल कार्बन भण्डार 
+                    {toNepaliDigit(Number(summary.average_carbon_stock_tc_per_ha || 0), 2)} 
+                    टन कार्बन प्रति हेक्टर र कार्बन डाइअक्साइड समतुल्य 
+                    {toNepaliDigit(Number(summary.average_co2_equivalent_tco2_per_ha || 0), 2)} 
+                    टन प्रति हेक्टर रहेको छ। वनको अवस्था 
+                    "<span className="font-semibold">{summary.overall_forest_condition || '—'}</span>" 
+                    रहेको छ भने औसत वार्षिक वृद्धि 
+                    {toNepaliDigit(Number(summary.average_mai_percent || 0), 1)}% र काठ घनत्व 
+                    {toNepaliDigit(Number(summary.average_wood_density || 0), 3)} 
+                    टन प्रति घनमिटर रहेको छ।
+                  </p>
+                </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                   {/* Basic Stats */}
                   <div className="bg-white rounded-lg p-4 shadow-md border border-green-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Total Blocks</div>
-                    <div className="text-3xl font-bold text-green-700">{summary.total_blocks || 0}</div>
+                    <div className="text-3xl font-bold text-green-700">{toNepaliDigit(summary.total_blocks || 0, 0)}</div>
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-green-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Sample Plots</div>
-                    <div className="text-3xl font-bold text-green-700">{summary.total_sample_plots || 0}</div>
+                    <div className="text-3xl font-bold text-green-700">{toNepaliDigit(summary.total_sample_plots || 0, 0)}</div>
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-blue-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Seedling/ha</div>
                     <div className="text-2xl font-bold text-blue-700">
-                      {summary.total_regeneration_per_ha ? summary.total_regeneration_per_ha.toLocaleString() : 0}
+                      {summary.total_regeneration_per_ha ? toNepaliDigit(summary.total_regeneration_per_ha, 0) : 0}
                     </div>
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-blue-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Sapling/ha</div>
                     <div className="text-2xl font-bold text-blue-700">
-                      {summary.total_sapling_per_ha ? summary.total_sapling_per_ha.toLocaleString() : 0}
+                      {summary.total_sapling_per_ha ? toNepaliDigit(summary.total_sapling_per_ha, 0) : 0}
                     </div>
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-blue-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Pole/ha</div>
                     <div className="text-2xl font-bold text-blue-700">
-                      {summary.total_pole_per_ha ? summary.total_pole_per_ha.toLocaleString() : 0}
+                      {summary.total_pole_per_ha ? toNepaliDigit(summary.total_pole_per_ha, 0) : 0}
                     </div>
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-blue-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Tree/ha</div>
                     <div className="text-2xl font-bold text-blue-700">
-                      {summary.total_tree_per_ha ? summary.total_tree_per_ha.toLocaleString() : 0}
+                      {summary.total_tree_per_ha ? toNepaliDigit(summary.total_tree_per_ha, 0) : 0}
                     </div>
                   </div>
 
                   <div className="bg-white rounded-lg p-4 shadow-md border border-amber-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Growing Stock</div>
                     <div className="text-xl font-bold text-amber-700">
-                      {summary.total_growing_stock_m3_per_ha ? Number(summary.total_growing_stock_m3_per_ha).toFixed(2) : '0.00'}
+                      {summary.total_growing_stock_m3_per_ha ? toNepaliDigit(Number(summary.total_growing_stock_m3_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> m³/ha</span>
                     </div>
                   </div>
@@ -599,7 +636,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-emerald-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Basal Area</div>
                     <div className="text-xl font-bold text-emerald-700">
-                      {summary.average_basal_area_m2_per_ha ? Number(summary.average_basal_area_m2_per_ha).toFixed(2) : '0.00'}
+                      {summary.average_basal_area_m2_per_ha ? toNepaliDigit(Number(summary.average_basal_area_m2_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> m²/ha</span>
                     </div>
                   </div>
@@ -607,7 +644,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-purple-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">MAI</div>
                     <div className="text-2xl font-bold text-purple-700">
-                      {summary.average_mai_percent ? Number(summary.average_mai_percent).toFixed(1) : '0.0'}%
+                      {summary.average_mai_percent ? toNepaliDigit(Number(summary.average_mai_percent), 1) : '0.0'}%
                     </div>
                   </div>
 
@@ -625,7 +662,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-teal-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Wood Density</div>
                     <div className="text-xl font-bold text-teal-700">
-                      {summary.average_wood_density ? Number(summary.average_wood_density).toFixed(3) : '0.000'}
+                      {summary.average_wood_density ? toNepaliDigit(Number(summary.average_wood_density), 3) : '0.000'}
                       <span className="text-sm font-normal"> t/m³</span>
                     </div>
                   </div>
@@ -633,7 +670,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-teal-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">AGB</div>
                     <div className="text-xl font-bold text-teal-700">
-                      {summary.average_agb_t_per_ha ? Number(summary.average_agb_t_per_ha).toFixed(2) : '0.00'}
+                      {summary.average_agb_t_per_ha ? toNepaliDigit(Number(summary.average_agb_t_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> t/ha</span>
                     </div>
                   </div>
@@ -641,7 +678,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-teal-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">BGB</div>
                     <div className="text-xl font-bold text-teal-700">
-                      {summary.average_bgb_t_per_ha ? Number(summary.average_bgb_t_per_ha).toFixed(2) : '0.00'}
+                      {summary.average_bgb_t_per_ha ? toNepaliDigit(Number(summary.average_bgb_t_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> t/ha</span>
                     </div>
                   </div>
@@ -649,7 +686,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-teal-200">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Total Biomass</div>
                     <div className="text-xl font-bold text-teal-700">
-                      {summary.average_total_biomass_t_per_ha ? Number(summary.average_total_biomass_t_per_ha).toFixed(2) : '0.00'}
+                      {summary.average_total_biomass_t_per_ha ? toNepaliDigit(Number(summary.average_total_biomass_t_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> t/ha</span>
                     </div>
                   </div>
@@ -657,7 +694,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-teal-200 col-span-2 md:col-span-1">
                     <div className="text-xs text-gray-500 mb-1 font-medium">Carbon Stock</div>
                     <div className="text-xl font-bold text-teal-700">
-                      {summary.average_carbon_stock_tc_per_ha ? Number(summary.average_carbon_stock_tc_per_ha).toFixed(2) : '0.00'}
+                      {summary.average_carbon_stock_tc_per_ha ? toNepaliDigit(Number(summary.average_carbon_stock_tc_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> tC/ha</span>
                     </div>
                   </div>
@@ -665,7 +702,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   <div className="bg-white rounded-lg p-4 shadow-md border border-teal-300 col-span-2 md:col-span-1 bg-teal-50">
                     <div className="text-xs text-gray-600 mb-1 font-medium">CO₂ Equivalent</div>
                     <div className="text-2xl font-bold text-teal-800">
-                      {summary.average_co2_equivalent_tco2_per_ha ? Number(summary.average_co2_equivalent_tco2_per_ha).toFixed(2) : '0.00'}
+                      {summary.average_co2_equivalent_tco2_per_ha ? toNepaliDigit(Number(summary.average_co2_equivalent_tco2_per_ha), 2) : '0.00'}
                       <span className="text-sm font-normal"> tCO₂/ha</span>
                     </div>
                   </div>
@@ -676,31 +713,31 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                       <div className="bg-white rounded-lg p-4 shadow-md border border-purple-200 col-span-2 md:col-span-1">
                         <div className="text-xs text-gray-500 mb-1 font-medium">MAI Total Volume</div>
                         <div className="text-xl font-bold text-purple-700">
-                          {maiAahData.mai_overall?.total_mai_m3_per_ha ? Number(maiAahData.mai_overall.total_mai_m3_per_ha).toFixed(2) : '0.00'}
+                          {maiAahData.mai_overall?.total_mai_m3_per_ha ? toNepaliDigit(Number(maiAahData.mai_overall.total_mai_m3_per_ha), 2) : '0.00'}
                           <span className="text-sm font-normal"> m³/ha/yr</span>
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
-                          Pole: {maiAahData.mai_overall?.pole_per_ha?.toLocaleString() || 0} |
-                          Tree: {maiAahData.mai_overall?.tree_per_ha?.toLocaleString() || 0}
+                          Pole: {toNepaliDigit(maiAahData.mai_overall?.pole_per_ha || 0, 0)} |
+                          Tree: {toNepaliDigit(maiAahData.mai_overall?.tree_per_ha || 0, 0)}
                         </div>
                       </div>
 
                       <div className="bg-white rounded-lg p-4 shadow-md border border-amber-300 col-span-2 md:col-span-1 bg-amber-50">
                         <div className="text-xs text-gray-600 mb-1 font-medium">AAH Total Volume</div>
                         <div className="text-2xl font-bold text-amber-800">
-                          {maiAahData.aah_overall?.total_aah_m3_per_ha ? Number(maiAahData.aah_overall.total_aah_m3_per_ha).toFixed(2) : '0.00'}
+                          {maiAahData.aah_overall?.total_aah_m3_per_ha ? toNepaliDigit(Number(maiAahData.aah_overall.total_aah_m3_per_ha), 2) : '0.00'}
                           <span className="text-sm font-normal"> m³/ha/yr</span>
                         </div>
                         <div className="text-xs text-gray-600 mt-1">
-                          Pole: {maiAahData.aah_overall?.pole_per_ha?.toLocaleString() || 0} |
-                          Tree: {maiAahData.aah_overall?.tree_per_ha?.toLocaleString() || 0}
+                          Pole: {toNepaliDigit(maiAahData.aah_overall?.pole_per_ha || 0, 0)} |
+                          Tree: {toNepaliDigit(maiAahData.aah_overall?.tree_per_ha || 0, 0)}
                         </div>
                       </div>
 
                       <div className="bg-white rounded-lg p-4 shadow-md border border-red-200">
                         <div className="text-xs text-gray-500 mb-1 font-medium">AAH Multiplier</div>
                         <div className="text-2xl font-bold text-red-700">
-                          {maiAahData.aah_overall?.aah_multiplier_percent ? Number(maiAahData.aah_overall.aah_multiplier_percent).toFixed(0) : '0'}%
+                          {maiAahData.aah_overall?.aah_multiplier_percent ? toNepaliDigit(Number(maiAahData.aah_overall.aah_multiplier_percent), 0) : '0'}%
                         </div>
                         <div className={`text-xs mt-1 font-medium ${
                           maiAahData.aah_overall?.forest_condition === 'Good' ? 'text-green-600' :
@@ -719,7 +756,25 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
             {/* Block-wise Results */}
             {summary?.blocks && Array.isArray(summary.blocks) && summary.blocks.length > 0 && (
               <div className="mt-6">
-                <h4 className="text-md font-semibold text-gray-900 mb-3">Block-wise Results</h4>
+                <h4 className="text-md font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                    Block-wise Results
+                    <span className="flex flex-wrap gap-1">
+                      <CopyTag label="{{fi_block_tree_count_per_ha}}" value="{{fi_block_tree_count_per_ha}}" variant="section" />
+                      <CopyTag label="{{fi_block_pole_tree_volume}}" value="{{fi_block_pole_tree_volume}}" variant="section" />
+                      <CopyTag label="{{fi_block_growing_stock}}" value="{{fi_block_growing_stock}}" variant="section" />
+                      <CopyTag label="{{fi_block_basal_area}}" value="{{fi_block_basal_area}}" variant="section" />
+                      <CopyTag label="{{fi_block_satellite_volume}}" value="{{fi_block_satellite_volume}}" variant="section" />
+                      <CopyTag label="{{fi_block_condition_growth}}" value="{{fi_block_condition_growth}}" variant="section" />
+                      <CopyTag label="{{fi_block_biomass_carbon}}" value="{{fi_block_biomass_carbon}}" variant="section" />
+                    </span>
+                  </h4>
+                <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                  <strong>पुनरोत्पादनको अवस्था:</strong> राम्रो=पुनरोत्पादन≥5000/ha र लाथ्रा≥2000/ha, मध्यम=पुनरोत्पादन≥2000/ha र लाथ्रा≥800/ha, कमजोर=अन्य (Forest Regulation 2075/2079).
+                  <br />
+                  <strong>वनको अवस्था:</strong> वृद्धि मौज्दात (m³/ha) × पुनरोत्पादनको अवस्थाको 3×3 — GS&gt;200+राम्रो/मध्यम→राम्रो, +कमजोर→मध्यम; GS 50-200+राम्रो→राम्रो, +मध्यम→मध्यम, +कमजोर→कमजोर; GS&lt;50+राम्रो→मध्यम, +मध्यम/कमजोर→कमजोर.
+                  <br />
+                  <strong>औसत वार्षिक वृद्धि% (MAI):</strong> ब्लकको प्रमुख प्रजातिको वृद्धि दर (Fast/Moderate/Slow) र वनको अवस्थाको 3×3 मेट्रिक्स — Fast+राम्रो=5%, +मध्यम=4%, +कमजोर=3%; Moderate+राम्रो=4%, +मध्यम=3%, +कमजोर=2%; Slow+राम्रो=3%, +मध्यम=2%, +कमजोर=1%.
+                </p>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
                     <thead className="bg-gray-50">
@@ -736,7 +791,11 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                         <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">पुनरोत्पादनको अवस्था</th>
                         <th rowSpan={2} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r border-gray-300">वनको अवस्था</th>
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300">औसत वार्षिक वृद्धि%</th>
-                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">(IPCC/REDD+) कार्बन र बायोमास</th>
+                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">
+                          <HelpTooltip helpText="IPCC Tier 2 Methodology: AGB = VOB × WD × BEF. VOB (gross merchantable stem volume, NOT net_volume), BEF=1.3, R/S=0.24, CF=0.47 (IPCC 2006 GL Vol 4 Tables 4.3, 4.4).">
+                            <span>(IPCC/REDD+) कार्बन र बायोमास</span>
+                          </HelpTooltip>
+                        </th>
                       </tr>
                       <tr>
                         <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">विरुवा</th>
@@ -769,62 +828,62 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{displayBlockName(block.block_name)}</td>
-                            <td className="px-3 py-3 text-sm text-gray-700 border-r border-gray-200">{block.total_sample_plots}</td>
+                            <td className="px-3 py-3 text-sm text-gray-700 border-r border-gray-200">{toNepaliDigit(block.total_sample_plots, 0)}</td>
 
                             {/* Trees per hectare */}
                             <td className="px-2 py-3 text-sm text-right text-gray-700">
-                              {Number(block.regeneration_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(block.regeneration_per_ha || 0), 0)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-gray-700">
-                              {Number(block.sapling_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(block.sapling_per_ha || 0), 0)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-gray-700">
-                              {Number(block.pole_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(block.pole_per_ha || 0), 0)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-gray-700 border-r border-gray-200">
-                              {Number(block.tree_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(block.tree_per_ha || 0), 0)}
                             </td>
 
                             {/* Pole volumes */}
                             <td className="px-2 py-3 text-sm text-right text-green-700 bg-green-50">
-                              {poleTimber.toFixed(2)}
+                              {toNepaliDigit(poleTimber, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-green-600 bg-green-50">
-                              {poleFirewood.toFixed(2)}
+                              {toNepaliDigit(poleFirewood, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-green-900 font-semibold bg-green-50 border-r border-gray-200">
-                              {poleTotal.toFixed(2)}
+                              {toNepaliDigit(poleTotal, 2)}
                             </td>
 
                             {/* Tree volumes */}
                             <td className="px-2 py-3 text-sm text-right text-amber-700 bg-amber-50">
-                              {treeTimber.toFixed(2)}
+                              {toNepaliDigit(treeTimber, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-amber-600 bg-amber-50">
-                              {treeFirewood.toFixed(2)}
+                              {toNepaliDigit(treeFirewood, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-amber-900 font-semibold bg-amber-50 border-r border-gray-200">
-                              {treeTotal.toFixed(2)}
+                              {toNepaliDigit(treeTotal, 2)}
                             </td>
 
                             {/* Growing stock (timber only) */}
                             <td className="px-3 py-3 text-sm text-right text-purple-700 font-bold border-r border-gray-200 bg-purple-50">
-                              {Number(block.total_growing_stock_m3_per_ha || 0).toFixed(2)}
+                              {toNepaliDigit(Number(block.total_growing_stock_m3_per_ha || 0), 2)}
                             </td>
 
                             {/* Total volume (timber + firewood) */}
                             <td className="px-3 py-3 text-sm text-right text-indigo-700 font-bold border-r border-gray-200 bg-indigo-50">
-                              {(poleTotal + treeTotal).toFixed(2)}
+                              {toNepaliDigit((poleTotal + treeTotal), 2)}
                             </td>
 
                             {/* Basal area */}
                             <td className="px-3 py-3 text-sm text-right text-emerald-700 font-bold border-r border-gray-200 bg-emerald-50">
-                              {block.basal_area_m2_per_ha ? Number(block.basal_area_m2_per_ha).toFixed(2) : '-'}
+                              {block.basal_area_m2_per_ha ? toNepaliDigit(Number(block.basal_area_m2_per_ha), 2) : '-'}
                             </td>
 
                             {/* Satellite-derived volume */}
                             <td className="px-3 py-3 text-sm text-right text-blue-900 font-bold italic border-r-2 border-blue-400 bg-blue-100 shadow-sm">
-                              {block.satellite_volume_m3_per_ha ? Number(block.satellite_volume_m3_per_ha).toFixed(2) : '-'}
+                              {block.satellite_volume_m3_per_ha ? toNepaliDigit(Number(block.satellite_volume_m3_per_ha), 2) : '-'}
                             </td>
 
                             {/* Conditions */}
@@ -849,16 +908,16 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
 
                             {/* MAI */}
                             <td className="px-3 py-3 text-sm text-right font-semibold text-gray-900 border-r border-gray-200">
-                              {Number(block.mai_percent || 0).toFixed(1)}%
+                              {toNepaliDigit(Number(block.mai_percent || 0), 1)}%
                             </td>
 
                             {/* Carbon & Biomass (IPCC/REDD+) */}
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.weighted_wood_density ? Number(block.weighted_wood_density).toFixed(3) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.agb_t_per_ha ? Number(block.agb_t_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.bgb_t_per_ha ? Number(block.bgb_t_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.total_biomass_t_per_ha ? Number(block.total_biomass_t_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.carbon_stock_tc_per_ha ? Number(block.carbon_stock_tc_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50 font-semibold text-teal-900">{block.co2_equivalent_tco2_per_ha ? Number(block.co2_equivalent_tco2_per_ha).toFixed(2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.weighted_wood_density ? toNepaliDigit(Number(block.weighted_wood_density), 3) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.agb_t_per_ha ? toNepaliDigit(Number(block.agb_t_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.bgb_t_per_ha ? toNepaliDigit(Number(block.bgb_t_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.total_biomass_t_per_ha ? toNepaliDigit(Number(block.total_biomass_t_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{block.carbon_stock_tc_per_ha ? toNepaliDigit(Number(block.carbon_stock_tc_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50 font-semibold text-teal-900">{block.co2_equivalent_tco2_per_ha ? toNepaliDigit(Number(block.co2_equivalent_tco2_per_ha), 2) : '-'}</td>
                           </tr>
                         );
                       })}
@@ -871,7 +930,17 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
             {/* DBH Class Breakdown Section */}
             {summary?.blocks && Array.isArray(summary.blocks) && summary.blocks.length > 0 && (
               <div className="mt-8">
-                <h4 className="text-md font-semibold text-gray-900 mb-3">ब्यास क्लास अनुसार प्रति हेक्टर मौज्दात</h4>
+                <h4 className="text-md font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    ब्यास क्लास अनुसार प्रति हेक्टर मौज्दात
+                    <span className="flex flex-wrap gap-1">
+                      <CopyTag label="{{fi_block_dbh_class_growing_stock_np}}" value="{{fi_block_dbh_class_growing_stock_np}}" variant="section" />
+                      <CopyTag label="{{fi_block_dbh_class_ag_np}}" value="{{fi_block_dbh_class_ag_np}}" variant="section" />
+                      <CopyTag label="{{fi_block_dbh_class_advance_np}}" value="{{fi_block_dbh_class_advance_np}}" variant="section" />
+                      <CopyTag label="{{fi_block_dbh_class_mature_np}}" value="{{fi_block_dbh_class_mature_np}}" variant="section" />
+                      <CopyTag label="{{chart:dbh_class_bar}}" value="{{chart:dbh_class_bar}}" variant="section" />
+                      <CopyTag label="{{chart:dbh_class_count_bar}}" value="{{chart:dbh_class_count_bar}}" variant="section" />
+                    </span>
+                  </h4>
                 <div className="overflow-x-auto" style={{ maxWidth: '100%' }}>
                   <table className="min-w-full divide-y divide-gray-200 text-sm" style={{ minWidth: '1600px' }}>
                     <thead className="bg-gray-50">
@@ -908,7 +977,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-3 py-2 text-sm font-medium text-gray-900 border-r border-gray-200 sticky left-0 bg-white" style={{position:'sticky',left:0,zIndex:1}}>{displayBlockName(block.block_name)}</td>
-                            <td className="px-3 py-2 text-sm text-gray-700 border-r border-gray-200">{block.total_sample_plots}</td>
+                            <td className="px-3 py-2 text-sm text-gray-700 border-r border-gray-200">{toNepaliDigit(block.total_sample_plots, 0)}</td>
                             {keys.flatMap((k, i) => {
                               const d = bd[k];
                               const cnt = d?.count_per_ha ?? '-';
@@ -933,7 +1002,10 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
             {/* Species-wise Breakdown */}
             {speciesBreakdown && speciesBreakdown.species_breakdown && Array.isArray(speciesBreakdown.species_breakdown) && speciesBreakdown.species_breakdown.length > 0 && (
               <div className="mt-8">
-                <h4 className="text-md font-semibold text-gray-900 mb-3">प्रजाति अनुसार बिभाजन (ब्लक अनुसार)</h4>
+                <h4 className="text-md font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    प्रजाति अनुसार बिभाजन (ब्लक अनुसार)
+                    <CopyTag label="{{fi_species_block_growing_stock}}" value="{{fi_species_block_growing_stock}}" variant="section" />
+                  </h4>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
                     <thead className="bg-gray-50">
@@ -947,7 +1019,11 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-purple-50">वृद्धि मौज्दात काठ</th>
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-indigo-50">जम्मा आयतन</th>
                         <th rowSpan={2} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase border-r border-gray-300 bg-emerald-50">बेसल एरिया (ब.मी./हे.)</th>
-                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">(IPCC/REDD+) कार्बन र बायोमास</th>
+                        <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-teal-50">
+                          <HelpTooltip helpText="IPCC Tier 2 Methodology: AGB = VOB × WD × BEF. VOB (gross merchantable stem volume, NOT net_volume), BEF=1.3, R/S=0.24, CF=0.47 (IPCC 2006 GL Vol 4 Tables 4.3, 4.4).">
+                            <span>(IPCC/REDD+) कार्बन र बायोमास</span>
+                          </HelpTooltip>
+                        </th>
                       </tr>
                       <tr>
                         <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase bg-blue-50">विरुवा</th>
@@ -985,60 +1061,60 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
 
                             {/* Trees per hectare */}
                             <td className="px-2 py-3 text-sm text-right text-gray-700">
-                              {Number(species.regeneration_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(species.regeneration_per_ha || 0), 0)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-gray-700">
-                              {Number(species.sapling_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(species.sapling_per_ha || 0), 0)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-gray-700">
-                              {Number(species.pole_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(species.pole_per_ha || 0), 0)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-gray-700 border-r border-gray-200">
-                              {Number(species.tree_per_ha || 0).toLocaleString()}
+                              {toNepaliDigit(Number(species.tree_per_ha || 0), 0)}
                             </td>
 
                             {/* Pole volumes */}
                             <td className="px-2 py-3 text-sm text-right text-green-700 bg-green-50">
-                              {poleTimber.toFixed(2)}
+                              {toNepaliDigit(poleTimber, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-green-600 bg-green-50">
-                              {poleFirewood.toFixed(2)}
+                              {toNepaliDigit(poleFirewood, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-green-900 font-semibold bg-green-50 border-r border-gray-200">
-                              {poleTotal.toFixed(2)}
+                              {toNepaliDigit(poleTotal, 2)}
                             </td>
 
                             {/* Tree volumes */}
                             <td className="px-2 py-3 text-sm text-right text-amber-700 bg-amber-50">
-                              {treeTimber.toFixed(2)}
+                              {toNepaliDigit(treeTimber, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-amber-600 bg-amber-50">
-                              {treeFirewood.toFixed(2)}
+                              {toNepaliDigit(treeFirewood, 2)}
                             </td>
                             <td className="px-2 py-3 text-sm text-right text-amber-900 font-semibold bg-amber-50 border-r border-gray-200">
-                              {treeTotal.toFixed(2)}
+                              {toNepaliDigit(treeTotal, 2)}
                             </td>
 
                             {/* Growing stock and total volume */}
                             <td className="px-3 py-3 text-sm text-right text-purple-700 font-bold border-r border-gray-200 bg-purple-50">
-                              {Number(species.growing_stock_m3_per_ha || 0).toFixed(2)}
+                              {toNepaliDigit(Number(species.growing_stock_m3_per_ha || 0), 2)}
                             </td>
                             <td className="px-3 py-3 text-sm text-right text-indigo-700 font-bold border-r border-gray-200 bg-indigo-50">
-                              {Number(species.total_volume_m3_per_ha || 0).toFixed(2)}
+                              {toNepaliDigit(Number(species.total_volume_m3_per_ha || 0), 2)}
                             </td>
 
                             {/* Basal area */}
                             <td className="px-3 py-3 text-sm text-right text-emerald-700 font-bold border-r border-gray-200 bg-emerald-50">
-                              {species.basal_area_m2_per_ha ? Number(species.basal_area_m2_per_ha).toFixed(2) : '-'}
+                              {species.basal_area_m2_per_ha ? toNepaliDigit(Number(species.basal_area_m2_per_ha), 2) : '-'}
                             </td>
 
                             {/* Carbon & Biomass (IPCC/REDD+) */}
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.wood_density_t_m3 ? Number(species.wood_density_t_m3).toFixed(3) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.agb_t_per_ha ? Number(species.agb_t_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.bgb_t_per_ha ? Number(species.bgb_t_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.total_biomass_t_per_ha ? Number(species.total_biomass_t_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.carbon_stock_tc_per_ha ? Number(species.carbon_stock_tc_per_ha).toFixed(2) : '-'}</td>
-                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50 font-semibold text-teal-900">{species.co2_equivalent_tco2_per_ha ? Number(species.co2_equivalent_tco2_per_ha).toFixed(2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.wood_density_t_m3 ? toNepaliDigit(Number(species.wood_density_t_m3), 3) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.agb_t_per_ha ? toNepaliDigit(Number(species.agb_t_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.bgb_t_per_ha ? toNepaliDigit(Number(species.bgb_t_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.total_biomass_t_per_ha ? toNepaliDigit(Number(species.total_biomass_t_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50">{species.carbon_stock_tc_per_ha ? toNepaliDigit(Number(species.carbon_stock_tc_per_ha), 2) : '-'}</td>
+                            <td className="px-2 py-3 text-sm text-right whitespace-nowrap bg-teal-50 font-semibold text-teal-900">{species.co2_equivalent_tco2_per_ha ? toNepaliDigit(Number(species.co2_equivalent_tco2_per_ha), 2) : '-'}</td>
                           </tr>
                         );
                       })}
@@ -1131,7 +1207,10 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
 
                 {/* MAI Table */}
                 <div className="mt-8">
-                  <h4 className="text-md font-semibold text-gray-900 mb-3">वार्षिक वृद्धि तालिका (m³/ha/year)</h4>
+                  <h4 className="text-md font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    वार्षिक वृद्धि तालिका (m³/ha/year)
+                    <CopyTag label="{{fi_mai_table}}" value="{{fi_mai_table}}" variant="section" />
+                  </h4>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-purple-50">
@@ -1157,30 +1236,30 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                         {maiAahData?.mai_blocks && Array.isArray(maiAahData.mai_blocks) && maiAahData.mai_blocks.map((mai: any, index: number) => (
                           <tr key={index} className="hover:bg-gray-50">
                             <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{displayBlockName(mai.block_name)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{mai.pole_per_ha?.toLocaleString() || 0}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{mai.tree_per_ha?.toLocaleString() || 0}</td>
-                            <td className="px-2 py-3 text-sm text-right">{mai.pole_timber_m3_per_ha.toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{mai.pole_firewood_m3_per_ha.toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{mai.pole_total_m3_per_ha.toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{mai.tree_timber_m3_per_ha.toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{mai.tree_firewood_m3_per_ha.toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{mai.tree_total_m3_per_ha.toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right font-bold text-purple-700 bg-purple-50">{mai.total_mai_m3_per_ha.toFixed(2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(mai.pole_per_ha || 0, 0)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(mai.tree_per_ha || 0, 0)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(mai.pole_timber_m3_per_ha, 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(mai.pole_firewood_m3_per_ha, 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(mai.pole_total_m3_per_ha, 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(mai.tree_timber_m3_per_ha, 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(mai.tree_firewood_m3_per_ha, 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(mai.tree_total_m3_per_ha, 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right font-bold text-purple-700 bg-purple-50">{toNepaliDigit(mai.total_mai_m3_per_ha, 2)}</td>
                           </tr>
                         ))}
                         {/* Overall Row */}
                         {maiAahData?.mai_overall && (
                           <tr className="bg-purple-100 font-bold">
                             <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">जम्मा वन</td>
-                            <td className="px-2 py-3 text-sm text-right">{maiAahData.mai_overall.pole_per_ha?.toLocaleString() || 0}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{maiAahData.mai_overall.tree_per_ha?.toLocaleString() || 0}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.mai_overall.pole_timber_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.mai_overall.pole_firewood_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{Number(maiAahData.mai_overall.pole_total_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.mai_overall.tree_timber_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.mai_overall.tree_firewood_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{Number(maiAahData.mai_overall.tree_total_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right font-bold text-purple-900">{Number(maiAahData.mai_overall.total_mai_m3_per_ha || 0).toFixed(2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(maiAahData.mai_overall.pole_per_ha || 0, 0)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(maiAahData.mai_overall.tree_per_ha || 0, 0)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.mai_overall.pole_timber_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.mai_overall.pole_firewood_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(Number(maiAahData.mai_overall.pole_total_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.mai_overall.tree_timber_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.mai_overall.tree_firewood_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(Number(maiAahData.mai_overall.tree_total_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right font-bold text-purple-900">{toNepaliDigit(Number(maiAahData.mai_overall.total_mai_m3_per_ha || 0), 2)}</td>
                           </tr>
                         )}
                       </tbody>
@@ -1190,7 +1269,15 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
 
                 {/* AAH Table */}
                 <div className="mt-8">
-                  <h4 className="text-md font-semibold text-gray-900 mb-3">वार्षिक स्वीकार्य कटान तालिका (m³/ha/year)</h4>
+                  <h4 className="text-md font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                    वार्षिक स्वीकार्य कटान तालिका (m³/ha/year)
+                    <CopyTag label="{{fi_aah_table}}" value="{{fi_aah_table}}" variant="section" />
+                  </h4>
+                  <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                    <strong>MAI (औसत वार्षिक वृद्धि):</strong> वृद्धि मौज्दात (m³/ha) × (MAI%/100). MAI% माथिको 3×3 मेट्रिक्स अनुसार।
+                    <br />
+                    <strong>AAH (वार्षिक स्वीकार्य कटान):</strong> MAI × AAH गुणक। AAH गुणक वनको अवस्थामा आधारित — राम्रो=७५%, मध्यम=६०%, कमजोर=४०% (पूर्वनिर्धारित)। प्रयोगकर्ताले प्रति-ब्लक अनुकूलित गर्न सक्नुहुन्छ।
+                  </p>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-amber-50">
@@ -1220,8 +1307,8 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                           return (
                             <tr key={index} className="hover:bg-gray-50">
                               <td className="px-3 py-3 text-sm font-medium text-gray-900 border-r border-gray-200">{displayBlockName(aah.block_name)}</td>
-                              <td className="px-2 py-3 text-sm text-right">{aah.pole_per_ha?.toLocaleString() || 0}</td>
-                              <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{aah.tree_per_ha?.toLocaleString() || 0}</td>
+                              <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(aah.pole_per_ha || 0, 0)}</td>
+                              <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(aah.tree_per_ha || 0, 0)}</td>
                               <td className={`px-3 py-3 text-sm text-center font-semibold border-r border-gray-200 ${
                                 aah.forest_condition === 'Good' ? 'text-green-600' :
                                 aah.forest_condition === 'Moderate' ? 'text-yellow-600' :
@@ -1259,7 +1346,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                                         }`}
                                         title={aah.is_custom ? `आफ्नै (पूर्वनिर्धारित: ${aah.default_multiplier_percent}%)` : 'सम्पादन गर्न क्लिक गर्नुहोस्'}
                                       >
-                                        {aah.aah_multiplier_percent.toFixed(0)}%
+                                        {toNepaliDigit(aah.aah_multiplier_percent, 0)}%
                                       </span>
                                       {aah.is_custom && (
                                         <span className="text-orange-500 text-xs font-bold" title="आफ्नै कटान प्रतिशत">⚠️</span>
@@ -1275,13 +1362,13 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                                   )}
                                 </div>
                               </td>
-                              <td className="px-2 py-3 text-sm text-right">{aah.pole_timber_m3_per_ha.toFixed(2)}</td>
-                              <td className="px-2 py-3 text-sm text-right">{aah.pole_firewood_m3_per_ha.toFixed(2)}</td>
-                              <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{aah.pole_total_m3_per_ha.toFixed(2)}</td>
-                              <td className="px-2 py-3 text-sm text-right">{aah.tree_timber_m3_per_ha.toFixed(2)}</td>
-                              <td className="px-2 py-3 text-sm text-right">{aah.tree_firewood_m3_per_ha.toFixed(2)}</td>
-                              <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{aah.tree_total_m3_per_ha.toFixed(2)}</td>
-                              <td className="px-2 py-3 text-sm text-right font-bold text-amber-700 bg-amber-50">{aah.total_aah_m3_per_ha.toFixed(2)}</td>
+                              <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(aah.pole_timber_m3_per_ha, 2)}</td>
+                              <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(aah.pole_firewood_m3_per_ha, 2)}</td>
+                              <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(aah.pole_total_m3_per_ha, 2)}</td>
+                              <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(aah.tree_timber_m3_per_ha, 2)}</td>
+                              <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(aah.tree_firewood_m3_per_ha, 2)}</td>
+                              <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(aah.tree_total_m3_per_ha, 2)}</td>
+                              <td className="px-2 py-3 text-sm text-right font-bold text-amber-700 bg-amber-50">{toNepaliDigit(aah.total_aah_m3_per_ha, 2)}</td>
                             </tr>
                           );
                         })}
@@ -1289,21 +1376,21 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                         {maiAahData?.aah_overall && (
                           <tr className="bg-amber-100 font-bold">
                             <td className="px-3 py-3 text-sm font-bold text-gray-900 border-r border-gray-200">जम्मा वन</td>
-                            <td className="px-2 py-3 text-sm text-right">{maiAahData.aah_overall.pole_per_ha?.toLocaleString() || 0}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{maiAahData.aah_overall.tree_per_ha?.toLocaleString() || 0}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(maiAahData.aah_overall.pole_per_ha || 0, 0)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(maiAahData.aah_overall.tree_per_ha || 0, 0)}</td>
                             <td className={`px-3 py-3 text-sm text-center font-bold border-r border-gray-200 ${
                               maiAahData.aah_overall.forest_condition === 'Good' ? 'text-green-700' :
                               maiAahData.aah_overall.forest_condition === 'Moderate' ? 'text-yellow-700' :
                               'text-red-700'
                             }`}>{maiAahData.aah_overall.forest_condition || 'N/A'}</td>
-                            <td className="px-3 py-3 text-sm text-center border-r border-gray-200">{Number(maiAahData.aah_overall.aah_multiplier_percent || 0).toFixed(0)}%</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.aah_overall.pole_timber_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.aah_overall.pole_firewood_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{Number(maiAahData.aah_overall.pole_total_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.aah_overall.tree_timber_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right">{Number(maiAahData.aah_overall.tree_firewood_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{Number(maiAahData.aah_overall.tree_total_m3_per_ha || 0).toFixed(2)}</td>
-                            <td className="px-2 py-3 text-sm text-right font-bold text-amber-900">{Number(maiAahData.aah_overall.total_aah_m3_per_ha || 0).toFixed(2)}</td>
+                            <td className="px-3 py-3 text-sm text-center border-r border-gray-200">{toNepaliDigit(Number(maiAahData.aah_overall.aah_multiplier_percent || 0), 0)}%</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.aah_overall.pole_timber_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.aah_overall.pole_firewood_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(Number(maiAahData.aah_overall.pole_total_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.aah_overall.tree_timber_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right">{toNepaliDigit(Number(maiAahData.aah_overall.tree_firewood_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right border-r border-gray-200">{toNepaliDigit(Number(maiAahData.aah_overall.tree_total_m3_per_ha || 0), 2)}</td>
+                            <td className="px-2 py-3 text-sm text-right font-bold text-amber-900">{toNepaliDigit(Number(maiAahData.aah_overall.total_aah_m3_per_ha || 0), 2)}</td>
                           </tr>
                         )}
                       </tbody>
@@ -1357,7 +1444,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                 <div className={`rounded-lg p-3 ${modalBlock.is_custom ? 'bg-orange-50' : 'bg-gray-50'}`}>
                   <div className="text-sm text-gray-600">हालको कटान प्रतिशत</div>
                   <div className={`text-xl font-bold ${modalBlock.is_custom ? 'text-orange-600' : 'text-gray-700'}`}>
-                    {modalBlock.aah_multiplier_percent.toFixed(0)}%
+                    {toNepaliDigit(modalBlock.aah_multiplier_percent, 0)}%
                     {modalBlock.is_custom && <span className="text-sm ml-2">(आफ्नै)</span>}
                   </div>
                 </div>
@@ -1369,7 +1456,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                   </label>
                   <input
                     type="number"
-                    defaultValue={modalBlock.aah_multiplier_percent.toFixed(0)}
+                    defaultValue={toNepaliDigit(modalBlock.aah_multiplier_percent, 0)}
                     onChange={(e) => {
                       const input = e.target as HTMLInputElement;
                       input.dataset.value = e.target.value;
@@ -1476,7 +1563,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                 step="0.1"
               />
-              <p className="text-xs text-gray-500 mt-1">Radius: {Math.sqrt(sampleSizes.regeneration_area_sqm / Math.PI).toFixed(2)}m</p>
+              <p className="text-xs text-gray-500 mt-1">Radius: {toNepaliDigit(Math.sqrt(sampleSizes.regeneration_area_sqm / Math.PI), 2)}m</p>
             </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Sapling (m²)</label>
@@ -1487,7 +1574,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                 step="0.1"
               />
-              <p className="text-xs text-gray-500 mt-1">Radius: {Math.sqrt(sampleSizes.sapling_area_sqm / Math.PI).toFixed(2)}m</p>
+              <p className="text-xs text-gray-500 mt-1">Radius: {toNepaliDigit(Math.sqrt(sampleSizes.sapling_area_sqm / Math.PI), 2)}m</p>
             </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Pole (m²)</label>
@@ -1498,7 +1585,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                 step="0.1"
               />
-              <p className="text-xs text-gray-500 mt-1">Radius: {Math.sqrt(sampleSizes.pole_area_sqm / Math.PI).toFixed(2)}m</p>
+              <p className="text-xs text-gray-500 mt-1">Radius: {toNepaliDigit(Math.sqrt(sampleSizes.pole_area_sqm / Math.PI), 2)}m</p>
             </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Tree (m²)</label>
@@ -1509,7 +1596,7 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                 step="0.1"
               />
-              <p className="text-xs text-gray-500 mt-1">Radius: {Math.sqrt(sampleSizes.tree_area_sqm / Math.PI).toFixed(2)}m</p>
+              <p className="text-xs text-gray-500 mt-1">Radius: {toNepaliDigit(Math.sqrt(sampleSizes.tree_area_sqm / Math.PI), 2)}m</p>
             </div>
           </div>
         </div>

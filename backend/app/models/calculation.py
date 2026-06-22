@@ -71,6 +71,7 @@ class Calculation(Base):
     sampling_designs = relationship("SamplingDesign", back_populates="calculation", cascade="all, delete-orphan")
     biodiversity_records = relationship("CalculationBiodiversity", back_populates="calculation", cascade="all, delete-orphan")
     synthetic_tree_models = relationship("SyntheticTreeModel", back_populates="calculation", cascade="all, delete-orphan")
+    all_tree_exports = relationship("AllTreeExport", back_populates="calculation", cascade="all, delete-orphan")
     household_data = relationship("HouseholdInformation", back_populates="calculation", cascade="all, delete-orphan")
     forest_committee_members = relationship("ForestUserCommittee", back_populates="calculation", cascade="all, delete-orphan")
     advisory_committee_members = relationship("AdvisoryCommittee", back_populates="calculation", cascade="all, delete-orphan")

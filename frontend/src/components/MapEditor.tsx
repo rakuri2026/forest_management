@@ -90,6 +90,9 @@ const MapEditor: React.FC<MapEditorProps> = ({
   const [showSteepSlopeMask, setShowSteepSlopeMask] = useState<boolean>(false);
   const [slopeMinClass, setSlopeMinClass] = useState<number>(4);
   const [showCanopyMask, setShowCanopyMask] = useState<boolean>(false);
+  const [canopyShowRed, setCanopyShowRed] = useState<boolean>(true);
+  const [canopyShowBlue, setCanopyShowBlue] = useState<boolean>(true);
+  const [canopyShowGreen, setCanopyShowGreen] = useState<boolean>(true);
   
   // Auto-switch to subareas mode if there are existing sub-areas (after loading) - but only on initial load
   useEffect(() => {
@@ -238,6 +241,10 @@ const MapEditor: React.FC<MapEditorProps> = ({
           fillOpacity: 0.3,
           weight: 3,
         });
+        setTimeout(() => {
+          const el = mapInstance.getContainer().querySelector<HTMLElement>('.leaflet-pm-touch-hint');
+          if (el) el.style.opacity = '0.05';
+        }, 50);
       }
     };
 
@@ -402,17 +409,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
             )
           );
           
-          // Save geometry to backend
-          forestApi.updateSubArea(calculationId, subAreaId, {
-            geometry: editedGeometry,
-            block_id: detection.blockId,
-            block_name: detection.blockName,
-          }).then(() => {
-            console.log('[MapEditor] Sub-area geometry saved');
-          }).catch((err: any) => {
-            console.error('[MapEditor] Failed to save sub-area geometry:', err);
-            // Don't clear warnings on save failure
-          });
+          // Geometry changes saved only via main "Save" button to avoid race conditions
         }
       });
     };
@@ -519,16 +516,7 @@ const MapEditor: React.FC<MapEditorProps> = ({
             )
           );
           
-          // Save to backend
-          forestApi.updateSubArea(calculationId, subAreaId, {
-            geometry: editedGeometry,
-            block_id: detection.blockId,
-            block_name: detection.blockName,
-          }).then(() => {
-            console.log('[MapEditor] Sub-area geometry saved via editend');
-          }).catch((err: any) => {
-            console.error('[MapEditor] Failed to save sub-area:', err);
-          });
+          // Geometry saved via main "Save" button only
         }
       }
       
@@ -982,13 +970,6 @@ const MapEditor: React.FC<MapEditorProps> = ({
             setSelectedSubAreaId(subArea.id);
           }
         });
-
-        layer.bindPopup(`
-          <strong>${subArea.name}</strong><br/>
-          Category: ${category?.label || subArea.category}<br/>
-          Area: ${subArea.area_hectares.toFixed(4)} ha<br/>
-          ${isExcluded ? '<br/><strong style="color: red;">EXCLUDED FROM FOREST</strong>' : ''}
-        `);
 
         layer.addTo(mapInstance);
       }
@@ -1601,9 +1582,28 @@ const MapEditor: React.FC<MapEditorProps> = ({
                     className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 mr-2"
                   />
                   <label htmlFor="showCanopy" className="text-sm font-medium text-gray-800">
-                    Show Canopy (&gt;15m)
+                    Show Canopy Mask
                   </label>
                 </div>
+                {showCanopyMask && (
+                  <div className="mt-2 ml-6 space-y-1.5 pl-1 border-l-2 border-green-200">
+                    <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={canopyShowRed} onChange={(e) => setCanopyShowRed(e.target.checked)} className="w-3 h-3 rounded border-gray-300" />
+                      <span className="inline-block w-3 h-3 rounded-sm" style={{backgroundColor: 'rgba(255,0,0,0.8)'}}></span>
+                      <span>Red — No Canopy</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={canopyShowBlue} onChange={(e) => setCanopyShowBlue(e.target.checked)} className="w-3 h-3 rounded border-gray-300" />
+                      <span className="inline-block w-3 h-3 rounded-sm" style={{backgroundColor: 'rgba(0,0,255,0.8)'}}></span>
+                      <span>Blue — Low (1-15m)</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={canopyShowGreen} onChange={(e) => setCanopyShowGreen(e.target.checked)} className="w-3 h-3 rounded border-gray-300" />
+                      <span className="inline-block w-3 h-3 rounded-sm" style={{backgroundColor: 'rgba(0,255,0,0.8)'}}></span>
+                      <span>Green — Tall (&gt;15m)</span>
+                    </label>
+                  </div>
+                )}
               </div>
 
               {/* Active Drawing Indicator */}
@@ -2091,10 +2091,10 @@ const MapEditor: React.FC<MapEditorProps> = ({
               />
             )}
 
-            {/* Canopy Mask Layer - shows trees >15m in green */}
+            {/* Canopy Mask Layer - clipped to forest boundary with color filters */}
             {showCanopyMask && (
               <TileLayer
-                url={`/api/calculations/${calculationId}/canopy-mask/{z}/{x}/{y}.png?alpha=150`}
+                url={`/api/calculations/${calculationId}/canopy-mask/{z}/{x}/{y}.png?alpha=150&red=${canopyShowRed}&blue=${canopyShowBlue}&green=${canopyShowGreen}`}
                 opacity={0.7}
                 zIndex={5}
                 minZoom={13}
@@ -2103,6 +2103,43 @@ const MapEditor: React.FC<MapEditorProps> = ({
             )}
           </MapContainer>
         </div>
+      </div>
+
+      {/* Status Bar */}
+      <div style={{
+        backgroundColor: 'rgba(31, 41, 55, 0.85)',
+        color: '#e5e7eb',
+        padding: '6px 16px',
+        fontSize: '13px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        minHeight: '32px',
+        flexShrink: 0,
+        backdropFilter: 'blur(4px)',
+      }}>
+        {selectedSubAreaId && (() => {
+          const sa = subAreas.find(s => s.id === selectedSubAreaId);
+          if (!sa) return null;
+          const category = SUB_AREA_CATEGORIES.find(c => c.value === sa.category);
+          return (
+            <>
+              <span style={{ fontWeight: 600, color: '#ffffff' }}>{sa.name}</span>
+              <span style={{ color: category?.color || '#9ca3af' }}>●</span>
+              <span>{category?.label || sa.category}</span>
+              <span style={{ color: '#9ca3af' }}>|</span>
+              <span>Area: {formatArea(sa.area_hectares)}</span>
+              {sa.is_excluded && (
+                <span style={{ color: '#f87171', fontWeight: 600 }}>EXCLUDED FROM FOREST</span>
+              )}
+            </>
+          );
+        })()}
+        {!selectedSubAreaId && (
+          <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>
+            Click a sub-area on the map to see details
+          </span>
+        )}
       </div>
     </div>
   );
