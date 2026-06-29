@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Button, message, Spin, Tag, Tabs, Modal } from 'antd';
+import { Button, message, Spin, Tag, Tabs, Alert, Tooltip } from 'antd';
 import {
   SaveOutlined,
   SettingOutlined,
@@ -11,11 +11,13 @@ import {
   EnvironmentOutlined,
   FileTextOutlined,
   PlusOutlined,
-  RollbackOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import TreeSidebar from '../components/OperationalPlan/TreeSidebar';
 import ContentPane from '../components/OperationalPlan/ContentPane';
+import DocumentOutline from '../components/OperationalPlan/DocumentOutline';
 import MetadataForm from '../components/OperationalPlan/MetadataForm';
 import TableEditor from '../components/OperationalPlan/TableEditor';
 import ChartEditor from '../components/OperationalPlan/ChartEditor';
@@ -49,9 +51,14 @@ interface OperationalPlanPageProps {
   calculationId?: string;
 }
 
+type ViewMode = 'editor' | 'consumer';
+
 const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   const { id: routeId } = useParams<{ id: string }>();
   const calculationId = props.calculationId || routeId;
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
+
   const [plan, setPlan] = useState<any>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNodeData[]>([]);
@@ -61,6 +68,29 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   const [showMetadata, setShowMetadata] = useState(false);
   const [activeTab, setActiveTab] = useState<EditorTab>('editor');
   const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('editor');
+  const [graceBanner, setGraceBanner] = useState(false);
+  const [editingStatusChecked, setEditingStatusChecked] = useState(false);
+
+  const determineViewMode = useCallback(async (planId: string) => {
+    if (isSuperAdmin) {
+      setViewMode('editor');
+      setEditingStatusChecked(true);
+      return;
+    }
+    try {
+      const status = await operationalPlanApi.getEditingStatus(planId);
+      if (status.can_edit) {
+        setViewMode('editor');
+        setGraceBanner(true);
+      } else {
+        setViewMode('consumer');
+      }
+    } catch {
+      setViewMode('consumer');
+    }
+    setEditingStatusChecked(true);
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     if (calculationId) {
@@ -78,6 +108,7 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       if ((planData.tree || []).length > 0) {
         setActiveNodeId(planData.tree[0].id);
       }
+      await determineViewMode(planData.id);
     } catch (err: any) {
       if (err.response?.status === 404) {
         await createWithDefault(calcId);
@@ -98,27 +129,10 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       if ((newPlan.tree || []).length > 0) {
         setActiveNodeId(newPlan.tree[0].id);
       }
+      setViewMode(isSuperAdmin ? 'editor' : 'consumer');
+      setEditingStatusChecked(true);
     } catch {
       message.error('Failed to create operational plan');
-    }
-  };
-
-  const handleLoadTemplate = async (templateId: string) => {
-    if (!calculationId) return;
-    setLoading(true);
-    try {
-      const newPlan = await operationalPlanApi.create(calculationId, undefined, templateId);
-      setPlan(newPlan);
-      setPlanId(newPlan.id);
-      setTree(newPlan.tree || []);
-      if ((newPlan.tree || []).length > 0) {
-        setActiveNodeId(newPlan.tree[0].id);
-      }
-      message.success('Template loaded');
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'Failed to load template');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -126,8 +140,19 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
     if (!planId) return;
     setSaving(true);
     try {
-      await operationalPlanApi.update(planId, { tree });
-      message.success('Plan saved');
+      const payload: any = { tree };
+      if (graceBanner) {
+        payload.plan_metadata = { ...(plan?.plan_metadata || {}), grace_period_used: true };
+      }
+      const updated = await operationalPlanApi.update(planId, payload);
+      setPlan(updated);
+      if (graceBanner) {
+        setGraceBanner(false);
+        setViewMode('consumer');
+        message.success('Plan saved. Editor is now locked for future sessions.');
+      } else {
+        message.success('Plan saved');
+      }
     } catch {
       message.error('Failed to save plan');
     } finally {
@@ -147,27 +172,6 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleResetTree = () => {
-    if (!planId) return;
-    Modal.confirm({
-      title: 'Reset document to default template?',
-      content: 'This will replace the entire document structure with the default template. All sections you added or modified will be permanently lost. This cannot be undone.',
-      okText: 'Reset',
-      okType: 'danger',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        try {
-          const result = await operationalPlanApi.resetTree(planId);
-          setTree(result.tree || []);
-          setActiveNodeId((result.tree || [])[0]?.id || null);
-          message.success('Document reset to default template');
-        } catch {
-          message.error('Failed to reset document');
-        }
-      },
-    });
   };
 
   const handleExport = async () => {
@@ -237,6 +241,7 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   };
 
   const handleAddChartNode = async (parentId: string | null) => {
+    if (!planId) return;
     const chartTypes = ['forest_type_pie', 'species_pie', 'block_area_bar', 'slope_pie', 'canopy_pie', 'landcover_pie', 'biomass_bar', 'dbh_histogram'];
     const typeStr = window.prompt(`Enter chart type (leave blank for default):\n${chartTypes.join(', ')}`);
     const chartType = typeStr && chartTypes.includes(typeStr) ? typeStr : 'forest_type_pie';
@@ -244,6 +249,7 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   };
 
   const handleAddMapNode = async (parentId: string | null) => {
+    if (!planId) return;
     const mapTypes = ['boundary', 'forest_type', 'forest_health', 'slope', 'biomass', 'landcover', 'soil_texture', 'dem', 'aspect', 'canopy'];
     const typeStr = window.prompt(`Enter map type (leave blank for default):\n${mapTypes.join(', ')}`);
     const mapType = typeStr && mapTypes.includes(typeStr) ? typeStr : 'boundary';
@@ -262,7 +268,6 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
         return { ...n, children: toggleNode(n.children) };
       });
     setTree(prev => toggleNode(prev));
-    setActiveNodeId(prev => prev === nodeId ? prev : prev);
   };
 
   const handleReorderNode = async (nodeId: string, newParentId: string | null, newPosition: number) => {
@@ -347,20 +352,22 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       })()
     : null;
 
-  if (loading) {
+  if (loading || !editingStatusChecked) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <Spin size="large" description="Loading plan..." />
+        <Spin size="large" />
       </div>
     );
   }
+
+  const isEditor = viewMode === 'editor';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#fff' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-            Operational Plan Editor
+            {isEditor ? 'Operational Plan Editor' : 'Operational Plan'}
           </h2>
           {plan && (
             <Tag color={plan.status === 'draft' ? 'blue' : plan.status === 'submitted' ? 'orange' : 'green'}>
@@ -372,33 +379,58 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
           )}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <Button icon={<FileTextOutlined />} onClick={() => setShowTemplateManager(true)} size="small">
-            Templates
-          </Button>
-          <Button icon={<RollbackOutlined />} onClick={handleResetTree} size="small" danger>
-            Reset to Default
-          </Button>
-          <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
-            Metadata
-          </Button>
-          <Button icon={<ThunderboltOutlined />} onClick={handleAutoPopulate} size="small" loading={loading}>
-            Auto-Populate
-          </Button>
-          <Button icon={<SaveOutlined />} onClick={handleSave} size="small" type="primary" loading={saving}>
-            Save All
-          </Button>
-          <Button icon={<DownloadOutlined />} size="small" onClick={handleExport}>
+          {isEditor && (
+            <>
+              {isSuperAdmin && (
+                <Button icon={<FileTextOutlined />} onClick={() => setShowTemplateManager(true)} size="small">
+                  Templates
+                </Button>
+              )}
+              <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
+                Metadata
+              </Button>
+              {!graceBanner && (
+                <Button icon={<ThunderboltOutlined />} onClick={handleAutoPopulate} size="small" loading={loading}>
+                  Auto-Populate
+                </Button>
+              )}
+              <Button icon={<SaveOutlined />} onClick={handleSave} size="small" type="primary" loading={saving}>
+                {graceBanner ? 'Save & Lock' : 'Save All'}
+              </Button>
+            </>
+          )}
+          {!isEditor && (
+            <>
+              <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
+                Metadata
+              </Button>
+              <Tooltip title="Preview full document">
+                {planId && <PreviewDrawer planId={planId} forestName={plan?.forest_name} />}
+              </Tooltip>
+            </>
+          )}
+          <Button icon={<DownloadOutlined />} size="small" type={isEditor ? 'default' : 'primary'} onClick={handleExport}>
             Export DOCX
           </Button>
-          {planId && <PreviewDrawer planId={planId} forestName={plan?.forest_name} />}
         </div>
       </div>
+
+      {graceBanner && (
+        <Alert
+          message="Final Edit Session"
+          description="This is your last opportunity to edit this document. After saving, the editor will be locked and you'll be able to view, preview, and download only."
+          type="warning"
+          showIcon
+          closable={false}
+          style={{ borderRadius: 0 }}
+        />
+      )}
 
       <Tabs
         activeKey={activeTab}
         onChange={(k) => setActiveTab(k as EditorTab)}
         items={[
-          { key: 'editor', label: <span><BranchesOutlined /> Document Editor</span> },
+          { key: 'editor', label: <span><BranchesOutlined /> {isEditor ? 'Document Editor' : 'Document View'}</span> },
           { key: 'tables', label: <span><PlusOutlined /> Tables 1-32</span> },
           { key: 'charts', label: <span><PieChartOutlined /> Charts</span> },
           { key: 'maps', label: <span><EnvironmentOutlined /> Maps</span> },
@@ -408,27 +440,69 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       />
 
       {activeTab === 'editor' ? (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <div style={{ width: 320, borderRight: '1px solid #f0f0f0', overflow: 'hidden', flexShrink: 0 }}>
-            <TreeSidebar
-              tree={tree}
-              activeNodeId={activeNodeId}
-              onSelectNode={setActiveNodeId}
-              onAddChild={handleAddChild}
-              onAddChartNode={handleAddChartNode}
-              onAddMapNode={handleAddMapNode}
-              onAddStaticTable={handleAddStaticTable}
-              onToggleDelete={handleToggleDelete}
-              onToggleHidden={handleToggleHidden}
-              onHardDelete={handleHardDelete}
-              onUpdateTitle={handleUpdateTitle}
-              onReorderNode={handleReorderNode}
-            />
+        isEditor ? (
+          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+            <div style={{ width: 320, borderRight: '1px solid #f0f0f0', overflow: 'hidden', flexShrink: 0 }}>
+              <TreeSidebar
+                tree={tree}
+                activeNodeId={activeNodeId}
+                onSelectNode={setActiveNodeId}
+                onAddChild={handleAddChild}
+                onAddChartNode={handleAddChartNode}
+                onAddMapNode={handleAddMapNode}
+                onAddStaticTable={handleAddStaticTable}
+                onToggleDelete={handleToggleDelete}
+                onToggleHidden={handleToggleHidden}
+                onHardDelete={handleHardDelete}
+                onUpdateTitle={handleUpdateTitle}
+                onReorderNode={handleReorderNode}
+              />
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {planId && <ContentPane node={activeNode} planId={planId} calculationId={calculationId} onContentChange={handleContentChange} />}
+            </div>
           </div>
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {planId && <ContentPane node={activeNode} planId={planId} calculationId={calculationId} onContentChange={handleContentChange} />}
+        ) : (
+          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+            <div style={{ width: 320, borderRight: '1px solid #f0f0f0', overflow: 'hidden', flexShrink: 0 }}>
+              <DocumentOutline
+                tree={tree}
+                activeNodeId={activeNodeId}
+                onSelectNode={setActiveNodeId}
+              />
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              {activeNode ? (
+                <div>
+                  <h3 style={{ marginBottom: 8 }}>
+                    {activeNode.number ? `${activeNode.number}. ` : ''}{activeNode.title_ne || activeNode.title_en}
+                  </h3>
+                  <div
+                    style={{
+                      background: '#fafafa',
+                      border: '1px solid #f0f0f0',
+                      borderRadius: 6,
+                      padding: 16,
+                      whiteSpace: 'pre-wrap',
+                      fontSize: 14,
+                      lineHeight: 1.6,
+                      minHeight: 200,
+                    }}
+                  >
+                    {activeNode.content || (
+                      <span style={{ color: '#bbb', fontStyle: 'italic' }}>No content</span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+                  <EyeOutlined style={{ fontSize: 48, display: 'block', marginBottom: 16 }} />
+                  Select a section from the outline to view its content
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )
       ) : activeTab === 'tables' ? (
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
           {calculationId && <TableEditor calculationId={calculationId} />}
@@ -451,13 +525,15 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
         />
       )}
 
-      <TemplateManager
-        planId={planId}
-        tree={tree}
-        visible={showTemplateManager}
-        onClose={() => setShowTemplateManager(false)}
-        onLoadTemplate={handleLoadTemplate}
-      />
+      {isSuperAdmin && (
+        <TemplateManager
+          planId={planId}
+          tree={tree}
+          visible={showTemplateManager}
+          onClose={() => setShowTemplateManager(false)}
+          onLoadTemplate={() => {}}
+        />
+      )}
     </div>
   );
 };

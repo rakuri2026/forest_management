@@ -2363,8 +2363,8 @@ export const operationalPlanApi = {
     return response.data;
   },
 
-  resetTree: async (planId: string): Promise<any> => {
-    const response = await api.post(`/api/operational-plans/${planId}/reset-tree`);
+  getEditingStatus: async (planId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/${planId}/editing-status`);
     return response.data;
   },
 

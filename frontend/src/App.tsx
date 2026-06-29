@@ -61,7 +61,11 @@ const App: React.FC = () => {
 
             {/* Template routes */}
             <Route path="templates" element={<PublicTemplatesPage />} />
-            <Route path="admin/templates" element={<AdminTemplatesPage />} />
+            <Route path="admin/templates" element={
+              <ProtectedRoute allowedRoles={['super_admin']}>
+                <AdminTemplatesPage />
+              </ProtectedRoute>
+            } />
 
             {/* Legacy routes (redirects for backward compatibility) */}
             <Route path="dashboard" element={<Navigate to="/my-uploads" replace />} />

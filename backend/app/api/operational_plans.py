@@ -8,7 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Dict, Any, Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 from ..core.database import get_db
 from ..models.user import User, UserRole
@@ -1413,30 +1417,41 @@ async def clear_plan_map_cache(
     return {"message": f"Map cache cleared for {layer or 'all layers'}"}
 
 
-@router.post("/{plan_id}/reset-tree")
-async def reset_plan_tree(
+def _has_custom_content(plan: OperationalPlan) -> bool:
+    """Check if plan has user-authored content beyond initial template defaults."""
+    tree = plan.sections.get("tree", []) if plan.sections else []
+    if not tree:
+        return False
+    all_nodes = list(TreeOperations.flatten([TreeNode.from_dict(n) if isinstance(n, dict) else n for n in tree]))
+    has_modified = any(n.last_modified is not None for n in all_nodes)
+    if has_modified:
+        return True
+    grace_used = (plan.plan_metadata or {}).get("grace_period_used", False)
+    if grace_used:
+        return True
+    age = datetime.utcnow() - plan.created_at
+    if age > timedelta(hours=1) and plan.updated_at != plan.created_at:
+        return True
+    return False
+
+
+@router.get("/{plan_id}/editing-status")
+async def get_plan_editing_status(
     plan_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Reset the plan document tree to the default seed/default template."""
+    """Check if plan has custom content and whether user can edit it."""
     plan = _check_plan_access(plan_id, current_user, db)
-
-    use_default = db.execute(
-        select(OPTemplate).where(OPTemplate.is_default == True, OPTemplate.is_system == True)
-    ).scalar_one_or_none()
-    if use_default:
-        tree_list = [TreeNode.from_dict(n) for n in use_default.tree]
-    else:
-        tree_list = get_full_seed_document()
-
-    recompute_numbers(tree_list, language=(plan.plan_metadata or {}).get("language", "NP"))
-    plan.sections = {"tree": _tree_to_dict_list(tree_list)}
-    flag_modified(plan, "sections")
-    db.commit()
-    db.refresh(plan)
-
-    return {"tree": plan.sections.get("tree", [])}
+    has_content = _has_custom_content(plan)
+    grace_used = (plan.plan_metadata or {}).get("grace_period_used", False)
+    return {
+        "has_custom_content": has_content,
+        "grace_period_used": grace_used,
+        "can_edit": current_user.role == UserRole.SUPER_ADMIN or (has_content and not grace_used),
+        "plan_created": plan.created_at.isoformat() if plan.created_at else None,
+        "plan_updated": plan.updated_at.isoformat() if plan.updated_at else None,
+    }
 
 
 @router.get("/{plan_id}/export")
@@ -1446,6 +1461,7 @@ async def export_operational_plan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    t0 = time.time()
     from app.services.management_plan_docx.plan_map_service import clear_map_cache
 
     plan = _check_plan_access(plan_id, current_user, db)
@@ -1459,11 +1475,13 @@ async def export_operational_plan(
 
     sections = plan.sections or {}
     tree_list = _dict_list_to_tree(sections.get("tree", []))
+    t1 = time.time()
     resolver = VariableResolver(db, plan.calculation_id, plan)
 
     for node in TreeOperations.flatten(tree_list):
         if node.content:
             node.content = resolver.resolve_node_content(node.content)
+    t2 = time.time()
 
     buffer = build_op_document(
         plan=plan_to_dict(plan),
@@ -1471,6 +1489,12 @@ async def export_operational_plan(
         resolver=resolver,
         calculation_id=plan.calculation_id,
         db=db,
+    )
+    t3 = time.time()
+
+    logger.info(
+        "OP_EXPORT: plan_id=%s forest=%s data_collect=%.2fs resolve=%.2fs build_doc=%.2fs total=%.2fs",
+        plan_id, plan.forest_name, t1 - t0, t2 - t1, t3 - t2, t3 - t0,
     )
 
     forest_name = plan.forest_name or "CF"
