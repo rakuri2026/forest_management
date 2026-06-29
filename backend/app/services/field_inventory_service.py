@@ -176,6 +176,11 @@ class FieldInventoryService:
         lon_col = column_mapping.get('longitude')
         lat_col = column_mapping.get('latitude')
 
+        # Resource yield columns (optional — from uploaded CSV/Excel)
+        fw_col = column_mapping.get('firewood_kg_per_100sqm_per_year')
+        gr_col = column_mapping.get('grass_kg_per_100sqm_per_year')
+        bd_col = column_mapping.get('bedding_material_kg_per_100sqm_per_year')
+
         for idx, row in df.iterrows():
             try:
                 block_name = str(row[block_col])
@@ -189,6 +194,26 @@ class FieldInventoryService:
             # Create unique key
             key = (block_name, plot_number)
 
+            # Extract resource yield values (only from first row of each plot)
+            firewood_kg = None
+            grass_kg = None
+            bedding_kg = None
+            if fw_col:
+                try:
+                    firewood_kg = float(row[fw_col])
+                except (ValueError, TypeError, KeyError):
+                    pass
+            if gr_col:
+                try:
+                    grass_kg = float(row[gr_col])
+                except (ValueError, TypeError, KeyError):
+                    pass
+            if bd_col:
+                try:
+                    bedding_kg = float(row[bd_col])
+                except (ValueError, TypeError, KeyError):
+                    pass
+
             # Create sample plot only once per unique (block, plot) combination
             # If multiple rows have different coordinates for same plot (common when GPS recorded per tree),
             # we use the FIRST coordinate encountered as the plot center
@@ -197,7 +222,10 @@ class FieldInventoryService:
                     field_inventory_calculation_id=field_inventory_id,
                     block_name=block_name,
                     sample_plot_number=plot_number,
-                    location=f'SRID=4326;POINT({lon} {lat})'
+                    location=f'SRID=4326;POINT({lon} {lat})',
+                    firewood_kg_per_100sqm_per_year=firewood_kg,
+                    grass_kg_per_100sqm_per_year=grass_kg,
+                    bedding_material_kg_per_100sqm_per_year=bedding_kg,
                 )
                 self.db.add(sample_plot)
                 sample_plots_dict[key] = sample_plot
@@ -631,6 +659,21 @@ class FieldInventoryService:
                     block_name=block_name
                 )
 
+            # --- NEW: Per-hectare resource yields (for Demand & Supply tab) ---
+            # Average kg/100sqm/year values across all plots in block,
+            # then multiply by 100 to get kg/ha/year
+            fw_vals = [p.firewood_kg_per_100sqm_per_year for p in plots if p.firewood_kg_per_100sqm_per_year is not None]
+            gr_vals = [p.grass_kg_per_100sqm_per_year for p in plots if p.grass_kg_per_100sqm_per_year is not None]
+            bd_vals = [p.bedding_material_kg_per_100sqm_per_year for p in plots if p.bedding_material_kg_per_100sqm_per_year is not None]
+
+            n_fw = len(fw_vals)
+            n_gr = len(gr_vals)
+            n_bd = len(bd_vals)
+
+            firewood_kg_per_ha = round((sum(fw_vals) / n_fw * 100) if n_fw > 0 else 0, 6)
+            grass_kg_per_ha = round((sum(gr_vals) / n_gr * 100) if n_gr > 0 else 0, 6)
+            bedding_kg_per_ha = round((sum(bd_vals) / n_bd * 100) if n_bd > 0 else 0, 6)
+
             # Create block summary
             block_summary = FieldInventoryBlockSummary(
                 field_inventory_calculation_id=field_inventory_id,
@@ -647,6 +690,10 @@ class FieldInventoryService:
                 total_growing_stock_m3_per_ha=round(total_growing_stock, 6),
                 basal_area_m2_per_ha=round(total_basal_area_m2_per_ha, 6),
                 satellite_volume_m3_per_ha=satellite_volume,
+                # Resource yields (kg/ha/year for Demand & Supply tab)
+                firewood_kg_per_ha_per_year=firewood_kg_per_ha,
+                grass_kg_per_ha_per_year=grass_kg_per_ha,
+                bedding_material_kg_per_ha_per_year=bedding_kg_per_ha,
                 # Carbon metrics
                 weighted_wood_density=carbon_metrics['weighted_density'],
                 agb_t_per_ha=carbon_metrics['agb_t_per_ha'],

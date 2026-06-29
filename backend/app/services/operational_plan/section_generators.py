@@ -1,5 +1,9 @@
 from typing import Any, Dict, Optional
 from app.utils.number_format import format_devanagari as fmt
+from .household_section_generators import (
+    generate_household_narration,
+    generate_committee_narration,
+)
 
 
 def _deep_get(data: dict, path: str, default: Any = None) -> Any:
@@ -227,43 +231,58 @@ def generate_actual_species(raw_data: dict) -> Optional[str]:
 # ─── 9. Biodiversity ─────────────────────────────────────────────
 def generate_biodiversity(raw_data: dict) -> Optional[str]:
     bio = raw_data.get("biodiversity", {})
-    species = bio.get("species", [])
-    if not species or not isinstance(species, list):
+    if not bio.get("available"):
         return None
-    total = len(species)
-    sub_cat: Dict[str, int] = {}
-    iucn: Dict[str, int] = {}
-    veg_count = animal_count = 0
-    for rec in species:
-        s = rec.get("species") or rec
-        cat = s.get("sub_category", "other") or "other"
-        sub_cat[cat] = sub_cat.get(cat, 0) + 1
-        i = s.get("iucn_status", "DD") or "DD"
-        iucn[i] = iucn.get(i, 0) + 1
-        if s.get("category") == "vegetation":
-            veg_count += 1
-        else:
-            animal_count += 1
+
+    total = bio.get("total_species", 0)
+    if not total:
+        return None
+
+    veg_count = bio.get("vegetation_count", 0)
+    animal_count = bio.get("animal_count", 0)
+    protected_count = bio.get("protected_count", 0)
+    invasive_count = bio.get("invasive_count", 0)
+
+    sub_category_breakdown = bio.get("sub_category_breakdown", {})
+    iucn_breakdown = bio.get("iucn_breakdown", {})
+
     cat_list = "\n".join(
         f"• {cat}: {fmt(cnt, 0)}" for cat, cnt in
-        sorted(sub_cat.items(), key=lambda x: -x[1])
+        sorted(sub_category_breakdown.items(), key=lambda x: -x[1])
     )
+
     iucn_order = ["CR", "EN", "VU", "NT", "LC", "DD"]
     iucn_labels = {
         "CR": "संकटग्रस्त", "EN": "लोपोन्मुख", "VU": "असुरक्षित",
         "NT": "नजिकै खतरा", "LC": "कम चासो", "DD": "अपर्याप्त",
     }
     iucn_list = "\n".join(
-        f"• {iucn_labels.get(ic, ic)}: {fmt(iucn[ic], 0)}"
-        for ic in iucn_order if ic in iucn
+        f"• {iucn_labels.get(ic, ic)}: {fmt(iucn_breakdown.get(ic, 0), 0)}"
+        for ic in iucn_order if iucn_breakdown.get(ic, 0) > 0
     )
-    return (
-        f"यस वनको जैविक विविधता अन्तर्गत जम्मा {fmt(total, 0)} प्रजातिहरू "
-        f"पाइन्छन्। वनस्पति प्रजाति {fmt(veg_count, 0)} र जनावर प्रजाति "
-        f"{fmt(animal_count, 0)} रहेका छन्।\n\n"
-        f"प्रकार अनुसार:\n{cat_list}\n\n"
-        f"संरक्षण स्थिति अनुसार:\n{iucn_list}"
-    )
+
+    parts = [f"यस वनको जैविक विविधता अन्तर्गत जम्मा {fmt(total, 0)} प्रजातिहरू पाइन्छन्।"]
+
+    veg_animal_parts = []
+    if veg_count:
+        veg_animal_parts.append(f"वनस्पति प्रजाति {fmt(veg_count, 0)}")
+    if animal_count:
+        veg_animal_parts.append(f"जनावर प्रजाति {fmt(animal_count, 0)}")
+    if veg_animal_parts:
+        parts[0] += " " + " र ".join(veg_animal_parts) + " रहेका छन्।"
+    else:
+        parts[0] = parts[0].rstrip("।") + "।"
+
+    if protected_count:
+        parts.append(f"संरक्षित प्रजाति {fmt(protected_count, 0)} रहेका छन्।")
+    if invasive_count:
+        parts.append(f"मिचाहा प्रजाति {fmt(invasive_count, 0)} रहेका छन्।")
+    if cat_list:
+        parts.append(f"\nप्रकार अनुसार:\n{cat_list}")
+    if iucn_list:
+        parts.append(f"\nसंरक्षण स्थिति अनुसार:\n{iucn_list}")
+
+    return "\n\n".join(parts)
 
 
 # ─── 10. Canopy Structure ───────────────────────────────────────
@@ -646,6 +665,344 @@ def generate_fieldbook_narration(raw_data: dict) -> Optional[str]:
     return " ".join(parts)
 
 
+# ─── 22. T1: Block Area Narration ─────────────────────────────
+def generate_ti_block_area_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_block_area_table", [])
+    if not tbl:
+        return None
+    total_row = tbl[-1] if tbl else {}
+    total_area = total_row.get("कुल_क्षेत्रफल_हे", 0)
+    eff_area = total_row.get("वन_श्रोत_प्रभावित_क्षेत्रफल", 0)
+    excluded = total_row.get("बनश्रोत_अप्रभावित_क्षेत्र_हे", 0)
+    if not total_area:
+        return None
+    parts = [
+        f"यस सामुदायिक वनको जम्मा क्षेत्रफल {fmt(total_area, 2)} हेक्टर रहेकोमा "
+        f"प्रभावकारी वन आवरण {fmt(eff_area, 2)} हेक्टर रहेको छ। "
+        f"बनश्रोत अप्रभावित क्षेत्र {fmt(excluded, 2)} हेक्टर रहेको छ।"
+    ]
+    block_details = []
+    for r in tbl:
+        bn = r.get("ब्लकको_नाम", "")
+        if bn == "जम्मा":
+            continue
+        eff = r.get("वन_श्रोत_प्रभावित_क्षेत्रफल", 0)
+        block_details.append(f"{bn} {fmt(eff, 2)} हेक्टर")
+    if block_details:
+        parts.append("ब्लक अनुसार प्रभावकारी क्षेत्रफल: " + ", ".join(block_details) + " रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 23. T2: Forest Total Narration ──────────────────────────
+def generate_ti_forest_total_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    if not fi.get("ti_available"):
+        return None
+    plots = fmt(fi.get("ti_total_plots", 0), 0)
+    blocks = fmt(fi.get("ti_total_blocks", 0), 0)
+    area = fi.get("ti_effective_area_ha", 0)
+    gs = fi.get("ti_total_growing_stock_m3", 0)
+    regen = fmt(fi.get("ti_total_regeneration", 0), 0)
+    sapling = fmt(fi.get("ti_total_sapling", 0), 0)
+    pole = fmt(fi.get("ti_total_pole", 0), 0)
+    tree = fmt(fi.get("ti_total_tree", 0), 0)
+    ba = fi.get("ti_total_basal_area_m2", 0)
+    mai = fi.get("ti_total_mai_m3_per_year", 0)
+    aah = fi.get("ti_total_aah_m3_per_year", 0)
+    biomass = fi.get("ti_total_biomass_tonnes", 0)
+    carbon = fi.get("ti_total_carbon_tc", 0)
+    if not gs:
+        return None
+    return (
+        f"यस सामुदायिक वनको कुल {plots} वटा नमुना प्लटहरू ({blocks} वटा ब्लक) को "
+        f"सर्वेक्षणबाट प्राप्त तथ्यांक अनुसार कुल क्षेत्रफल {fmt(area, 2)} हेक्टर र "
+        f"कुल वृद्धि मौज्दात {fmt(gs, 2)} घनमिटर रहेको छ। जसमा कुल {regen} वटा "
+        f"विरुवा, {sapling} वटा लाथ्रा, {pole} वटा खाँवा र {tree} वटा रूख "
+        f"रहेका छन्। कुल बेसल एरिया {fmt(ba, 2)} वर्गमिटर र कुल कार्बन स्टक "
+        f"{fmt(carbon, 2)} टन कार्बन रहेको छ। कुल जैविक पदार्थ {fmt(biomass, 2)} टन, "
+        f"कुल MAI {fmt(mai, 2)} घनमिटर/वर्ष र कुल AAH {fmt(aah, 2)} घनमिटर/वर्ष रहेको छ।"
+    )
+
+
+# ─── 24. T3: Block Growing Stock Narration ───────────────────
+def generate_ti_block_growing_stock_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_block_growing_stock", [])
+    if not tbl:
+        return None
+    parts = ["ब्लक अनुसार कुल वृद्धि मौज्दातको विवरण:"]
+    block_items = []
+    for r in tbl:
+        bn = r.get("ब्लकको_नाम", "")
+        if bn == "जम्मा":
+            continue
+        total = r.get("वृद्धि_मौज्दात_जम्मा_कुल_घमी", 0)
+        timber = r.get("वृद्धि_मौज्दात_काठ_कुल_घमी", 0)
+        fuel = r.get("वृद्धि_मौज्दात_दाउरा_कुल_घमी", 0)
+        block_items.append(f"{bn} मा कुल {fmt(total, 2)} घनमिटर (काठ {fmt(timber, 2)} घमी, दाउरा {fmt(fuel, 2)} घमी)")
+    if block_items:
+        parts.append("। ".join(block_items) + " रहेको छ।")
+    total_row = tbl[-1] if len(tbl) > 1 else {}
+    gt = total_row.get("वृद्धि_मौज्दात_जम्मा_कुल_घमी", 0)
+    if gt:
+        parts.append(f"जम्मा {fmt(gt, 2)} घनमिटर रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 25. T4: Species Stock Narration ─────────────────────────
+def generate_ti_species_stock_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    comp = fi.get("ti_species_composition_absolute", {})
+    tbl = fi.get("ti_species_block_growing_stock", [])
+    if not comp and not tbl:
+        return None
+    total = sum(v for v in comp.values() if isinstance(v, (int, float)))
+    if not total:
+        return None
+    sorted_sp = sorted(comp.items(), key=lambda x: x[1], reverse=True)
+    parts = ["प्रजाति अनुसार कुल वृद्धि मौज्दात:"]
+    sp_items = []
+    for sp, vol in sorted_sp[:6]:
+        pct = vol / total * 100
+        sp_items.append(f"{sp} {fmt(vol, 2)} घनमिटर ({fmt(pct, 2)}%)")
+    if sorted_sp:
+        parts.append("। ".join(sp_items))
+    if len(sorted_sp) > 6:
+        other_vol = sum(v for _, v in sorted_sp[6:])
+        other_pct = other_vol / total * 100
+        parts.append(f"र अन्य {fmt(other_vol, 2)} घनमिटर ({fmt(other_pct, 2)}%)")
+    parts.append(f"रहेको छ। जम्मा {fmt(total, 2)} घनमिटर।")
+    return " ".join(parts)
+
+
+# ─── 26. T5: Species DBH Narration ───────────────────────────
+def generate_ti_species_dbh_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_species_dbh_class_table", [])
+    if not tbl:
+        return None
+    by_class: dict = {}
+    for r in tbl:
+        cls = r.get("DBH_क्लास", "")
+        vol = r.get("आयतन_घमी_प्रति_हे", 0)
+        if cls not in by_class:
+            by_class[cls] = 0.0
+        by_class[cls] += vol
+    parts = ["प्रजाति अनुसार DBH वर्ग मौज्दात (प्रति हेक्टर):"]
+    cls_items = [f"{cls} {fmt(vol, 2)} घमी/हे" for cls, vol in sorted(by_class.items())]
+    if cls_items:
+        parts.append("। ".join(cls_items) + " रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 27. T6: Forest DBH Narration ────────────────────────────
+def generate_ti_forest_dbh_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_forest_dbh_class_table", [])
+    if not tbl:
+        return None
+    parts = ["सम्पूर्ण वन क्षेत्रको DBH वर्ग मौज्दात (प्रति हेक्टर):"]
+    cls_items = [f"{r.get('DBH_क्लास', '')} {fmt(r.get('आयतन_घमी_प्रति_हे', 0), 2)} घमी/हे" for r in tbl]
+    if cls_items:
+        parts.append("। ".join(cls_items) + " रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 28. T7: DBH Class Total Narration ───────────────────────
+def generate_ti_dbh_total_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_dbh_class_totals_table", [])
+    if not tbl:
+        return None
+    total_row = tbl[-1] if tbl else {}
+    total_vol = sum(r.get("आयतन_घमी", 0) for r in tbl if r.get("ब्लकको_नाम") == "जम्मा वन कुल")
+    parts = ["DBH वर्ग अनुसार कुल वृद्धि मौज्दात:"]
+    cls_items = []
+    for r in tbl:
+        if r.get("ब्लकको_नाम") != "जम्मा वन कुल":
+            continue
+        cls = r.get("DBH_क्लास", "")
+        vol = r.get("आयतन_घमी", 0)
+        pct = vol / total_vol * 100 if total_vol > 0 else 0
+        cls_items.append(f"{cls} वर्गमा {fmt(vol, 2)} घनमिटर ({fmt(pct, 2)}%)")
+    if cls_items:
+        parts.append("। ".join(cls_items) + " रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 29. T8: DBH Class Per Ha Narration ──────────────────────
+def generate_ti_dbh_perha_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_dbh_class_perha_table", [])
+    if not tbl:
+        return None
+    parts = ["प्रति हेक्टर DBH वर्ग अनुसार मौज्दात:"]
+    cls_items = []
+    for r in tbl:
+        if r.get("ब्लकको_नाम") != "जम्मा वन कुल/हे.":
+            continue
+        cls = r.get("DBH_क्लास", "")
+        vol = r.get("आयतन_घमी_प्रति_हे", 0)
+        cls_items.append(f"{cls} {fmt(vol, 2)} घनमिटर/हे")
+    if cls_items:
+        parts.append("। ".join(cls_items) + " रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 30. T9: DBH Class MAI Narration ─────────────────────────
+def generate_ti_dbh_mai_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_dbh_mai_table", [])
+    if not tbl:
+        return None
+    parts = ["DBH वर्ग अनुसार वार्षिक वृद्धि (MAI):"]
+    cls_items = []
+    total_mai = 0
+    for r in tbl:
+        if r.get("ब्लकको_नाम") != "जम्मा वन कुल":
+            continue
+        cls = r.get("DBH_क्लास", "")
+        mai = r.get("MAI_घमी_प्रति_वर्ष", 0)
+        cls_items.append(f"{cls} वर्गमा {fmt(mai, 2)} घनमिटर/वर्ष")
+        total_mai += mai
+    if cls_items:
+        parts.append("। ".join(cls_items) + f" रहेको छ। जम्मा MAI {fmt(total_mai, 2)} घनमिटर/वर्ष।")
+    return " ".join(parts)
+
+
+# ─── 31. T10: DBH Class AAH Narration ────────────────────────
+def generate_ti_dbh_aah_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_dbh_aah_table", [])
+    if not tbl:
+        return None
+    parts = ["DBH वर्ग अनुसार वार्षिक स्वीकार्य कटान (AAH):"]
+    cls_items = []
+    total_aah = 0
+    for r in tbl:
+        if r.get("ब्लकको_नाम") != "जम्मा वन कुल":
+            continue
+        cls = r.get("DBH_क्लास", "")
+        aah = r.get("AAH_घमी_प्रति_वर्ष", 0)
+        cls_items.append(f"{cls} वर्गमा {fmt(aah, 2)} घनमिटर/वर्ष")
+        total_aah += aah
+    if cls_items:
+        parts.append("। ".join(cls_items) + f" रहेको छ। जम्मा AAH {fmt(total_aah, 2)} घनमिटर/वर्ष।")
+    return " ".join(parts)
+
+
+# ─── 32. T11: Species Composition Narration ──────────────────
+def generate_ti_species_composition_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    comp = fi.get("ti_species_composition_absolute", {})
+    if not comp:
+        return None
+    total = sum(v for v in comp.values() if isinstance(v, (int, float)))
+    if not total:
+        return None
+    sorted_sp = sorted(comp.items(), key=lambda x: x[1], reverse=True)
+    parts = ["यस वनमा प्रजाति संरचना निम्नानुसार रहेको छ:"]
+    sp_items = []
+    for sp, vol in sorted_sp[:5]:
+        pct = vol / total * 100
+        sp_items.append(f"{sp} {fmt(vol, 2)} घनमिटर ({fmt(pct, 2)}%)")
+    if sorted_sp:
+        parts.append("। ".join(sp_items))
+    if len(sorted_sp) > 5:
+        other_vol = sum(v for _, v in sorted_sp[5:])
+        other_pct = other_vol / total * 100
+        parts.append(f"र अन्य प्रजातिहरू {fmt(other_vol, 2)} घनमिटर ({fmt(other_pct, 2)}%)")
+    dominant = sorted_sp[0][0] if sorted_sp else ""
+    if dominant:
+        parts.append(f"रहेका छन्। {dominant} प्रमुख प्रजाति हो।")
+    return " ".join(parts)
+
+
+# ─── 33. T12: Productivity Narration ─────────────────────────
+def generate_ti_productivity_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_block_productivity_table", [])
+    if not tbl:
+        return None
+    parts = ["ब्लक अनुसार उत्पादनसिल संचिती:"]
+    block_items = []
+    for r in tbl:
+        bn = r.get("ब्लकको_नाम", "")
+        if bn == "जम्मा":
+            continue
+        gs_ph = r.get("प्रति_हे_मौज्दात_घमी", 0)
+        mai = r.get("MAI_घमी_प्रति_वर्ष", 0)
+        aah = r.get("AAH_घमी_प्रति_वर्ष", 0)
+        block_items.append(f"{bn} मा प्रति हेक्टर {fmt(gs_ph, 2)} घनमिटर, MAI {fmt(mai, 2)} घमी/वर्ष, AAH {fmt(aah, 2)} घमी/वर्ष")
+    if block_items:
+        parts.append("। ".join(block_items) + " रहेको छ।")
+    best = max(tbl[:-1], key=lambda r: r.get("प्रति_हे_मौज्दात_घमी", 0)) if len(tbl) > 1 else {}
+    worst = min(tbl[:-1], key=lambda r: r.get("प्रति_हे_मौज्दात_घमी", 0)) if len(tbl) > 1 else {}
+    if best and worst and best.get("ब्लकको_नाम") != worst.get("ब्लकको_नाम"):
+        parts.append(
+            f"सबैभन्दा बढी उत्पादनसिल संचिती {best.get('ब्लकको_नाम', '')} मा र "
+            f"सबैभन्दा कम {worst.get('ब्लकको_नाम', '')} मा रहेको छ।"
+        )
+    total_row = tbl[-1] if len(tbl) > 1 else {}
+    gt_ph = total_row.get("प्रति_हे_मौज्दात_घमी", 0)
+    if gt_ph:
+        parts.append(f"जम्मा प्रति हेक्टर {fmt(gt_ph, 2)} घनमिटर रहेको छ।")
+    return " ".join(parts)
+
+
+# ─── 34. T13: Economic Narration ─────────────────────────────
+def generate_ti_economic_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_economic_valuation_table", [])
+    if not tbl:
+        return None
+    total_row = tbl[-1] if len(tbl) > 1 else {}
+    gs = total_row.get("उत्पादनसिल_संचिती_घमी", 0)
+    timber_val = total_row.get("काठ_मूल्य_रु", 0)
+    fuel_val = total_row.get("दाउरा_मूल्य_रु", 0)
+    carbon_val = total_row.get("कार्बन_मूल्य_रु", 0)
+    grand = total_row.get("जम्मा_मूल्य_रु", 0)
+    timber_rate = total_row.get("काठ_दर_रु", 2500)
+    carbon_rate = total_row.get("कार्बन_दर_रु", 3000)
+    if not gs:
+        return None
+    return (
+        f"आर्थिक मूल्याङ्कन: जम्मा वृद्धि मौज्दात {fmt(gs, 2)} घनमिटरको "
+        f"स्टम्पेज दर रु. {fmt(timber_rate, 0)}/घमी अनुसार काठको मूल्य "
+        f"रु. {fmt(timber_val, 0)} र दाउराको मूल्य रु. {fmt(fuel_val, 0)} "
+        f"रहेको छ। कार्बन स्टकको मूल्य दर रु. {fmt(carbon_rate, 0)}/tCO₂ "
+        f"अनुसार रु. {fmt(carbon_val, 0)} रहेको छ। जम्मा मूल्य "
+        f"रु. {fmt(grand, 0)} रहेको छ।"
+    )
+
+
+# ─── 35. T14: Sustainability Narration ───────────────────────
+def generate_ti_sustainability_narration(raw_data: dict) -> Optional[str]:
+    fi = raw_data.get("field_inventory", {})
+    tbl = fi.get("ti_sustainability_table", [])
+    if not tbl:
+        return None
+    total_row = tbl[-1] if len(tbl) > 1 else {}
+    si = total_row.get("दिगोपन_सूचकांक_SI_प्रतिशत", 0)
+    hp = total_row.get("कटान_दबाव_HP_प्रतिशत", 0)
+    gs_ph = total_row.get("उत्पादनसिल_संचिती_प्रति_हे_घमी", 0)
+    mai_pct = total_row.get("MAI_प्रतिशत", 0)
+    if not si and not hp:
+        return None
+
+    si_status = "दिगो" if si < 5 else ("मध्यम" if si < 10 else "अति दोहन जोखिम")
+    hp_status = "कम दबाब" if hp < 50 else ("मध्यम दबाब" if hp < 80 else "उच्च दबाब")
+
+    return (
+        f"दिगोपन सूचकांक: SI (AAH ÷ कुल मौज्दात × १००) {fmt(si, 2)}% रहेको छ, "
+        f"जुन {si_status} अवस्थामा रहेको संकेत गर्दछ। "
+        f"कटान दबाव HP (AAH ÷ MAI × १००) {fmt(hp, 1)}% रहेको छ, "
+        f"जुन {hp_status} हो। प्रति हेक्टर उत्पादनसिल संचिती "
+        f"{fmt(gs_ph, 2)} घनमिटर/हे. र MAI प्रतिशत {fmt(mai_pct, 1)}% रहेको छ।"
+    )
+
+
 SECTION_GENERATORS = {
     "section:forest_summary": generate_forest_summary,
     "section:slope_analysis": generate_slope_analysis,
@@ -670,6 +1027,22 @@ SECTION_GENERATORS = {
     "section:field_inventory_narration": generate_field_inventory_narration,
     "section:sampling_narration": generate_sampling_narration,
     "section:fieldbook_narration": generate_fieldbook_narration,
+    "section:household_narration": generate_household_narration,
+    "section:committee_narration": generate_committee_narration,
+    "section:ti_block_area_narration": generate_ti_block_area_narration,
+    "section:ti_forest_total_narration": generate_ti_forest_total_narration,
+    "section:ti_block_growing_stock_narration": generate_ti_block_growing_stock_narration,
+    "section:ti_species_stock_narration": generate_ti_species_stock_narration,
+    "section:ti_species_dbh_narration": generate_ti_species_dbh_narration,
+    "section:ti_forest_dbh_narration": generate_ti_forest_dbh_narration,
+    "section:ti_dbh_total_narration": generate_ti_dbh_total_narration,
+    "section:ti_dbh_perha_narration": generate_ti_dbh_perha_narration,
+    "section:ti_dbh_mai_narration": generate_ti_dbh_mai_narration,
+    "section:ti_dbh_aah_narration": generate_ti_dbh_aah_narration,
+    "section:ti_species_composition_narration": generate_ti_species_composition_narration,
+    "section:ti_productivity_narration": generate_ti_productivity_narration,
+    "section:ti_economic_narration": generate_ti_economic_narration,
+    "section:ti_sustainability_narration": generate_ti_sustainability_narration,
 }
 
 

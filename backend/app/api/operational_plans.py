@@ -1477,7 +1477,7 @@ async def export_operational_plan(
     filename, disposition = build_disposition(forest_name, "OP", "DOCX", "docx")
 
     return StreamingResponse(
-        buffer,
+        iter([buffer.getvalue()]),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": disposition},
     )

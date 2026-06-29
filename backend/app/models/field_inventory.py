@@ -82,6 +82,11 @@ class FieldInventorySamplePlot(Base):
     sample_plot_number = Column(Integer, nullable=False)
     location = Column(Geography('POINT', srid=4326), nullable=False)
 
+    # Resource yield per 100 sqm per year (from uploaded CSV/Excel)
+    firewood_kg_per_100sqm_per_year = Column(Numeric(10, 2), nullable=True)
+    grass_kg_per_100sqm_per_year = Column(Numeric(10, 2), nullable=True)
+    bedding_material_kg_per_100sqm_per_year = Column(Numeric(10, 2), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
@@ -196,6 +201,11 @@ class FieldInventoryBlockSummary(Base):
     # Mean Annual Increment (%)
     mai_percent = Column(Numeric(5, 2), nullable=True)
     dominant_growth_rate = Column(String(20), nullable=True)  # 'Fast', 'Moderate', 'Slow'
+
+    # Per-hectare resource yields (from kg/100sqm → kg/ha, for demand-supply)
+    firewood_kg_per_ha_per_year = Column(Numeric(15, 6), nullable=True)
+    grass_kg_per_ha_per_year = Column(Numeric(15, 6), nullable=True)
+    bedding_material_kg_per_ha_per_year = Column(Numeric(15, 6), nullable=True)
 
     # Carbon and biomass metrics (IPCC/REDD+ - added 2026-03-03)
     agb_t_per_ha = Column(Numeric(15, 6), nullable=True)  # Above-ground biomass (tonnes/ha)

@@ -753,6 +753,23 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
               </div>
             )}
 
+            {/* OP Document Variables */}
+            {fieldInventory && (
+              <div className="mt-6 bg-white border border-emerald-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-emerald-800 text-sm">
+                    📋 OP Document Variables — Field Inventory Data Table
+                  </h4>
+                </div>
+                <p className="text-xs text-gray-500 mb-2">
+                  क्षेत्र सर्वेक्षण मापन तथ्याङ्क — raw measurement data as a table in the OP document
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <CopyTag label="{{table:fieldinventory}}" value="{{table:fieldinventory}}" variant="section" />
+                </div>
+              </div>
+            )}
+
             {/* Block-wise Results */}
             {summary?.blocks && Array.isArray(summary.blocks) && summary.blocks.length > 0 && (
               <div className="mt-6">

@@ -42,7 +42,7 @@ TABLE_DEFINITIONS: List[dict] = [
     {"table_id": "table_17", "title_ne": "वन पैदावार सङ्कलन",                    "title_en": "Forest Product Collection",     "auto_populatable": False, "data_source": None},
     {"table_id": "table_18", "title_ne": "वन संवर्द्धन क्रियाकलाप",              "title_en": "Forest Enhancement Activities", "auto_populatable": False, "data_source": None},
     {"table_id": "table_19", "title_ne": "संरक्षण योजना",                         "title_en": "Conservation Plan",             "auto_populatable": False, "data_source": None},
-    {"table_id": "table_20", "title_ne": "जैविक विविधता",                        "title_en": "Biodiversity",                  "auto_populatable": False, "data_source": None},
+    {"table_id": "table_20", "title_ne": "जैविक विविधता",                        "title_en": "Biodiversity",                  "auto_populatable": True, "data_source": "biodiversity"},
     {"table_id": "table_21", "title_ne": "आय-आर्जन योजना",                       "title_en": "Income Generation Plan",        "auto_populatable": False, "data_source": None},
     {"table_id": "table_22", "title_ne": "सीप विकास",                             "title_en": "Skill Development",             "auto_populatable": False, "data_source": None},
     {"table_id": "table_23", "title_ne": "पर्यापर्यटन",                           "title_en": "Eco-tourism",                   "auto_populatable": False, "data_source": None},
@@ -55,6 +55,11 @@ TABLE_DEFINITIONS: List[dict] = [
     {"table_id": "table_30", "title_ne": "वित्तीय विश्लेषण",                     "title_en": "Financial Analysis",            "auto_populatable": False, "data_source": None},
     {"table_id": "table_31", "title_ne": "जोखिम व्यवस्थापन",                     "title_en": "Risk Management",               "auto_populatable": False, "data_source": None},
     {"table_id": "table_32", "title_ne": "अन्य तालिका",                          "title_en": "Other Table",                   "auto_populatable": False, "data_source": None},
+    {"table_id": "table_33", "title_ne": "संरक्षण स्थिति विवरण",                  "title_en": "IUCN Conservation Status",       "auto_populatable": True, "data_source": "biodiversity"},
+    {"table_id": "table_34", "title_ne": "संरक्षित प्रजाति सूची",                 "title_en": "Protected Species List",         "auto_populatable": True, "data_source": "biodiversity"},
+    {"table_id": "table_35", "title_ne": "मिचाहा प्रजाति सूची",                   "title_en": "Invasive Species List",          "auto_populatable": True, "data_source": "biodiversity"},
+    {"table_id": "table_36", "title_ne": "वनस्पति प्रजाति सूची",                   "title_en": "Vegetation Species List",        "auto_populatable": True, "data_source": "biodiversity"},
+    {"table_id": "table_37", "title_ne": "जनावर प्रजाति सूची",                     "title_en": "Animal Species List",            "auto_populatable": True, "data_source": "biodiversity"},
 ]
 
 
@@ -144,6 +149,8 @@ async def auto_populate_table(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    from app.services.operational_plan.variable_registry import TABLE_ID_ALIAS
+    table_id = TABLE_ID_ALIAS.get(table_id, table_id)
     calc = db.execute(
         select(Calculation).where(Calculation.id == calculation_id)
     ).scalar_one_or_none()
@@ -224,6 +231,143 @@ async def auto_populate_table(
             {"committee": "Advisory Committee", "members": ac.get("total_members", 0)},
             {"committee": "Financial Committee", "members": fc.get("total_members", 0)},
         ]
+    elif table_id == "table_20":
+        bio = raw.get("biodiversity", {})
+        if bio.get("available"):
+            rows = []
+            idx = 0
+            for rec in bio.get("vegetation", []):
+                idx += 1
+                rows.append({
+                    "sn": idx,
+                    "name": rec.get("name", ""),
+                    "scientific_name": rec.get("scientific_name", ""),
+                    "type": "वनस्पति",
+                    "sub_category": rec.get("sub_category", ""),
+                    "iucn_status": rec.get("iucn_status", ""),
+                    "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                    "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                })
+            for rec in bio.get("animals", []):
+                idx += 1
+                rows.append({
+                    "sn": idx,
+                    "name": rec.get("name", ""),
+                    "scientific_name": rec.get("scientific_name", ""),
+                    "type": "जनावर",
+                    "sub_category": rec.get("sub_category", ""),
+                    "iucn_status": rec.get("iucn_status", ""),
+                    "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                    "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                })
+        else:
+            rows = [{"note": "No biodiversity data available"}]
+    elif table_id == "table_33":
+        bio = raw.get("biodiversity", {})
+        if bio.get("available"):
+            iucn_map = {"CR": "संकटग्रस्त", "EN": "लोपोन्मुख", "VU": "असुरक्षित",
+                        "NT": "नजिकै खतरा", "LC": "कम चासो", "DD": "अपर्याप्त"}
+            iucn_order = ["CR", "EN", "VU", "NT", "LC", "DD"]
+            breakdown = bio.get("iucn_breakdown", {})
+            rows = []
+            for code in iucn_order:
+                cnt = breakdown.get(code, 0)
+                if cnt:
+                    rows.append({
+                        "iucn_code": code,
+                        "nepali_label": iucn_map.get(code, code),
+                        "count": cnt,
+                    })
+        else:
+            rows = [{"note": "No biodiversity data available"}]
+    elif table_id == "table_34":
+        bio = raw.get("biodiversity", {})
+        if bio.get("available"):
+            rows = []
+            idx = 0
+            for rec in bio.get("vegetation", []):
+                if rec.get("is_protected"):
+                    idx += 1
+                    rows.append({
+                        "sn": idx,
+                        "name": rec.get("name", ""),
+                        "scientific_name": rec.get("scientific_name", ""),
+                        "sub_category": rec.get("sub_category", ""),
+                        "iucn_status": rec.get("iucn_status", ""),
+                    })
+            for rec in bio.get("animals", []):
+                if rec.get("is_protected"):
+                    idx += 1
+                    rows.append({
+                        "sn": idx,
+                        "name": rec.get("name", ""),
+                        "scientific_name": rec.get("scientific_name", ""),
+                        "sub_category": rec.get("sub_category", ""),
+                        "iucn_status": rec.get("iucn_status", ""),
+                    })
+        else:
+            rows = [{"note": "No biodiversity data available"}]
+    elif table_id == "table_35":
+        bio = raw.get("biodiversity", {})
+        if bio.get("available"):
+            rows = []
+            idx = 0
+            for rec in bio.get("vegetation", []):
+                if rec.get("is_invasive"):
+                    idx += 1
+                    rows.append({
+                        "sn": idx,
+                        "name": rec.get("name", ""),
+                        "scientific_name": rec.get("scientific_name", ""),
+                        "sub_category": rec.get("sub_category", ""),
+                        "iucn_status": rec.get("iucn_status", ""),
+                    })
+            for rec in bio.get("animals", []):
+                if rec.get("is_invasive"):
+                    idx += 1
+                    rows.append({
+                        "sn": idx,
+                        "name": rec.get("name", ""),
+                        "scientific_name": rec.get("scientific_name", ""),
+                        "sub_category": rec.get("sub_category", ""),
+                        "iucn_status": rec.get("iucn_status", ""),
+                    })
+        else:
+            rows = [{"note": "No biodiversity data available"}]
+    elif table_id == "table_36":
+        bio = raw.get("biodiversity", {})
+        if bio.get("available"):
+            rows = []
+            for idx, rec in enumerate(bio.get("vegetation", []), 1):
+                rows.append({
+                    "sn": idx,
+                    "name": rec.get("name", ""),
+                    "scientific_name": rec.get("scientific_name", ""),
+                    "sub_category": rec.get("sub_category", ""),
+                    "iucn_status": rec.get("iucn_status", ""),
+                    "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                    "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                    "primary_use": rec.get("primary_use", ""),
+                })
+        else:
+            rows = [{"note": "No vegetation data available"}]
+    elif table_id == "table_37":
+        bio = raw.get("biodiversity", {})
+        if bio.get("available"):
+            rows = []
+            for idx, rec in enumerate(bio.get("animals", []), 1):
+                rows.append({
+                    "sn": idx,
+                    "name": rec.get("name", ""),
+                    "scientific_name": rec.get("scientific_name", ""),
+                    "sub_category": rec.get("sub_category", ""),
+                    "iucn_status": rec.get("iucn_status", ""),
+                    "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                    "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                    "primary_use": rec.get("primary_use", ""),
+                })
+        else:
+            rows = [{"note": "No animal data available"}]
 
     table_data = db.execute(
         select(OPTableData).where(

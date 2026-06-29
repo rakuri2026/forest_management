@@ -10,6 +10,7 @@ import {
   TableOutlined,
   BarChartOutlined,
   TeamOutlined,
+  AuditOutlined,
   ReloadOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
@@ -21,6 +22,7 @@ import FileUploadSection from './FileUploadSection';
 import HouseholdDataTable from './HouseholdDataTable';
 import HouseholdSummaryDashboard from './HouseholdSummary';
 import CommitteeManagement from './CommitteeManagement';
+import DemandSupplyTab from './DemandSupplyTab';
 
 interface HouseholdInfoTabProps {
   calculationId: string;
@@ -173,7 +175,7 @@ const HouseholdInfoTab: React.FC<HouseholdInfoTabProps> = ({
         </span>
       ),
       children: hasData && summary ? (
-        <HouseholdSummaryDashboard summary={summary} />
+        <HouseholdSummaryDashboard summary={summary} calculationId={calculationId} />
       ) : (
         <Alert
           message="No Data to Analyze"
@@ -192,6 +194,17 @@ const HouseholdInfoTab: React.FC<HouseholdInfoTabProps> = ({
       ),
       children: (
         <CommitteeManagement calculationId={calculationId} />
+      ),
+    },
+    {
+      key: '6',
+      label: (
+        <span>
+          <AuditOutlined /> Demand & Supply
+        </span>
+      ),
+      children: (
+        <DemandSupplyTab calculationId={calculationId} />
       ),
     },
   ];

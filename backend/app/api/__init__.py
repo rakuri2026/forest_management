@@ -10,5 +10,6 @@ from . import household_info
 from . import forest_committee
 from . import yearly_activities
 from . import compartments
+from . import demand_supply
 
-__all__ = ["auth_router", "forests_router", "inventory_router", "species_router", "tree_models_router", "all_tree_exports_router", "biodiversity", "household_info", "forest_committee", "yearly_activities", "compartments"]
+__all__ = ["auth_router", "forests_router", "inventory_router", "species_router", "tree_models_router", "all_tree_exports_router", "biodiversity", "household_info", "forest_committee", "yearly_activities", "compartments", "demand_supply"]

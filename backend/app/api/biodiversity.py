@@ -20,6 +20,12 @@ from ..schemas.biodiversity import (
 )
 from ..utils.auth import get_current_user
 
+def _invalidate_op_cache(db: Session, calculation_id: UUID):
+    from app.models.op_data_cache import OpDataCache
+    db.query(OpDataCache).filter(
+        OpDataCache.calculation_id == calculation_id
+    ).delete(synchronize_session=False)
+
 router = APIRouter(prefix="/biodiversity")
 
 
@@ -255,6 +261,7 @@ def bulk_add_species(
     if new_records:
         db.add_all(new_records)
         db.commit()
+        _invalidate_op_cache(db, calculation_id)
 
     return {
         "added": len(new_records),
@@ -295,6 +302,7 @@ def remove_species_from_calculation(
 
     db.delete(record)
     db.commit()
+    _invalidate_op_cache(db, calculation_id)
 
     return {"message": "Species removed successfully"}
 

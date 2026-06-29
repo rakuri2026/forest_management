@@ -39,6 +39,7 @@ export function SettlementStatistics({ settlements }: SettlementStatisticsProps)
             <div>
               <p className="text-sm text-gray-600">Total Settlements</p>
               <p className="text-2xl font-bold">{settlements.length}</p>
+              <p className="text-xs text-gray-400 font-mono mt-1">{'{{ug_total_settlements}}'}</p>
             </div>
           </div>
         </div>
@@ -49,6 +50,7 @@ export function SettlementStatistics({ settlements }: SettlementStatisticsProps)
             <div>
               <p className="text-sm text-gray-600">Total Buildings</p>
               <p className="text-2xl font-bold">{totalBuildings}</p>
+              <p className="text-xs text-gray-400 font-mono mt-1">{'{{ug_total_buildings}}'}</p>
             </div>
           </div>
         </div>
@@ -59,6 +61,7 @@ export function SettlementStatistics({ settlements }: SettlementStatisticsProps)
             <div>
               <p className="text-sm text-gray-600">Total Building Area</p>
               <p className="text-2xl font-bold">{totalArea.toFixed(0)} m²</p>
+              <p className="text-xs text-gray-400 font-mono mt-1">{'{{ug_total_building_area_m2}}'}</p>
             </div>
           </div>
         </div>
@@ -72,18 +75,21 @@ export function SettlementStatistics({ settlements }: SettlementStatisticsProps)
                   <span className="font-bold">{totalSmall}</span>
                 </div>
                 <span className="text-gray-600">Small</span>
+                <p className="text-gray-400 font-mono mt-0.5">{'{{ug_small_buildings}}'}</p>
               </div>
               <div className="text-center">
                 <div className="bg-yellow-200 px-2 py-1 rounded mb-1">
                   <span className="font-bold">{totalMedium}</span>
                 </div>
                 <span className="text-gray-600">Medium</span>
+                <p className="text-gray-400 font-mono mt-0.5">{'{{ug_medium_buildings}}'}</p>
               </div>
               <div className="text-center">
                 <div className="bg-orange-200 px-2 py-1 rounded mb-1">
                   <span className="font-bold">{totalLarge}</span>
                 </div>
                 <span className="text-gray-600">Large</span>
+                <p className="text-gray-400 font-mono mt-0.5">{'{{ug_large_buildings}}'}</p>
               </div>
             </div>
           </div>
@@ -96,18 +102,21 @@ export function SettlementStatistics({ settlements }: SettlementStatisticsProps)
           <div>
             <p className="text-sm text-gray-600">Average Building Size</p>
             <p className="text-xl font-semibold text-gray-800">{avgBuildingSize.toFixed(1)} m²</p>
+            <p className="text-xs text-gray-400 font-mono mt-0.5">{'{{ug_avg_building_size_m2}}'}</p>
           </div>
           <div>
             <p className="text-sm text-gray-600">Small Buildings (&lt; 50 m²)</p>
             <p className="text-xl font-semibold text-green-600">
               {totalSmall} ({totalBuildings > 0 ? ((totalSmall / totalBuildings) * 100).toFixed(1) : 0}%)
             </p>
+            <p className="text-xs text-gray-400 font-mono mt-0.5">{'{{ug_small_pct}}'} {'{{ug_small_buildings}}'}</p>
           </div>
           <div>
             <p className="text-sm text-gray-600">Medium Buildings (50-150 m²)</p>
             <p className="text-xl font-semibold text-yellow-600">
               {totalMedium} ({totalBuildings > 0 ? ((totalMedium / totalBuildings) * 100).toFixed(1) : 0}%)
             </p>
+            <p className="text-xs text-gray-400 font-mono mt-0.5">{'{{ug_medium_pct}}'} {'{{ug_medium_buildings}}'}</p>
           </div>
         </div>
         <div className="grid grid-cols-1 gap-4 text-center mt-4">
@@ -116,11 +125,13 @@ export function SettlementStatistics({ settlements }: SettlementStatisticsProps)
             <p className="text-xl font-semibold text-orange-600">
               {totalLarge} ({totalBuildings > 0 ? ((totalLarge / totalBuildings) * 100).toFixed(1) : 0}%)
             </p>
+            <p className="text-xs text-gray-400 font-mono mt-0.5">{'{{ug_large_pct}}'} {'{{ug_large_buildings}}'}</p>
           </div>
         </div>
       </div>
 
       {/* Detailed Table */}
+      <p className="text-xs text-gray-400 font-mono mb-1">{'{{ug_buildings}}'}</p>
       <div className="overflow-x-auto">
         <table className="min-w-full bg-white border border-gray-300">
           <thead className="bg-gray-100">

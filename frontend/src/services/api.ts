@@ -926,6 +926,11 @@ export const fieldInventoryApi = {
     return response.data;
   },
 
+  getSpeciesDbhBreakdown: async (fieldInventoryId: string): Promise<any> => {
+    const response = await api.get(`/api/field-inventory/${fieldInventoryId}/species-dbh-breakdown`);
+    return response.data;
+  },
+
   exportExcel: async (
     fieldInventoryId: string,
     aahGood: number = 75,
@@ -1629,6 +1634,14 @@ export const userGroupApi = {
    */
   deleteAllCommittees: async (calculationId: string): Promise<any> => {
     const response = await api.delete(`/api/forest-committee/user-groups/${calculationId}`);
+    return response.data;
+  },
+
+  /**
+   * Get demand vs supply data for forest products
+   */
+  getDemandSupply: async (calculationId: string): Promise<any> => {
+    const response = await api.get(`/api/calculations/${calculationId}/demand-supply`);
     return response.data;
   },
 };

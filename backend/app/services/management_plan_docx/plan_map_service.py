@@ -57,11 +57,18 @@ def _map_cache_set(calculation_id: UUID, layer_name: str, buf: io.BytesIO, dpi: 
     if dpi is None:
         import sys
         dpi = sys.modules[__name__].DPI
+    buf.seek(0, 2)
+    size = buf.tell()
+    if size < 5000:
+        logger.warning(f"Map cache SKIPPED (too small: {size}B): {layer_name} for {calculation_id}")
+        buf.seek(0)
+        return
+    buf.seek(0)
     path = _map_cache_path(calculation_id, layer_name, dpi)
     try:
         with open(path, "wb") as f:
             f.write(buf.getvalue())
-        logger.info(f"Map cache SAVED: {layer_name} -> {path} dpi={dpi}")
+        logger.info(f"Map cache SAVED ({size/1024:.0f}KB): {layer_name} -> {path} dpi={dpi}")
     except Exception as e:
         logger.warning(f"Map cache write failed: {e}")
 
@@ -140,6 +147,8 @@ BASEMAP_SOURCES = {
     "sampling_plot_topo":    cx.providers.OpenTopoMap,
     "sampling_plot_satellite": cx.providers.Esri.WorldImagery,
     "fieldbook":               cx.providers.OpenTopoMap,
+    "usergroup":               cx.providers.OpenTopoMap,
+    "subarea":                 cx.providers.OpenTopoMap,
 }
 
 LAYER_LABELS = {
@@ -157,6 +166,8 @@ LAYER_LABELS = {
     "sampling_plot_topo":      {"ne": "स्थलाकृतिक नमुना प्लट नक्सा",     "en": "Sample Plot Map (Topo)"},
     "sampling_plot_satellite": {"ne": "उपग्रह नमुना प्लट नक्सा",         "en": "Sample Plot Map (Satellite)"},
     "fieldbook":               {"ne": "फिल्डबुक बाटो नक्सा",              "en": "Fieldbook Path Map"},
+    "usergroup":               {"ne": "उपयोगकर्ता समूह नक्सा",             "en": "User Group Map"},
+    "subarea":                 {"ne": "उप-क्षेत्र नक्सा",                  "en": "Sub-Area Map"},
 }
 
 _SAMPLING_PLOT_LAYERS = {"sampling_plot", "sampling_plot_topo", "sampling_plot_satellite"}
@@ -164,6 +175,21 @@ _SAMPLING_PLOT_LAYERS = {"sampling_plot", "sampling_plot_topo", "sampling_plot_s
 BLOCK_COLORS = [
     '#2e7d32', '#1565c0', '#795548', '#f9a825',
     '#6a1b9a', '#00838f', '#e65100', '#c62828',
+]
+
+SUB_AREA_CATEGORIES = [
+    {"value": "protected",      "label": "संरक्षित क्षेत्र",               "color": "#ef4444", "is_excluded": False},
+    {"value": "plantation",     "label": "बृक्षारोपण क्षेत्र",             "color": "#10b981", "is_excluded": False},
+    {"value": "pro-poor",       "label": "गरिव तथा विपन्नको लागी",         "color": "#f59e0b", "is_excluded": False},
+    {"value": "religious",      "label": "धार्मीक क्षेत्र",                 "color": "#8b5cf6", "is_excluded": False},
+    {"value": "biodiversity",   "label": "जैविक विविधता क्षेत्र",           "color": "#06b6d4", "is_excluded": False},
+    {"value": "tourist",        "label": "पर्यटन क्षेत्र",                   "color": "#ec4899", "is_excluded": False},
+    {"value": "office",         "label": "कार्यालय परिसर",                  "color": "#6b7280", "is_excluded": False},
+    {"value": "private_land",   "label": "निजि जग्गा (बहिस्कृत)",           "color": "#dc2626", "is_excluded": True},
+    {"value": "agroforestry",   "label": "कृषिवन क्षेत्र",                  "color": "#84cc17", "is_excluded": False},
+    {"value": "tree_strata",    "label": "धेरै ठुला रूख भएको क्षेत्र",      "color": "#15803d", "is_excluded": False},
+    {"value": "water_hole",     "label": "पानी मूहान",                      "color": "#0ea5e9", "is_excluded": False},
+    {"value": "wildlife_corridor", "label": "जैविक मार्ग",                  "color": "#a855f7", "is_excluded": False},
 ]
 
 
@@ -205,6 +231,46 @@ def _get_blocks_with_geometry(db: Session, calculation_id: UUID) -> List[Dict]:
             })
         except Exception as e:
             logger.warning(f"Could not parse geometry for block {b.name}: {e}")
+    return result
+
+
+def _get_sub_areas_with_geometry(db: Session, calculation_id: UUID) -> List[Dict]:
+    from ...models.calculation import Calculation
+    from shapely.geometry import shape as shapely_shape
+
+    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calc or not calc.result_data:
+        return []
+
+    raw_sub_areas = calc.result_data.get("sub_areas", [])
+    if not raw_sub_areas:
+        return []
+
+    result = []
+    for sa in raw_sub_areas:
+        try:
+            geo_dict = sa.get("geometry")
+            if not geo_dict:
+                continue
+            geom = shapely_shape(geo_dict)
+            centroid = geom.centroid
+            category = sa.get("category", "")
+            name = sa.get("name", "")
+            is_excluded = sa.get("is_excluded", sa.get("isExcluded", False))
+            area_ha = sa.get("area_hectares", sa.get("area", 0))
+            cat_info = next((c for c in SUB_AREA_CATEGORIES if c["value"] == category), None)
+            result.append({
+                "name": name,
+                "category": category,
+                "geometry": geom,
+                "centroid": centroid,
+                "area_ha": area_ha,
+                "is_excluded": is_excluded,
+                "color": cat_info["color"] if cat_info else "#9e9e9e",
+                "label_np": cat_info["label"] if cat_info else category,
+            })
+        except Exception as e:
+            logger.warning(f"Could not parse geometry for sub-area '{sa.get('name', '')}': {e}")
     return result
 
 
@@ -261,11 +327,185 @@ def _get_sample_plots(db: Session, calculation_id: UUID) -> List[Dict]:
     return plots
 
 
+def _get_usergroup_extent(db: Session, calculation_id: UUID):
+    """Returns user group extent as Shapely polygon, or None."""
+    from app.models.user_group import UserGroupExtent
+    from geoalchemy2.shape import to_shape
+    extent = db.query(UserGroupExtent).filter(
+        UserGroupExtent.calculation_id == calculation_id
+    ).first()
+    if extent and extent.extent_geometry:
+        try:
+            return to_shape(extent.extent_geometry)
+        except Exception:
+            return None
+    return None
+
+
+def _get_usergroup_settlements(db: Session, calculation_id: UUID) -> List[Dict]:
+    """Returns [{name, lat, lon, building_count}] grouped by settlement."""
+    from app.models.user_group import UserGroupExtent, UserGroupBuilding
+    extent = db.query(UserGroupExtent).filter(
+        UserGroupExtent.calculation_id == calculation_id
+    ).first()
+    if not extent:
+        return []
+    rows = db.query(UserGroupBuilding).filter(
+        UserGroupBuilding.extent_id == extent.id,
+        UserGroupBuilding.buildings_geojson.isnot(None),
+    ).order_by(UserGroupBuilding.settlement_name).all()
+    seen = {}
+    for r in rows:
+        name = r.settlement_name or "Unknown"
+        if name not in seen:
+            geo = r.buildings_geojson or []
+            ref_lat = geo[0].get("lat") if geo else None
+            ref_lon = geo[0].get("lon") if geo else None
+            seen[name] = {
+                "name": name,
+                "lat": ref_lat,
+                "lon": ref_lon,
+                "building_count": sum(
+                    sum(1 for bg in (b.buildings_geojson or []))
+                    for b in rows if (b.settlement_name or "Unknown") == name
+                ),
+            }
+    return list(seen.values())
+
+
+def _get_usergroup_buildings(db: Session, calculation_id: UUID) -> List[Dict]:
+    """Returns [{lat, lon, area}] flattened from all UserGroupBuilding records."""
+    from app.models.user_group import UserGroupExtent, UserGroupBuilding
+    extent = db.query(UserGroupExtent).filter(
+        UserGroupExtent.calculation_id == calculation_id
+    ).first()
+    if not extent:
+        return []
+    rows = db.query(UserGroupBuilding).filter(
+        UserGroupBuilding.extent_id == extent.id,
+        UserGroupBuilding.buildings_geojson.isnot(None),
+    ).all()
+    points = []
+    for r in rows:
+        geo = r.buildings_geojson or []
+        for g in geo:
+            lat = g.get("lat")
+            lon = g.get("lon")
+            if lat is not None and lon is not None:
+                points.append({
+                    "lat": lat,
+                    "lon": lon,
+                    "area": g.get("area", 0),
+                })
+    return points
+
+
+def _get_usergroup_rivers(db: Session, calculation_id: UUID, extent_wkt: str) -> List[Dict]:
+    """Returns [{name, geometry_wkt}] of rivers intersecting the extent."""
+    sql = text("""
+        SELECT "river name", ST_AsText(shape) as geometry_wkt
+        FROM river.river84
+        WHERE ST_Intersects(shape, ST_SetSRID(ST_GeomFromText(:wkt), 4326))
+        LIMIT 200
+    """)
+    try:
+        rows = db.execute(sql, {"wkt": extent_wkt}).fetchall()
+        return [{"name": r[0] or "", "geometry": r[1]} for r in rows]
+    except Exception:
+        return []
+
+
+def _get_usergroup_poi(db: Session, calculation_id: UUID, extent_wkt: str, table: str) -> List[Dict]:
+    """Returns [{name, lon, lat}] from infrastructure.{table} intersecting extent.
+    Uses COALESCE to handle tables without a 'name' column (e.g. health_facilities uses hf_type)."""
+    name_col = "name" if table == "education_facilities" else "hf_type"
+    sql = text(f"""
+        SELECT COALESCE({name_col}, '') as name,
+               ST_X(geom) as lon, ST_Y(geom) as lat
+        FROM infrastructure.{table}
+        WHERE geom IS NOT NULL
+          AND ST_Intersects(geom, ST_SetSRID(ST_GeomFromText(:wkt), 4326))
+        LIMIT 100
+    """)
+    try:
+        rows = db.execute(sql, {"wkt": extent_wkt}).fetchall()
+        return [{"name": r[0] or "", "lon": r[1], "lat": r[2]} for r in rows]
+    except Exception:
+        return []
+
+
+def _fetch_tile(url: str) -> Optional[np.ndarray]:
+    """Fetch a single tile image from URL, return as RGBA numpy array."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "ForestManagement/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = resp.read()
+        img = PILImage.open(io.BytesIO(data)).convert("RGBA")
+        return np.array(img)
+    except Exception:
+        return None
+
+
 def _add_basemap(ax, layer_name: str, alpha: float = 0.6):
     source = BASEMAP_SOURCES.get(layer_name, cx.providers.OpenStreetMap.Mapnik)
+    url_template = source.get("url", "")
+    if not url_template:
+        ax.set_facecolor('#f0f0f0')
+        return False
+
     try:
-        cx.add_basemap(ax, crs='EPSG:4326', source=source, alpha=alpha, zorder=1)
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        lon_span = x1 - x0
+        zoom = _calc_zoom(lon_span, FIG_SIZE_INCHES[0], dpi=150)
+
+        # Tile coordinates covering the viewport
+        min_tx, max_ty = _latlon_to_tile(y1, x0, zoom)  # NW corner
+        max_tx, min_ty = _latlon_to_tile(y0, x1, zoom)  # SE corner
+
+        tx_start, tx_end = min(min_tx, max_tx), max(min_tx, max_tx)
+        ty_start, ty_end = min(min_ty, max_ty), max(min_ty, max_ty)
+
+        # Clamp to valid range
+        max_tile = 2 ** zoom - 1
+        tx_start = max(0, min(tx_start, max_tile))
+        tx_end = max(0, min(tx_end, max_tile))
+        ty_start = max(0, min(ty_start, max_tile))
+        ty_end = max(0, min(ty_end, max_tile))
+
+        n = 2.0 ** zoom
+        subdomains = ["a", "b", "c"]
+
+        rows = []
+        for ty in range(ty_start, ty_end + 1):
+            row_tiles = []
+            for tx in range(tx_start, tx_end + 1):
+                subdomain = subdomains[(tx + ty) % len(subdomains)]
+                tile_url = url_template.replace("{s}", subdomain).replace("{z}", str(zoom)).replace("{x}", str(tx)).replace("{y}", str(ty))
+                tile_data = _fetch_tile(tile_url)
+                if tile_data is not None:
+                    row_tiles.append(tile_data)
+                else:
+                    row_tiles.append(np.full((256, 256, 4), [240, 240, 240, 255], dtype=np.uint8))
+            if row_tiles:
+                rows.append(np.hstack(row_tiles))
+
+        if not rows:
+            raise ValueError("No tiles fetched")
+
+        tile_img = np.vstack(rows)
+
+        # Compute extent in lon/lat
+        extent_min_lon = tx_start / n * 360.0 - 180.0
+        extent_max_lon = (tx_end + 1) / n * 360.0 - 180.0
+        extent_max_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * ty_start / n))))
+        extent_min_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (ty_end + 1) / n))))
+
+        ax.imshow(tile_img, extent=[extent_min_lon, extent_max_lon, extent_min_lat, extent_max_lat],
+                  alpha=alpha, zorder=1)
         return True
+
     except Exception as e:
         logger.warning(f"Basemap unavailable for {layer_name}: {e}")
         ax.set_facecolor('#f0f0f0')
@@ -331,7 +571,7 @@ def _add_raster_overlay(ax, db: Session, calculation_id: UUID, layer_name: str, 
         return False
 
 
-def _add_block_polygons_with_labels(ax, blocks: List[Dict]):
+def _add_block_polygons_with_labels(ax, blocks: List[Dict], show_labels: bool = True):
     for i, blk in enumerate(blocks):
         color = BLOCK_COLORS[i % len(BLOCK_COLORS)]
 
@@ -352,24 +592,76 @@ def _add_block_polygons_with_labels(ax, blocks: List[Dict]):
                     rx, ry = ring.xy
                     ax.plot(rx, ry, color='#888', linewidth=0.8, linestyle='--', zorder=3)
 
+        if show_labels:
+            ax.annotate(
+                blk["name"],
+                xy=(centroid.x, centroid.y),
+                fontsize=10,
+                fontweight='bold',
+                ha='center',
+                va='center',
+                color='#1b5e20',
+                fontproperties=_dev_fontprop(10),
+                bbox=dict(
+                    boxstyle='round,pad=0.25',
+                    facecolor='white',
+                    edgecolor='#1b5e20',
+                    alpha=0.85,
+                    linewidth=0.5,
+                ),
+                zorder=6,
+            )
+
+
+def _add_sub_area_polygons_with_labels(ax, sub_areas: List[Dict]) -> List[Dict]:
+    legend_items = []
+    for i, sa in enumerate(sub_areas, 1):
+        geom = sa["geometry"]
+        color = sa["color"]
+        is_excluded = sa["is_excluded"]
+
+        fill_color = color if not is_excluded else "#fca5a5"
+        line_style = "dashed" if is_excluded else "solid"
+        line_color = "#dc2626" if is_excluded else color
+
+        if isinstance(geom, ShapelyPolygon):
+            xs, ys = geom.exterior.xy
+            ax.fill(xs, ys, color=fill_color, alpha=0.25, zorder=4)
+            ax.plot(xs, ys, color=line_color, linewidth=1.8, linestyle=line_style, zorder=4)
+            for ring in geom.interiors:
+                rx, ry = ring.xy
+                ax.plot(rx, ry, color="#888", linewidth=0.6, linestyle="--", zorder=4)
+        elif isinstance(geom, MultiPolygon):
+            for part in geom.geoms:
+                xs, ys = part.exterior.xy
+                ax.fill(xs, ys, color=fill_color, alpha=0.25, zorder=4)
+                ax.plot(xs, ys, color=line_color, linewidth=1.8, linestyle=line_style, zorder=4)
+                for ring in part.interiors:
+                    rx, ry = ring.xy
+                    ax.plot(rx, ry, color="#888", linewidth=0.6, linestyle="--", zorder=4)
+
+        centroid = sa["centroid"]
+        num_color = "#dc2626" if is_excluded else "#1a1a1a"
+        ax.scatter(centroid.x, centroid.y, s=100, marker="o",
+                   facecolors="white", edgecolors=num_color, linewidth=1.5, zorder=8)
         ax.annotate(
-            blk["name"],
+            str(i),
             xy=(centroid.x, centroid.y),
-            fontsize=10,
-            fontweight='bold',
-            ha='center',
-            va='center',
-            color='#1b5e20',
-            fontproperties=_dev_fontprop(10),
-            bbox=dict(
-                boxstyle='round,pad=0.25',
-                facecolor='white',
-                edgecolor='#1b5e20',
-                alpha=0.85,
-                linewidth=0.5,
-            ),
-            zorder=6,
+            fontsize=7,
+            fontweight="bold",
+            ha="center",
+            va="center",
+            color=num_color,
+            zorder=9,
         )
+        legend_items.append({
+            "number": i,
+            "name": sa["name"],
+            "category": sa.get("label_np", sa["category"]),
+            "color": color,
+            "is_excluded": is_excluded,
+        })
+    return legend_items
 
 
 def _add_sample_plots(ax, plots: List[Dict]):
@@ -518,6 +810,39 @@ def _add_grid(ax, min_lon, max_lon, min_lat, max_lat):
         ax.text(min_lon, lat, f'{lat:.4f}°', ha='right', va='center', **kw)
 
 
+def _add_neatline(ax, min_lon, max_lon, min_lat, max_lat):
+    """Draw a rectangular border (neat line) around the map data area."""
+    lons = [min_lon, max_lon, max_lon, min_lon, min_lon]
+    lats = [min_lat, min_lat, max_lat, max_lat, min_lat]
+    ax.plot(lons, lats, color='#333333', linewidth=1.5, zorder=10)
+
+
+def _add_scale_bar(ax, min_lon, max_lon, min_lat, max_lat):
+    """Add a simple scale bar at the bottom-left below the lon labels."""
+    import math
+    center_lat = (min_lat + max_lat) / 2.0
+    lon_range = max_lon - min_lon
+    meter_per_deg = 111320.0 * math.cos(math.radians(center_lat))
+    map_width_m = lon_range * meter_per_deg
+
+    nice_intervals = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
+    bar_m = map_width_m * 0.30
+    bar_m = max(iv for iv in nice_intervals if iv <= bar_m) if bar_m >= nice_intervals[0] else nice_intervals[0]
+    bar_deg = bar_m / meter_per_deg
+
+    x0 = min_lon + lon_range * 0.05
+    y = min_lat - 0.02 * (max_lat - min_lat)
+    x1 = x0 + bar_deg
+
+    ax.plot([x0, x1], [y, y], color='#222222', linewidth=3, zorder=10)
+    ax.plot([x0, x0], [y - 0.005, y + 0.005], color='#222222', linewidth=1.5, zorder=10)
+    ax.plot([x1, x1], [y - 0.005, y + 0.005], color='#222222', linewidth=1.5, zorder=10)
+
+    label = f"{bar_m} m" if bar_m < 1000 else f"{bar_m // 1000} km"
+    ax.text((x0 + x1) / 2, y - 0.015, label, fontsize=8, fontweight='bold',
+            ha='center', va='top', color='#222222', zorder=10)
+
+
 def _add_north_arrow(ax):
     na_x = 0.93
     na_y = 0.85
@@ -589,6 +914,29 @@ def _add_legend(ax, layer_name: str):
             ((46/255, 125/255, 50/255, 0.85), "Forest Block"),
             ((255/255, 87/255, 34/255, 0.85), "Sample Plot"),
         ],
+        "usergroup": [
+            ((27/255, 94/255, 32/255, 0.85),  "Community Forest"),
+            ((0/255, 0/255, 255/255, 0.85),   "User Group Extent"),
+            ((255/255, 0/255, 0/255, 0.70),   "Buildings"),
+            ((0/255, 102/255, 255/255, 0.80), "Rivers"),
+            ((255/255, 140/255, 0/255, 0.85), "Settlements"),
+            ((156/255, 39/255, 176/255, 0.85),"Education"),
+            ((233/255, 30/255, 99/255, 0.85), "Health"),
+        ],
+        "subarea": [
+            ((239/255, 68/255, 68/255, 0.85),   "संरक्षित / Protected"),
+            (( 16/255, 185/255,129/255, 0.85),  "बृक्षारोपण / Plantation"),
+            ((245/255,158/255, 11/255, 0.85),   "गरिव विपन्न / Pro-Poor"),
+            ((139/255, 92/255,246/255, 0.85),   "धार्मीक / Religious"),
+            ((  6/255,182/255,212/255, 0.85),   "जैविक / Biodiversity"),
+            ((236/255, 72/255,153/255, 0.85),   "पर्यटन / Tourist"),
+            ((107/255,114/255,128/255, 0.85),   "कार्यालय / Office"),
+            ((220/255, 38/255, 38/255, 0.85),   "निजि जग्गा / Private Land"),
+            ((132/255,204/255, 23/255, 0.85),   "कृषिवन / Agroforestry"),
+            (( 21/255,128/255, 61/255, 0.85),   "ठुला रूख / Tree Strata"),
+            (( 14/255,165/255,233/255, 0.85),   "पानी मूहान / Water Hole"),
+            ((168/255, 85/255,247/255, 0.85),   "जैविक मार्ग / Wildlife Corridor"),
+        ],
     }
 
     items = legend_map.get(layer_name)
@@ -596,10 +944,11 @@ def _add_legend(ax, layer_name: str):
         return
 
     elements = [mpatches.Patch(color=c, label=l) for c, l in items]
+    ncol = len(items) if len(items) <= 4 else (len(items) + 1) // 2
     ax.legend(
         handles=elements, loc='lower right', fontsize=7,
-        title_fontsize=8, framealpha=0.90, edgecolor='#555555',
-        fancybox=True,
+        title_fontsize=8, framealpha=0.85, edgecolor='#555555',
+        fancybox=True, ncol=ncol,
     )
 
 
@@ -617,7 +966,7 @@ def generate_standard_map(
     - Raster overlay at alpha=0.55
     - Block polygons with distinct colors + name labels on ALL maps
     - Boundary outline
-    - Coordinate grid (5x5), NO scale bar
+    - Coordinate grid (5x5), scale bar, neat line
     - North arrow, legend, title
     - Devanagari font with fallback verification
 
@@ -676,37 +1025,76 @@ def _generate_map_inner(
     lon_width = max_lon - min_lon
     lat_height = max_lat - min_lat
 
-    # Compute figure size preserving data aspect ratio
-    base_width_inches = FIG_SIZE_MM / 25.4
-    aspect = lon_width / lat_height if lat_height > 0 else 1.0
-    fig_width = base_width_inches
-    fig_height = base_width_inches / aspect
-    # Clamp to reasonable range so very elongated shapes don't break layout
-    fig_height = max(base_width_inches * 0.5, min(fig_height, base_width_inches * 2.0))
+    # For usergroup, focus viewport on the user group extent instead of full forest
+    if layer_name == "usergroup":
+        ug_extent = _get_usergroup_extent(db, calculation_id)
+        if ug_extent:
+            ug_bounds = ug_extent.bounds
+            min_lon, min_lat, max_lon, max_lat = ug_bounds
+            lon_width = max_lon - min_lon
+            lat_height = max_lat - min_lat
+
+    # Fixed square figure (map content preserves aspect via set_aspect('equal'))
+    A5_W_MM = 148
+    A5_H_MM = 210
+    fig_size_in = FIG_SIZE_MM / 25.4
+
+    subarea_legend_items = []
+    n_extra_lines = 0
+    if layer_name == "subarea":
+        subarea_legend_items = _get_sub_areas_with_geometry(db, calculation_id)
+        n_extra_lines = len(subarea_legend_items)
+
+    if layer_name == "subarea":
+        fig_width = A5_W_MM / 25.4
+        fig_height = A5_H_MM / 25.4
+    else:
+        fig_width = fig_size_in
+        fig_height = fig_size_in * (1.25 if n_extra_lines > 4 else 1.15 if n_extra_lines > 0 else 1.0)
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.92, bottom=0.06)
 
     boundary_geom = _get_forest_geometry(db, calculation_id)
 
-    pad_x = lon_width * 0.05
-    pad_y = lat_height * 0.05
+    pad_x = lon_width * 0.02
+    pad_y = lat_height * 0.02
     ax.set_xlim(min_lon - pad_x, max_lon + pad_x)
     ax.set_ylim(min_lat - pad_y, max_lat + pad_y)
     ax.set_aspect('equal')
 
+    # Dynamic margins (convert user's cm specs to figure fractions)
+    _cm = 1 / 2.54
+    _fw, _fh = fig.get_size_inches()
+    _lr_margin = 0.0 * _cm
+    _title_margin = 1.0 * _cm
+    _title_h = (6 + 14 * 1.3 * 2 + 4) / 72  # pad + font*linespacing*nlines + buffer (in)
+    _legend_rows = (n_extra_lines + 3) // 4 if layer_name == "subarea" else n_extra_lines
+    _legend_h = (_legend_rows * 0.22 + 0.5) / _fh if n_extra_lines > 0 else 0.0
+    fig.subplots_adjust(
+        left=_lr_margin / _fw,
+        right=1 - _lr_margin / _fw,
+        top=1 - (_title_margin + _title_h) / _fh,
+        bottom=_legend_h,
+    )
+
     # 1. Basemap
     _add_basemap(ax, layer_name, alpha=0.6)
 
-    _NO_RASTER_LAYERS = {"boundary", "fieldbook"} | _SAMPLING_PLOT_LAYERS
-    # 2. Raster overlay (skip for boundary, fieldbook, and sampling_plot layers)
+    _NO_RASTER_LAYERS = {"boundary", "fieldbook", "usergroup", "subarea"} | _SAMPLING_PLOT_LAYERS
+    # 2. Raster overlay (skip for boundary, fieldbook, subarea, and sampling_plot layers)
     if layer_name not in _NO_RASTER_LAYERS:
         _add_raster_overlay(ax, db, calculation_id, layer_name, bbox, dpi)
 
-    # 3. Block polygons with name labels — on EVERY map
-    blocks = _get_blocks_with_geometry(db, calculation_id)
-    if blocks:
-        _add_block_polygons_with_labels(ax, blocks)
+    # 3. Block polygons with name labels — on EVERY map except usergroup
+    if layer_name != "usergroup":
+        blocks = _get_blocks_with_geometry(db, calculation_id)
+        if blocks:
+            _add_block_polygons_with_labels(ax, blocks, show_labels=(layer_name != "subarea"))
+
+    # 3b. Sub-area polygons (subarea layer only)
+    subarea_numbered = []
+    if layer_name == "subarea" and subarea_legend_items:
+        subarea_numbered = _add_sub_area_polygons_with_labels(ax, subarea_legend_items)
 
     # 4. Sample plot points (for all sampling_plot layer variants)
     if layer_name in _SAMPLING_PLOT_LAYERS:
@@ -718,33 +1106,123 @@ def _generate_map_inner(
     if layer_name == "fieldbook":
         _add_fieldbook_features(ax, db, calculation_id)
 
-    # 5. Boundary outline
-    _add_boundary_outline(ax, boundary_geom)
+    # 4c. User Group features (usergroup layer only)
+    if layer_name == "usergroup":
+        usergroup_extent = _get_usergroup_extent(db, calculation_id)
+
+        # Rivers — zorder=2
+        if usergroup_extent:
+            from shapely import wkt as shapely_wkt
+            extent_wkt = usergroup_extent.wkt
+            river_data = _get_usergroup_rivers(db, calculation_id, extent_wkt)
+            for r in river_data:
+                try:
+                    geom = shapely_wkt.loads(r["geometry"])
+                    ax.plot(*geom.xy, color='#0066ff', linewidth=2, alpha=0.8, zorder=2)
+                except Exception:
+                    pass
+
+        # Buildings — scatter, Option C (zorder=3)
+        buildings = _get_usergroup_buildings(db, calculation_id)
+        if buildings:
+            lons = [b["lon"] for b in buildings]
+            lats = [b["lat"] for b in buildings]
+            ax.scatter(lons, lats, s=8, color='#ff0000', alpha=0.7, zorder=3, marker='o')
+
+        # Forest boundary (zorder=5)
+        _add_boundary_outline(ax, boundary_geom)
+
+        # User group extent polygon — blue dashed (zorder=5)
+        if usergroup_extent:
+            from shapely.geometry import Polygon as ShapelyPolygon
+            from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
+            ug_polys = [usergroup_extent] if isinstance(usergroup_extent, ShapelyPolygon) else list(usergroup_extent.geoms)
+            for ug_poly in ug_polys:
+                xs, ys = ug_poly.exterior.xy
+                ax.plot(xs, ys, color='#0000ff', linewidth=3, linestyle='--', zorder=5)
+
+        # Settlement markers with labels (zorder=7)
+        settlements = _get_usergroup_settlements(db, calculation_id)
+        for s in settlements:
+            if s["lat"] is not None and s["lon"] is not None:
+                ax.plot(s["lon"], s["lat"], marker='s', color='#ff8c00',
+                        markersize=6, zorder=7)
+                ax.annotate(s["name"], xy=(s["lon"], s["lat"]),
+                            fontsize=7, fontweight='bold', color='#000',
+                            ha='left', va='bottom',
+                            bbox=dict(boxstyle='round,pad=0.15', facecolor='white',
+                                      edgecolor='#cccccc', alpha=0.85),
+                            zorder=8)
+
+        # Education and Health POIs (zorder=7)
+        if usergroup_extent:
+            extent_wkt = usergroup_extent.wkt
+            for table, color in [("education", '#9c27b0'), ("health", '#e91e63')]:
+                pois = _get_usergroup_poi(db, calculation_id, extent_wkt, table)
+                for p in pois:
+                    ax.plot(p["lon"], p["lat"], marker='D', color=color,
+                            markersize=5, zorder=7)
+
+    # 5. Boundary outline (already drawn inside usergroup block for that layer)
+    if layer_name != "usergroup":
+        _add_boundary_outline(ax, boundary_geom)
 
     # 6. Coordinate grid (5x5 lines + labels)
     _add_grid(ax, min_lon, max_lon, min_lat, max_lat)
 
+    # 6b. Neat line (border around the map)
+    _add_neatline(ax, min_lon, max_lon, min_lat, max_lat)
+
+    # 6c. Scale bar (bottom-left) — skip for subarea map
+    if layer_name != "subarea":
+        _add_scale_bar(ax, min_lon, max_lon, min_lat, max_lat)
+
     # 7. Hide axis ticks
     ax.axis('off')
 
-    # 8. Title (Nepali main + English sub — single block, no overlap)
+    # 8. Title (English only, no forest name prefix)
     label_info = LAYER_LABELS.get(layer_name, {})
-    title_ne = label_info.get("ne", layer_name)
     title_en = label_info.get("en", layer_name)
-    prefix = f"{forest_name} — " if forest_name else ""
-    title = f"{prefix}{title_ne}\n{title_en}"
-    ax.set_title(title, fontsize=16, fontweight='bold', pad=10, color='#1b5e20',
-                 fontproperties=_dev_fontprop(16), linespacing=1.4)
+    ax.set_title(title_en, fontsize=14, fontweight='bold', pad=6, color='#1b5e20',
+                 fontproperties=_dev_fontprop(14))
 
-    # 9. North arrow (NO scale bar — grid provides scale)
+    # 9. North arrow
     _add_north_arrow(ax)
 
-    # 10. Legend
-    if layer_name != "boundary":
+    # 10. Legend (below map, horizontal) — skip for boundary and subarea (subarea has its own numbered list)
+    if layer_name not in ("boundary", "subarea"):
         _add_legend(ax, layer_name)
 
     # Footer
-    fig.text(0.02, 0.02, f"{dpi} DPI | {title_en}", fontsize=8, color='#888888')
+    fig.text(0.02, 0.01, f"{dpi} DPI | {title_en}", fontsize=7, color='#888888')
+
+    # 11. Sub-area numbered list (below map) — 4 columns with wrapping
+    if subarea_numbered:
+        def _wrap_label(text, max_chars=20):
+            if len(text) <= max_chars:
+                return text
+            break_at = text.rfind(" ", 0, max_chars)
+            if break_at == -1:
+                break_at = max_chars
+            return text[:break_at] + "\n" + text[break_at:]
+
+        n_cols = 4
+        col_width = 0.16
+        gap = 0.008
+        total_w = n_cols * col_width + (n_cols - 1) * gap
+        x_start = (1.0 - total_w) / 2
+        lines_per_col = (len(subarea_numbered) + n_cols - 1) // n_cols
+        for idx, item in enumerate(subarea_numbered):
+            col = idx // lines_per_col
+            row = idx % lines_per_col
+            x_pos = x_start + col * (col_width + gap)
+            line_height = _legend_h * 0.85 / max(lines_per_col, 1)
+            y_pos = _legend_h * 0.9 - row * line_height
+            marker_color = "#dc2626" if item["is_excluded"] else "#1a1a1a"
+            fig.text(x_pos, y_pos, f"{item['number']}. {_wrap_label(item['name'])}",
+                     fontsize=7, color=marker_color, fontweight="bold",
+                     va="top", ha="left",
+                     fontproperties=_dev_fontprop(7))
 
     buf = io.BytesIO()
     fig.savefig(buf, format='PNG', dpi=dpi, facecolor='white')

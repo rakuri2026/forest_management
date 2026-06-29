@@ -8,6 +8,7 @@ import { DeleteOutlined, EditOutlined, ReloadOutlined, SaveOutlined, CloseOutlin
 import type { ColumnsType } from 'antd/es/table';
 import * as api from '../../services/api';
 import type { HouseholdInfo } from '../../types/household';
+import HouseholdVariablePanel from './HouseholdVariablePanel';
 
 interface HouseholdDataTableProps {
   households: HouseholdInfo[];
@@ -763,6 +764,53 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
           bordered
         />
       </Form>
+
+      {/* Variable Panel + Notes Section */}
+      <div style={{ marginTop: 24, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 60%', minWidth: 300 }}>
+          <div style={{
+            border: '1px solid #d9d9d9',
+            borderRadius: 6,
+            padding: 12,
+            background: '#fafafa',
+          }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>
+              अतिरिक्त विवरण / नोट (Additional Notes)
+            </h4>
+            <textarea
+              id="household-notes"
+              rows={4}
+              style={{
+                width: '100%',
+                border: '1px solid #d9d9d9',
+                borderRadius: 4,
+                padding: '8px 12px',
+                fontSize: 13,
+                lineHeight: 1.6,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+              placeholder="चर सम्मिलित गर्न दायाँ प्यानलको 'सम्मिलित' बटन प्रयोग गर्नुहोस्।"
+            />
+          </div>
+        </div>
+        <div style={{ flex: '0 0 340px' }}>
+          <HouseholdVariablePanel
+            calculationId={calculationId}
+            tabKey="households"
+            onInsert={(varStr) => {
+              const ta = document.getElementById('household-notes') as HTMLTextAreaElement;
+              if (ta) {
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                ta.value = ta.value.substring(0, start) + varStr + ta.value.substring(end);
+                ta.focus();
+                ta.selectionStart = ta.selectionEnd = start + varStr.length;
+              }
+            }}
+          />
+        </div>
+      </div>
 
       {/* Add Household Modal */}
       <Modal

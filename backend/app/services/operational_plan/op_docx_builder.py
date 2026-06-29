@@ -12,13 +12,16 @@ from sqlalchemy.orm import Session
 from docx import Document
 from docx.shared import Inches, Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from sqlalchemy.orm import joinedload
 
 from app.models.op_table import OPTableData
 from app.models.forest_block import ForestBlock
 from app.models.calculation import Calculation
+from app.models.field_inventory import FieldInventoryMeasurement, FieldInventorySamplePlot, FieldInventoryCalculation
 from app.services.operational_plan.tree_models import TreeNode
 from app.services.operational_plan.variable_resolver import VariableResolver
 from app.services.operational_plan.variable_registry import get_variable
@@ -494,6 +497,16 @@ _VAR_LOOKUP = {
     "species_list": ("species", "species_list"),
     "bio_vegetation": ("biodiversity", "vegetation"),
     "bio_animals": ("biodiversity", "animals"),
+    "bio_available": ("biodiversity", "available"),
+    "bio_total_species": ("biodiversity", "total_species"),
+    "bio_vegetation_count": ("biodiversity", "vegetation_count"),
+    "bio_animal_count": ("biodiversity", "animal_count"),
+    "bio_protected_count": ("biodiversity", "protected_count"),
+    "bio_invasive_count": ("biodiversity", "invasive_count"),
+    "bio_iucn_cr": ("biodiversity", "iucn_breakdown.CR"),
+    "bio_iucn_en": ("biodiversity", "iucn_breakdown.EN"),
+    "bio_iucn_vu": ("biodiversity", "iucn_breakdown.VU"),
+    "bio_sub_category_breakdown": ("biodiversity", "sub_category_breakdown"),
     "activities_list": ("activities", "activities"),
     "ya_year_summary": ("yearly_plan", "year_summary"),
     "ya_plan_matrix": ("yearly_plan", "plan_matrix"),
@@ -710,6 +723,70 @@ NP_COL_WIDTHS_CM = [
     2.2,   # स्थानिक फिचर
 ]
 
+NP_HEADERS_HH_RECORDS = [
+    ("घर_नं", "घर नं", 1.2, "number"),
+    ("पुरुष_मुखिया", "पुरुष\nघरमुली", 2.8, "text"),
+    ("महिला_मुखिया", "महिला\nघरमुली", 2.8, "text"),
+    ("जात_वर्गीकरण", "जात\nवर्गीकरण", 2.0, "text"),
+    ("पुरुष", "पुरुष", 0.8, "number"),
+    ("महिला", "महिला", 0.8, "number"),
+    ("ठेगाना", "ठेगाना", 2.0, "text"),
+    ("गाई_गोरु", "गाई गोरु", 0.7, "number"),
+    ("भैंसी", "भैंसी", 0.7, "number"),
+    ("बाख्रा_भेडा", "बाख्रा भेडा", 0.7, "number"),
+    ("जग्गा_क्षेत्रफल", "जग्गा", 0.9, "number"),
+    ("जग्गा_एकाइ", "इकाइ", 1.1, "vertical"),
+    ("घाँस_भारी", "घाँस भारी", 1.2, "number"),
+    ("पोल", "पोल", 0.8, "number"),
+    ("काठ_cft", "काठ Cft", 0.8, "number"),
+    ("दाउरा_भारी", "दाउरा भारी", 1.2, "number"),
+    ("ओछ्यान_भारी", "सोतर भारी", 1.2, "number"),
+    ("समृद्धि_स्तर", "समृद्धि\nस्तर", 1.5, "text"),
+    ("वन_पेशा", "वन\nपेशा", 1.2, "text"),
+]
+
+NP_HEADERS_BIODIVERSITY: Dict[str, List[tuple]] = {
+    "table_33": [
+        ("iucn_code", "IUCN कोड"),
+        ("nepali_label", "संरक्षण स्थिति"),
+        ("count", "सङ्ख्या"),
+    ],
+    "table_34": [
+        ("sn", "सि.नं."),
+        ("name", "नाम"),
+        ("scientific_name", "वैज्ञानिक नाम"),
+        ("sub_category", "उप-प्रकार"),
+        ("iucn_status", "IUCN स्थिति"),
+    ],
+    "table_35": [
+        ("sn", "सि.नं."),
+        ("name", "नाम"),
+        ("scientific_name", "वैज्ञानिक नाम"),
+        ("sub_category", "उप-प्रकार"),
+        ("iucn_status", "IUCN स्थिति"),
+    ],
+    "table_36": [
+        ("sn", "सि.नं."),
+        ("name", "नाम"),
+        ("scientific_name", "वैज्ञानिक नाम"),
+        ("sub_category", "उप-प्रकार"),
+        ("iucn_status", "IUCN स्थिति"),
+        ("is_protected", "संरक्षित"),
+        ("is_invasive", "मिचाहा"),
+        ("primary_use", "प्रमुख प्रयोग"),
+    ],
+    "table_37": [
+        ("sn", "सि.नं."),
+        ("name", "नाम"),
+        ("scientific_name", "वैज्ञानिक नाम"),
+        ("sub_category", "उप-प्रकार"),
+        ("iucn_status", "IUCN स्थिति"),
+        ("is_protected", "संरक्षित"),
+        ("is_invasive", "मिचाहा"),
+        ("primary_use", "प्रमुख प्रयोग"),
+    ],
+}
+
 def _add_activity_plan_detail_table(doc: Document, val: list):
     if not val or not isinstance(val, list):
         return
@@ -753,6 +830,287 @@ def _add_activity_plan_detail_table(doc: Document, val: list):
     doc.add_paragraph()
 
 
+def _add_hh_records_table(doc: Document, val: list, raw_data: dict = None):
+    if not val or not isinstance(val, list):
+        return
+    hh = (raw_data or {}).get("households", {})
+    total_hh = hh.get("total_households", len(val))
+    total_pop = hh.get("total_population", 0)
+    forest_occ = hh.get("forest_based_occupation", 0)
+
+    # Switch to landscape for this wide table
+    landscape = doc.add_section()
+    landscape.orientation = WD_ORIENT.LANDSCAPE
+    landscape.page_width = Cm(29.7)
+    landscape.page_height = Cm(21.0)
+    landscape.top_margin = Cm(1.5)
+    landscape.bottom_margin = Cm(1.5)
+    landscape.left_margin = Cm(1.5)
+    landscape.right_margin = Cm(1.5)
+
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(2)
+    run = p.add_run(f"{_fix(format_devanagari(total_hh, 0))} घरपरिवारको विस्तृत विवरण")
+    run.font.size = Pt(13)
+    run.font.bold = True
+    p2 = doc.add_paragraph()
+    p2.paragraph_format.space_after = Pt(6)
+    run2 = p2.add_run(f"कुल जनसंख्या: {_fix(format_devanagari(total_pop, 0))}  |  वनमा आश्रित: {_fix(format_devanagari(forest_occ, 0))}")
+    run2.font.size = Pt(10)
+    run2.font.italic = True
+    keys = [k for k, _, _, _ in NP_HEADERS_HH_RECORDS]
+    headers = [h for _, h, _, _ in NP_HEADERS_HH_RECORDS]
+    col_types = [t for _, _, _, t in NP_HEADERS_HH_RECORDS]
+    widths = [w for _, _, w, _ in NP_HEADERS_HH_RECORDS]
+    num_cols = len(keys)
+    num_rows = len(val) + 1
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tbl.style = "Table Grid"
+    tbl.autofit = False
+    for ci, np_header in enumerate(headers):
+        cell = tbl.cell(0, ci)
+        cell.width = Cm(widths[ci])
+        lines = np_header.split("\n")
+        for li, line in enumerate(lines):
+            if li == 0:
+                cell.text = ""
+            p = cell.add_paragraph() if li > 0 else cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(line)
+            run.font.size = Pt(9)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+        _set_cell_shading(cell, "006400")
+        if col_types[ci] in ("number", "vertical"):
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            textDirection = OxmlElement("w:textDirection")
+            textDirection.set(qn("w:val"), "btLr")
+            tcPr.append(textDirection)
+    tbl.rows[0].height = Cm(1.4)
+    tbl.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+    for ri, row in enumerate(val, 1):
+        for ci, key in enumerate(keys):
+            cell = tbl.cell(ri, ci)
+            cell.width = Cm(widths[ci])
+            val_raw = row.get(key, "")
+            if key == "जग्गा_एकाइ":
+                val_str = "रो." if str(val_raw).strip().lower() == "ropani" else _fix(str(val_raw))
+            elif key in ("घाँस_भारी", "दाउरा_भारी", "ओछ्यान_भारी"):
+                val_str = _fix(format_devanagari(val_raw, 0))
+            else:
+                val_str = _fmt_value(val_raw, "hh_records")
+            cell.text = val_str
+            for p in cell.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9)
+    doc.add_paragraph()
+
+    # Restore portrait for subsequent content
+    portrait = doc.add_section()
+    portrait.orientation = WD_ORIENT.PORTRAIT
+    portrait.page_width = Cm(21.0)
+    portrait.page_height = Cm(29.7)
+    portrait.top_margin = Cm(2)
+    portrait.bottom_margin = Cm(2)
+    portrait.left_margin = Cm(2.5)
+    portrait.right_margin = Cm(2.5)
+
+
+# ── Field Inventory Measurement Table ──
+
+FI_HEADERS = [
+    ("block_name", "ब्लक", 2.5, "left", False),
+    ("plot_no", "प्लट नं.", 1.2, "center", False),
+    ("stand_type", "प्रकार", 1.5, "center", False),
+    ("species", "प्रजाति", 3.2, "left", False),
+    ("dbh", "DBH (से.मि.)", 1.0, "center", True),
+    ("height", "उचाइ (मि.)", 1.0, "center", True),
+    ("class", "वर्ग", 1.0, "center", True),
+    ("count", "गणना", 1.2, "center", False),
+]
+
+FI_YIELD_HEADERS = [
+    ("block_name", "ब्लक", 2.5, "left"),
+    ("plot_no", "प्लट नं.", 1.2, "center"),
+    ("firewood", "दाउरा (के.जी.)", 2.5, "right"),
+    ("grass", "घाँस (के.जी.)", 2.5, "right"),
+    ("bedding", "ओछ्यान (के.जी.)", 2.5, "right"),
+]
+
+ST_TYPE_MAP = {
+    "Regeneration": "पुनरुत्पादन",
+    "Sapling": "लाथ्रा",
+    "Pole": "पोल",
+    "Tree": "रूख",
+}
+
+
+def _add_field_inventory_tables(doc: Document, calculation_id: UUID, db: Session):
+    fi_calc = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.calculation_id == calculation_id
+    ).first()
+    if not fi_calc:
+        no_data = doc.add_paragraph()
+        run = no_data.add_run("[Table data not available: fieldinventory]")
+        run.font.size = Pt(9)
+        run.font.italic = True
+        run.font.color.rgb = RGBColor(200, 50, 50)
+        return
+
+    measurements = (
+        db.query(FieldInventoryMeasurement)
+        .options(joinedload(FieldInventoryMeasurement.sample_plot))
+        .join(FieldInventorySamplePlot)
+        .filter(FieldInventorySamplePlot.field_inventory_calculation_id == fi_calc.id)
+        .order_by(
+            FieldInventorySamplePlot.block_name,
+            FieldInventorySamplePlot.sample_plot_number,
+            FieldInventoryMeasurement.stand_type,
+            FieldInventoryMeasurement.sn,
+        )
+        .all()
+    )
+
+    if not measurements:
+        no_data = doc.add_paragraph()
+        run = no_data.add_run("[Table data not available: fieldinventory]")
+        run.font.size = Pt(9)
+        run.font.italic = True
+        run.font.color.rgb = RGBColor(200, 50, 50)
+        return
+
+    # Collect plots for resource yield data
+    seen_plots = set()
+    yield_rows = []
+    for m in measurements:
+        plot_key = (m.sample_plot.block_name, m.sample_plot.sample_plot_number)
+        if plot_key not in seen_plots:
+            seen_plots.add(plot_key)
+            sp = m.sample_plot
+            yield_rows.append({
+                "block_name": sp.block_name,
+                "plot_no": str(sp.sample_plot_number),
+                "firewood": sp.firewood_kg_per_100sqm_per_year,
+                "grass": sp.grass_kg_per_100sqm_per_year,
+                "bedding": sp.bedding_material_kg_per_100sqm_per_year,
+            })
+
+    # ── Title ──
+    heading = doc.add_paragraph()
+    heading.paragraph_format.space_after = Pt(4)
+    run = heading.add_run(_fix("क्षेत्र सर्वेक्षण मापन तथ्याङ्क"))
+    run.font.size = Pt(13)
+    run.font.bold = True
+
+    # ── Main Measurement Table ──
+    keys = [k for k, _, _, _, _ in FI_HEADERS]
+    headers = [h for _, h, _, _, _ in FI_HEADERS]
+    widths = [w for _, _, w, _, _ in FI_HEADERS]
+    vertical = [v for _, _, _, _, v in FI_HEADERS]
+    num_cols = len(keys)
+    num_rows = len(measurements) + 1
+
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tbl.style = "Table Grid"
+    tbl.autofit = False
+
+    for ci, np_header in enumerate(headers):
+        cell = tbl.cell(0, ci)
+        cell.width = Cm(widths[ci])
+        cell.text = ""
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(np_header)
+        run.font.size = Pt(7)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+        _set_cell_shading(cell, "006400")
+        if vertical[ci]:
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            textDirection = OxmlElement("w:textDirection")
+            textDirection.set(qn("w:val"), "btLr")
+            tcPr.append(textDirection)
+
+    for ri, m in enumerate(measurements, 1):
+        stand_type_np = ST_TYPE_MAP.get(m.stand_type, m.stand_type)
+        species = m.species_scientific or ""
+        if len(species) > 25:
+            species = species[:24] + "…"
+        row_data = {
+            "block_name": m.sample_plot.block_name,
+            "plot_no": str(m.sample_plot.sample_plot_number),
+            "stand_type": stand_type_np,
+            "species": species,
+            "dbh": format_devanagari(m.dbh_cm, 1) if m.dbh_cm is not None else "—",
+            "height": format_devanagari(m.height_m, 1) if m.height_m is not None else "—",
+            "class": m.tree_class if m.tree_class else "—",
+            "count": format_devanagari(m.count, 0),
+        }
+        for ci, key in enumerate(keys):
+            cell = tbl.cell(ri, ci)
+            cell.width = Cm(widths[ci])
+            cell.text = ""
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT
+            run = p.add_run(_fix(str(row_data[key])))
+            run.font.size = Pt(7)
+
+    doc.add_paragraph()
+
+    # ── Resource Yield Table ──
+    if yield_rows:
+        sub_heading = doc.add_paragraph()
+        sub_heading.paragraph_format.space_after = Pt(4)
+        run = sub_heading.add_run(_fix("नमुना प्लटमा उपलब्ध स्रोत परिणाम"))
+        run.font.size = Pt(11)
+        run.font.bold = True
+
+        y_keys = [k for k, _, _, _ in FI_YIELD_HEADERS]
+        y_headers = [h for _, h, _, _ in FI_YIELD_HEADERS]
+        y_widths = [w for _, _, w, _ in FI_YIELD_HEADERS]
+        y_align = [a for _, _, _, a in FI_YIELD_HEADERS]
+        y_num_cols = len(y_keys)
+        y_num_rows = len(yield_rows) + 1
+
+        y_tbl = doc.add_table(rows=y_num_rows, cols=y_num_cols)
+        y_tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        y_tbl.style = "Table Grid"
+        y_tbl.autofit = False
+
+        for ci, np_header in enumerate(y_headers):
+            cell = y_tbl.cell(0, ci)
+            cell.width = Cm(y_widths[ci])
+            cell.text = ""
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(np_header)
+            run.font.size = Pt(7)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+            _set_cell_shading(cell, "006400")
+
+        for ri, row in enumerate(yield_rows, 1):
+            for ci, key in enumerate(y_keys):
+                cell = y_tbl.cell(ri, ci)
+                cell.width = Cm(y_widths[ci])
+                cell.text = ""
+                val = row.get(key)
+                if key in ("firewood", "grass", "bedding"):
+                    val_str = format_devanagari(val, 1) if val is not None else "—"
+                else:
+                    val_str = str(val) if val is not None else "—"
+                p = cell.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT if y_align[ci] == "left" else WD_ALIGN_PARAGRAPH.CENTER if y_align[ci] == "center" else WD_ALIGN_PARAGRAPH.RIGHT
+                run = p.add_run(_fix(val_str))
+                run.font.size = Pt(7)
+
+        doc.add_paragraph()
+
+
 def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db: Session = None, raw_data: dict = None, table_cache: dict = None):
     text = _fix( text)
     parts = re.split(r"(\{\{chart:\w+\}\}|\{\{map:\w+\}\}|\{\{table:\w+\}\})", text)
@@ -770,7 +1128,11 @@ def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db:
         elif map_match and calculation_id and db:
             _add_map_standard(doc, map_match.group(1), calculation_id, db)
         elif table_match and calculation_id:
-            _add_table_inline(doc, table_match.group(1), table_cache)
+            table_id = table_match.group(1)
+            if table_id == "fieldinventory":
+                _add_field_inventory_tables(doc, calculation_id, db)
+            else:
+                _add_table_inline(doc, table_id, table_cache)
         else:
             var_match = re.match(r"^\{\{(\w+(?::\w+)*)\}\}$", part)
             if var_match and raw_data:
@@ -786,6 +1148,9 @@ def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db:
                             continue
                         if var_name == "ya_activity_plan_detail":
                             _add_activity_plan_detail_table(doc, var_val)
+                            continue
+                        if var_name == "hh_records":
+                            _add_hh_records_table(doc, var_val, raw_data)
                             continue
                         _add_list_table(doc, var_val, var_name)
                         continue
@@ -811,6 +1176,9 @@ def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db:
                         if isinstance(var_val, list):
                             if var_name == "uc_members":
                                 _add_uc_members_table(doc, var_val)
+                                continue
+                            if var_name == "hh_records":
+                                _add_hh_records_table(doc, var_val, raw_data)
                                 continue
                             _add_list_table(doc, var_val, var_name)
                             continue
@@ -864,6 +1232,8 @@ def _add_section_full_docx(doc: Document, var_name: str, raw_data: dict, calcula
 
 
 def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
+    from app.services.operational_plan.variable_registry import TABLE_ID_ALIAS
+    table_id = TABLE_ID_ALIAS.get(table_id, table_id)
     table_data = (table_cache or {}).get(table_id)
 
     if not table_data or not table_data.rows:
@@ -873,9 +1243,17 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
         run.font.color.rgb = RGBColor(200, 0, 0)
         return
 
+    vdef = get_variable(f"table:{table_id}")
+    title_ne = vdef.label_ne if vdef else table_id.replace("_", " ").title()
+    p_heading = doc.add_paragraph()
+    p_heading.paragraph_format.space_after = Pt(2)
+    run_heading = p_heading.add_run(title_ne)
+    run_heading.font.size = Pt(13)
+    run_heading.font.bold = True
+
     rows = table_data.rows
     headers = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
-    data_rows = [[_fix( format_devanagari(r.get(h, ""))) for h in headers] for r in rows] if headers else rows
+    data_rows = [[_fix(format_devanagari(r.get(h, ""))) for h in headers] for r in rows] if headers else rows
     num_cols = len(headers) if headers else len(rows[0]) if rows else 1
     num_rows = len(rows) + 1
 
@@ -883,9 +1261,11 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
     tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
     tbl.style = 'Table Grid'
 
+    np_headers = NP_HEADERS_BIODIVERSITY.get(table_id, [])
+    np_map = {eng: np for eng, np in np_headers}
     for ci, header in enumerate(headers):
         cell = tbl.cell(0, ci)
-        cell.text = header.replace("_", " ").title()
+        cell.text = np_map.get(header, header.replace("_", " ").title())
         for p in cell.paragraphs:
             for r in p.runs:
                 r.font.size = Pt(9)
@@ -901,11 +1281,6 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
                 for r in p.runs:
                     r.font.size = Pt(9)
 
-    cap_p = doc.add_paragraph()
-    cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = cap_p.add_run(table_id.replace("_", " ").title())
-    run.font.size = Pt(9)
-    run.font.italic = True
     doc.add_paragraph()
 
 
@@ -1015,6 +1390,20 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
         hh = raw_data.get("households", {}).get("caste_distribution", {})
         if hh and isinstance(hh, dict):
             img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Caste Distribution", is_pie=False)
+    elif chart_type == "hh_caste_pie":
+        hh = raw_data.get("households", {}).get("caste_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "जाति वितरण (Caste Distribution)")
+    elif chart_type == "hh_prosperity_bar":
+        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "समृद्धि वितरण (Prosperity Distribution)", is_pie=False)
+    elif chart_type == "hh_demand_supply_bar":
+        hh = raw_data.get("households", {})
+        if hh and hh.get("available"):
+            labels = ["काठ (cft)", "दाउरा (भारी)"]
+            values = [hh.get("timber_demand_cft", 0), hh.get("firewood_demand_bhari", 0)]
+            img_data = _chart_from_data(labels, values, forest_name, "माग र आपूर्ति (Demand & Supply)", is_pie=False)
     elif chart_type == "budget_bar":
         acts = raw_data.get("activities", {})
         activities = acts.get("activities", [])
@@ -1156,7 +1545,7 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
 
     alias_map = {"boundary_map": "boundary"}
     layer_name = alias_map.get(map_type, map_type)
-    known_layers = {"boundary","forest_type","forest_health","slope","biomass","landcover","soil_texture","dem","aspect","canopy","sampling_plot","sampling_plot_topo","sampling_plot_satellite","fieldbook"}
+    known_layers = {"boundary","forest_type","forest_health","slope","biomass","landcover","soil_texture","dem","aspect","canopy","sampling_plot","sampling_plot_topo","sampling_plot_satellite","fieldbook","usergroup","subarea"}
 
     if layer_name not in known_layers:
         p = doc.add_paragraph()
@@ -1165,10 +1554,25 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
         run.font.color.rgb = RGBColor(200, 0, 0)
         return
 
+    if layer_name == "subarea":
+        from app.models.calculation import Calculation
+        calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+        has_sub_areas = bool(
+            calc and calc.result_data and calc.result_data.get("sub_areas")
+        )
+        if not has_sub_areas:
+            p = doc.add_paragraph()
+            run = p.add_run(f"[Map: {map_type}] - data not available (no sub-areas drawn)")
+            run.font.italic = True
+            run.font.color.rgb = RGBColor(200, 0, 0)
+            return
+
     try:
-        buf = generate_standard_map(db, calculation_id, layer_name, forest_name=forest_name)
+        use_cache = True
+        buf = generate_standard_map(db, calculation_id, layer_name, forest_name=forest_name, use_cache=use_cache)
         buf.seek(0)
-        doc.add_picture(buf, width=Inches(5.5))
+        pic_width = Inches(5.83) if layer_name == "subarea" else Inches(5.5)
+        doc.add_picture(buf, width=pic_width)
     except Exception:
         buf = None
 
@@ -1428,6 +1832,46 @@ def _add_uc_members_table_html(parts: list, val: list, var_name: str = ""):
         parts.append('</tr>')
     parts.append('</tbody></table></div>')
 
+def _add_hh_records_table_html(parts: list, val: list, raw_data: dict = None):
+    if not val or not isinstance(val, list):
+        return
+    hh = (raw_data or {}).get("households", {})
+    total_hh = hh.get("total_households", len(val))
+    total_pop = hh.get("total_population", 0)
+    forest_occ = hh.get("forest_based_occupation", 0)
+    parts.append(f'<h3 style="margin:16px 0 2px;font-size:14pt;font-weight:700;">{_html_escape(f"{format_devanagari(total_hh,0)} घरपरिवारको विस्तृत विवरण")}</h3>')
+    parts.append(f'<p style="margin:0 0 8px;font-size:10pt;font-style:italic;">कुल जनसंख्या: {_html_escape(format_devanagari(total_pop,0))}  |  वनमा आश्रित: {_html_escape(format_devanagari(forest_occ,0))}</p>')
+    keys = [k for k, _, _, _ in NP_HEADERS_HH_RECORDS]
+    headers = [h for _, h, _, _ in NP_HEADERS_HH_RECORDS]
+    col_types = [t for _, _, _, t in NP_HEADERS_HH_RECORDS]
+    parts.append('<div class="table-preview"><table class="data" style="border-collapse:collapse;width:100%"><thead><tr>')
+    for ci, np_header in enumerate(headers):
+        display = _html_escape(np_header).replace("\n", "<br>")
+        extra = ""
+        if col_types[ci] == "number":
+            extra = ' style="writing-mode:vertical-lr;text-orientation:mixed;white-space:nowrap;width:28px;height:80px;background:#006400;color:white;padding:4px 6px;font-size:9pt;text-align:center;border:1px solid #006400;"'
+        elif col_types[ci] == "vertical":
+            extra = ' style="writing-mode:vertical-lr;text-orientation:mixed;white-space:nowrap;width:28px;height:80px;background:#006400;color:white;padding:4px 6px;font-size:9pt;text-align:center;border:1px solid #006400;"'
+        else:
+            extra = ' style="background:#006400;color:white;padding:6px 8px;font-size:9pt;text-align:center;border:1px solid #006400;white-space:nowrap;"'
+        parts.append(f'<th{extra}>{display}</th>')
+    parts.append('</tr></thead><tbody>')
+    for row in val:
+        parts.append('<tr>')
+        for ci, key in enumerate(keys):
+            val_raw = row.get(key, "")
+            if key == "जग्गा_एकाइ":
+                val_str = "रो." if str(val_raw).strip().lower() == "ropani" else _html_escape(str(val_raw))
+            elif key in ("घाँस_भारी", "दाउरा_भारी", "ओछ्यान_भारी"):
+                val_str = _html_escape(format_devanagari(val_raw, 0))
+            else:
+                val_str = _html_escape(_fmt_value(val_raw, "hh_records"))
+            align = "text-align:right" if col_types[ci] in ("number", "vertical") else "text-align:left"
+            parts.append(f'<td style="padding:4px 6px;font-size:9pt;border:1px solid #ddd;{align};">{val_str}</td>')
+        parts.append('</tr>')
+    parts.append('</tbody></table></div>')
+
+
 def _add_activity_plan_detail_table_html(parts: list, val: list):
     if not val or not isinstance(val, list):
         return
@@ -1604,6 +2048,14 @@ def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
 # HTML Preview Functions
 # ═══════════════════════════════════════════════════════
 
+def _render_table_inline_replacement(table_id: str, table_cache: dict = None) -> str:
+    if table_id == "fieldinventory":
+        return '<div class="chart-placeholder">📋 क्षेत्र सर्वेक्षण मापन तथ्याङ्क<br><small>Rendered as table in DOCX</small></div>'
+    parts = []
+    _add_table_inline_html(parts, table_id, table_cache)
+    return "".join(parts) if parts else f'<div class="chart-placeholder">📋 {table_id}<br><small>Rendered as table in DOCX</small></div>'
+
+
 def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
                     raw_data: Dict[str, Any], db: Session,
                     table_cache: dict = None) -> str:
@@ -1639,7 +2091,7 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
             )
             escaped = re.sub(
                 r'\{\{table:(\w+)\}\}',
-                r'<div class="chart-placeholder">📋 \1<br><small>Rendered as table in DOCX</small></div>',
+                lambda m: _render_table_inline_replacement(m.group(1), table_cache),
                 escaped
             )
             escaped = _render_html_list_vars(escaped, raw_data)
@@ -1685,6 +2137,9 @@ def _add_table_html(parts: List[str], node: TreeNode, table_cache: dict = None):
     table_id = node.table_id
     if not table_id:
         return
+    vdef = get_variable(f"table:{table_id}")
+    title_ne = vdef.label_ne if vdef else table_id.replace("_", " ").title()
+    parts.append(f'<h3 style="margin:16px 0 2px;font-size:14pt;font-weight:700;">{_html_escape(title_ne)}</h3>')
     table_data = (table_cache or {}).get(table_id)
     if not table_data or not table_data.rows:
         parts.append(f'<div class="chart-placeholder">📋 {table_id} — no data</div>')
@@ -1693,9 +2148,40 @@ def _add_table_html(parts: List[str], node: TreeNode, table_cache: dict = None):
     if not rows:
         return
     headers = list(rows[0].keys()) if isinstance(rows[0], dict) else []
+    np_headers = NP_HEADERS_BIODIVERSITY.get(table_id, [])
+    np_map = {eng: np for eng, np in np_headers}
     parts.append('<div class="table-preview"><table class="data"><thead><tr>')
     for h in headers:
-        parts.append(f'<th>{_html_escape(h)}</th>')
+        display = np_map.get(h, h.replace("_", " ").title())
+        parts.append(f'<th>{_html_escape(display)}</th>')
+    parts.append('</tr></thead><tbody>')
+    for row in rows:
+        parts.append('<tr>')
+        for h in headers:
+            val = format_devanagari(row.get(h, ""))
+            parts.append(f'<td>{_html_escape(val)}</td>')
+        parts.append('</tr>')
+    parts.append('</tbody></table></div>')
+
+
+def _add_table_inline_html(parts: list, table_id: str, table_cache: dict = None):
+    from app.services.operational_plan.variable_registry import TABLE_ID_ALIAS
+    table_id = TABLE_ID_ALIAS.get(table_id, table_id)
+    vdef = get_variable(f"table:{table_id}")
+    title_ne = vdef.label_ne if vdef else table_id.replace("_", " ").title()
+    parts.append(f'<h3 style="margin:16px 0 2px;font-size:14pt;font-weight:700;">{_html_escape(title_ne)}</h3>')
+    table_data = (table_cache or {}).get(table_id)
+    if not table_data or not table_data.rows:
+        parts.append(f'<div class="chart-placeholder">📋 {table_id} — no data</div>')
+        return
+    rows = table_data.rows
+    headers = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+    np_headers = NP_HEADERS_BIODIVERSITY.get(table_id, [])
+    np_map = {eng: np for eng, np in np_headers}
+    parts.append('<div class="table-preview"><table class="data"><thead><tr>')
+    for h in headers:
+        display = np_map.get(h, h.replace("_", " ").title())
+        parts.append(f'<th>{_html_escape(display)}</th>')
     parts.append('</tr></thead><tbody>')
     for row in rows:
         parts.append('<tr>')
@@ -1813,6 +2299,10 @@ def _render_html_list_vars(text: str, raw_data: dict) -> str:
                 if var_name == "ya_activity_plan_detail":
                     parts = []
                     _add_activity_plan_detail_table_html(parts, var_val)
+                    return "".join(parts)
+                if var_name == "hh_records":
+                    parts = []
+                    _add_hh_records_table_html(parts, var_val, raw_data)
                     return "".join(parts)
                 title_html = ""
                 vdef = get_variable(var_name)

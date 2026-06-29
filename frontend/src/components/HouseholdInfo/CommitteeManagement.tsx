@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Select, Input, message, Alert, Space, Popconfirm, Card, Progress, Tag, Collapse } from 'antd';
-import { PlusOutlined, DeleteOutlined, SaveOutlined, WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Table, Button, Select, Input, message, Alert, Space, Popconfirm, Card, Progress, Tag, Collapse, Divider } from 'antd';
+import { PlusOutlined, DeleteOutlined, SaveOutlined, WarningOutlined, CheckCircleOutlined, CodeOutlined } from '@ant-design/icons';
 import { userGroupApi } from '../../services/api';
+import HouseholdVariablePanel from './HouseholdVariablePanel';
 
 const { Option } = Select;
 const { Panel } = Collapse;
@@ -560,6 +561,57 @@ const CommitteeManagement: React.FC<CommitteeManagementProps> = ({ calculationId
           type="info"
           showIcon
         />
+      )}
+
+      {calculationId && (
+        <div style={{ marginTop: 24 }}>
+          <Divider>समिति चरहरू (Committee Variables)</Divider>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 60%', minWidth: 300 }}>
+              <div style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 6,
+                padding: 12,
+                background: '#fafafa',
+              }}>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>
+                  <CodeOutlined /> अतिरिक्त विवरण / नोट (Additional Notes)
+                </h4>
+                <textarea
+                  id="committee-notes"
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: 4,
+                    padding: '8px 12px',
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                  }}
+                  placeholder="चर सम्मिलित गर्न दायाँ प्यानलको 'सम्मिलित' बटन प्रयोग गर्नुहोस्।"
+                />
+              </div>
+            </div>
+            <div style={{ flex: '0 0 340px' }}>
+              <HouseholdVariablePanel
+                calculationId={calculationId}
+                tabKey="committee"
+                onInsert={(varStr) => {
+                  const ta = document.getElementById('committee-notes') as HTMLTextAreaElement;
+                  if (ta) {
+                    const start = ta.selectionStart;
+                    const end = ta.selectionEnd;
+                    ta.value = ta.value.substring(0, start) + varStr + ta.value.substring(end);
+                    ta.focus();
+                    ta.selectionStart = ta.selectionEnd = start + varStr.length;
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

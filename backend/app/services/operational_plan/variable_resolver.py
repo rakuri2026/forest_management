@@ -150,6 +150,12 @@ _KEY_ALIAS: Dict[tuple, str] = {
     ("biodiversity", "bio_total_species"): "total_species",
     ("biodiversity", "bio_vegetation_count"): "vegetation_count",
     ("biodiversity", "bio_animal_count"): "animal_count",
+    ("biodiversity", "bio_protected_count"): "protected_count",
+    ("biodiversity", "bio_invasive_count"): "invasive_count",
+    ("biodiversity", "bio_iucn_cr"): "iucn_breakdown.CR",
+    ("biodiversity", "bio_iucn_en"): "iucn_breakdown.EN",
+    ("biodiversity", "bio_iucn_vu"): "iucn_breakdown.VU",
+    ("biodiversity", "bio_sub_category_breakdown"): "sub_category_breakdown",
     ("biodiversity", "bio_vegetation"): "vegetation",
     ("biodiversity", "bio_animals"): "animals",
 
@@ -163,6 +169,27 @@ _KEY_ALIAS: Dict[tuple, str] = {
     ("user_group", "ug_available"): "available",
     ("user_group", "ug_total_settlements"): "total_settlements",
     ("user_group", "ug_buildings"): "buildings",
+    # Settlement / Building
+    ("user_group", "ug_total_buildings"): "total_buildings",
+    ("user_group", "ug_total_building_area_m2"): "total_building_area_m2",
+    ("user_group", "ug_avg_building_size_m2"): "avg_building_size_m2",
+    ("user_group", "ug_small_buildings"): "small_buildings",
+    ("user_group", "ug_medium_buildings"): "medium_buildings",
+    ("user_group", "ug_large_buildings"): "large_buildings",
+    ("user_group", "ug_small_pct"): "small_pct",
+    ("user_group", "ug_medium_pct"): "medium_pct",
+    ("user_group", "ug_large_pct"): "large_pct",
+    # Land Cover / Area
+    ("user_group", "ug_user_group_area_ha"): "user_group_area_ha",
+    ("user_group", "ug_forest_overlap_area_ha"): "forest_overlap_area_ha",
+    ("user_group", "ug_net_analysis_area_ha"): "net_analysis_area_ha",
+    # Biomass / Volume
+    ("user_group", "ug_total_biomass_mg"): "total_biomass_mg",
+    ("user_group", "ug_total_volume_m3"): "total_volume_m3",
+    ("user_group", "ug_avg_biomass_mg_per_ha"): "avg_biomass_mg_per_ha",
+    ("user_group", "ug_avg_volume_m3_per_ha"): "avg_volume_m3_per_ha",
+    # Land Cover Classes (list)
+    ("user_group", "ug_land_cover_classes"): "land_cover_classes",
 
     # section_generators
     ("section_generators", "fieldbook_narration"): "section:fieldbook_narration",
@@ -242,7 +269,15 @@ class VariableResolver:
         if key.startswith("chart:"):
             return self._resolve_chart(var_def)
         if key.startswith("map:"):
-            return None
+            layer_name = key.split(":", 1)[1]
+            if layer_name == "usergroup":
+                from app.models.user_group import UserGroupExtent
+                exists = self.db.query(UserGroupExtent.id).filter(
+                    UserGroupExtent.calculation_id == self.calculation_id
+                ).first() is not None
+                if not exists:
+                    return None
+            return {"type": "map", "layer": layer_name, "available": True}
         if key.startswith("table:"):
             return self._resolve_table(var_def)
         resolver_map = {
@@ -519,6 +554,23 @@ class VariableResolver:
                 if dist:
                     return _bar_data(list(dist.keys()), list(dist.values()), "Households")
                 return None
+            elif chart_key == "hh_caste_pie":
+                dist = data.get("households", {}).get("caste_distribution", {})
+                return _pct_data(dist) if dist else None
+            elif chart_key == "hh_prosperity_bar":
+                dist = data.get("households", {}).get("prosperity_distribution", {})
+                if dist:
+                    return _bar_data(list(dist.keys()), list(dist.values()), "घरधुरी")
+                return None
+            elif chart_key == "hh_demand_supply_bar":
+                hh = data.get("households", {})
+                if hh.get("available"):
+                    return _bar_data(
+                        ["काठ (cft)", "दाउरा (भारी)"],
+                        [hh.get("timber_demand_cft", 0), hh.get("firewood_demand_bhari", 0)],
+                        "माग"
+                    )
+                return None
             elif chart_key == "budget_bar":
                 activities = data.get("activities", {}).get("activities", [])
                 if activities:
@@ -569,6 +621,8 @@ class VariableResolver:
 
     def _resolve_table(self, var_def: VariableDef) -> Optional[Dict[str, Any]]:
         table_id = var_def.key.replace("table:", "")
+        from app.services.operational_plan.variable_registry import TABLE_ID_ALIAS
+        table_id = TABLE_ID_ALIAS.get(table_id, table_id)
         try:
             from app.models.op_table import OPTableData
             from sqlalchemy import select

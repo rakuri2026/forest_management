@@ -272,6 +272,7 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
               <p className="text-2xl font-bold text-blue-800">
                 {results.user_group_area_ha.toFixed(2)} ha
               </p>
+              <p className="text-xs text-gray-400 font-mono mt-1">{'{{ug_user_group_area_ha}}'}</p>
             </div>
 
             <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
@@ -279,6 +280,7 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
               <p className="text-2xl font-bold text-orange-800">
                 {results.forest_overlap_area_ha.toFixed(2)} ha
               </p>
+              <p className="text-xs text-gray-400 font-mono mt-1">{'{{ug_forest_overlap_area_ha}}'}</p>
               {results.has_forest_overlap && (
                 <p className="text-xs text-orange-600 mt-1">Excluded from analysis</p>
               )}
@@ -289,6 +291,7 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
               <p className="text-2xl font-bold text-green-800">
                 {results.net_analysis_area_ha.toFixed(2)} ha
               </p>
+              <p className="text-xs text-gray-400 font-mono mt-1">{'{{ug_net_analysis_area_ha}}'}</p>
               <p className="text-xs text-green-600 mt-1">After overlap exclusion</p>
             </div>
           </div>
@@ -303,9 +306,11 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
               <p className="text-3xl font-bold text-emerald-800">
                 {results.total_biomass_mg.toFixed(2)} Mg
               </p>
+              <p className="text-xs text-gray-400 font-mono">{'{{ug_total_biomass_mg}}'}</p>
               <p className="text-sm text-emerald-600 mt-2">
                 Average: {results.avg_biomass_mg_per_ha.toFixed(2)} Mg/ha
               </p>
+              <p className="text-xs text-gray-400 font-mono">{'{{ug_avg_biomass_mg_per_ha}}'}</p>
             </div>
 
             <div className="p-5 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-lg border border-amber-200">
@@ -316,13 +321,16 @@ export function LandCoverAnalysis({ calculationId, forestName }: LandCoverAnalys
               <p className="text-3xl font-bold text-amber-800">
                 {results.total_volume_m3.toFixed(2)} m³
               </p>
+              <p className="text-xs text-gray-400 font-mono">{'{{ug_total_volume_m3}}'}</p>
               <p className="text-sm text-amber-600 mt-2">
                 Average: {results.avg_volume_m3_per_ha.toFixed(2)} m³/ha
               </p>
+              <p className="text-xs text-gray-400 font-mono">{'{{ug_avg_volume_m3_per_ha}}'}</p>
             </div>
           </div>
 
           {/* Land Cover Breakdown */}
+          <p className="text-xs text-gray-400 font-mono mb-1">{'{{ug_land_cover_classes}}'}</p>
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
               <h4 className="font-semibold text-gray-800">Land Cover Classification</h4>

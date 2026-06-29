@@ -968,6 +968,9 @@ export default function CalculationDetail() {
                         <div className="px-4 py-3 flex flex-wrap gap-2">
                           <CopyTag label="{{sub_areas_detail}}" value="{{sub_areas_detail}}" variant="section" />
                           <CopyTag label="{{block_area_detail_merged}}" value="{{block_area_detail_merged}}" variant="section" />
+                          {calculation?.result_data?.sub_areas?.length > 0 && (
+                            <CopyTag label="{{map:subarea}}" value="{{map:subarea}}" variant="section" />
+                          )}
                         </div>
                       </div>
                     )}

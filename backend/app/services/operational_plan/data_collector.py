@@ -16,6 +16,9 @@ from app.services.report.data_collector import (
 )
 from app.services.operational_plan.section_generators import collect_section_content
 
+# Bump this when data_collector or any collector it calls changes schema/keys
+OP_DATA_CACHE_VERSION = 4
+
 
 def _fetch_species_block_breakdown(db: Session, fi_calc_id: str,
                                     block_areas: Optional[Dict[str, float]] = None) -> List[Dict[str, Any]]:
@@ -563,7 +566,7 @@ def get_field_inventory_data(db: Session, calculation_id: str,
         FieldInventoryBlockSummary.field_inventory_calculation_id == fi_calc.id
     ).all()
 
-    # Block effective areas for weighted grand total
+    # Block effective areas for weighted grand total and total inventory computation
     block_areas = _fetch_block_effective_areas(db, calculation_id)
 
     # Species-level block growing stock (with weighted totals)
@@ -930,10 +933,12 @@ def get_field_inventory_data(db: Session, calculation_id: str,
                 "कार्बन_टन_कार्बन_प्रति_हे": grand["carbon_stock_tc_per_ha"],
                 "CO₂_समतुल्य_टन_CO₂_प्रति_हे": grand["co2_equivalent_tco2_per_ha"],
             }] if grand else []),
+            "_block_areas_ha": block_areas,
         }
 
     return {
         "available": True, "total_sample_plots": 0, "total_blocks": 0,
+        "_block_areas_ha": block_areas,
         "fi_species_composition": {},
         "fi_dominant_species": [],
         "fi_co_dominant_species": [],
@@ -943,6 +948,683 @@ def get_field_inventory_data(db: Session, calculation_id: str,
         "fi_slow_growing_species": [],
         "fi_species_volume_by_block": [],
     }
+
+
+def _compute_total_inventory(fi_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert per-hectare field inventory data to total inventory absolute values.
+
+    Takes the output of get_field_inventory_data() (which must include _block_areas_ha),
+    computes ti_ (total inventory) keys by multiplying per-hectare values by block area.
+    """
+    result: Dict[str, Any] = {}
+    block_areas: Dict[str, float] = fi_data.get("_block_areas_ha", {})
+    if not fi_data.get("available") or not block_areas:
+        result["ti_available"] = False
+        return result
+    result["ti_available"] = True
+
+    total_area = sum(block_areas.values())
+    result["ti_effective_area_ha"] = round(total_area, 4)
+    result["ti_total_blocks"] = fi_data.get("total_blocks", 0)
+    result["ti_total_plots"] = fi_data.get("total_sample_plots", 0)
+
+    # ── Scalar forest-wide totals (per-ha × total_area) ──
+    _SCALAR_TI = [
+        ("fi_regeneration_per_ha", "ti_total_regeneration", 0),
+        ("fi_sapling_per_ha", "ti_total_sapling", 0),
+        ("fi_pole_per_ha", "ti_total_pole", 0),
+        ("fi_tree_per_ha", "ti_total_tree", 0),
+        ("fi_growing_stock_m3_per_ha", "ti_total_growing_stock_m3", 2),
+        ("fi_basal_area_m2_per_ha", "ti_total_basal_area_m2", 2),
+        ("fi_agb_t_per_ha", "ti_total_agb_tonnes", 3),
+        ("fi_bgb_t_per_ha", "ti_total_bgb_tonnes", 3),
+        ("fi_total_biomass_t_per_ha", "ti_total_biomass_tonnes", 3),
+        ("fi_carbon_stock_tc_per_ha", "ti_total_carbon_tc", 3),
+        ("fi_co2_equivalent_tco2_per_ha", "ti_total_co2_tco2", 3),
+    ]
+    for fi_key, ti_key, prec in _SCALAR_TI:
+        val = fi_data.get(fi_key, 0)
+        if isinstance(val, (int, float)) and val:
+            result[ti_key] = round(val * total_area, prec) if prec else int(val * total_area)
+        else:
+            result[ti_key] = 0
+
+    # ── MAI / AAH forest-wide totals ──
+    gs_per_ha = float(fi_data.get("fi_growing_stock_m3_per_ha", 0) or 0)
+    mai_pct = float(fi_data.get("fi_mai_percent", 0) or 0)
+    mai_per_ha = gs_per_ha * mai_pct / 100.0
+    result["ti_total_mai_m3_per_year"] = round(mai_per_ha * total_area, 2)
+    aah_per_ha = mai_per_ha * 0.60
+    result["ti_total_aah_m3_per_year"] = round(aah_per_ha * total_area, 2)
+
+    # ── Weighted wood density (density is independent of area) ──
+    result["ti_weighted_wood_density"] = fi_data.get("fi_weighted_wood_density", 0)
+
+    # ── Helper: build block-wise absolute row from per-ha row ──
+    def _to_abs(per_ha_row: dict, area: float) -> dict:
+        """Multiply all per-hectare numeric fields by area to get absolute values."""
+        abs_row = dict(per_ha_row)
+        for k, v in per_ha_row.items():
+            if isinstance(v, (int, float)) and k != "total_sample_plots":
+                abs_row[k] = round(v * area, 2) if isinstance(v, float) else int(v * area)
+        return abs_row
+
+    # ── Block-wise list variables ──
+    block_summaries = fi_data.get("fi_block_summaries", [])
+    ti_block_rows = []
+    for br in block_summaries:
+        bn = br.get("block_name", "")
+        if bn == "Grand Total (Weighted)":
+            continue
+        area = block_areas.get(bn, 0)
+        if area <= 0:
+            continue
+        ti_block_rows.append(_to_abs(br, area))
+
+    if ti_block_rows:
+        # ti_block_summaries — full block-wise absolute results
+        result["ti_block_summaries"] = ti_block_rows
+
+        # Forest-wide total row
+        ft = {
+            "block_name": "Forest Total",
+            "total_sample_plots": sum(r.get("total_sample_plots", 0) for r in ti_block_rows),
+            "regeneration_per_ha": sum(r.get("regeneration_per_ha", 0) for r in ti_block_rows),
+            "sapling_per_ha": sum(r.get("sapling_per_ha", 0) for r in ti_block_rows),
+            "pole_per_ha": sum(r.get("pole_per_ha", 0) for r in ti_block_rows),
+            "tree_per_ha": sum(r.get("tree_per_ha", 0) for r in ti_block_rows),
+            "pole_timber_m3_per_ha": round(sum(r.get("pole_timber_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "pole_firewood_m3_per_ha": round(sum(r.get("pole_firewood_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "pole_total_m3_per_ha": round(sum(r.get("pole_total_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "tree_timber_m3_per_ha": round(sum(r.get("tree_timber_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "tree_firewood_m3_per_ha": round(sum(r.get("tree_firewood_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "tree_total_m3_per_ha": round(sum(r.get("tree_total_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "total_volume_m3_per_ha": round(sum(r.get("total_volume_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "total_growing_stock_m3_per_ha": round(sum(r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "satellite_volume_m3_per_ha": round(sum(r.get("satellite_volume_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "basal_area_m2_per_ha": round(sum(r.get("basal_area_m2_per_ha", 0) for r in ti_block_rows), 2),
+            "mai_total_m3_per_ha": round(sum(r.get("mai_total_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "aah_total_m3_per_ha": round(sum(r.get("aah_total_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "agb_t_per_ha": round(sum(r.get("agb_t_per_ha", 0) for r in ti_block_rows), 2),
+            "bgb_t_per_ha": round(sum(r.get("bgb_t_per_ha", 0) for r in ti_block_rows), 2),
+            "total_biomass_t_per_ha": round(sum(r.get("total_biomass_t_per_ha", 0) for r in ti_block_rows), 2),
+            "carbon_stock_tc_per_ha": round(sum(r.get("carbon_stock_tc_per_ha", 0) for r in ti_block_rows), 2),
+            "co2_equivalent_tco2_per_ha": round(sum(r.get("co2_equivalent_tco2_per_ha", 0) for r in ti_block_rows), 2),
+            "weighted_wood_density": round(
+                sum(r.get("weighted_wood_density", 0) * r.get("total_growing_stock_m3_per_ha", 0)
+                    for r in ti_block_rows) /
+                max(sum(r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows), 1), 3
+            ),
+        }
+        result["ti_block_summaries"].append(ft)
+
+        # ── Nepali-keyed block-wise tables ──
+        result["ti_block_tree_count_total"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "विरुवा_कुल": r.get("regeneration_per_ha", 0),
+                "लाथ्रा_कुल": r.get("sapling_per_ha", 0),
+                "खाँवा_कुल": r.get("pole_per_ha", 0),
+                "रूख_कुल": r.get("tree_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "विरुवा_कुल": ft.get("regeneration_per_ha", 0),
+            "लाथ्रा_कुल": ft.get("sapling_per_ha", 0),
+            "खाँवा_कुल": ft.get("pole_per_ha", 0),
+            "रूख_कुल": ft.get("tree_per_ha", 0),
+        }]
+
+        result["ti_block_pole_tree_volume"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "खाँवा_काठ_कुल_घमी": r.get("pole_timber_m3_per_ha", 0),
+                "खाँवा_दाउरा_कुल_घमी": r.get("pole_firewood_m3_per_ha", 0),
+                "खाँवा_जम्मा_कुल_घमी": r.get("pole_total_m3_per_ha", 0),
+                "रूख_काठ_कुल_घमी": r.get("tree_timber_m3_per_ha", 0),
+                "रूख_दाउरा_कुल_घमी": r.get("tree_firewood_m3_per_ha", 0),
+                "रूख_जम्मा_कुल_घमी": r.get("tree_total_m3_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "खाँवा_काठ_कुल_घमी": ft.get("pole_timber_m3_per_ha", 0),
+            "खाँवा_दाउरा_कुल_घमी": ft.get("pole_firewood_m3_per_ha", 0),
+            "खाँवा_जम्मा_कुल_घमी": ft.get("pole_total_m3_per_ha", 0),
+            "रूख_काठ_कुल_घमी": ft.get("tree_timber_m3_per_ha", 0),
+            "रूख_दाउरा_कुल_घमी": ft.get("tree_firewood_m3_per_ha", 0),
+            "रूख_जम्मा_कुल_घमी": ft.get("tree_total_m3_per_ha", 0),
+        }]
+
+        result["ti_block_growing_stock"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "वृद्धि_मौज्दात_काठ_कुल_घमी": round(
+                    float(r.get("pole_timber_m3_per_ha", 0) or 0) + float(r.get("tree_timber_m3_per_ha", 0) or 0), 2),
+                "वृद्धि_मौज्दात_दाउरा_कुल_घमी": round(
+                    float(r.get("pole_firewood_m3_per_ha", 0) or 0) + float(r.get("tree_firewood_m3_per_ha", 0) or 0), 2),
+                "वृद्धि_मौज्दात_जम्मा_कुल_घमी": r.get("total_volume_m3_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "वृद्धि_मौज्दात_काठ_कुल_घमी": round(
+                float(ft.get("pole_timber_m3_per_ha", 0) or 0) + float(ft.get("tree_timber_m3_per_ha", 0) or 0), 2),
+            "वृद्धि_मौज्दात_दाउरा_कुल_घमी": round(
+                float(ft.get("pole_firewood_m3_per_ha", 0) or 0) + float(ft.get("tree_firewood_m3_per_ha", 0) or 0), 2),
+            "वृद्धि_मौज्दात_जम्मा_कुल_घमी": ft.get("total_volume_m3_per_ha", 0),
+        }]
+
+        result["ti_block_basal_area"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "बेसल_एरिया_कुल_वर्गमी": r.get("basal_area_m2_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "बेसल_एरिया_कुल_वर्गमी": ft.get("basal_area_m2_per_ha", 0),
+        }]
+
+        result["ti_block_satellite_volume"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "भू_उपग्रहिय_इमेजको_आधारमा_कुल_आयतन": r.get("satellite_volume_m3_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "भू_उपग्रहिय_इमेजको_आधारमा_कुल_आयतन": ft.get("satellite_volume_m3_per_ha", 0),
+        }]
+
+        result["ti_block_condition_growth"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "पुनरोत्पादनको_अवस्था": r.get("regeneration_condition", ""),
+                "वनको_अवस्था": r.get("forest_condition", ""),
+                "औसत_वार्षिक_वृद्धि_प्रतिशत": r.get("mai_percent", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "पुनरोत्पादनको_अवस्था": "—",
+            "वनको_अवस्था": "—",
+            "औसत_वार्षिक_वृद्धि_प्रतिशत": ft.get("mai_percent", 0),
+        }]
+
+        result["ti_block_biomass_carbon"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "काठ_घनत्व_टन_प्रति_घमी": r.get("weighted_wood_density", 0),
+                "जमिन_माथिको_बायोमास_कुल_टन": r.get("agb_t_per_ha", 0),
+                "जमिन_मुनिको_बायोमास_कुल_टन": r.get("bgb_t_per_ha", 0),
+                "जम्मा_बायोमास_कुल_टन": r.get("total_biomass_t_per_ha", 0),
+                "कार्बन_कुल_टन_कार्बन": r.get("carbon_stock_tc_per_ha", 0),
+                "CO₂_समतुल्य_कुल_टन_CO₂": r.get("co2_equivalent_tco2_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "काठ_घनत्व_टन_प्रति_घमी": ft.get("weighted_wood_density", 0),
+            "जमिन_माथिको_बायोमास_कुल_टन": ft.get("agb_t_per_ha", 0),
+            "जमिन_मुनिको_बायोमास_कुल_टन": ft.get("bgb_t_per_ha", 0),
+            "जम्मा_बायोमास_कुल_टन": ft.get("total_biomass_t_per_ha", 0),
+            "कार्बन_कुल_टन_कार्बन": ft.get("carbon_stock_tc_per_ha", 0),
+            "CO₂_समतुल्य_कुल_टन_CO₂": ft.get("co2_equivalent_tco2_per_ha", 0),
+        }]
+
+        # ── MAI table (absolute) ──
+        result["ti_mai_table"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "खाँवा_संख्या": r.get("pole_per_ha", 0),
+                "रूख_संख्या": r.get("tree_per_ha", 0),
+                "खाँवा_काठ_कुल_घमी": r.get("pole_timber_m3_per_ha", 0),
+                "खाँवा_दाउरा_कुल_घमी": r.get("pole_firewood_m3_per_ha", 0),
+                "खाँवा_जम्मा_कुल_घमी": r.get("pole_total_m3_per_ha", 0),
+                "रूख_काठ_कुल_घमी": r.get("tree_timber_m3_per_ha", 0),
+                "रूख_दाउरा_कुल_घमी": r.get("tree_firewood_m3_per_ha", 0),
+                "रूख_जम्मा_कुल_घमी": r.get("tree_total_m3_per_ha", 0),
+                "कुल_MAI_घमी_प्रति_वर्ष": r.get("mai_total_m3_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "खाँवा_संख्या": ft.get("pole_per_ha", 0),
+            "रूख_संख्या": ft.get("tree_per_ha", 0),
+            "खाँवा_काठ_कुल_घमी": ft.get("pole_timber_m3_per_ha", 0),
+            "खाँवा_दाउरा_कुल_घमी": ft.get("pole_firewood_m3_per_ha", 0),
+            "खाँवा_जम्मा_कुल_घमी": ft.get("pole_total_m3_per_ha", 0),
+            "रूख_काठ_कुल_घमी": ft.get("tree_timber_m3_per_ha", 0),
+            "रूख_दाउरा_कुल_घमी": ft.get("tree_firewood_m3_per_ha", 0),
+            "रूख_जम्मा_कुल_घमी": ft.get("tree_total_m3_per_ha", 0),
+            "कुल_MAI_घमी_प्रति_वर्ष": ft.get("mai_total_m3_per_ha", 0),
+        }]
+
+        # ── AAH table (absolute) ──
+        result["ti_aah_table"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "खाँवा_संख्या": r.get("pole_per_ha", 0),
+                "रूख_संख्या": r.get("tree_per_ha", 0),
+                "वन_अवस्था": r.get("forest_condition", ""),
+                "AAH_गुणक_प्रतिशत": r.get("aah_multiplier_percent", 60.0),
+                "कुल_AAH_घमी_प्रति_वर्ष": r.get("aah_total_m3_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "खाँवा_संख्या": ft.get("pole_per_ha", 0),
+            "रूख_संख्या": ft.get("tree_per_ha", 0),
+            "वन_अवस्था": "—",
+            "AAH_गुणक_प्रतिशत": 60.0,
+            "कुल_AAH_घमी_प्रति_वर्ष": ft.get("aah_total_m3_per_ha", 0),
+        }]
+
+        # ── Regeneration status (absolute) ──
+        result["ti_block_regeneration_status"] = fi_data.get("fi_block_regeneration_status", [])
+
+    # ── Species block growing stock (absolute) ──
+    species_data = fi_data.get("fi_species_block_growing_stock", [])
+    ti_species_rows = []
+    for sr in species_data:
+        bn = sr.get("block_name", "")
+        if bn == "Grand Total (Weighted)":
+            continue
+        area = block_areas.get(bn, 0)
+        if area <= 0:
+            continue
+        ti_species_rows.append({
+            "block_name": bn,
+            "species_scientific": sr.get("species_scientific", ""),
+            "species_local": sr.get("species_local", ""),
+            "count_total": int((sr.get("count_per_ha", 0) or 0) * area),
+            "timber_m3_total": round((sr.get("timber_m3_per_ha", 0) or 0) * area, 2),
+            "fuelwood_m3_total": round((sr.get("fuelwood_m3_per_ha", 0) or 0) * area, 2),
+            "total_volume_m3_total": round((sr.get("total_volume_m3_per_ha", 0) or 0) * area, 2),
+        })
+    if ti_species_rows:
+        result["ti_species_block_growing_stock"] = ti_species_rows
+
+        # Species-level grand totals
+        sp_agg: Dict = {}
+        sp_order: list = []
+        for sr in ti_species_rows:
+            key = (sr["species_scientific"] or "") + "||" + (sr["species_local"] or "")
+            if key not in sp_agg:
+                sp_agg[key] = {"sci": sr["species_scientific"], "loc": sr["species_local"],
+                               "cnt": 0, "tim": 0.0, "fuel": 0.0, "tot": 0.0}
+                sp_order.append(key)
+            sp_agg[key]["cnt"] += sr["count_total"]
+            sp_agg[key]["tim"] += sr["timber_m3_total"]
+            sp_agg[key]["fuel"] += sr["fuelwood_m3_total"]
+            sp_agg[key]["tot"] += sr["total_volume_m3_total"]
+        for key in sp_order:
+            s = sp_agg[key]
+            ti_species_rows.append({
+                "block_name": "Grand Total",
+                "species_scientific": s["sci"],
+                "species_local": s["loc"],
+                "count_total": s["cnt"],
+                "timber_m3_total": round(s["tim"], 2),
+                "fuelwood_m3_total": round(s["fuel"], 2),
+                "total_volume_m3_total": round(s["tot"], 2),
+            })
+
+    # ── Species volume by block (absolute) — sorted species list ──
+    species_vol = fi_data.get("fi_species_volume_by_block", [])
+    if species_vol:
+        result["ti_species_volume_by_block"] = [
+            {"species": name, "total_volume_m3": round(pct / 100.0 * result.get("ti_total_growing_stock_m3", 0), 2)}
+            for name, pct in species_vol
+        ]
+
+    # ── Species composition (absolute numbers) ──
+    comp_pct = fi_data.get("fi_species_composition", {})
+    if comp_pct and result.get("ti_total_growing_stock_m3"):
+        result["ti_species_composition_absolute"] = {
+            name: round(pct / 100.0 * result["ti_total_growing_stock_m3"], 2)
+            for name, pct in comp_pct.items()
+        }
+        result["ti_dominant_species_absolute"] = fi_data.get("fi_dominant_species", [])
+        result["ti_co_dominant_species_absolute"] = fi_data.get("fi_co_dominant_species", [])
+        result["ti_associated_species_absolute"] = fi_data.get("fi_associated_species", [])
+
+    # ── Growth rate species totals (absolute volume) ──
+    fast = fi_data.get("fi_fast_growing_species", [])
+    moderate = fi_data.get("fi_moderate_growing_species", [])
+    slow = fi_data.get("fi_slow_growing_species", [])
+    if comp_pct and result.get("ti_total_growing_stock_m3"):
+        result["ti_fast_growing_species_total"] = round(
+            sum(comp_pct.get(s, 0) for s in fast) / 100.0 * result["ti_total_growing_stock_m3"], 2
+        ) if fast else 0
+        result["ti_moderate_growing_species_total"] = round(
+            sum(comp_pct.get(s, 0) for s in moderate) / 100.0 * result["ti_total_growing_stock_m3"], 2
+        ) if moderate else 0
+        result["ti_slow_growing_species_total"] = round(
+            sum(comp_pct.get(s, 0) for s in slow) / 100.0 * result["ti_total_growing_stock_m3"], 2
+        ) if slow else 0
+
+    # ── Chart data structures ──
+    block_names = [r["block_name"] for r in ti_block_rows]
+    block_stocks = [r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows]
+    block_mais = [r.get("mai_total_m3_per_ha", 0) for r in ti_block_rows]
+    block_aahs = [r.get("aah_total_m3_per_ha", 0) for r in ti_block_rows]
+    colors = ["#22c55e", "#3b82f6", "#eab308", "#f97316", "#a855f7", "#ec4899", "#14b8a6", "#f43f5e"]
+
+    result["ti_chart_block_stock_pie"] = {
+        "type": "pie",
+        "title_np": "ब्लक अनुसार कुल ग्रोइङ स्टक वितरण",
+        "title_en": "Block-wise Total Growing Stock Distribution",
+        "labels": block_names,
+        "data": block_stocks,
+        "backgroundColor": colors[:len(block_names)],
+        "unit": "m³",
+    }
+    result["ti_chart_block_comparison_bar"] = {
+        "type": "bar",
+        "title_np": "ब्लक अनुसार ग्रोइङ स्टक, MAI तथा AAH तुलना",
+        "title_en": "Block-wise Growing Stock, MAI & AAH Comparison",
+        "labels": block_names,
+        "datasets": [
+            {"label": "ग्रोइङ स्टक (m³)", "data": block_stocks, "backgroundColor": "#22c55e"},
+            {"label": "MAI (m³/yr)", "data": block_mais, "backgroundColor": "#a855f7"},
+            {"label": "AAH (m³/yr)", "data": block_aahs, "backgroundColor": "#f59e0b"},
+        ],
+    }
+
+    # ── DBH class stacked bar chart data ──
+    dbh_data = fi_data.get("fi_dbh_class_chart_data", [])
+    if dbh_data:
+        dbh_labels = [d["label"] for d in dbh_data]
+        dbh_volumes = [d["total_volume_m3_per_ha"] for d in dbh_data]
+        result["ti_chart_dbh_class_bar"] = {
+            "type": "bar",
+            "title_np": "DBH वर्ग अनुसार प्रतिहेक्टर आयतन",
+            "title_en": "DBH Class Volume per ha",
+            "labels": dbh_labels,
+            "datasets": [{"label": "आयतन (m³/ha)", "data": dbh_volumes, "backgroundColor": "#22c55e"}],
+        }
+
+    # ── T7: DBH क्लास अनुसार कुल मौज्दात (Absolute) ──
+    dbh_raw = fi_data.get("fi_block_dbh_class_growing_stock", [])
+    _DBH_NP_LABEL = {
+        "10-20 Sm.Pole": "१०-२० (सानो खाँवा)",
+        "20-30 Lg.Pole": "२०-३० (ठुलो खाँवा)",
+        "30-40 Sm.Tree": "३०-४० (सानो रूख)",
+        "40-50 Med.Tree": "४०-५० (मध्यम रूख)",
+        "50-60 Lg.Tree": "५०-६० (ठुलो रूख)",
+        "60+ V.Lg.Tree": ">६० (धेरै ठुलो रूख)",
+    }
+    if dbh_raw and ti_block_rows:
+        # Per-block DBH class absolute values
+        dbh_abs_rows = []
+        for r in dbh_raw:
+            bn = r.get("block_name", "")
+            area = block_areas.get(bn, 0)
+            if area <= 0 or bn == "Grand Total (Weighted)":
+                continue
+            dbh_abs_rows.append({
+                "ब्लकको_नाम": bn,
+                "DBH_क्लास": _DBH_NP_LABEL.get(r["dbh_class"], r["dbh_class"]),
+                "गणना": int(r["count_per_ha"] * area),
+                "काठ_घमी": round(r["timber_m3_per_ha"] * area, 2),
+                "दाउरा_घमी": round(r["fuelwood_m3_per_ha"] * area, 2),
+                "आयतन_घमी": round(r["total_volume_m3_per_ha"] * area, 2),
+            })
+
+        # Forest-wide DBH class totals
+        ft_dbh: dict = {}
+        ft_dbh_order: list = []
+        for r in dbh_abs_rows:
+            cls = r["DBH_क्लास"]
+            if cls not in ft_dbh:
+                ft_dbh[cls] = {"गणना": 0, "काठ_घमी": 0.0, "दाउरा_घमी": 0.0, "आयतन_घमी": 0.0}
+                ft_dbh_order.append(cls)
+            ft_dbh[cls]["गणना"] += r["गणना"]
+            ft_dbh[cls]["काठ_घमी"] += r["काठ_घमी"]
+            ft_dbh[cls]["दाउरा_घमी"] += r["दाउरा_घमी"]
+            ft_dbh[cls]["आयतन_घमी"] += r["आयतन_घमी"]
+
+        result["ti_dbh_class_totals_table"] = dbh_abs_rows + [
+            {"ब्लकको_नाम": "जम्मा वन कुल", "DBH_क्लास": cls,
+             "गणना": ft_dbh[cls]["गणना"],
+             "काठ_घमी": round(ft_dbh[cls]["काठ_घमी"], 2),
+             "दाउरा_घमी": round(ft_dbh[cls]["दाउरा_घमी"], 2),
+             "आयतन_घमी": round(ft_dbh[cls]["आयतन_घमी"], 2)}
+            for cls in ft_dbh_order
+        ]
+
+        # ── T8: DBH क्लास अनुसार कुल मौज्दात (प्रति हे.) ──
+        dbh_perha_rows = []
+        for r in dbh_raw:
+            bn = r.get("block_name", "")
+            if bn == "Grand Total (Weighted)":
+                continue
+            area = block_areas.get(bn, 0)
+            if area <= 0:
+                continue
+            dbh_perha_rows.append({
+                "ब्लकको_नाम": bn,
+                "DBH_क्लास": _DBH_NP_LABEL.get(r["dbh_class"], r["dbh_class"]),
+                "गणना_प्रति_हे": r["count_per_ha"],
+                "काठ_घमी_प्रति_हे": r["timber_m3_per_ha"],
+                "दाउरा_घमी_प्रति_हे": r["fuelwood_m3_per_ha"],
+                "आयतन_घमी_प्रति_हे": r["total_volume_m3_per_ha"],
+            })
+        # Forest-wide per-ha
+        ft_perha: dict = {}
+        ft_ph_order: list = []
+        for r in dbh_perha_rows:
+            cls = r["DBH_क्लास"]
+            if cls not in ft_perha:
+                ft_perha[cls] = {"गणना_प्रति_हे": 0.0, "काठ_घमी_प्रति_हे": 0.0,
+                                 "दाउरा_घमी_प्रति_हे": 0.0, "आयतन_घमी_प्रति_हे": 0.0}
+                ft_ph_order.append(cls)
+            area = block_areas.get(r["ब्लकको_नाम"], 0)
+            ft_perha[cls]["गणना_प्रति_हे"] += r["गणना_प्रति_हे"] * area
+            ft_perha[cls]["काठ_घमी_प्रति_हे"] += r["काठ_घमी_प्रति_हे"] * area
+            ft_perha[cls]["दाउरा_घमी_प्रति_हे"] += r["दाउरा_घमी_प्रति_हे"] * area
+            ft_perha[cls]["आयतन_घमी_प्रति_हे"] += r["आयतन_घमी_प्रति_हे"] * area
+        for cls in ft_ph_order:
+            for k in ft_perha[cls]:
+                ft_perha[cls][k] = round(ft_perha[cls][k] / total_area, 2) if total_area > 0 else 0
+
+        result["ti_dbh_class_perha_table"] = dbh_perha_rows + [
+            {"ब्लकको_नाम": "जम्मा वन कुल/हे.", "DBH_क्लास": cls, **ft_perha[cls]}
+            for cls in ft_ph_order
+        ]
+
+        # ── T5: प्रजाति अनुसार DBH क्लास मौज्दात (block+dbh class, without species dimension) ──
+        if dbh_perha_rows:
+            result["ti_species_dbh_class_table"] = dbh_perha_rows
+            # T6: पुरै वन क्षेत्र — forest-wide species×DBH (without species breakdown)
+            result["ti_forest_dbh_class_table"] = [
+                {"DBH_क्लास": cls,
+                 "गणना_प्रति_हे": ft_perha[cls]["गणना_प्रति_हे"],
+                 "काठ_घमी_प्रति_हे": ft_perha[cls]["काठ_घमी_प्रति_हे"],
+                 "दाउरा_घमी_प्रति_हे": ft_perha[cls]["दाउरा_घमी_प्रति_हे"],
+                 "आयतन_घमी_प्रति_हे": ft_perha[cls]["आयतन_घमी_प्रति_हे"]}
+                for cls in ft_ph_order
+            ]
+
+        # ── T9: DBH क्लास अनुसार MAI ──
+        _mai_pct = float(fi_data.get("fi_mai_percent", 0) or 0)
+        _aah_mult = 0.60  # default AAH multiplier
+        dbh_mai_rows = []
+        for r in dbh_abs_rows:
+            bname = r["ब्लकको_नाम"]
+            vol = r["आयतन_घमी"]
+            dbh_mai_rows.append({
+                "ब्लकको_नाम": bname,
+                "DBH_क्लास": r["DBH_क्लास"],
+                "आयतन_घमी": vol,
+                "MAI_घमी_प्रति_वर्ष": round(vol * _mai_pct / 100.0, 2),
+            })
+        # Forest-wide DBH MAI
+        ft_mai = []
+        for cls in ft_dbh_order:
+            vol = ft_dbh[cls]["आयतन_घमी"]
+            ft_mai.append({
+                "DBH_क्लास": cls,
+                "आयतन_घमी": round(vol, 2),
+                "MAI_घमी_प्रति_वर्ष": round(vol * _mai_pct / 100.0, 2),
+            })
+        result["ti_dbh_mai_table"] = dbh_mai_rows + [
+            {"ब्लकको_नाम": "जम्मा वन कुल", **r} for r in ft_mai
+        ] if ft_mai else []
+
+        # ── T10: DBH क्लास अनुसार AAH ──
+        dbh_aah_rows = []
+        for r in dbh_abs_rows:
+            vol = r["आयतन_घमी"]
+            mai_val = vol * _mai_pct / 100.0
+            dbh_aah_rows.append({
+                "ब्लकको_नाम": r["ब्लकको_नाम"],
+                "DBH_क्लास": r["DBH_क्लास"],
+                "आयतन_घमी": vol,
+                "MAI_घमी_प्रति_वर्ष": round(mai_val, 2),
+                "AAH_घमी_प्रति_वर्ष": round(mai_val * _aah_mult, 2),
+            })
+        ft_aah = []
+        for cls in ft_dbh_order:
+            vol = ft_dbh[cls]["आयतन_घमी"]
+            mai_val = vol * _mai_pct / 100.0
+            ft_aah.append({
+                "DBH_क्लास": cls,
+                "आयतन_घमी": round(vol, 2),
+                "MAI_घमी_प्रति_वर्ष": round(mai_val, 2),
+                "AAH_घमी_प्रति_वर्ष": round(mai_val * _aah_mult, 2),
+            })
+        result["ti_dbh_aah_table"] = dbh_aah_rows + [
+            {"ब्लकको_नाम": "जम्मा वन कुल", **r} for r in ft_aah
+        ] if ft_aah else []
+
+    # ── T11: प्रजाति संरचना (स्थानीय नाम) ──
+    comp_abs = fi_data.get("ti_species_composition_absolute", {})
+    if comp_abs:
+        total_vol = sum(v for v in comp_abs.values() if isinstance(v, (int, float)))
+        result["ti_species_composition_table"] = [
+            {
+                "प्रजातिको_नाम": sp,
+                "कुल_आयतन_घमी": round(vol, 2),
+                "प्रतिशत": round(vol / total_vol * 100, 2) if total_vol > 0 else 0,
+            }
+            for sp, vol in sorted(comp_abs.items(), key=lambda x: x[1], reverse=True)
+        ]
+
+    # ── T12: ब्लक अनुसार उत्पादनसिल संचिती ──
+    if ti_block_rows:
+        result["ti_block_productivity_table"] = [
+            {
+                "ब्लकको_नाम": r["block_name"],
+                "क्षेत्रफल_हे": round(block_areas.get(r["block_name"], 0), 4),
+                "जम्मा_मौज्दात_घमी": r.get("total_growing_stock_m3_per_ha", 0),
+                "प्रति_हे_मौज्दात_घमी": round(
+                    r.get("total_growing_stock_m3_per_ha", 0) / max(block_areas.get(r["block_name"], 1), 0.01), 2),
+                "MAI_घमी_प्रति_वर्ष": r.get("mai_total_m3_per_ha", 0),
+                "AAH_घमी_प्रति_वर्ष": r.get("aah_total_m3_per_ha", 0),
+            }
+            for r in ti_block_rows
+        ] + [{
+            "ब्लकको_नाम": "जम्मा",
+            "क्षेत्रफल_हे": round(total_area, 4),
+            "जम्मा_मौज्दात_घमी": ft.get("total_growing_stock_m3_per_ha", 0),
+            "प्रति_हे_मौज्दात_घमी": round(
+                ft.get("total_growing_stock_m3_per_ha", 0) / max(total_area, 0.01), 2),
+            "MAI_घमी_प्रति_वर्ष": ft.get("mai_total_m3_per_ha", 0),
+            "AAH_घमी_प्रति_वर्ष": ft.get("aah_total_m3_per_ha", 0),
+        }]
+
+    # ── T13: आर्थिक मूल्याङ्कन ──
+    # Default rates (NPR)
+    _TIMBER_RATE = 2500
+    _FUELWOOD_RATE = 1000
+    _CARBON_RATE = 3000
+    if ti_block_rows:
+        econ_rows = []
+        gt_timber_val = gt_fuel_val = gt_carbon_val = 0.0
+        for r in ti_block_rows:
+            bn = r["block_name"]
+            area = block_areas.get(bn, 0)
+            timber_vol = r.get("pole_timber_m3_per_ha", 0) + r.get("tree_timber_m3_per_ha", 0)
+            fuel_vol = r.get("pole_firewood_m3_per_ha", 0) + r.get("tree_firewood_m3_per_ha", 0)
+            co2 = r.get("co2_equivalent_tco2_per_ha", 0)
+            t_val = round(timber_vol * _TIMBER_RATE, 2)
+            f_val = round(fuel_vol * _FUELWOOD_RATE, 2)
+            c_val = round(co2 * _CARBON_RATE, 2)
+            econ_rows.append({
+                "ब्लकको_नाम": bn,
+                "उत्पादनसिल_संचिती_घमी": r.get("total_growing_stock_m3_per_ha", 0),
+                "काठ_दर_रु": _TIMBER_RATE,
+                "काठ_मूल्य_रु": t_val,
+                "दाउरा_दर_रु": _FUELWOOD_RATE,
+                "दाउरा_मूल्य_रु": f_val,
+                "कार्बन_दर_रु": _CARBON_RATE,
+                "कार्बन_मूल्य_रु": c_val,
+                "जम्मा_मूल्य_रु": round(t_val + f_val + c_val, 2),
+            })
+            gt_timber_val += t_val
+            gt_fuel_val += f_val
+            gt_carbon_val += c_val
+        result["ti_economic_valuation_table"] = econ_rows + [{
+            "ब्लकको_नाम": "जम्मा",
+            "उत्पादनसिल_संचिती_घमी": round(sum(r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "काठ_दर_रु": _TIMBER_RATE,
+            "काठ_मूल्य_रु": round(gt_timber_val, 2),
+            "दाउरा_दर_रु": _FUELWOOD_RATE,
+            "दाउरा_मूल्य_रु": round(gt_fuel_val, 2),
+            "कार्बन_दर_रु": _CARBON_RATE,
+            "कार्बन_मूल्य_रु": round(gt_carbon_val, 2),
+            "जम्मा_मूल्य_रु": round(gt_timber_val + gt_fuel_val + gt_carbon_val, 2),
+        }]
+
+    # ── T14: दिगोपन सूचकांक ──
+    if ti_block_rows:
+        sus_rows = []
+        for r in ti_block_rows:
+            bn = r["block_name"]
+            area = block_areas.get(bn, 0) or 1
+            gs = r.get("total_growing_stock_m3_per_ha", 0)
+            mai_val = r.get("mai_total_m3_per_ha", 0)
+            aah_val = r.get("aah_total_m3_per_ha", 0)
+            si = round((aah_val / gs * 100), 2) if gs > 0 else 0
+            hp = round((aah_val / mai_val * 100), 1) if mai_val > 0 else 0
+            gs_per_ha = round(gs / area, 2) if area > 0 else 0
+            regen_cond = r.get("regeneration_condition", "—")
+            forest_cond = r.get("forest_condition", "—")
+            sus_rows.append({
+                "ब्लकको_नाम": bn,
+                "दिगोपन_सूचकांक_SI_प्रतिशत": si,
+                "कटान_दबाव_HP_प्रतिशत": hp,
+                "उत्पादनसिल_संचिती_प्रति_हे_घमी": gs_per_ha,
+                "MAI_प्रतिशत": r.get("mai_percent", 0),
+                "AAH_घमी_प्रति_वर्ष": aah_val,
+                "पुनरोत्पादन_अवस्था": regen_cond,
+                "वन_अवस्था": forest_cond,
+            })
+
+        if sus_rows:
+            gs_t = sum(r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows)
+            mai_t = sum(r.get("mai_total_m3_per_ha", 0) for r in ti_block_rows)
+            aah_t = sum(r.get("aah_total_m3_per_ha", 0) for r in ti_block_rows)
+            si_t = round((aah_t / gs_t * 100), 2) if gs_t > 0 else 0
+            hp_t = round((aah_t / mai_t * 100), 1) if mai_t > 0 else 0
+            gs_t_per_ha = round(gs_t / total_area, 2) if total_area > 0 else 0
+            sus_rows.append({
+                "ब्लकको_नाम": "जम्मा",
+                "दिगोपन_सूचकांक_SI_प्रतिशत": si_t,
+                "कटान_दबाव_HP_प्रतिशत": hp_t,
+                "उत्पादनसिल_संचिती_प्रति_हे_घमी": gs_t_per_ha,
+                "MAI_प्रतिशत": round(mai_t / gs_t * 100, 1) if gs_t > 0 else 0,
+                "AAH_घमी_प्रति_वर्ष": round(aah_t, 2),
+                "पुनरोत्पादन_अवस्था": "—",
+                "वन_अवस्था": "—",
+            })
+            result["ti_sustainability_table"] = sus_rows
+
+    return result
 
 
 # ── Sub-Areas Detail ──
@@ -1874,17 +2556,33 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         OpDataCache.calculation_id == calc_uuid
     ).first()
     if cached:
-        return dict(cached.data)
+        cached_data = dict(cached.data)
+        # Invalidate if cache version doesn't match (schema/keys may have changed)
+        if cached_data.pop("_cache_version", None) == OP_DATA_CACHE_VERSION:
+            return cached_data
 
     raw = _collect_all_data(db, calculation_id)
+
+    # Merge user_group_landcover into user_group so all UG vars resolve from one source
+    if "user_group_landcover" in raw:
+        ug_lc = raw.pop("user_group_landcover", {})
+        raw.setdefault("user_group", {})
+        raw["user_group"].update(ug_lc)
+
     fi_data = get_field_inventory_data(db, calculation_id,
                                        base_species_data=raw.get("species"))
     raw["field_inventory"] = fi_data
+
+    # Compute total inventory (absolute) from per-hectare field inventory data
+    ti_data = _compute_total_inventory(fi_data)
+    raw["field_inventory"].update(ti_data)
     calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
     raw["result_data"] = calc.result_data or {} if calc else {}
 
     raw["blocks"]["sub_areas_detail"] = _fetch_sub_areas_detail(db, calculation_id)
     raw["blocks"]["block_area_detail_merged"] = _fetch_block_area_detail_merged(db, calculation_id)
+    # T1: Block area table — merge into field_inventory for ti_ variable resolution
+    raw["field_inventory"]["ti_block_area_table"] = raw["blocks"]["block_area_detail_merged"]
 
     raw["compartment"] = _fetch_compartment_data(db, calculation_id)
 
@@ -1925,6 +2623,7 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     existing = db.query(OpDataCache).filter(
         OpDataCache.calculation_id == calc_uuid
     ).first()
+    raw["_cache_version"] = OP_DATA_CACHE_VERSION
     if existing:
         existing.data = raw
         existing.updated_at = datetime.utcnow()

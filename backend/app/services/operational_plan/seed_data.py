@@ -52,8 +52,9 @@ def get_default_seed_tree() -> List[TreeNode]:
         _node("section", "सामुदायिक वन र समूहको भौगोलिक अवस्थिति", "Geography",
               "यस वनको भौगोलिक अवस्थिति निम्नानुसार छ:",
               children=[
-                  _node("subsection", "समूहको परिचय", "Group Introduction",
-                        "{{user_group_name}} उपभोक्ता समूहको दर्ता नं. {{user_group_code}} रहेको छ।"),
+_node("subsection", "समूहको परिचय", "Group Introduction",
+                         "{{user_group_name}} उपभोक्ता समूहको दर्ता नं. {{user_group_code}} रहेको छ।\n\n"
+                         "{{map:usergroup}}"),
                   _node("subsection", "वनको भौगोलिक अवस्था", "Geographic Condition",
                         "यस वनको उचाई {{altitude_min_m}} देखि {{altitude_max_m}} मिटर सम्म रहेको छ। औसत उचाई {{altitude_mean_m}} मिटर छ।"),
                   _node("subsection", "वनको ऐतिहासिक पृष्ठभूमि", "Historical Background",

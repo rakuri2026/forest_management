@@ -239,6 +239,7 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
             poiData={poiData}
             ref={mapRef}
           />
+          <p className="text-xs text-gray-400 font-mono mb-1">{'{{map:usergroup}}'}</p>
 
           <SettlementStatistics settlements={results.settlements} />
 

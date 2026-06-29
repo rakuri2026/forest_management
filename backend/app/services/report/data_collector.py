@@ -400,22 +400,63 @@ def get_household_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     total_timber_demand = sum(float(h.timber_demand_cft or 0) for h in households)
     total_firewood_demand = sum(float(h.firewood_demand_bhari or 0) for h in households)
 
+    total_population = total_male + total_female
+    forest_occ = sum(1 for h in households if h.forest_based_occupation)
+    livestock = {
+        "cow_ox": sum(h.cow_ox_count or 0 for h in households),
+        "buffalo": sum(h.buffalo_count or 0 for h in households),
+        "goat_sheep": sum(h.goat_sheep_count or 0 for h in households),
+    }
+
+    from app.utils.number_format import format_devanagari
+    _ne = {
+        "total_households": format_devanagari(len(households), 0),
+        "total_population": format_devanagari(total_population, 0),
+        "total_male": format_devanagari(total_male, 0),
+        "total_female": format_devanagari(total_female, 0),
+        "timber_demand_cft": format_devanagari(round(total_timber_demand, 2), 2),
+        "firewood_demand_bhari": format_devanagari(round(total_firewood_demand, 2), 2),
+        "forest_based_occupation": format_devanagari(forest_occ, 0),
+    }
+
+    hh_records = []
+    for h in households:
+        hh_records.append({
+            "घर_नं": h.house_no,
+            "पुरुष_मुखिया": h.household_head_male or "",
+            "महिला_मुखिया": h.household_head_female or "",
+            "जात_वर्गीकरण": h.caste_classification_ne or "",
+            "पुरुष": h.male_count or 0,
+            "महिला": h.female_count or 0,
+            "ठेगाना": h.address_tole or "",
+            "गाई_गोरु": h.cow_ox_count or 0,
+            "भैंसी": h.buffalo_count or 0,
+            "बाख्रा_भेडा": h.goat_sheep_count or 0,
+            "जग्गा_क्षेत्रफल": float(h.land_area or 0),
+            "जग्गा_एकाइ": h.land_unit or "",
+            "घाँस_भारी": float(h.grass_demand_bhari or 0),
+            "पोल": h.pole_demand or 0,
+            "काठ_cft": float(h.timber_demand_cft or 0),
+            "दाउरा_भारी": float(h.firewood_demand_bhari or 0),
+            "ओछ्यान_भारी": float(h.bedding_demand_bhari or 0),
+            "समृद्धि_स्तर": h.prosperity_level or "",
+            "वन_पेशा": "छ" if h.forest_based_occupation else "छैन",
+        })
+
     return {
         "available": True,
         "total_households": len(households),
-        "total_population": total_male + total_female,
+        "total_population": total_population,
         "total_male": total_male,
         "total_female": total_female,
         "prosperity_distribution": prosperity,
         "caste_distribution": caste,
         "timber_demand_cft": round(total_timber_demand, 2),
         "firewood_demand_bhari": round(total_firewood_demand, 2),
-        "forest_based_occupation": sum(1 for h in households if h.forest_based_occupation),
-        "livestock": {
-            "cow_ox": sum(h.cow_ox_count or 0 for h in households),
-            "buffalo": sum(h.buffalo_count or 0 for h in households),
-            "goat_sheep": sum(h.goat_sheep_count or 0 for h in households),
-        },
+        "forest_based_occupation": forest_occ,
+        "livestock": livestock,
+        "_ne": _ne,
+        "hh_records": hh_records,
     }
 
 
@@ -433,9 +474,20 @@ def get_committee_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         FinancialCommittee.calculation_id == calculation_id
     ).order_by(FinancialCommittee.serial_no).all()
 
+    from app.utils.number_format import format_devanagari
+    uc_total = len(user_committee)
+    ac_total = len(advisory)
+    fc_total = len(financial)
+
+    _ne = {
+        "user_committee_total": format_devanagari(uc_total, 0),
+        "advisory_committee_total": format_devanagari(ac_total, 0),
+        "financial_committee_total": format_devanagari(fc_total, 0),
+    }
+
     return {
         "user_committee": {
-            "total_members": len(user_committee),
+            "total_members": uc_total,
             "members": [
                 {
                     "name": m.name,
@@ -448,18 +500,19 @@ def get_committee_data(db: Session, calculation_id: str) -> Dict[str, Any]:
             ],
         },
         "advisory_committee": {
-            "total_members": len(advisory),
+            "total_members": ac_total,
             "members": [{"name": m.name, "address": m.address} for m in advisory],
         },
         "financial_committee": {
-            "total_members": len(financial),
+            "total_members": fc_total,
             "members": [{"name": m.name, "address": m.address} for m in financial],
         },
+        "_ne": _ne,
     }
 
 
 def get_biodiversity_data(db: Session, calculation_id: str) -> Dict[str, Any]:
-    """Get biodiversity records"""
+    """Get biodiversity records with enriched summary data"""
     records = db.query(CalculationBiodiversity).filter(
         CalculationBiodiversity.calculation_id == calculation_id
     ).all()
@@ -475,27 +528,60 @@ def get_biodiversity_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         BiodiversitySpecies.id.in_(species_ids)
     ).all()}
 
+    protected_count = 0
+    invasive_count = 0
+    iucn_breakdown: Dict[str, int] = {}
+    sub_category_breakdown: Dict[str, int] = {}
+
     for r in records:
         species = species_map.get(r.species_id)
+        if not species:
+            continue
+
+        iucn = species.iucn_status or "DD"
+        is_protected = bool(species.is_protected) or iucn in ("CR", "EN", "VU")
+        is_invasive = bool(species.is_invasive)
+
+        if is_protected:
+            protected_count += 1
+        if is_invasive:
+            invasive_count += 1
+
+        iucn_breakdown[iucn] = iucn_breakdown.get(iucn, 0) + 1
+        sub_cat = species.sub_category or "other"
+        sub_category_breakdown[sub_cat] = sub_category_breakdown.get(sub_cat, 0) + 1
 
         record = {
-            "name": species.nepali_name if species else "",
-            "scientific_name": species.scientific_name if species else "",
+            "name": species.nepali_name or "",
+            "scientific_name": species.scientific_name or "",
+            "sub_category": species.sub_category or "",
+            "primary_use": species.primary_use or "",
             "presence_status": r.presence_status,
-            "abundance": r.abundance,
-            "iucn_status": species.iucn_status if species else "",
+            "abundance": r.abundance or "",
+            "iucn_status": iucn,
+            "is_protected": is_protected,
+            "is_invasive": is_invasive,
+            "cites_appendix": species.cites_appendix or "",
         }
 
-        if species and species.category == "vegetation":
+        if species.category == "vegetation":
             vegetation.append(record)
         else:
             animals.append(record)
+
+    # Ensure all IUCN categories exist
+    for code in ("CR", "EN", "VU", "NT", "LC", "DD"):
+        iucn_breakdown.setdefault(code, 0)
 
     return {
         "available": True,
         "total_species": len(records),
         "vegetation_count": len(vegetation),
         "animal_count": len(animals),
+        "protected_count": protected_count,
+        "invasive_count": invasive_count,
+        "iucn_breakdown": iucn_breakdown,
+        "sub_category_breakdown": sub_category_breakdown,
         "vegetation": vegetation,
         "animals": animals,
     }
@@ -549,7 +635,7 @@ def get_activities_data(db: Session, calculation_id: str) -> Dict[str, Any]:
 
 
 def get_user_group_data(db: Session, calculation_id: str) -> Dict[str, Any]:
-    """Get user group extent and buildings data"""
+    """Get user group extent, buildings data with size breakdown"""
     extents = db.query(UserGroupExtent).filter(
         UserGroupExtent.calculation_id == calculation_id
     ).all()
@@ -566,19 +652,85 @@ def get_user_group_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         ext_buildings_map[b.extent_id].append(b)
 
     buildings = []
+    total_buildings = 0
+    total_building_area = 0.0
+    total_small = 0
+    total_medium = 0
+    total_large = 0
+
     for ext in extents:
         for b in ext_buildings_map.get(ext.id, []):
+            geo = b.buildings_geojson or []
+            small_count = sum(1 for bg in geo if bg.get('area', 0) < 50)
+            medium_count = sum(1 for bg in geo if 50 <= bg.get('area', 0) <= 150)
+            large_count = sum(1 for bg in geo if bg.get('area', 0) > 150)
+            bc = b.building_count or 0
+            ta = float(b.total_building_area_m2 or 0)
+            avg_size = ta / bc if bc > 0 else 0
+
+            total_buildings += bc
+            total_building_area += ta
+            total_small += small_count
+            total_medium += medium_count
+            total_large += large_count
+
             buildings.append({
                 "settlement_name": b.settlement_name,
-                "building_count": b.building_count,
+                "building_count": bc,
+                "small_buildings": small_count,
+                "medium_buildings": medium_count,
+                "large_buildings": large_count,
+                "avg_building_size_m2": round(avg_size, 2),
                 "direction_from_forest": b.direction_from_forest,
-                "total_area_m2": b.total_building_area_m2,
+                "total_area_m2": ta,
             })
+
+    avg_building_size = total_building_area / total_buildings if total_buildings > 0 else 0
+    small_pct = round(total_small / total_buildings * 100, 1) if total_buildings > 0 else 0
+    medium_pct = round(total_medium / total_buildings * 100, 1) if total_buildings > 0 else 0
+    large_pct = round(total_large / total_buildings * 100, 1) if total_buildings > 0 else 0
 
     return {
         "available": True,
         "total_settlements": len(buildings),
+        "total_buildings": total_buildings,
+        "total_building_area_m2": round(total_building_area, 2),
+        "avg_building_size_m2": round(avg_building_size, 2),
+        "small_buildings": total_small,
+        "medium_buildings": total_medium,
+        "large_buildings": total_large,
+        "small_pct": small_pct,
+        "medium_pct": medium_pct,
+        "large_pct": large_pct,
         "buildings": buildings,
+    }
+
+
+def get_user_group_landcover_data(db: Session, calculation_id: str) -> Dict[str, Any]:
+    """Get user group land cover and biomass analysis data from calculation result_data"""
+    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    if not calc:
+        return {"available": False}
+
+    result_data = calc.result_data or {}
+    lc_data = result_data.get("user_group_land_cover")
+    if not lc_data:
+        return {"available": False}
+
+    classes = lc_data.get("land_cover_classes", [])
+
+    return {
+        "available": True,
+        "user_group_area_ha": lc_data.get("user_group_area_ha", 0),
+        "forest_overlap_area_ha": lc_data.get("forest_overlap_area_ha", 0),
+        "net_analysis_area_ha": lc_data.get("net_analysis_area_ha", 0),
+        "total_biomass_mg": lc_data.get("total_biomass_mg", 0),
+        "total_volume_m3": lc_data.get("total_volume_m3", 0),
+        "avg_biomass_mg_per_ha": lc_data.get("avg_biomass_mg_per_ha", 0),
+        "avg_volume_m3_per_ha": lc_data.get("avg_volume_m3_per_ha", 0),
+        "has_forest_overlap": lc_data.get("has_forest_overlap", False),
+        "analysis_date": lc_data.get("analysis_date", ""),
+        "land_cover_classes": classes,
     }
 
 
@@ -597,5 +749,6 @@ def collect_all_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         "biodiversity": get_biodiversity_data(db, calculation_id),
         "activities": get_activities_data(db, calculation_id),
         "user_group": get_user_group_data(db, calculation_id),
+        "user_group_landcover": get_user_group_landcover_data(db, calculation_id),
     }
     return _convert_decimals(raw_data)

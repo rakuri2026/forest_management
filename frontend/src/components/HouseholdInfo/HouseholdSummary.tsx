@@ -2,8 +2,8 @@
  * Household Summary Dashboard
  * Displays aggregate statistics and charts
  */
-import React from 'react';
-import { Card, Row, Col, Statistic, Tag, Divider } from 'antd';
+import React, { useState } from 'react';
+import { Card, Row, Col, Statistic, Tag, Divider, Collapse } from 'antd';
 import {
   UserOutlined,
   HomeOutlined,
@@ -14,13 +14,16 @@ import {
 } from '@ant-design/icons';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { HouseholdSummary } from '../../types/household';
+import HouseholdVariablePanel from './HouseholdVariablePanel';
 
 interface HouseholdSummaryDashboardProps {
   summary: HouseholdSummary;
+  calculationId?: string;
 }
 
 const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
   summary,
+  calculationId,
 }) => {
   // Prepare caste distribution chart data
   const casteData = Object.entries(summary.caste_distribution).map(
@@ -95,7 +98,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
         </Col>
       </Row>
 
-      <Divider orientation="left">Livestock Summary</Divider>
+      <Divider>Livestock Summary</Divider>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={8}>
@@ -127,7 +130,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
         </Col>
       </Row>
 
-      <Divider orientation="left">Forest Product Demands (Yearly)</Divider>
+      <Divider>Forest Product Demands (Yearly)</Divider>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={8}>
@@ -192,7 +195,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
         </Col>
       </Row>
 
-      <Divider orientation="left">Distribution Analysis</Divider>
+      <Divider>Distribution Analysis</Divider>
 
       <Row gutter={[16, 16]}>
         {/* Caste Distribution */}
@@ -282,7 +285,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
         </Col>
       </Row>
 
-      <Divider orientation="left">Notes</Divider>
+      <Divider>Notes</Divider>
 
       <Card size="small">
         <p style={{ marginBottom: 8 }}>
@@ -300,6 +303,51 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
           <li>Bedding: (cow + buffalo) × 10 kg/day × 365 ÷ 25</li>
         </ul>
       </Card>
+
+      {calculationId && (
+        <div style={{ marginTop: 24 }}>
+          <HouseholdVariablePanel
+            calculationId={calculationId}
+            tabKey="summary"
+            onInsert={(varStr) => {
+              const ta = document.getElementById('summary-notes') as HTMLTextAreaElement;
+              if (ta) {
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                ta.value = ta.value.substring(0, start) + varStr + ta.value.substring(end);
+                ta.focus();
+                ta.selectionStart = ta.selectionEnd = start + varStr.length;
+              }
+            }}
+          />
+          <div style={{
+            border: '1px solid #d9d9d9',
+            borderRadius: 6,
+            padding: 12,
+            background: '#fafafa',
+            marginTop: 12,
+          }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>
+              अतिरिक्त विवरण / नोट (Additional Notes)
+            </h4>
+            <textarea
+              id="summary-notes"
+              rows={3}
+              style={{
+                width: '100%',
+                border: '1px solid #d9d9d9',
+                borderRadius: 4,
+                padding: '8px 12px',
+                fontSize: 13,
+                lineHeight: 1.6,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+              placeholder="चर सम्मिलित गर्न माथिको 'सम्मिलित' बटन प्रयोग गर्नुहोस्।"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
