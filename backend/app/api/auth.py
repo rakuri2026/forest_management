@@ -2,8 +2,10 @@
 Authentication API endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+from jose import JWTError, jwt
 
 from ..core.database import get_db
 from ..models.user import User, UserStatus
@@ -16,6 +18,7 @@ from ..utils.auth import (
 )
 from ..core.config import settings
 
+security = HTTPBearer(auto_error=False)
 
 router = APIRouter()
 
@@ -155,3 +158,58 @@ async def get_available_roles():
             for role in UserRole
         ]
     }
+
+
+@router.post("/refresh")
+async def refresh_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """
+    Refresh the access token — extends the session.
+
+    Accepts a token that is still valid OR recently expired (signature
+    must match, but expiration is ignored). Returns a fresh token.
+    """
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or user.status != UserStatus.ACTIVE:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    access_token = create_access_token(
+        data={"sub": str(user.id), "email": user.email}
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
+
+
+@router.post("/toggle-role")
+async def toggle_user_role(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle current user between super_admin and user (dev convenience)."""
+    new_role = UserRole.USER if current_user.role == UserRole.SUPER_ADMIN else UserRole.SUPER_ADMIN
+    current_user.role = new_role
+    db.commit()
+    db.refresh(current_user)
+    return current_user

@@ -25,6 +25,7 @@ class TreeNode(BaseModel):
     is_locked: bool = False
     hidden_in_export: bool = False
     deleted: bool = False
+    page_break_before: bool = False
     last_modified: Optional[str] = None
 
     def touch(self):

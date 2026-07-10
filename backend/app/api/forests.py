@@ -1077,7 +1077,7 @@ async def generate_maps(
     This endpoint generates the selected maps for an existing calculation.
     Maps are generated as A5 PNG files (1748×2480 pixels at 300 DPI) with:
     - Professional cartographic styling
-    - Title, legend, scale bar, north arrow
+    - Title, legend, north arrow
     - Thematic colors and classifications
 
     Available maps:
@@ -1568,10 +1568,16 @@ async def delete_calculation(
         )
 
     try:
+        # Clean up export files BEFORE cascade delete removes the DB records
+        from ..services.export_cleanup import cleanup_export_files_for_calculation, _remove_file
+        orphan_paths = cleanup_export_files_for_calculation(db, calculation_id)
+        for p in orphan_paths:
+            _remove_file(p)
+
         # Use ORM delete with cascade (slower but more reliable)
         db.delete(calculation)
         db.commit()
-        print(f"Successfully deleted calculation {calculation_id}")
+        print(f"Successfully deleted calculation {calculation_id} (cleaned {len(orphan_paths)} files)")
     except Exception as e:
         db.rollback()
         print(f"Error deleting calculation {calculation_id}: {str(e)}")
@@ -1659,8 +1665,8 @@ async def generate_boundary_map(
             show_ridges=True, show_esa_boundary=True, buffer_m=100.0
         )
         _save_map_cache(calculation_id, "boundary", buffer.getvalue())
-        return StreamingResponse(io.BytesIO(buffer.getvalue()), media_type="image/png",
-                                 headers={"Content-Disposition": f"inline; filename=boundary_map_{calculation_id}.png"})
+        return StreamingResponse(io.BytesIO(buffer.getvalue()), media_type="image/svg+xml",
+                                 headers={"Content-Disposition": f"inline; filename=boundary_map_{calculation_id}.svg"})
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error: {str(e)}")
 
@@ -1712,8 +1718,8 @@ def _generate_raster_map(calculation_id: UUID, layer: str, db: Session, current_
             forest_name=calculation.forest_name or 'Community Forest', orientation='auto'
         )
         _save_map_cache(calculation_id, layer, buffer.getvalue())
-        return StreamingResponse(io.BytesIO(buffer.getvalue()), media_type="image/png",
-                                 headers={"Content-Disposition": f"inline; filename={layer}_map_{calculation_id}.png"})
+        return StreamingResponse(io.BytesIO(buffer.getvalue()), media_type="image/svg+xml",
+                                 headers={"Content-Disposition": f"inline; filename={layer}_map_{calculation_id}.svg"})
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 

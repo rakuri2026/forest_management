@@ -107,6 +107,15 @@ class FieldInventoryService:
             self.db.commit()
             logger.info(f"[FIELD_INVENTORY] Processing {field_inventory_id} with {len(df)} rows")
 
+            # 0. Clean up any raw rows stored during upload (cascade deletes measurements)
+            existing_plots = self.db.query(FieldInventorySamplePlot).filter(
+                FieldInventorySamplePlot.field_inventory_calculation_id == field_inventory_id
+            ).all()
+            for sp in existing_plots:
+                self.db.delete(sp)
+            self.db.flush()
+            logger.info(f"[FIELD_INVENTORY] Cleaned up {len(existing_plots)} pre-existing sample plots")
+
             # 1. Parse CSV and create sample plots
             sample_plots = await self._create_sample_plots(field_inventory_id, df, column_mapping)
             logger.info(f"[FIELD_INVENTORY] Created {len(sample_plots)} sample plots")
@@ -493,6 +502,162 @@ class FieldInventoryService:
         )
 
         return measurement
+
+    def store_raw_measurements(
+        self,
+        field_inventory_id: UUID,
+        df: pd.DataFrame,
+        column_mapping: Dict[str, str]
+    ):
+        """Store raw measurement rows at upload time (no volume calculations).
+
+        Creates sample plots and measurements with only the raw uploaded fields
+        (species, DBH, height, class, count, yield data). Volume columns are left NULL
+        — they will be filled during the processing step.
+
+        This mirrors _create_sample_plots() + _create_measurements() but without
+        _calculate_volumes(), so that {{table:fieldinventory}} works immediately
+        after upload.
+        """
+        block_col = column_mapping.get('block_name')
+        plot_col = column_mapping.get('sample_plot_number')
+        lon_col = column_mapping.get('longitude')
+        lat_col = column_mapping.get('latitude')
+        fw_col = column_mapping.get('firewood_kg_per_100sqm_per_year')
+        gr_col = column_mapping.get('grass_kg_per_100sqm_per_year')
+        bd_col = column_mapping.get('bedding_material_kg_per_100sqm_per_year')
+
+        # 1. Create sample plots (unique block+plot combos)
+        sample_plots_dict = {}
+        for idx, row in df.iterrows():
+            try:
+                block_name = str(row[block_col])
+                plot_number = int(float(row[plot_col]))
+                lon = float(row[lon_col])
+                lat = float(row[lat_col])
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"[RAW_STORE] Skipping row {idx}: Invalid plot data - {str(e)}")
+                continue
+
+            key = (block_name, plot_number)
+            if key in sample_plots_dict:
+                continue
+
+            firewood_kg = grass_kg = bedding_kg = None
+            if fw_col:
+                try: firewood_kg = float(row[fw_col])
+                except (ValueError, TypeError, KeyError): pass
+            if gr_col:
+                try: grass_kg = float(row[gr_col])
+                except (ValueError, TypeError, KeyError): pass
+            if bd_col:
+                try: bedding_kg = float(row[bd_col])
+                except (ValueError, TypeError, KeyError): pass
+
+            sample_plot = FieldInventorySamplePlot(
+                field_inventory_calculation_id=field_inventory_id,
+                block_name=block_name,
+                sample_plot_number=plot_number,
+                location=f'SRID=4326;POINT({lon} {lat})',
+                firewood_kg_per_100sqm_per_year=firewood_kg,
+                grass_kg_per_100sqm_per_year=grass_kg,
+                bedding_material_kg_per_100sqm_per_year=bedding_kg,
+            )
+            self.db.add(sample_plot)
+            sample_plots_dict[key] = sample_plot
+
+        self.db.flush()
+
+        # 2. Create measurement rows (raw fields only, no volume calculations)
+        for idx, row in df.iterrows():
+            try:
+                block_name = str(row[block_col])
+                plot_number = int(float(row[plot_col]))
+            except (ValueError, TypeError, KeyError):
+                continue
+
+            sample_plot = sample_plots_dict.get((block_name, plot_number))
+            if not sample_plot:
+                continue
+
+            for stand_type_info in [
+                ('Regeneration', 'regen'),
+                ('Sapling', 'sapling'),
+                ('Pole', 'pole'),
+                ('Tree', 'tree'),
+            ]:
+                stand_type, prefix = stand_type_info
+                species_col = column_mapping.get(f'{prefix}_species_scientific')
+                if not species_col or species_col not in row.index:
+                    continue
+                species_value = row[species_col]
+                if pd.isna(species_value) or str(species_value).strip() == '':
+                    continue
+
+                species = str(species_value).strip()
+                species_local = self.species_coefficients.get(species, {}).get('local_name')
+
+                dbh_col = column_mapping.get(f'{prefix}_dbh_cm') or column_mapping.get(f'{prefix}_dbh')
+                dbh_cm = None
+                if dbh_col and dbh_col in row.index and pd.notna(row[dbh_col]):
+                    try: dbh_cm = float(row[dbh_col])
+                    except (ValueError, TypeError): pass
+
+                height_col = column_mapping.get(f'{prefix}_height_m')
+                height_m = None
+                height_estimated = False
+                if height_col and height_col in row.index and pd.notna(row[height_col]):
+                    try: height_m = float(row[height_col])
+                    except (ValueError, TypeError): pass
+                if not height_m and dbh_cm and stand_type in ('Pole', 'Tree'):
+                    height_m = dbh_cm * 0.8
+                    height_estimated = True
+
+                class_col = column_mapping.get(f'{prefix}_class')
+                tree_class = None
+                if class_col and class_col in row.index and pd.notna(row[class_col]):
+                    tc_raw = str(row[class_col]).strip()
+                    if tc_raw:
+                        try:
+                            tc_num = str(int(float(tc_raw)))
+                            tree_class = {'1': 'a', '2': 'b', '3': 'c', '4': 'd'}.get(tc_num, tc_num)
+                        except (ValueError, TypeError):
+                            tc_lower = tc_raw.lower()
+                            tree_class = {'i': 'a', 'ii': 'b', 'iii': 'c', 'iv': 'd',
+                                          'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd'}.get(tc_lower, tc_lower)
+
+                count_col = column_mapping.get(f'{prefix}_count')
+                count = 1
+                if count_col and count_col in row.index and pd.notna(row[count_col]):
+                    try: count = int(float(row[count_col]))
+                    except (ValueError, TypeError): pass
+
+                sn_col = column_mapping.get(f'{prefix}_sn')
+                sn = None
+                if sn_col and sn_col in row.index and pd.notna(row[sn_col]):
+                    try: sn = int(float(row[sn_col]))
+                    except (ValueError, TypeError): pass
+
+                dbh_class = DiameterClassifier.classify_detailed(dbh_cm) if dbh_cm else None
+                basal_area_m2 = round(math.pi * (dbh_cm / 200.0) ** 2, 6) if dbh_cm else None
+
+                measurement = FieldInventoryMeasurement(
+                    sample_plot_id=sample_plot.id,
+                    stand_type=stand_type,
+                    sn=sn,
+                    species_scientific=species,
+                    species_local=species_local,
+                    dbh_cm=dbh_cm,
+                    height_m=height_m,
+                    height_estimated=height_estimated,
+                    tree_class=tree_class,
+                    count=count,
+                    dbh_class=dbh_class,
+                    basal_area_m2=basal_area_m2,
+                )
+                self.db.add(measurement)
+
+        self.db.flush()
 
     async def _calculate_volumes(self, field_inventory_id: UUID):
         """Calculate volumes for pole and tree measurements"""

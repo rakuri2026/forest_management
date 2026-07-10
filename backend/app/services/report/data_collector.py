@@ -36,7 +36,14 @@ def _convert_decimals(obj):
 
 def get_calculation_basic_info(db: Session, calculation_id: str) -> Dict[str, Any]:
     """Get basic calculation information"""
-    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    from sqlalchemy.orm import load_only
+    calc = db.query(Calculation).options(
+        load_only(
+            Calculation.forest_name, Calculation.block_name,
+            Calculation.status, Calculation.created_at,
+            Calculation.completed_at, Calculation.result_data,
+        )
+    ).filter(Calculation.id == calculation_id).first()
     if not calc:
         return {}
 
@@ -94,7 +101,10 @@ def get_calculation_basic_info(db: Session, calculation_id: str) -> Dict[str, An
 
 def get_boundary_info(db: Session, calculation_id: str) -> Dict[str, Any]:
     """Get boundary geometry and fieldbook data"""
-    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    from sqlalchemy.orm import load_only
+    calc = db.query(Calculation).options(
+        load_only(Calculation.result_data)
+    ).filter(Calculation.id == calculation_id).first()
     if not calc:
         return {}
 
@@ -128,7 +138,10 @@ def get_boundary_info(db: Session, calculation_id: str) -> Dict[str, Any]:
 
 def get_species_info(db: Session, calculation_id: str) -> Dict[str, Any]:
     """Get species data from analysis results"""
-    calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
+    from sqlalchemy.orm import load_only
+    calc = db.query(Calculation).options(
+        load_only(Calculation.result_data)
+    ).filter(Calculation.id == calculation_id).first()
     if not calc:
         return {}
 
@@ -246,11 +259,24 @@ def get_raster_analysis(db: Session, calculation_id: str) -> Dict[str, Any]:
 
 def get_block_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     """Get block-wise data from database"""
-    blocks = db.query(ForestBlock).filter(
+    from sqlalchemy.orm import load_only
+    blocks = db.query(ForestBlock).options(
+        load_only(
+            ForestBlock.id, ForestBlock.name,
+            ForestBlock.area_hectares, ForestBlock.area_sqm,
+            ForestBlock.index, ForestBlock.is_compartment,
+        )
+    ).filter(
         ForestBlock.calculation_id == calculation_id
     ).order_by(ForestBlock.index).all()
 
-    sub_areas = db.query(ForestSubArea).filter(
+    sub_areas = db.query(ForestSubArea).options(
+        load_only(
+            ForestSubArea.block_id, ForestSubArea.name,
+            ForestSubArea.category, ForestSubArea.area_hectares,
+            ForestSubArea.is_excluded,
+        )
+    ).filter(
         ForestSubArea.calculation_id == calculation_id
     ).all()
 
@@ -295,14 +321,29 @@ def get_block_data(db: Session, calculation_id: str) -> Dict[str, Any]:
 
 def get_inventory_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     """Get tree inventory data"""
-    inv_calc = db.query(InventoryCalculation).filter(
+    from sqlalchemy.orm import load_only
+
+    inv_calc = db.query(InventoryCalculation).options(
+        load_only(
+            InventoryCalculation.total_trees, InventoryCalculation.mother_trees_count,
+            InventoryCalculation.felling_trees_count, InventoryCalculation.seedling_count,
+            InventoryCalculation.total_volume_m3, InventoryCalculation.total_net_volume_m3,
+            InventoryCalculation.total_net_volume_cft, InventoryCalculation.total_firewood_m3,
+            InventoryCalculation.total_firewood_chatta,
+        )
+    ).filter(
         InventoryCalculation.calculation_id == calculation_id
     ).first()
 
     if not inv_calc:
         return {"available": False}
 
-    trees = db.query(InventoryTree).filter(
+    trees = db.query(InventoryTree).options(
+        load_only(
+            InventoryTree.species, InventoryTree.dbh_class,
+            InventoryTree.block_name, InventoryTree.net_volume,
+        )
+    ).filter(
         InventoryTree.inventory_calculation_id == inv_calc.id
     ).all()
 
@@ -485,19 +526,36 @@ def get_committee_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         "financial_committee_total": format_devanagari(fc_total, 0),
     }
 
+    members = [
+        {
+            "name": m.name,
+            "position": m.position,
+            "gender": m.gender,
+            "caste_category": m.caste_category,
+            "address": m.address,
+            "mobile": m.mobile,
+        }
+        for m in user_committee
+    ]
+
+    gender_distribution: Dict[str, int] = {}
+    position_distribution: Dict[str, int] = {}
+    caste_distribution: Dict[str, int] = {}
+    for m in members:
+        g = m["gender"] or "अन्य"
+        gender_distribution[g] = gender_distribution.get(g, 0) + 1
+        p = m["position"] or "अन्य"
+        position_distribution[p] = position_distribution.get(p, 0) + 1
+        c = m["caste_category"] or "अन्य"
+        caste_distribution[c] = caste_distribution.get(c, 0) + 1
+
     return {
         "user_committee": {
             "total_members": uc_total,
-            "members": [
-                {
-                    "name": m.name,
-                    "position": m.position,
-                    "gender": m.gender,
-                    "address": m.address,
-                    "mobile": m.mobile,
-                }
-                for m in user_committee
-            ],
+            "members": members,
+            "gender_distribution": gender_distribution,
+            "position_distribution": position_distribution,
+            "caste_distribution": caste_distribution,
         },
         "advisory_committee": {
             "total_members": ac_total,
@@ -715,9 +773,22 @@ def get_user_group_landcover_data(db: Session, calculation_id: str) -> Dict[str,
     result_data = calc.result_data or {}
     lc_data = result_data.get("user_group_land_cover")
     if not lc_data:
-        return {"available": False}
+        return {
+            "available": False,
+            "user_group_area_ha": 0,
+            "forest_overlap_area_ha": 0,
+            "net_analysis_area_ha": 0,
+            "total_biomass_mg": 0,
+            "total_volume_m3": 0,
+            "avg_biomass_mg_per_ha": 0,
+            "avg_volume_m3_per_ha": 0,
+            "has_forest_overlap": False,
+            "analysis_date": "",
+            "land_cover_classes": [],
+        }
 
     classes = lc_data.get("land_cover_classes", [])
+    area_val = lc_data.get("user_group_area_ha", 0)
 
     return {
         "available": True,

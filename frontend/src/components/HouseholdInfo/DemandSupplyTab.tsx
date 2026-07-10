@@ -80,6 +80,8 @@ const DemandSupplyTab: React.FC<DemandSupplyTabProps> = ({ calculationId }) => {
       )}
 
       <Card title="माग र आपूर्तिको अवस्था" style={{ marginBottom: 16 }}>
+        <p className="text-xs text-gray-400 font-mono mb-2">{'{{section:demand_supply_narration}}'}</p>
+        <p className="text-xs text-gray-400 font-mono mb-2">{'{{table:demand_supply}}'}</p>
         <Table
           dataSource={tableData}
           columns={[
@@ -106,6 +108,7 @@ const DemandSupplyTab: React.FC<DemandSupplyTabProps> = ({ calculationId }) => {
 
       {chartData.length > 0 && (
         <Card title="माग र आपूर्ति तुलना">
+          <p className="text-xs text-gray-400 font-mono mb-1">{'{{chart:hh_demand_supply_bar}}'}</p>
           <ResponsiveContainer width="100%" height={350}>
             <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />

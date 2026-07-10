@@ -104,4 +104,8 @@ export const helpTexts = {
     title: 'निजी जमिन',
     text: 'निजी जमिन भनेको वन क्षेत्र भित्रको तर समुदाय वनमा नसमेटिएको निजी स्वामित्वमा रहेको जमिन हो। यो क्षेत्र वन गणनाबाट बाहिर गरिनेछ।\n\nPrivate land is land within the forest area but privately owned and not part of the community forest. This area will be excluded from forest calculations.',
   },
+  encroachedArea: {
+    title: 'अतीक्रमीत क्षेत्र',
+    text: 'अतीक्रमीत क्षेत्र भनेको वन क्षेत्र मानिसहरूले अवैध रूपमा कब्जा गरेको क्षेत्र हो। यो क्षेत्र वन प्रबन्धन योजनामा निगरानीको लागि चिन्हित गरिन्छ।\n\nEncroached area is forest land that has been illegally occupied by people. This area is marked for monitoring in the forest management plan.',
+  },
 };

@@ -366,6 +366,10 @@ class TileService:
             print(f"Error querying raster tile: {e}")
             import traceback
             traceback.print_exc()
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             return None
 
     def _apply_colormap(

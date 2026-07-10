@@ -22,6 +22,7 @@ const CATEGORY_COLORS: Record<string, { fill: string; border: string; label: str
   biodiversity: { fill: '#14b8a6', border: '#0d9488', label: 'जैविक विविधता क्षेत्र' },
   tourist: { fill: '#eab308', border: '#ca8a04', label: 'पर्यटन क्षेत्र' },
   office: { fill: '#64748b', border: '#475569', label: 'कार्यालय परिसर' },
+  encroached: { fill: '#78350f', border: '#451a03', label: 'अतीक्रमीत क्षेत्र' },
 };
 
 // Component to handle auto-zoom and scale
@@ -173,7 +174,7 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
           font-weight: bold;
           color: white;
           font-size: 9px;
-          font-family: Arial, sans-serif;
+          font-family: 'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Arial, sans-serif;
           text-shadow: 1px 1px 2px rgba(0,0,0,0.9), -1px -1px 2px rgba(0,0,0,0.9);
         ">
           ${plotNumber}
@@ -196,7 +197,7 @@ export function SamplingMapView({ designId }: SamplingMapViewProps) {
           font-weight: bold;
           color: white;
           font-size: 14px;
-          font-family: Arial, sans-serif;
+          font-family: 'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Arial, sans-serif;
           text-shadow: 2px 2px 4px rgba(0,0,0,0.9), -1px -1px 3px rgba(0,0,0,0.9);
           white-space: nowrap;
           pointer-events: none;

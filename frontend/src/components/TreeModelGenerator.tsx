@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Download, Trash2, AlertCircle, CheckCircle, Clock, Loader, FileSpreadsheet, Map } from 'lucide-react';
-import api, { allTreeExportApi } from '../services/api';
+import api, { allTreeExportApi, exportCleanupApi } from '../services/api';
 import { downloadFromApi } from '../utils/download';
 
 interface TreeModelConfig {
@@ -751,6 +751,7 @@ const AllTreeExportSection: React.FC<{ calculationId: string }> = ({ calculation
   const [error, setError] = useState<string | null>(null);
   const [useRatioOverride, setUseRatioOverride] = useState(false);
   const [pollingId, setPollingId] = useState<string | null>(null);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   // Config
   const [config, setConfig] = useState({
@@ -842,6 +843,20 @@ const AllTreeExportSection: React.FC<{ calculationId: string }> = ({ calculation
       setExports(prev => prev.filter(e => e.id !== exportId));
     } catch (err: any) {
       alert('Delete failed: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleCleanupOldExports = async () => {
+    if (!confirm('Delete all export files older than 7 days? This cannot be undone.')) return;
+    try {
+      setCleaningUp(true);
+      const result = await exportCleanupApi.cleanup(7);
+      alert(result.message || 'Cleanup complete');
+      loadExports();
+    } catch (err: any) {
+      alert('Cleanup failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setCleaningUp(false);
     }
   };
 
@@ -944,21 +959,36 @@ const AllTreeExportSection: React.FC<{ calculationId: string }> = ({ calculation
         </div>
       )}
 
-      <button onClick={handleGenerate} disabled={generating}
-        className={`px-6 py-3 rounded-md font-medium transition-colors ${
-          generating
-            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            : 'bg-purple-600 text-white hover:bg-purple-700'
-        }`}>
-        {generating ? (
-          <span className="flex items-center gap-2">
-            <Loader className="w-5 h-5 animate-spin" />
-            Exporting All Trees...
-          </span>
-        ) : (
-          'Total Tree Export'
+      <div className="flex items-center gap-3">
+        <button onClick={handleGenerate} disabled={generating}
+          className={`px-6 py-3 rounded-md font-medium transition-colors ${
+            generating
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-purple-600 text-white hover:bg-purple-700'
+          }`}>
+          {generating ? (
+            <span className="flex items-center gap-2">
+              <Loader className="w-5 h-5 animate-spin" />
+              Exporting All Trees...
+            </span>
+          ) : (
+            'Total Tree Export'
+          )}
+        </button>
+        {exports.length > 0 && (
+          <button onClick={handleCleanupOldExports} disabled={cleaningUp}
+            className="px-4 py-3 rounded-md font-medium text-sm bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors">
+            {cleaningUp ? (
+              <span className="flex items-center gap-2">
+                <Loader className="w-4 h-4 animate-spin" />
+                Cleaning...
+              </span>
+            ) : (
+              'Clean Old Exports'
+            )}
+          </button>
         )}
-      </button>
+      </div>
       {generating && (
         <p className="mt-2 text-sm text-gray-600">
           This may take several minutes depending on forest size.

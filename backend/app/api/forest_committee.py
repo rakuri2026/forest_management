@@ -158,6 +158,13 @@ def create_committees_bulk(
 
     db.commit()
 
+    # Invalidate OP data cache so {{uc_members}} etc. show fresh data
+    from app.models.op_data_cache import OpDataCache
+    db.query(OpDataCache).filter(
+        OpDataCache.calculation_id == calculation_id
+    ).delete(synchronize_session=False)
+    db.commit()
+
     # Return all committees
     return get_all_committees(calculation_id, current_user, db)
 

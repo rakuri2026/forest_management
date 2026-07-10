@@ -15,8 +15,11 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib import font_manager as fm
+import matplotlib.patheffects as pe
 import numpy as np
 from PIL import Image as PILImage
+
+from app.utils.map_grid import compute_snapped_grid
 
 import contextily as cx
 
@@ -77,10 +80,10 @@ def clear_map_cache(calculation_id: Optional[UUID] = None, layer_name: Optional[
     if calculation_id:
         sub = os.path.join(MAP_CACHE_DIR, str(calculation_id))
         if layer_name:
-            path = os.path.join(sub, f"{layer_name}.png")
-            if os.path.exists(path):
-                os.remove(path)
-                logger.info(f"Map cache CLEARED: {layer_name}")
+            import glob
+            for p in glob.glob(os.path.join(sub, f"{layer_name}_dpi*.png")):
+                os.remove(p)
+                logger.info(f"Map cache CLEARED: {os.path.basename(p)}")
         elif os.path.isdir(sub):
             import shutil
             shutil.rmtree(sub)
@@ -149,6 +152,8 @@ BASEMAP_SOURCES = {
     "fieldbook":               cx.providers.OpenTopoMap,
     "usergroup":               cx.providers.OpenTopoMap,
     "subarea":                 cx.providers.OpenTopoMap,
+    "compartment":             cx.providers.OpenStreetMap.Mapnik,
+    "sub_compartment":         cx.providers.OpenStreetMap.Mapnik,
 }
 
 LAYER_LABELS = {
@@ -168,6 +173,8 @@ LAYER_LABELS = {
     "fieldbook":               {"ne": "फिल्डबुक बाटो नक्सा",              "en": "Fieldbook Path Map"},
     "usergroup":               {"ne": "उपयोगकर्ता समूह नक्सा",             "en": "User Group Map"},
     "subarea":                 {"ne": "उप-क्षेत्र नक्सा",                  "en": "Sub-Area Map"},
+    "compartment":             {"ne": "कम्पार्टमेन्ट नक्सा",                "en": "Compartment Map"},
+    "sub_compartment":         {"ne": "उप-कम्पार्टमेन्ट नक्सा",            "en": "Sub-Compartment Map"},
 }
 
 _SAMPLING_PLOT_LAYERS = {"sampling_plot", "sampling_plot_topo", "sampling_plot_satellite"}
@@ -231,6 +238,52 @@ def _get_blocks_with_geometry(db: Session, calculation_id: UUID) -> List[Dict]:
             })
         except Exception as e:
             logger.warning(f"Could not parse geometry for block {b.name}: {e}")
+    return result
+
+
+def _get_compartments_with_geometry(db: Session, calculation_id: UUID) -> List[Dict]:
+    from ...models.forest_block import ForestBlock
+    from uuid import UUID as _UUID
+    compartments = db.query(ForestBlock).filter(
+        ForestBlock.calculation_id == calculation_id,
+        ForestBlock.is_compartment == True,
+    ).order_by(
+        ForestBlock.parent_block_id, ForestBlock.division_level, ForestBlock.display_order
+    ).all()
+
+    if not compartments:
+        return []
+
+    parent_ids = set()
+    for c in compartments:
+        if c.parent_block_id:
+            parent_ids.add(str(c.parent_block_id))
+    parent_map = {}
+    if parent_ids:
+        for pb in db.query(ForestBlock).filter(
+            ForestBlock.id.in_([_UUID(pid) for pid in parent_ids])
+        ).all():
+            parent_map[str(pb.id)] = pb.name
+
+    result = []
+    for c in compartments:
+        try:
+            geom = to_shape(c.geometry)
+            centroid = geom.centroid
+            pid = str(c.parent_block_id) if c.parent_block_id else ""
+            result.append({
+                "id": str(c.id),
+                "name": c.name or "",
+                "code": c.compartment_code or "",
+                "parent_block_id": pid,
+                "parent_block_name": parent_map.get(pid, ""),
+                "division_level": c.division_level or 1,
+                "geometry": geom,
+                "centroid": centroid,
+                "area_ha": c.area_hectares or 0,
+            })
+        except Exception as e:
+            logger.warning(f"Could not parse geometry for compartment {c.name}: {e}")
     return result
 
 
@@ -568,6 +621,10 @@ def _add_raster_overlay(ax, db: Session, calculation_id: UUID, layer_name: str, 
 
     except Exception as e:
         logger.error(f"Raster overlay failed for {layer_name}: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return False
 
 
@@ -611,6 +668,92 @@ def _add_block_polygons_with_labels(ax, blocks: List[Dict], show_labels: bool = 
                 ),
                 zorder=6,
             )
+
+
+COMPARTMENT_COLORS = [
+    '#2e7d32', '#1565c0', '#795548', '#f9a825',
+    '#6a1b9a', '#00838f', '#e65100', '#c62828',
+    '#283593', '#4e342e', '#558b2f', '#ad1457',
+    '#00695c', '#3e2723', '#f57f17', '#1a237e',
+]
+
+
+def _add_compartment_polygons_with_labels(
+    ax, compartments: List[Dict], show_sub_as_overlay: bool = True
+) -> List[Dict]:
+    parent_keys = sorted(set(
+        c["parent_block_id"] for c in compartments if c["parent_block_id"]
+    ))
+    parent_color_map = {
+        pid: COMPARTMENT_COLORS[i % len(COMPARTMENT_COLORS)]
+        for i, pid in enumerate(parent_keys)
+    }
+
+    legend_items = []
+    item_index = 0
+
+    for c in compartments:
+        geom = c["geometry"]
+        pid = c["parent_block_id"]
+        is_sub = c["division_level"] >= 2
+        color = parent_color_map.get(pid, "#757575")
+
+        if is_sub and show_sub_as_overlay:
+            # Compartment layer: skip sub-compartments (level >= 2)
+            continue
+        if not is_sub and not show_sub_as_overlay:
+            # Sub-compartment layer: skip compartments (level 1)
+            continue
+        prominent = True
+
+        item_index += 1
+        label = c["code"] or c["name"]
+        parent_name = c["parent_block_name"]
+
+        if isinstance(geom, ShapelyPolygon):
+            xs, ys = geom.exterior.xy
+            if prominent:
+                ax.fill(xs, ys, color=color, alpha=0.20, zorder=4)
+                ax.plot(xs, ys, color=color, linewidth=2.0, zorder=4)
+            else:
+                ax.fill(xs, ys, color=color, alpha=0.12, zorder=4)
+                ax.plot(xs, ys, color=color, linewidth=1.0, linestyle="--", zorder=4)
+            for ring in geom.interiors:
+                rx, ry = ring.xy
+                ax.plot(rx, ry, color="#888", linewidth=0.6, linestyle="--", zorder=4)
+        elif isinstance(geom, MultiPolygon):
+            for part in geom.geoms:
+                xs, ys = part.exterior.xy
+                if prominent:
+                    ax.fill(xs, ys, color=color, alpha=0.20, zorder=4)
+                    ax.plot(xs, ys, color=color, linewidth=2.0, zorder=4)
+                else:
+                    ax.fill(xs, ys, color=color, alpha=0.12, zorder=4)
+                    ax.plot(xs, ys, color=color, linewidth=1.0, linestyle="--", zorder=4)
+                for ring in part.interiors:
+                    rx, ry = ring.xy
+                    ax.plot(rx, ry, color="#888", linewidth=0.6, linestyle="--", zorder=4)
+
+        # Numbered circle marker instead of text annotation — avoids overlap
+        num_color = "#1a1a1a"
+        ax.scatter(c["centroid"].x, c["centroid"].y, s=100, marker="o",
+                   facecolors="white", edgecolors=num_color, linewidth=1.5, zorder=8)
+        ax.annotate(
+            str(item_index),
+            xy=(c["centroid"].x, c["centroid"].y),
+            fontsize=7, fontweight="bold", ha="center", va="center",
+            color=num_color, zorder=9,
+        )
+
+        legend_label = f"{label} ({parent_name})" if parent_name else label
+        legend_items.append({
+            "number": item_index,
+            "name": legend_label,
+            "is_sub": is_sub,
+            "color": color,
+        })
+
+    return legend_items
 
 
 def _add_sub_area_polygons_with_labels(ax, sub_areas: List[Dict]) -> List[Dict]:
@@ -676,6 +819,7 @@ def _add_sample_plots(ax, plots: List[Dict]):
             xy=(pt["lon"], pt["lat"]),
             fontsize=8, fontweight='bold', color='#000000',
             ha='center', va='center',
+            fontproperties=_dev_fontprop(8),
             zorder=8,
         )
 
@@ -776,14 +920,28 @@ def _add_fieldbook_features(ax, db: Session, calculation_id: UUID):
                for bn in block_names]
     if handles:
         ax.legend(handles=handles, loc='lower right', fontsize=7,
-                  title='Forest Block', title_fontsize=8)
+                  title='Forest Block', title_fontsize=8,
+                  prop=_dev_fontprop(7))
 
 
 def _add_boundary_outline(ax, boundary_geom):
     if boundary_geom is None:
         return
     from shapely.geometry import Polygon, MultiPolygon
-    polys = [boundary_geom] if isinstance(boundary_geom, Polygon) else list(boundary_geom.geoms)
+
+    def extract_polygons(geom):
+        if isinstance(geom, Polygon):
+            return [geom]
+        elif isinstance(geom, MultiPolygon):
+            return list(geom.geoms)
+        elif hasattr(geom, 'geoms'):
+            result = []
+            for g in geom.geoms:
+                result.extend(extract_polygons(g))
+            return result
+        return []
+
+    polys = extract_polygons(boundary_geom)
     for poly in polys:
         xs, ys = poly.exterior.xy
         ax.plot(xs, ys, color='#1b5e20', linewidth=2.5, zorder=5)
@@ -793,21 +951,25 @@ def _add_boundary_outline(ax, boundary_geom):
 
 
 def _add_grid(ax, min_lon, max_lon, min_lat, max_lat):
-    lon_step = (max_lon - min_lon) / 5
-    lat_step = (max_lat - min_lat) / 5
-    lon_vals = [min_lon + i * lon_step for i in range(6)]
-    lat_vals = [min_lat + i * lat_step for i in range(6)]
+    """Draw snapped coordinate grid. Returns (snapped_min_lon, snapped_max_lon, snapped_min_lat, snapped_max_lat)."""
+    lon_lines, lon_labels, lon_start, lon_end = compute_snapped_grid(min_lon, max_lon)
+    lat_lines, lat_labels, lat_start, lat_end = compute_snapped_grid(min_lat, max_lat)
 
-    for lon in lon_vals:
+    for lon in lon_lines:
         ax.axvline(lon, color='#888888', linewidth=0.3, linestyle='-', alpha=0.5, zorder=0)
-    for lat in lat_vals:
+    for lat in lat_lines:
         ax.axhline(lat, color='#888888', linewidth=0.3, linestyle='-', alpha=0.5, zorder=0)
 
-    kw = dict(fontsize=7, color='#444444', alpha=0.7)
-    for lon in lon_vals:
-        ax.text(lon, min_lat, f'{lon:.3f}°', ha='center', va='top', **kw)
-    for lat in lat_vals:
-        ax.text(min_lon, lat, f'{lat:.4f}°', ha='right', va='center', **kw)
+    kw = dict(fontsize=7, color='#000000', alpha=1.0,
+              path_effects=[pe.withStroke(linewidth=2, foreground='white')])
+    for lon, lab in zip(lon_lines, lon_labels):
+        ax.text(lon, lat_end, f'{lab}°', ha='center', va='bottom', **kw)
+        ax.plot(lon, lat_end, marker='+', color='#dc2626', markersize=6, markeredgewidth=1.5, zorder=15)
+    for lat, lab in zip(lat_lines, lat_labels):
+        ax.text(lon_start, lat, f'{lab}°', ha='right', va='center', rotation=90, **kw)
+        ax.plot(lon_start, lat, marker='+', color='#dc2626', markersize=6, markeredgewidth=1.5, zorder=15)
+
+    return lon_start, lon_end, lat_start, lat_end
 
 
 def _add_neatline(ax, min_lon, max_lon, min_lat, max_lat):
@@ -815,32 +977,6 @@ def _add_neatline(ax, min_lon, max_lon, min_lat, max_lat):
     lons = [min_lon, max_lon, max_lon, min_lon, min_lon]
     lats = [min_lat, min_lat, max_lat, max_lat, min_lat]
     ax.plot(lons, lats, color='#333333', linewidth=1.5, zorder=10)
-
-
-def _add_scale_bar(ax, min_lon, max_lon, min_lat, max_lat):
-    """Add a simple scale bar at the bottom-left below the lon labels."""
-    import math
-    center_lat = (min_lat + max_lat) / 2.0
-    lon_range = max_lon - min_lon
-    meter_per_deg = 111320.0 * math.cos(math.radians(center_lat))
-    map_width_m = lon_range * meter_per_deg
-
-    nice_intervals = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
-    bar_m = map_width_m * 0.30
-    bar_m = max(iv for iv in nice_intervals if iv <= bar_m) if bar_m >= nice_intervals[0] else nice_intervals[0]
-    bar_deg = bar_m / meter_per_deg
-
-    x0 = min_lon + lon_range * 0.05
-    y = min_lat - 0.02 * (max_lat - min_lat)
-    x1 = x0 + bar_deg
-
-    ax.plot([x0, x1], [y, y], color='#222222', linewidth=3, zorder=10)
-    ax.plot([x0, x0], [y - 0.005, y + 0.005], color='#222222', linewidth=1.5, zorder=10)
-    ax.plot([x1, x1], [y - 0.005, y + 0.005], color='#222222', linewidth=1.5, zorder=10)
-
-    label = f"{bar_m} m" if bar_m < 1000 else f"{bar_m // 1000} km"
-    ax.text((x0 + x1) / 2, y - 0.015, label, fontsize=8, fontweight='bold',
-            ha='center', va='top', color='#222222', zorder=10)
 
 
 def _add_north_arrow(ax):
@@ -923,6 +1059,13 @@ def _add_legend(ax, layer_name: str):
             ((156/255, 39/255, 176/255, 0.85),"Education"),
             ((233/255, 30/255, 99/255, 0.85), "Health"),
         ],
+        "compartment": [
+            ((46/255, 125/255, 50/255, 0.85), "Compartment"),
+            ((46/255, 125/255, 50/255, 0.55), "Sub-Compartment"),
+        ],
+        "sub_compartment": [
+            ((46/255, 125/255, 50/255, 0.55), "Sub-Compartment"),
+        ],
         "subarea": [
             ((239/255, 68/255, 68/255, 0.85),   "संरक्षित / Protected"),
             (( 16/255, 185/255,129/255, 0.85),  "बृक्षारोपण / Plantation"),
@@ -949,6 +1092,7 @@ def _add_legend(ax, layer_name: str):
         handles=elements, loc='lower right', fontsize=7,
         title_fontsize=8, framealpha=0.85, edgecolor='#555555',
         fancybox=True, ncol=ncol,
+        prop=_dev_fontprop(7),
     )
 
 
@@ -966,7 +1110,7 @@ def generate_standard_map(
     - Raster overlay at alpha=0.55
     - Block polygons with distinct colors + name labels on ALL maps
     - Boundary outline
-    - Coordinate grid (5x5), scale bar, neat line
+    - Coordinate grid (5x5), neat line
     - North arrow, legend, title
     - Devanagari font with fallback verification
 
@@ -1034,6 +1178,26 @@ def _generate_map_inner(
             lon_width = max_lon - min_lon
             lat_height = max_lat - min_lat
 
+    # For compartment/sub_compartment, zoom to compartment extent (not full forest)
+    if layer_name in ("compartment", "sub_compartment"):
+        comps = _get_compartments_with_geometry(db, calculation_id)
+        if comps:
+            bounds = [c["geometry"].bounds for c in comps if hasattr(c["geometry"], 'bounds')]
+            if bounds:
+                min_lon = min(b[0] for b in bounds)
+                min_lat = min(b[1] for b in bounds)
+                max_lon = max(b[2] for b in bounds)
+                max_lat = max(b[3] for b in bounds)
+                # Add 5% padding
+                pad_lon = (max_lon - min_lon) * 0.05
+                pad_lat = (max_lat - min_lat) * 0.05
+                min_lon -= pad_lon
+                min_lat -= pad_lat
+                max_lon += pad_lon
+                max_lat += pad_lat
+                lon_width = max_lon - min_lon
+                lat_height = max_lat - min_lat
+
     # Fixed square figure (map content preserves aspect via set_aspect('equal'))
     A5_W_MM = 148
     A5_H_MM = 210
@@ -1044,8 +1208,11 @@ def _generate_map_inner(
     if layer_name == "subarea":
         subarea_legend_items = _get_sub_areas_with_geometry(db, calculation_id)
         n_extra_lines = len(subarea_legend_items)
+    if layer_name in ("compartment", "sub_compartment"):
+        comps = _get_compartments_with_geometry(db, calculation_id)
+        n_extra_lines = len(comps)
 
-    if layer_name == "subarea":
+    if layer_name in ("subarea", "compartment", "sub_compartment"):
         fig_width = A5_W_MM / 25.4
         fig_height = A5_H_MM / 25.4
     else:
@@ -1056,10 +1223,12 @@ def _generate_map_inner(
 
     boundary_geom = _get_forest_geometry(db, calculation_id)
 
-    pad_x = lon_width * 0.02
-    pad_y = lat_height * 0.02
-    ax.set_xlim(min_lon - pad_x, max_lon + pad_x)
-    ax.set_ylim(min_lat - pad_y, max_lat + pad_y)
+    # Compute snapped grid bounds (replaces 2% padding)
+    from app.utils.map_grid import compute_snapped_grid
+    _, _, slon_start, slon_end = compute_snapped_grid(min_lon, max_lon)
+    _, _, slat_start, slat_end = compute_snapped_grid(min_lat, max_lat)
+    ax.set_xlim(slon_start, slon_end)
+    ax.set_ylim(slat_start, slat_end)
     ax.set_aspect('equal')
 
     # Dynamic margins (convert user's cm specs to figure fractions)
@@ -1068,7 +1237,7 @@ def _generate_map_inner(
     _lr_margin = 0.0 * _cm
     _title_margin = 1.0 * _cm
     _title_h = (6 + 14 * 1.3 * 2 + 4) / 72  # pad + font*linespacing*nlines + buffer (in)
-    _legend_rows = (n_extra_lines + 3) // 4 if layer_name == "subarea" else n_extra_lines
+    _legend_rows = (n_extra_lines + 3) // 4 if layer_name in ("subarea", "compartment", "sub_compartment") else n_extra_lines
     _legend_h = (_legend_rows * 0.22 + 0.5) / _fh if n_extra_lines > 0 else 0.0
     fig.subplots_adjust(
         left=_lr_margin / _fw,
@@ -1080,16 +1249,24 @@ def _generate_map_inner(
     # 1. Basemap
     _add_basemap(ax, layer_name, alpha=0.6)
 
-    _NO_RASTER_LAYERS = {"boundary", "fieldbook", "usergroup", "subarea"} | _SAMPLING_PLOT_LAYERS
+    _NO_RASTER_LAYERS = {"boundary", "fieldbook", "usergroup", "subarea", "compartment", "sub_compartment"} | _SAMPLING_PLOT_LAYERS
     # 2. Raster overlay (skip for boundary, fieldbook, subarea, and sampling_plot layers)
     if layer_name not in _NO_RASTER_LAYERS:
         _add_raster_overlay(ax, db, calculation_id, layer_name, bbox, dpi)
 
-    # 3. Block polygons with name labels — on EVERY map except usergroup
-    if layer_name != "usergroup":
+    # 3. Block polygons with name labels — on EVERY map except usergroup and compartment layers
+    if layer_name != "usergroup" and layer_name not in ("compartment", "sub_compartment"):
         blocks = _get_blocks_with_geometry(db, calculation_id)
         if blocks:
             _add_block_polygons_with_labels(ax, blocks, show_labels=(layer_name != "subarea"))
+
+    # 3a. Compartment / Sub-compartment polygons (numbered markers, no text labels — avoids overlap)
+    compartment_numbered = []
+    if layer_name in ("compartment", "sub_compartment"):
+        comps = _get_compartments_with_geometry(db, calculation_id)
+        if comps:
+            show_as_overlay = (layer_name == "compartment")
+            compartment_numbered = _add_compartment_polygons_with_labels(ax, comps, show_sub_as_overlay=show_as_overlay)
 
     # 3b. Sub-area polygons (subarea layer only)
     subarea_numbered = []
@@ -1150,6 +1327,7 @@ def _generate_map_inner(
                 ax.annotate(s["name"], xy=(s["lon"], s["lat"]),
                             fontsize=7, fontweight='bold', color='#000',
                             ha='left', va='bottom',
+                            fontproperties=_dev_fontprop(7),
                             bbox=dict(boxstyle='round,pad=0.15', facecolor='white',
                                       edgecolor='#cccccc', alpha=0.85),
                             zorder=8)
@@ -1167,15 +1345,13 @@ def _generate_map_inner(
     if layer_name != "usergroup":
         _add_boundary_outline(ax, boundary_geom)
 
-    # 6. Coordinate grid (5x5 lines + labels)
-    _add_grid(ax, min_lon, max_lon, min_lat, max_lat)
+    # 6. Coordinate grid (snapped to clean round values)
+    slon_start, slon_end, slat_start, slat_end = _add_grid(
+        ax, min_lon, max_lon, min_lat, max_lat
+    )
 
-    # 6b. Neat line (border around the map)
-    _add_neatline(ax, min_lon, max_lon, min_lat, max_lat)
-
-    # 6c. Scale bar (bottom-left) — skip for subarea map
-    if layer_name != "subarea":
-        _add_scale_bar(ax, min_lon, max_lon, min_lat, max_lat)
+    # 6b. Neat line (border around the map, matching snapped bounds)
+    _add_neatline(ax, slon_start, slon_end, slat_start, slat_end)
 
     # 7. Hide axis ticks
     ax.axis('off')
@@ -1189,14 +1365,17 @@ def _generate_map_inner(
     # 9. North arrow
     _add_north_arrow(ax)
 
-    # 10. Legend (below map, horizontal) — skip for boundary and subarea (subarea has its own numbered list)
-    if layer_name not in ("boundary", "subarea"):
+    # 10. Legend (below map, horizontal) — skip for layers with numbered lists
+    if layer_name not in ("boundary", "subarea", "sub_compartment", "compartment"):
         _add_legend(ax, layer_name)
 
-    # Footer
-    fig.text(0.02, 0.01, f"{dpi} DPI | {title_en}", fontsize=7, color='#888888')
+    # 11. Figure sizing: no extra top margin for these layers
+    _numbered_for_height = subarea_legend_items if layer_name == "subarea" else (comps if layer_name in ("compartment", "sub_compartment") else [])
 
-    # 11. Sub-area numbered list (below map) — 4 columns with wrapping
+    # 11. Numbered list renderer (shared by subarea / compartment / sub_compartment)
+    _numbered_items = subarea_numbered or compartment_numbered
+
+    # 12. Sub-area numbered list (below map) — 4 columns with wrapping
     if subarea_numbered:
         def _wrap_label(text, max_chars=20):
             if len(text) <= max_chars:
@@ -1221,6 +1400,33 @@ def _generate_map_inner(
             marker_color = "#dc2626" if item["is_excluded"] else "#1a1a1a"
             fig.text(x_pos, y_pos, f"{item['number']}. {_wrap_label(item['name'])}",
                      fontsize=7, color=marker_color, fontweight="bold",
+                     va="top", ha="left",
+                     fontproperties=_dev_fontprop(7))
+
+    # 13. Compartment / Sub-compartment numbered list (below map) — 4 columns
+    if compartment_numbered:
+        def _wrap_label(text, max_chars=24):
+            if len(text) <= max_chars:
+                return text
+            break_at = text.rfind(" ", 0, max_chars)
+            if break_at == -1:
+                break_at = max_chars
+            return text[:break_at] + "\n" + text[break_at:]
+
+        n_cols = 4
+        col_width = 0.16
+        gap = 0.008
+        total_w = n_cols * col_width + (n_cols - 1) * gap
+        x_start = (1.0 - total_w) / 2
+        lines_per_col = (len(compartment_numbered) + n_cols - 1) // n_cols
+        for idx, item in enumerate(compartment_numbered):
+            col = idx // lines_per_col
+            row = idx % lines_per_col
+            x_pos = x_start + col * (col_width + gap)
+            line_height = _legend_h * 0.85 / max(lines_per_col, 1)
+            y_pos = _legend_h * 0.9 - row * line_height
+            fig.text(x_pos, y_pos, f"{item['number']}. {_wrap_label(item['name'])}",
+                     fontsize=7, color="#1a1a1a", fontweight="bold",
                      va="top", ha="left",
                      fontproperties=_dev_fontprop(7))
 

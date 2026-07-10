@@ -152,10 +152,16 @@ class InventoryService:
             return summary
 
         except Exception as e:
-            # Update status to failed
-            inventory.status = 'failed'
-            inventory.error_message = str(e)
-            self.db.commit()
+            # Delete entire inventory (and all trees via cascade) to prevent
+            # orphaned data when processing fails partway through.
+            inventory_id_for_cleanup = inventory.id
+            try:
+                self.db.delete(inventory)
+                self.db.commit()
+                print(f"[INVENTORY] Cleaned up failed inventory {inventory_id_for_cleanup}: {e}")
+            except Exception as cleanup_err:
+                print(f"[INVENTORY] Warning: cleanup failed for {inventory_id_for_cleanup}: {cleanup_err}")
+                self.db.rollback()
             raise
 
     async def _convert_species_to_scientific(
@@ -689,10 +695,16 @@ class InventoryService:
             return summary
 
         except Exception as e:
-            # Update status to failed
-            inventory.status = 'failed'
-            inventory.error_message = str(e)
-            self.db.commit()
+            # Delete entire inventory (and all trees via cascade) to prevent
+            # orphaned data when processing fails partway through.
+            inventory_id_for_cleanup = inventory.id
+            try:
+                self.db.delete(inventory)
+                self.db.commit()
+                print(f"[INVENTORY] Cleaned up failed inventory {inventory_id_for_cleanup}: {e}")
+            except Exception as cleanup_err:
+                print(f"[INVENTORY] Warning: cleanup failed for {inventory_id_for_cleanup}: {cleanup_err}")
+                self.db.rollback()
             raise
 
     async def _store_trees_simple(
@@ -933,6 +945,12 @@ class InventoryService:
                 "projection_epsg": projection_epsg
             })
 
+            # GiST index on projected geometry for KNN spatial index lookups
+            self.db.execute(text("""
+                CREATE INDEX idx_temp_eligible_geom_proj
+                ON temp_eligible_trees USING gist (geom_proj);
+            """))
+
             # Step 2: Get bounding box in projected CRS
             bounds_result = self.db.execute(text("""
                 SELECT
@@ -970,6 +988,8 @@ class InventoryService:
 
             # Step 3+4+5: Generate grid, find cells with trees, assign mother trees
             # Uses single CTE chain to avoid temp table persistence issues
+            # Use SAVEPOINT so ST_SquareGrid failure doesn't poison the transaction
+            self.db.execute(text("SAVEPOINT sp_grid"))
             try:
                 self.db.execute(text("""
                     WITH grid_raw AS (
@@ -988,7 +1008,7 @@ class InventoryService:
                         SELECT DISTINCT ON (c.cell_id) c.cell_id, t.id AS tree_id
                         FROM cells_with_trees c
                         CROSS JOIN LATERAL (
-                            SELECT id FROM temp_eligible_trees ORDER BY ST_Distance(c.centroid, geom_proj) LIMIT 1
+                            SELECT id FROM temp_eligible_trees ORDER BY c.centroid <-> geom_proj LIMIT 1
                         ) t
                     )
                     UPDATE public.inventory_trees
@@ -1000,9 +1020,11 @@ class InventoryService:
                     "projection_epsg": projection_epsg,
                     "grid_size": grid_spacing_meters,
                 })
+                self.db.execute(text("RELEASE SAVEPOINT sp_grid"))
                 print(f"Mother tree assignment via ST_SquareGrid")
 
             except Exception as e:
+                self.db.execute(text("ROLLBACK TO SAVEPOINT sp_grid"))
                 print(f"ST_SquareGrid not available, using manual grid generation: {e}")
                 self.db.execute(text("""
                     WITH RECURSIVE
@@ -1029,7 +1051,7 @@ class InventoryService:
                         SELECT DISTINCT ON (c.cell_id) c.cell_id, t.id AS tree_id
                         FROM cells_with_trees c
                         CROSS JOIN LATERAL (
-                            SELECT id FROM temp_eligible_trees ORDER BY ST_Distance(c.centroid, geom_proj) LIMIT 1
+                            SELECT id FROM temp_eligible_trees ORDER BY c.centroid <-> geom_proj LIMIT 1
                         ) t
                     )
                     UPDATE public.inventory_trees

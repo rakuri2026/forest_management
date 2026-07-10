@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Settings, Download, Play, Image, Users, Map } from 'lucide-react';
 import { Tabs } from 'antd';
 import { ExtentUploadSection } from './UserGroup/ExtentUploadSection';
+import CopyTag from './DetailDescription/CopyTag';
 import { AutoBufferSection } from './UserGroup/AutoBufferSection';
 import { downloadFromApi } from '../utils/download';
 import { UserGroupMapVisualization } from './UserGroup/UserGroupMapVisualization';
@@ -249,6 +250,68 @@ export function UserGroupMapTab({ calculationId, forestBoundary, forestName: pro
               forestName={forestName}
             />
           </div>
+
+          {/* OP Document Variables */}
+          {results && (
+            <div className="mt-6 bg-white border border-emerald-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold text-emerald-800 text-sm">
+                  📋 OP Document Variables — User Group Map
+                </h4>
+              </div>
+              <p className="text-xs text-gray-500 mb-2">
+                उपभोक्ता समूह नक्सा — settlement, land cover, biomass variables for the OP document
+              </p>
+
+              {/* Narration */}
+              <div className="mb-3">
+                <p className="text-xs font-medium text-gray-600 mb-1">नेपाली विवरण:</p>
+                <CopyTag label="{{section:user_group_narration}}" value="{{section:user_group_narration}}" variant="section" />
+              </div>
+
+              {/* Settlement Variables */}
+              <details className="mb-2">
+                <summary className="text-xs font-semibold text-gray-700 cursor-pointer hover:text-blue-600">
+                  🏘️ Settlement Variables
+                </summary>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  <CopyTag label="{{ug_total_settlements}}" value="{{ug_total_settlements}}" variant="section" />
+                  <CopyTag label="{{ug_total_buildings}}" value="{{ug_total_buildings}}" variant="section" />
+                  <CopyTag label="{{ug_total_building_area_m2}}" value="{{ug_total_building_area_m2}}" variant="section" />
+                  <CopyTag label="{{ug_avg_building_size_m2}}" value="{{ug_avg_building_size_m2}}" variant="section" />
+                  <CopyTag label="{{ug_small_buildings}}" value="{{ug_small_buildings}}" variant="section" />
+                  <CopyTag label="{{ug_medium_buildings}}" value="{{ug_medium_buildings}}" variant="section" />
+                  <CopyTag label="{{ug_large_buildings}}" value="{{ug_large_buildings}}" variant="section" />
+                  <CopyTag label="{{ug_small_pct}}" value="{{ug_small_pct}}" variant="section" />
+                  <CopyTag label="{{ug_medium_pct}}" value="{{ug_medium_pct}}" variant="section" />
+                  <CopyTag label="{{ug_large_pct}}" value="{{ug_large_pct}}" variant="section" />
+                  <CopyTag label="{{ug_buildings}}" value="{{ug_buildings}}" variant="section" />
+                </div>
+              </details>
+
+              {/* Land Cover Variables */}
+              <details className="mb-2">
+                <summary className="text-xs font-semibold text-gray-700 cursor-pointer hover:text-blue-600">
+                  🌿 Land Cover & Biomass Variables
+                </summary>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  <CopyTag label="{{ug_user_group_area_ha}}" value="{{ug_user_group_area_ha}}" variant="section" />
+                  <CopyTag label="{{ug_forest_overlap_area_ha}}" value="{{ug_forest_overlap_area_ha}}" variant="section" />
+                  <CopyTag label="{{ug_net_analysis_area_ha}}" value="{{ug_net_analysis_area_ha}}" variant="section" />
+                  <CopyTag label="{{ug_total_biomass_mg}}" value="{{ug_total_biomass_mg}}" variant="section" />
+                  <CopyTag label="{{ug_total_volume_m3}}" value="{{ug_total_volume_m3}}" variant="section" />
+                  <CopyTag label="{{ug_avg_biomass_mg_per_ha}}" value="{{ug_avg_biomass_mg_per_ha}}" variant="section" />
+                  <CopyTag label="{{ug_avg_volume_m3_per_ha}}" value="{{ug_avg_volume_m3_per_ha}}" variant="section" />
+                  <CopyTag label="{{ug_land_cover_classes}}" value="{{ug_land_cover_classes}}" variant="section" />
+                </div>
+              </details>
+
+              {/* Map variable */}
+              <div className="mt-2">
+                <span className="text-xs text-gray-400 font-mono">{'{{map:usergroup}}'}</span>
+              </div>
+            </div>
+          )}
 
           <div className="export-section mt-6">
             <h3 className="text-lg font-semibold mb-3">Export</h3>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, List, Button, Input, Form, message, Popconfirm, Tag, Typography, Space, Empty, Spin, Select, Tooltip, Collapse } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import {
   SaveOutlined,
   DeleteOutlined,
@@ -12,8 +13,13 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   EyeOutlined,
+  EditOutlined,
+  CopyOutlined,
+  StopOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -25,6 +31,7 @@ interface TemplateData {
   description: string;
   is_system: boolean;
   is_default: boolean;
+  is_active: boolean;
   visibility: string;
   approval_status: string;
   approval_note?: string;
@@ -34,6 +41,7 @@ interface TemplateData {
   created_by?: string | null;
   created_at: string;
   updated_at: string;
+  version?: number;
 }
 
 interface TemplateManagerProps {
@@ -64,6 +72,9 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
   onClose,
   onLoadTemplate,
 }) => {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
+  const navigate = useNavigate();
   const [templates, setTemplates] = useState<TemplateData[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -72,6 +83,7 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
   const [saveVisibility, setSaveVisibility] = useState('private');
   const [saveTags, setSaveTags] = useState('');
   const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [saveAsSystem, setSaveAsSystem] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateData | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -119,6 +131,7 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
         description: saveDesc.trim(),
         tree,
         is_default: saveAsDefault,
+        is_system: saveAsSystem,
         visibility: saveVisibility,
         tags,
       });
@@ -129,6 +142,7 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
       setSaveTags('');
       setSaveVisibility('private');
       setSaveAsDefault(false);
+      setSaveAsSystem(false);
       fetchTemplates();
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Failed to save template');
@@ -159,6 +173,26 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
       fetchTemplates();
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Failed to submit');
+    }
+  };
+
+  const handlePublishTemplate = async (tmpl: TemplateData) => {
+    try {
+      await operationalPlanApi.publishTemplate(tmpl.id, !tmpl.is_active);
+      message.success(tmpl.is_active ? 'Template unpublished' : 'Template published');
+      fetchTemplates();
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to update publish status');
+    }
+  };
+
+  const handleCloneTemplate = async (tmpl: TemplateData) => {
+    try {
+      const result = await operationalPlanApi.cloneTemplate(tmpl.id, `${tmpl.name} (Copy)`);
+      message.success('Template cloned');
+      fetchTemplates();
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to clone template');
     }
   };
 
@@ -195,17 +229,22 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
             renderItem={(tmpl) => (
               <List.Item
                 actions={[
-                  <Button key="use" size="small" type="link" onClick={() => handleUseTemplate(tmpl)}>
-                    Use Template
-                  </Button>,
                   <Tooltip key="detail" title="View details">
                     <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => handleShowDetail(tmpl)} />
                   </Tooltip>,
-                  tmpl.visibility === 'private' && tmpl.approval_status === 'none' && !tmpl.is_system ? (
-                    <Tooltip key="submit" title="Submit for global approval">
-                      <Button size="small" type="link" icon={<SendOutlined />} onClick={() => handleSubmitForApproval(tmpl)} />
+                  <Tooltip key="designer" title="Edit in Designer">
+                    <Button size="small" type="link" icon={<EditOutlined />} onClick={() => navigate(`/templates/designer/${tmpl.id}`)} />
+                  </Tooltip>,
+                  <Popconfirm key="clone" title="Clone this template?" onConfirm={() => handleCloneTemplate(tmpl)}>
+                    <Tooltip title="Clone template">
+                      <Button size="small" type="link" icon={<CopyOutlined />} />
                     </Tooltip>
-                  ) : null,
+                  </Popconfirm>,
+                  <Popconfirm key="publish" title={`${tmpl.is_active ? 'Unpublish' : 'Publish'} this template?`} onConfirm={() => handlePublishTemplate(tmpl)}>
+                    <Tooltip title={tmpl.is_active ? 'Unpublish' : 'Publish'}>
+                      <Button size="small" type="link" icon={tmpl.is_active ? <StopOutlined /> : <CheckCircleOutlined />} style={tmpl.is_active ? { color: '#52c41a' } : { color: '#999' }} />
+                    </Tooltip>
+                  </Popconfirm>,
                   !tmpl.is_system && (
                     <Popconfirm key="del" title="Delete this template?" onConfirm={() => handleDeleteTemplate(tmpl.id)}>
                       <Button size="small" danger type="link" icon={<DeleteOutlined />} />
@@ -220,19 +259,23 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
                     <FileTextOutlined style={{ fontSize: 20, color: '#999' }} />
                   }
                   title={
-                    <Space wrap>
-                      <Text strong>{tmpl.name}</Text>
-                      {tmpl.is_system && <Tag color="gold" style={{ fontSize: 11 }}>System</Tag>}
-                      {tmpl.is_default && <Tag color="blue" style={{ fontSize: 11 }}>Default</Tag>}
-                      <Tag color={VISIBILITY_LABELS[tmpl.visibility]?.color || 'default'} style={{ fontSize: 11 }}>
-                        {VISIBILITY_LABELS[tmpl.visibility]?.label || tmpl.visibility}
-                      </Tag>
-                      {tmpl.approval_status !== 'none' && (
-                        <Tag color={APPROVAL_LABELS[tmpl.approval_status]?.color || 'default'} style={{ fontSize: 11 }}>
-                          {APPROVAL_LABELS[tmpl.approval_status]?.label || tmpl.approval_status}
+                      <Space wrap>
+                        <Text strong>{tmpl.name}</Text>
+                        {tmpl.is_system && <Tag color="gold" style={{ fontSize: 11 }}>System</Tag>}
+                        {tmpl.is_default && <Tag color="blue" style={{ fontSize: 11 }}>Default</Tag>}
+                        {tmpl.is_active && <Tag color="green" style={{ fontSize: 11 }}>Published</Tag>}
+                        {tmpl.version !== undefined && tmpl.version > 1 && (
+                          <Tag style={{ fontSize: 11 }}>v{tmpl.version}</Tag>
+                        )}
+                        <Tag color={VISIBILITY_LABELS[tmpl.visibility]?.color || 'default'} style={{ fontSize: 11 }}>
+                          {VISIBILITY_LABELS[tmpl.visibility]?.label || tmpl.visibility}
                         </Tag>
-                      )}
-                    </Space>
+                        {tmpl.approval_status !== 'none' && (
+                          <Tag color={APPROVAL_LABELS[tmpl.approval_status]?.color || 'default'} style={{ fontSize: 11 }}>
+                            {APPROVAL_LABELS[tmpl.approval_status]?.label || tmpl.approval_status}
+                          </Tag>
+                        )}
+                      </Space>
                   }
                   description={
                     <div>
@@ -321,17 +364,41 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
             <Input value={saveTags} onChange={(e) => setSaveTags(e.target.value)} placeholder="e.g. normal_forest, hills, leasehold" />
           </Form.Item>
           <Form.Item>
-            <Button
-              type={saveAsDefault ? 'primary' : 'default'}
-              icon={saveAsDefault ? <StarFilled /> : <StarOutlined />}
-              onClick={() => setSaveAsDefault(!saveAsDefault)}
-              size="small"
-            >
-              {saveAsDefault ? 'Default Template' : 'Set as Default'}
-            </Button>
-            <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-              Default is auto-selected when creating new plans
-            </Text>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <Button
+                  type={saveAsDefault ? 'primary' : 'default'}
+                  icon={saveAsDefault ? <StarFilled /> : <StarOutlined />}
+                  onClick={() => setSaveAsDefault(!saveAsDefault)}
+                  size="small"
+                >
+                  {saveAsDefault ? 'Default Template' : 'Set as Default'}
+                </Button>
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                  Default is auto-selected when creating new plans
+                </Text>
+              </div>
+              {isSuperAdmin && (
+                <div>
+                  <Button
+                    type={saveAsSystem ? 'primary' : 'default'}
+                    icon={<SettingOutlined />}
+                    onClick={() => {
+                      const next = !saveAsSystem;
+                      setSaveAsSystem(next);
+                      if (next) setSaveAsDefault(true);
+                    }}
+                    size="small"
+                    danger={saveAsSystem}
+                  >
+                    {saveAsSystem ? 'System Template' : 'Set as System Template'}
+                  </Button>
+                  <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                    System templates are the official default for all users
+                  </Text>
+                </div>
+              )}
+            </div>
           </Form.Item>
         </Form>
       </Modal>

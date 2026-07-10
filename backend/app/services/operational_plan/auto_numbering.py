@@ -23,7 +23,6 @@ def _num(n: int, language: str) -> str:
 
 def recompute_numbers(tree: List[TreeNode], language: str = "NP") -> None:
     section_counter = 0
-    appendix_counter = 0
 
     for node in list(tree):
         if node.type in ("preamble", "toc"):
@@ -34,12 +33,6 @@ def recompute_numbers(tree: List[TreeNode], language: str = "NP") -> None:
         elif node.type == "section":
             section_counter += 1
             node.number = _num(section_counter, language)
-            node.level = 0
-            _number_descendants(node, language, 1)
-
-        elif node.type == "appendix":
-            appendix_counter += 1
-            node.number = _num(appendix_counter, language)
             node.level = 0
             _number_descendants(node, language, 1)
 

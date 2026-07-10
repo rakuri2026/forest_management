@@ -480,6 +480,14 @@ const CommitteeManagement: React.FC<CommitteeManagementProps> = ({ calculationId
           }
           key="1"
         >
+          <div className="flex gap-2 mb-2">
+            <span className="text-xs text-gray-400 font-mono">{'{{uc_members}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{uc_total_members}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{uc_caste_distribution}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{uc_position_distribution}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{uc_gender_distribution}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{section:committee_narration}}'}</span>
+          </div>
           <div style={{ marginBottom: 10 }}>
             <Button type="dashed" onClick={addMainMember} icon={<PlusOutlined />} disabled={data.main_committee.length >= 15}>
               Add Member
@@ -508,6 +516,10 @@ const CommitteeManagement: React.FC<CommitteeManagementProps> = ({ calculationId
           }
           key="2"
         >
+          <div className="flex gap-2 mb-2">
+            <span className="text-xs text-gray-400 font-mono">{'{{ac_members}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{ac_total_members}}'}</span>
+          </div>
           <div style={{ marginBottom: 10 }}>
             <Button type="dashed" onClick={addAdvisoryMember} icon={<PlusOutlined />} disabled={data.advisory_committee.length >= 10}>
               Add Member
@@ -536,6 +548,10 @@ const CommitteeManagement: React.FC<CommitteeManagementProps> = ({ calculationId
           }
           key="3"
         >
+          <div className="flex gap-2 mb-2">
+            <span className="text-xs text-gray-400 font-mono">{'{{fc_members}}'}</span>
+            <span className="text-xs text-gray-400 font-mono">{'{{fc_total_members}}'}</span>
+          </div>
           <div style={{ marginBottom: 10 }}>
             <Button type="dashed" onClick={addFinancialMember} icon={<PlusOutlined />} disabled={data.financial_committee.length >= 10}>
               Add Member

@@ -27,7 +27,7 @@ const PreviewDrawer: React.FC<PreviewDrawerProps> = ({ planId, forestName }) => 
   };
 
   return (
-    <>
+    <div>
       <Button icon={<EyeOutlined />} size="small" onClick={handleOpen}>
         Preview
       </Button>
@@ -51,7 +51,7 @@ const PreviewDrawer: React.FC<PreviewDrawerProps> = ({ planId, forestName }) => 
           />
         )}
       </Drawer>
-    </>
+    </div>
   );
 };
 

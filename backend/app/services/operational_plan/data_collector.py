@@ -1,8 +1,12 @@
+import logging
+import time
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 from app.models.calculation import Calculation
 from app.models.forest_block import ForestBlock
@@ -17,7 +21,7 @@ from app.services.report.data_collector import (
 from app.services.operational_plan.section_generators import collect_section_content
 
 # Bump this when data_collector or any collector it calls changes schema/keys
-OP_DATA_CACHE_VERSION = 4
+OP_DATA_CACHE_VERSION = 11
 
 
 def _fetch_species_block_breakdown(db: Session, fi_calc_id: str,
@@ -1005,7 +1009,7 @@ def _compute_total_inventory(fi_data: Dict[str, Any]) -> Dict[str, Any]:
         """Multiply all per-hectare numeric fields by area to get absolute values."""
         abs_row = dict(per_ha_row)
         for k, v in per_ha_row.items():
-            if isinstance(v, (int, float)) and k != "total_sample_plots":
+            if isinstance(v, (int, float)) and k not in ("total_sample_plots", "mai_percent", "aah_multiplier_percent"):
                 abs_row[k] = round(v * area, 2) if isinstance(v, float) else int(v * area)
         return abs_row
 
@@ -1045,6 +1049,14 @@ def _compute_total_inventory(fi_data: Dict[str, Any]) -> Dict[str, Any]:
             "basal_area_m2_per_ha": round(sum(r.get("basal_area_m2_per_ha", 0) for r in ti_block_rows), 2),
             "mai_total_m3_per_ha": round(sum(r.get("mai_total_m3_per_ha", 0) for r in ti_block_rows), 2),
             "aah_total_m3_per_ha": round(sum(r.get("aah_total_m3_per_ha", 0) for r in ti_block_rows), 2),
+            "mai_percent": round(
+                sum(r.get("mai_percent", 0) * r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows) /
+                max(sum(r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows), 1), 2
+            ),
+            "aah_multiplier_percent": round(
+                sum(r.get("aah_multiplier_percent", 60.0) * r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows) /
+                max(sum(r.get("total_growing_stock_m3_per_ha", 0) for r in ti_block_rows), 1), 1
+            ),
             "agb_t_per_ha": round(sum(r.get("agb_t_per_ha", 0) for r in ti_block_rows), 2),
             "bgb_t_per_ha": round(sum(r.get("bgb_t_per_ha", 0) for r in ti_block_rows), 2),
             "total_biomass_t_per_ha": round(sum(r.get("total_biomass_t_per_ha", 0) for r in ti_block_rows), 2),
@@ -1452,24 +1464,38 @@ def _compute_total_inventory(fi_data: Dict[str, Any]) -> Dict[str, Any]:
         # ── T9: DBH क्लास अनुसार MAI ──
         _mai_pct = float(fi_data.get("fi_mai_percent", 0) or 0)
         _aah_mult = 0.60  # default AAH multiplier
+        # Build per-ha lookup from dbh_perha_rows
+        _perha_lookup = {}
+        for r in dbh_perha_rows:
+            _perha_lookup[(r["ब्लकको_नाम"], r["DBH_क्लास"])] = r["गणना_प्रति_हे"]
         dbh_mai_rows = []
         for r in dbh_abs_rows:
             bname = r["ब्लकको_नाम"]
             vol = r["आयतन_घमी"]
+            count_abs = r["गणना"]
+            count_per_ha = _perha_lookup.get((bname, r["DBH_क्लास"]), 0)
             dbh_mai_rows.append({
                 "ब्लकको_नाम": bname,
                 "DBH_क्लास": r["DBH_क्लास"],
+                "गणना_प्रति_हे": count_per_ha,
+                "गणना": count_abs,
                 "आयतन_घमी": vol,
                 "MAI_घमी_प्रति_वर्ष": round(vol * _mai_pct / 100.0, 2),
+                "MAI_संख्या_प्रति_हे": round(count_per_ha * _mai_pct / 100.0, 2),
             })
         # Forest-wide DBH MAI
         ft_mai = []
         for cls in ft_dbh_order:
             vol = ft_dbh[cls]["आयतन_घमी"]
+            count_abs = ft_dbh[cls]["गणना"]
+            count_per_ha = round(ft_perha[cls]["गणना_प्रति_हे"], 2) if cls in ft_perha else 0
             ft_mai.append({
                 "DBH_क्लास": cls,
+                "गणना_प्रति_हे": count_per_ha,
+                "गणना": count_abs,
                 "आयतन_घमी": round(vol, 2),
                 "MAI_घमी_प्रति_वर्ष": round(vol * _mai_pct / 100.0, 2),
+                "MAI_संख्या_प्रति_हे": round(count_per_ha * _mai_pct / 100.0, 2),
             })
         result["ti_dbh_mai_table"] = dbh_mai_rows + [
             {"ब्लकको_नाम": "जम्मा वन कुल", **r} for r in ft_mai
@@ -1478,24 +1504,39 @@ def _compute_total_inventory(fi_data: Dict[str, Any]) -> Dict[str, Any]:
         # ── T10: DBH क्लास अनुसार AAH ──
         dbh_aah_rows = []
         for r in dbh_abs_rows:
+            bname = r["ब्लकको_नाम"]
             vol = r["आयतन_घमी"]
+            count_abs = r["गणना"]
+            count_per_ha = _perha_lookup.get((bname, r["DBH_क्लास"]), 0)
             mai_val = vol * _mai_pct / 100.0
+            mai_trees = count_per_ha * _mai_pct / 100.0
             dbh_aah_rows.append({
-                "ब्लकको_नाम": r["ब्लकको_नाम"],
+                "ब्लकको_नाम": bname,
                 "DBH_क्लास": r["DBH_क्लास"],
+                "गणना_प्रति_हे": count_per_ha,
+                "गणना": count_abs,
                 "आयतन_घमी": vol,
                 "MAI_घमी_प्रति_वर्ष": round(mai_val, 2),
+                "MAI_संख्या_प्रति_हे": round(mai_trees, 2),
                 "AAH_घमी_प्रति_वर्ष": round(mai_val * _aah_mult, 2),
+                "AAH_संख्या_प्रति_हे": round(mai_trees * _aah_mult, 2),
             })
         ft_aah = []
         for cls in ft_dbh_order:
             vol = ft_dbh[cls]["आयतन_घमी"]
+            count_abs = ft_dbh[cls]["गणना"]
+            count_per_ha = round(ft_perha[cls]["गणना_प्रति_हे"], 2) if cls in ft_perha else 0
             mai_val = vol * _mai_pct / 100.0
+            mai_trees = count_per_ha * _mai_pct / 100.0
             ft_aah.append({
                 "DBH_क्लास": cls,
+                "गणना_प्रति_हे": count_per_ha,
+                "गणना": count_abs,
                 "आयतन_घमी": round(vol, 2),
                 "MAI_घमी_प्रति_वर्ष": round(mai_val, 2),
+                "MAI_संख्या_प्रति_हे": round(mai_trees, 2),
                 "AAH_घमी_प्रति_वर्ष": round(mai_val * _aah_mult, 2),
+                "AAH_संख्या_प्रति_हे": round(mai_trees * _aah_mult, 2),
             })
         result["ti_dbh_aah_table"] = dbh_aah_rows + [
             {"ब्लकको_नाम": "जम्मा वन कुल", **r} for r in ft_aah
@@ -2549,6 +2590,7 @@ def _fetch_fieldbook_data(db: Session, calculation_id: str) -> Dict[str, Any]:
 
 
 def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
+    t_start = time.time()
     import uuid
     from app.models.op_data_cache import OpDataCache
     calc_uuid = uuid.UUID(calculation_id) if isinstance(calculation_id, str) else calculation_id
@@ -2559,23 +2601,37 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         cached_data = dict(cached.data)
         # Invalidate if cache version doesn't match (schema/keys may have changed)
         if cached_data.pop("_cache_version", None) == OP_DATA_CACHE_VERSION:
+            logger.info("OP_COLLECT: cache HIT for calc=%s (%.2fs)", calculation_id, time.time() - t_start)
             return cached_data
 
+    logger.info("OP_COLLECT: cache MISS for calc=%s — starting full collection", calculation_id)
+    t0 = time.time()
     raw = _collect_all_data(db, calculation_id)
+    logger.info("OP_COLLECT: _collect_all_data done in %.2fs", time.time() - t0)
 
     # Merge user_group_landcover into user_group so all UG vars resolve from one source
     if "user_group_landcover" in raw:
+        buildings_available = raw.get("user_group", {}).get("available", False)
         ug_lc = raw.pop("user_group_landcover", {})
         raw.setdefault("user_group", {})
         raw["user_group"].update(ug_lc)
+        # Preserve buildings availability — don't let missing landcover overwrite
+        if buildings_available:
+            raw["user_group"]["available"] = True
 
+    t1 = time.time()
     fi_data = get_field_inventory_data(db, calculation_id,
                                        base_species_data=raw.get("species"))
+    logger.info("OP_COLLECT: get_field_inventory_data done in %.2fs", time.time() - t1)
     raw["field_inventory"] = fi_data
 
     # Compute total inventory (absolute) from per-hectare field inventory data
+    t2 = time.time()
     ti_data = _compute_total_inventory(fi_data)
+    logger.info("OP_COLLECT: _compute_total_inventory done in %.2fs", time.time() - t2)
     raw["field_inventory"].update(ti_data)
+
+    t2b = time.time()
     calc = db.query(Calculation).filter(Calculation.id == calculation_id).first()
     raw["result_data"] = calc.result_data or {} if calc else {}
 
@@ -2592,7 +2648,49 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     # Fieldbook data — must be before section_generators so narration sees it
     raw["fieldbook"] = _fetch_fieldbook_data(db, calculation_id)
 
+    # Demand-supply data for section:demand_supply_narration
+    try:
+        from app.services.demand_supply_service import (
+            get_demand,
+            get_community_forest_regular_supply,
+            get_community_forest_aah_supply,
+            get_private_supply,
+        )
+        calc_uuid = UUID(calculation_id)
+        demand = get_demand(db, calc_uuid)
+        cf_reg = get_community_forest_regular_supply(db, calc_uuid)
+        cf_aah = get_community_forest_aah_supply(db, calc_uuid)
+        cf_data = {
+            "firewood_bhari": cf_reg.get("firewood_bhari", 0),
+            "grass_bhari": cf_reg.get("grass_bhari", 0),
+            "bedding_bhari": cf_reg.get("bedding_bhari", 0),
+            "timber_cft": cf_aah.get("timber_cft", 0),
+            "poles_count": cf_aah.get("poles_count", 0),
+        }
+        pvt = get_private_supply(db, calc_uuid)
+        total_supply = {
+            k: (cf_data.get(k, 0) or 0) + (pvt.get(k, 0) or 0)
+            for k in ("firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count")
+        }
+        deficit = {
+            k: total_supply.get(k, 0) - (demand.get(k, 0) or 0)
+            for k in ("firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count")
+        }
+        raw["demand_supply"] = {
+            "demand": demand,
+            "supply_cf_regular": cf_reg,
+            "supply_cf_aah": cf_aah,
+            "supply_private": pvt,
+            "total_supply": total_supply,
+            "deficit": deficit,
+        }
+    except Exception as exc:
+        logger.warning("OP_COLLECT: demand-supply collection failed: %s", exc)
+        raw["demand_supply"] = {}
+
+    t3 = time.time()
     raw["section_generators"] = collect_section_content(raw)
+    logger.info("OP_COLLECT: block+compartment+act+fieldbook+sections done in %.2fs", time.time() - t2b)
 
     # Sampling: Nepali-keyed variants for inline table rendering
     sampling_data = raw.get("sampling", {})
@@ -2630,4 +2728,8 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     else:
         db.add(OpDataCache(calculation_id=calc_uuid, data=raw))
     db.commit()
+    logger.info(
+        "OP_COLLECT: total=%.2fs calc=%s cache=%s",
+        time.time() - t_start, calculation_id, "WRITTEN",
+    )
     return raw

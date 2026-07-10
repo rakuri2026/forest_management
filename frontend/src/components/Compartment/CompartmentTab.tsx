@@ -187,7 +187,7 @@ function PolygonLabels({ features }: { features: any[] }) {
             x="75" 
             y="14" 
             text-anchor="middle" 
-            font-family="Arial, sans-serif" 
+            font-family="'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Arial, sans-serif" 
             font-size="11" 
             font-weight="bold" 
             fill="white"

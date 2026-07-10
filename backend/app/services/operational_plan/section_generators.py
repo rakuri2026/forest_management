@@ -3,6 +3,8 @@ from app.utils.number_format import format_devanagari as fmt
 from .household_section_generators import (
     generate_household_narration,
     generate_committee_narration,
+    generate_user_group_narration,
+    generate_demand_supply_narration,
 )
 
 
@@ -1029,6 +1031,8 @@ SECTION_GENERATORS = {
     "section:fieldbook_narration": generate_fieldbook_narration,
     "section:household_narration": generate_household_narration,
     "section:committee_narration": generate_committee_narration,
+    "section:user_group_narration": generate_user_group_narration,
+    "section:demand_supply_narration": generate_demand_supply_narration,
     "section:ti_block_area_narration": generate_ti_block_area_narration,
     "section:ti_forest_total_narration": generate_ti_forest_total_narration,
     "section:ti_block_growing_stock_narration": generate_ti_block_growing_stock_narration,

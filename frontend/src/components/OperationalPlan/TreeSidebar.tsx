@@ -31,6 +31,44 @@ type TreeSidebarProps = {
   onReorderNode?: (nodeId: string, newParentId: string | null, newPosition: number) => void;
 };
 
+const BetweenDropZone: React.FC<{
+  parentId: string | null;
+  position: number;
+  onReorderNode?: (nodeId: string, newParentId: string | null, newPosition: number) => void;
+}> = ({ parentId, position, onReorderNode }) => {
+  const [isOver, setIsOver] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setIsOver(true);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsOver(false);
+    const draggedId = e.dataTransfer.getData('text/plain');
+    if (draggedId && onReorderNode) {
+      onReorderNode(draggedId, parentId, position);
+    }
+  };
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={handleDrop}
+      style={{
+        height: 6,
+        margin: '1px 0',
+        background: isOver ? '#1677ff' : 'transparent',
+        borderRadius: 3,
+        transition: 'background 0.15s',
+      }}
+    />
+  );
+};
+
 const typeIcons: Record<string, string> = {
   preamble: '📄',
   toc: '📑',
@@ -232,15 +270,19 @@ const TreeNodeComponent: React.FC<{
           </Tooltip>
         )}
       </div>
-      {node.children?.map(child =>
-        <TreeNodeComponent key={child.id} node={child} activeNodeId={activeNodeId} depth={depth + 1}
-          parentDeleted={isDeleted}
-          editingId={editingId} editValue={editValue} setEditingId={setEditingId} setEditValue={setEditValue}
-          onSelectNode={onSelectNode} onAddChild={onAddChild} onToggleDelete={onToggleDelete}
-          onAddChartNode={onAddChartNode} onAddMapNode={onAddMapNode} onAddStaticTable={onAddStaticTable}
-          onToggleHidden={onToggleHidden} onHardDelete={onHardDelete} onUpdateTitle={onUpdateTitle} onReorderNode={onReorderNode}
-          dragOverId={dragOverId} setDragOverId={setDragOverId} />
-      )}
+      {(node.children || []).map((child, index) => (
+        <React.Fragment key={child.id}>
+          <BetweenDropZone parentId={node.id} position={index} onReorderNode={onReorderNode} />
+          <TreeNodeComponent node={child} activeNodeId={activeNodeId} depth={depth + 1}
+            parentDeleted={isDeleted}
+            editingId={editingId} editValue={editValue} setEditingId={setEditingId} setEditValue={setEditValue}
+            onSelectNode={onSelectNode} onAddChild={onAddChild} onToggleDelete={onToggleDelete}
+            onAddChartNode={onAddChartNode} onAddMapNode={onAddMapNode} onAddStaticTable={onAddStaticTable}
+            onToggleHidden={onToggleHidden} onHardDelete={onHardDelete} onUpdateTitle={onUpdateTitle} onReorderNode={onReorderNode}
+            dragOverId={dragOverId} setDragOverId={setDragOverId} />
+        </React.Fragment>
+      ))}
+      <BetweenDropZone parentId={node.id} position={(node.children || []).length} onReorderNode={onReorderNode} />
     </div>
   );
 };
@@ -278,9 +320,13 @@ const TreeSidebar: React.FC<TreeSidebarProps> = ({ tree, activeNodeId, onSelectN
         )}
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
-        {tree.map(node =>
-          <TreeNodeComponent key={node.id} node={node} depth={0} parentDeleted={false} {...shared} />
-        )}
+        {tree.map((node, index) => (
+          <React.Fragment key={node.id}>
+            <BetweenDropZone parentId={null} position={index} onReorderNode={onReorderNode} />
+            <TreeNodeComponent node={node} depth={0} parentDeleted={false} {...shared} />
+          </React.Fragment>
+        ))}
+        <BetweenDropZone parentId={null} position={tree.length} onReorderNode={onReorderNode} />
         {tree.length === 0 && (
           <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
             No sections yet

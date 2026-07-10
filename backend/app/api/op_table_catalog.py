@@ -35,7 +35,7 @@ TABLE_DEFINITIONS: List[dict] = [
     {"table_id": "table_10", "title_ne": "मुख्य प्रजाति",                         "title_en": "Main Species",                  "auto_populatable": True,  "data_source": "species"},
     {"table_id": "table_11", "title_ne": "घरधुरी विवरण",                          "title_en": "Household Details",             "auto_populatable": True,  "data_source": "household"},
     {"table_id": "table_12", "title_ne": "जनसंख्या विवरण",                        "title_en": "Population Details",            "auto_populatable": True,  "data_source": "household"},
-    {"table_id": "table_13", "title_ne": "माग र आपूर्ति",                         "title_en": "Demand and Supply",             "auto_populatable": True,  "data_source": "household"},
+    {"table_id": "demand_supply", "title_ne": "माग र आपूर्ति",                         "title_en": "Demand and Supply",             "auto_populatable": True,  "data_source": "household"},
     {"table_id": "table_14", "title_ne": "समिति विवरण",                           "title_en": "Committee Details",             "auto_populatable": True,  "data_source": "committee"},
     {"table_id": "table_15", "title_ne": "वार्षिक क्रियाकलाप",                   "title_en": "Annual Activities",             "auto_populatable": False, "data_source": None},
     {"table_id": "table_16", "title_ne": "बजेट विवरण",                            "title_en": "Budget Details",                "auto_populatable": False, "data_source": None},
@@ -217,10 +217,35 @@ async def auto_populate_table(
         hh = raw.get("households", {})
         if hh.get("available"):
             rows = [{"total_male": hh.get("total_male", 0), "total_female": hh.get("total_female", 0), "total_population": hh.get("total_population", 0)}]
-    elif table_id == "table_13":
-        hh = raw.get("households", {})
-        if hh.get("available"):
-            rows = [{"timber_demand_cft": hh.get("timber_demand_cft", 0), "firewood_demand_bhari": hh.get("firewood_demand_bhari", 0)}]
+    elif table_id == "demand_supply":
+        ds = raw.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            np_labels = {
+                "firewood_bhari": "दाउरा भारी",
+                "grass_bhari": "घाँस भारी",
+                "bedding_bhari": "सोतर भारी",
+                "timber_cft": "काठ क्यू.फि.",
+                "poles_count": "खाँवा संख्या",
+            }
+            for k in products:
+                cf_reg = ds.get("supply_cf_regular", {})
+                cf_aah = ds.get("supply_cf_aah", {})
+                deficit = ds.get("deficit", {}).get(k, 0) or 0
+                if isinstance(deficit, (int, float)):
+                    sign = "बचत" if deficit >= 0 else "कमी"
+                    deficit_str = f"{sign} {abs(deficit):.2f}"
+                else:
+                    deficit_str = str(deficit) if deficit else "-"
+                rows.append({
+                    "product": np_labels.get(k, k),
+                    "demand": ds.get("demand", {}).get(k, 0) or 0,
+                    "cf_regular": cf_reg[k] if k in cf_reg else "-",
+                    "cf_aah": cf_aah[k] if k in cf_aah else "-",
+                    "private": ds.get("supply_private", {}).get(k, 0) or 0,
+                    "total_supply": ds.get("total_supply", {}).get(k, 0) or 0,
+                    "deficit": deficit_str,
+                })
     elif table_id == "table_14":
         cm = raw.get("committees", {})
         uc = cm.get("user_committee", {})

@@ -9,7 +9,6 @@ import type {
   Calculation,
 } from '../types';
 import { downloadFromApi } from '../utils/download';
-import { downloadFromApi } from '../utils/download';
 
 export const API_BASE_URL = 'http://localhost:8001';
 
@@ -43,6 +42,9 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // Track last API activity for idle timeout
+    localStorage.setItem('last_active', String(Date.now()));
+
     // If sending FormData, remove Content-Type header so browser sets it with boundary
     if (config.data instanceof FormData) {
       delete config.headers['Content-Type'];
@@ -56,10 +58,27 @@ api.interceptors.request.use(
 // Response interceptor to handle errors
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('access_token');
-      window.location.href = '/login';
+  async (error) => {
+    const originalRequest = error.config;
+
+    // On 401, try once to refresh the token, then retry the request
+    // Never retry the refresh endpoint itself (would infinite loop)
+    if (error.response?.status === 401
+        && !originalRequest._retry
+        && !originalRequest.url?.includes('/api/auth/refresh')) {
+      originalRequest._retry = true;
+      try {
+        const { data } = await api.post('/api/auth/refresh');
+        localStorage.setItem('access_token', data.access_token);
+        const newExpiry = Date.now() + (data.expires_in - 300) * 1000;
+        localStorage.setItem('token_expiry', String(newExpiry));
+        originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+        return api(originalRequest);
+      } catch {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('token_expiry');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -79,6 +98,16 @@ export const authApi = {
 
   me: async (): Promise<User> => {
     const response = await api.get<User>('/api/auth/me');
+    return response.data;
+  },
+
+  refresh: async (): Promise<TokenResponse> => {
+    const response = await api.post<TokenResponse>('/api/auth/refresh');
+    return response.data;
+  },
+
+  toggleRole: async (): Promise<User> => {
+    const response = await api.post<User>('/api/auth/toggle-role');
     return response.data;
   },
 };
@@ -599,6 +628,13 @@ export const allTreeExportApi = {
 
   delete: async (exportId: string) => {
     const response = await api.delete(`/api/all-tree-exports/${exportId}`);
+    return response.data;
+  },
+};
+
+export const exportCleanupApi = {
+  cleanup: async (retentionDays: number = 7) => {
+    const response = await api.post(`/api/exports/cleanup?retention_days=${retentionDays}`);
     return response.data;
   },
 };
@@ -2171,9 +2207,9 @@ export const compartmentApi = {
 };
 
 export const operationalPlanApi = {
-  create: async (calculationId: string, forestName?: string, templateId?: string): Promise<any> => {
+  create: async (calculationId: string, forestName?: string, templateId?: string, customNotes?: string): Promise<any> => {
     const params = templateId ? `?template_id=${templateId}` : '';
-    const response = await api.post(`/api/operational-plans${params}`, { calculation_id: calculationId, forest_name: forestName });
+    const response = await api.post(`/api/operational-plans${params}`, { calculation_id: calculationId, forest_name: forestName, custom_notes: customNotes });
     return response.data;
   },
 
@@ -2340,8 +2376,22 @@ export const operationalPlanApi = {
     );
   },
 
+  exportVariablesCsv: async (): Promise<void> => {
+    await downloadFromApi(
+      '/api/operational-plans/variables/export/csv',
+      'OP_Variable_Registry.csv'
+    );
+  },
+
   previewOperationalPlan: async (planId: string): Promise<string> => {
     const response = await api.get(`/api/operational-plans/${planId}/preview`, {
+      responseType: 'text',
+    });
+    return response.data;
+  },
+
+  previewOperationalPlanSection: async (planId: string, nodeId: string): Promise<string> => {
+    const response = await api.get(`/api/operational-plans/${planId}/preview/section/${nodeId}`, {
       responseType: 'text',
     });
     return response.data;
@@ -2421,8 +2471,48 @@ export const operationalPlanApi = {
     return response.data;
   },
 
-  savePlanAsTemplate: async (planId: string, data: { name: string; description?: string; tree?: any[]; is_default?: boolean; visibility?: string; tags?: string[] }): Promise<any> => {
+  savePlanAsTemplate: async (planId: string, data: { name: string; description?: string; tree?: any[]; is_default?: boolean; is_system?: boolean; visibility?: string; tags?: string[] }): Promise<any> => {
     const response = await api.post(`/api/operational-plans/${planId}/save-as-template`, data);
+    return response.data;
+  },
+
+  publishTemplate: async (templateId: string, is_active: boolean): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/templates/${templateId}/publish`, { is_active });
+    return response.data;
+  },
+
+  cloneTemplate: async (templateId: string, name?: string): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/templates/${templateId}/clone`, { name });
+    return response.data;
+  },
+
+  getTemplateVersions: async (templateId: string): Promise<any> => {
+    const response = await api.get(`/api/operational-plans/templates/${templateId}/versions`);
+    return response.data;
+  },
+
+  rollbackTemplate: async (templateId: string, version: number): Promise<any> => {
+    const response = await api.post(`/api/operational-plans/templates/${templateId}/rollback`, { version });
+    return response.data;
+  },
+
+  listTemplateCategories: async (): Promise<any> => {
+    const response = await api.get('/api/operational-plans/template-categories');
+    return response.data;
+  },
+
+  createTemplateCategory: async (data: { key: string; label_ne: string; label_en: string; description?: string; color?: string; sort_order?: number }): Promise<any> => {
+    const response = await api.post('/api/operational-plans/template-categories', data);
+    return response.data;
+  },
+
+  updateTemplateCategory: async (categoryId: string, data: any): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/template-categories/${categoryId}`, data);
+    return response.data;
+  },
+
+  deleteTemplateCategory: async (categoryId: string): Promise<any> => {
+    const response = await api.delete(`/api/operational-plans/template-categories/${categoryId}`);
     return response.data;
   },
 };

@@ -25,6 +25,7 @@ class TreeNodeSchema(BaseModel):
 class OperationalPlanCreate(BaseModel):
     calculation_id: UUID4
     forest_name: Optional[str] = None
+    custom_notes: Optional[str] = None
 
 
 class OperationalPlanUpdate(BaseModel):
@@ -48,6 +49,7 @@ class TreeNodeCreate(BaseModel):
     content_type: Literal["richtext", "chart", "table", "map", "static_table"] = "richtext"
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
+    map_type: Optional[str] = None
     static_table: Optional[dict] = None
     position: int = -1
 
@@ -59,6 +61,7 @@ class TreeNodeUpdate(BaseModel):
     content_type: Optional[Literal["richtext", "chart", "table", "map", "static_table"]] = None
     chart_type: Optional[str] = None
     table_id: Optional[str] = None
+    map_type: Optional[str] = None
     static_table: Optional[dict] = None
     hidden_in_export: Optional[bool] = None
     deleted: Optional[bool] = None
@@ -79,6 +82,9 @@ class VariableDefResponse(BaseModel):
     source: str
     auto_populate: bool
     description: str
+    description_ne: str = ""
+    table_columns: List[str] = []
+    mock_rows: List[Dict[str, Any]] = []
 
 
 class OperationalPlanResponse(BaseModel):
@@ -114,8 +120,10 @@ class TemplateCreate(BaseModel):
     description: Optional[str] = ""
     tree: List[TreeNodeSchema]
     is_default: bool = False
+    is_system: bool = False
     visibility: Literal["private", "shared"] = "private"
     tags: Optional[List[str]] = None
+    template_category: Optional[str] = None
 
 
 class TemplateUpdate(BaseModel):
@@ -125,6 +133,16 @@ class TemplateUpdate(BaseModel):
     is_default: Optional[bool] = None
     visibility: Optional[Literal["private", "shared"]] = None
     tags: Optional[List[str]] = None
+    template_category: Optional[str] = None
+    changelog: Optional[str] = None
+
+
+class TemplatePublish(BaseModel):
+    is_active: bool
+
+
+class TemplateClone(BaseModel):
+    name: Optional[str] = None
 
 
 class TemplateApprove(BaseModel):
@@ -138,9 +156,12 @@ class TemplateSummary(BaseModel):
     description: str = ""
     is_system: bool = False
     is_default: bool = False
+    is_active: bool = True
+    version: int = 1
     visibility: str = "private"
     approval_status: str = "none"
     tags: List[str] = []
+    template_category: Optional[str] = None
     sections_summary: List[str] = []
     variables_summary: List[str] = []
     created_by: Optional[UUID4] = None
@@ -157,3 +178,53 @@ class TemplateResponse(TemplateSummary):
     approved_by: Optional[UUID4] = None
     approved_at: Optional[datetime] = None
     source_calculation_id: Optional[UUID4] = None
+    source_template_id: Optional[UUID4] = None
+    changelog: Optional[str] = None
+
+
+class TemplateVersionResponse(BaseModel):
+    id: UUID4
+    template_id: UUID4
+    version: int
+    name: str
+    description: str = ""
+    changelog: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateRollbackRequest(BaseModel):
+    version: int
+
+
+class CategoryCreate(BaseModel):
+    key: str = Field(..., min_length=1, max_length=50)
+    label_ne: str = Field(..., min_length=1, max_length=255)
+    label_en: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = ""
+    color: Optional[str] = "purple"
+    sort_order: int = 0
+
+
+class CategoryUpdate(BaseModel):
+    label_ne: Optional[str] = None
+    label_en: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class CategoryResponse(BaseModel):
+    id: UUID4
+    key: str
+    label_ne: str
+    label_en: str
+    description: str = ""
+    color: str = "purple"
+    sort_order: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

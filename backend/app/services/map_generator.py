@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for server-side generation
 
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import matplotlib.patches as mpatches
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
@@ -30,6 +31,8 @@ from shapely import wkt
 from sqlalchemy import text
 import matplotlib.colors as mcolors
 
+from app.utils.map_grid import compute_snapped_grid, apply_snapped_ticks
+
 # A5 dimensions in inches at 300 DPI
 A5_PORTRAIT_INCHES = (5.83, 8.27)   # 148mm × 210mm
 A5_LANDSCAPE_INCHES = (8.27, 5.83)  # 210mm × 148mm
@@ -44,7 +47,7 @@ class MapGenerator:
     - A5-sized maps (portrait/landscape)
     - High-quality 300 DPI output
     - Customizable colors and styles
-    - North arrow and scale bar
+    - North arrow
     - Legend support
     """
 
@@ -66,6 +69,17 @@ class MapGenerator:
         plt.rcParams['legend.fontsize'] = 7
         plt.rcParams['figure.dpi'] = dpi
 
+        # Register Devanagari-supporting font for Nepali labels
+        for _dev_font_name in ['Nirmala UI', 'Mangal', 'Noto Sans Devanagari', 'Arial Unicode MS']:
+            try:
+                _fp = fm.findfont(_dev_font_name, fallback_to_default=False)
+                if _fp:
+                    fm.fontManager.addfont(_fp)
+                    plt.rcParams['font.sans-serif'] = [_dev_font_name] + plt.rcParams.get('font.sans-serif', [])
+                    break
+            except Exception:
+                continue
+
         # Configure requests session with timeout for basemap tiles
         self.session = requests.Session()
         retry_strategy = Retry(
@@ -76,6 +90,15 @@ class MapGenerator:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
+
+    def _snap_axis(self, ax, min_x, max_x, min_y, max_y, **grid_kwargs):
+        """Compute snapped grid, set axis limits, and apply ticks+grid (one call)."""
+        lx, lx_lab, lx0, lx1 = compute_snapped_grid(min_x, max_x)
+        ly, ly_lab, ly0, ly1 = compute_snapped_grid(min_y, max_y)
+        ax.set_xlim(lx0, lx1)
+        ax.set_ylim(ly0, ly1)
+        apply_snapped_ticks(ax, lx, ly, lx_lab, ly_lab, grid_kwargs=grid_kwargs)
+        return lx, ly, lx_lab, ly_lab, lx0, lx1, ly0, ly1
 
     def add_basemap_with_timeout(self, ax, crs='EPSG:4326', timeout=5, alpha=0.7, zorder=1):
         """
@@ -213,61 +236,21 @@ class MapGenerator:
             zorder=1001
         )
 
-    def add_scale_bar(
-        self,
-        fig: plt.Figure,
-        ax: plt.Axes,
-        length_km: float = 1.0,
-        x: float = 0.15,
-        y: float = 0.08,
-        bar_width: float = 0.12
-    ) -> None:
-        """
-        Add a scale bar outside the map area.
-
-        Args:
-            fig: Matplotlib figure
-            ax: Matplotlib axes
-            length_km: Scale bar length in kilometers
-            x: X position (0-1, figure coordinates)
-            y: Y position (0-1, figure coordinates)
-            bar_width: Bar width relative to figure
-        """
-        # Draw scale bar in figure coordinates (outside axes)
-        bar = mpatches.Rectangle(
-            (x, y), bar_width, 0.008,
-            transform=fig.transFigure,
-            fc='black',
-            ec='black',
-            zorder=1000,
-            clip_on=False
-        )
-        fig.patches.append(bar)
-
-        # Add scale label
-        fig.text(
-            x + bar_width/2, y + 0.015,
-            f'{length_km} km',
-            ha='center',
-            va='bottom',
-            fontsize=8,
-            zorder=1001
-        )
-
     def save_to_buffer(self, fig: plt.Figure) -> io.BytesIO:
         """
-        Save figure to BytesIO buffer as PNG.
+        Save figure to BytesIO buffer as SVG.
+        SVG preserves text as elements, allowing proper Devanagari shaping in browser/Word.
 
         Args:
             fig: Matplotlib figure
 
         Returns:
-            BytesIO buffer containing PNG data
+            BytesIO buffer containing SVG data
         """
         buffer = io.BytesIO()
         fig.savefig(
             buffer,
-            format='png',
+            format='svg',
             dpi=self.dpi,
             bbox_inches='tight',
             facecolor='white',
@@ -751,13 +734,11 @@ class MapGenerator:
                 ax.plot(x, y, 'r-', linewidth=1.5, zorder=10)
                 ax.fill(x, y, color='white', alpha=0.8, zorder=9)
 
-        # Set axis limits with padding (in WGS84)
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.15  # Increased padding for context
-
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
+        # Compute snapped grid and set axis limits (replaces 15% padding)
+        blon_lines, blon_labels, blon_start, blon_end = compute_snapped_grid(min_x, max_x)
+        blat_lines, blat_labels, blat_start, blat_end = compute_snapped_grid(min_y, max_y)
+        ax.set_xlim(blon_start, blon_end)
+        ax.set_ylim(blat_start, blat_end)
 
         # Add OpenStreetMap basemap with timeout (5 seconds)
         basemap_success = self.add_basemap_with_timeout(
@@ -973,26 +954,15 @@ class MapGenerator:
                 # Add ESA boundary to legend
                 ax.plot([], [], color='#9B59B6', linewidth=2, alpha=0.7, linestyle=':', label='ESA Boundary')
 
-        # Add grid (on top of basemap, white for visibility)
-        ax.grid(True, alpha=0.4, linestyle='--', linewidth=0.5, zorder=8, color='white')
+        # Add snapped grid (on top of basemap, white for visibility)
+        apply_snapped_ticks(ax, blon_lines, blat_lines, blon_labels, blat_labels,
+                            grid_kwargs={'alpha': 0.4, 'color': 'white'})
 
         # Equal aspect ratio
         ax.set_aspect('equal', adjustable='box')
 
-        # Format axis tick labels
-        ax.tick_params(axis='both', labelsize=8)
-
         # Add north arrow (outside map area, top-right)
         self.add_north_arrow(fig, ax)
-
-        # Calculate approximate scale (1 degree ≈ 111 km at equator)
-        # Use WGS84 coordinates for scale calculation
-        x_range_wgs = max_x_wgs - min_x_wgs
-        y_range_wgs = max_y_wgs - min_y_wgs
-        avg_lat = (min_y_wgs + max_y_wgs) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)  # 1/5 of width
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata (bottom center, outside map)
         fig.text(
@@ -1163,31 +1133,14 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits with padding
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
 
         # Equal aspect ratio
         ax.set_aspect('equal', adjustable='box')
 
-        # Format axis tick labels
-        ax.tick_params(axis='both', labelsize=8)
-
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -1372,27 +1325,12 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
         ax.set_aspect('equal', adjustable='box')
-        ax.tick_params(axis='both', labelsize=8)
 
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -1582,31 +1520,14 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits with padding
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
 
         # Equal aspect ratio
         ax.set_aspect('equal', adjustable='box')
 
-        # Format axis tick labels
-        ax.tick_params(axis='both', labelsize=8)
-
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -1800,27 +1721,12 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
         ax.set_aspect('equal', adjustable='box')
-        ax.tick_params(axis='both', labelsize=8)
 
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -1990,27 +1896,12 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
         ax.set_aspect('equal', adjustable='box')
-        ax.tick_params(axis='both', labelsize=8)
 
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -2193,27 +2084,12 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
         ax.set_aspect('equal', adjustable='box')
-        ax.tick_params(axis='both', labelsize=8)
 
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -2404,27 +2280,12 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
         ax.set_aspect('equal', adjustable='box')
-        ax.tick_params(axis='both', labelsize=8)
 
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -2605,27 +2466,12 @@ class MapGenerator:
             x, y = poly.exterior.xy
             ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-        # Set axis limits
-        x_range = max_x - min_x
-        y_range = max_y - min_y
-        padding = max(x_range, y_range) * 0.05
-        ax.set_xlim(min_x - padding, max_x + padding)
-        ax.set_ylim(min_y - padding, max_y + padding)
-
-        # Add grid
-        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, min_x, max_x, min_y, max_y)
         ax.set_aspect('equal', adjustable='box')
-        ax.tick_params(axis='both', labelsize=8)
 
         # Add north arrow
         self.add_north_arrow(fig, ax)
-
-        # Add scale bar
-        x_range_wgs = max_x - min_x
-        avg_lat = (min_y + max_y) / 2
-        km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-        scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-        self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
         # Add metadata
         fig.text(
@@ -2698,13 +2544,11 @@ class MapGenerator:
         ax.plot(x, y, 'g-', linewidth=2, label='Test Pattern')
         ax.fill_between(x, 0, y, alpha=0.3, color='green')
 
-        # Remove axis labels
-        ax.tick_params(axis='both', labelsize=8)
-        ax.grid(True, alpha=0.3)
+        # Snapped grid with clean coordinate labels
+        self._snap_axis(ax, 0, 2 * np.pi, -1, 1)
 
-        # Add north arrow and scale bar (outside map area)
+        # Add north arrow (outside map area)
         self.add_north_arrow(fig, ax)
-        self.add_scale_bar(fig, ax, length_km=1.0)
 
         # Add legend outside map area
         fig.legend(

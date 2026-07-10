@@ -200,19 +200,7 @@ export default function OperationalPlanTab({ calculationId }: OperationalPlanTab
                 </button>
               ))}
 
-            {/* 3. Appendix Items - after sections */}
-            {plan?.sections?.toc?.appendix && (
-              <div className="mt-4 pt-4 border-t border-gray-300">
-                <div className="text-xs font-medium text-gray-500 mb-2 px-3">अनुसूची (Appendix)</div>
-                {plan.sections.toc.appendix.map((item: string, idx: number) => (
-                  <div key={`appendix-${idx}`} className="px-3 py-1.5 text-sm text-gray-600">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* 4. Tables - at the very end */}
+            {/* 3. Tables - at the very end */}
             {plan?.sections?.toc?.tables && (
               <div className="mt-4 pt-4 border-t border-gray-300">
                 <div className="text-xs font-medium text-gray-500 mb-2 px-3">तालिकाहरु (Tables)</div>

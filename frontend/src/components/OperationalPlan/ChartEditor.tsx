@@ -14,6 +14,7 @@ import {
 import { operationalPlanApi } from '../../services/api';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
+ChartJS.defaults.font.family = "'Noto Sans Devanagari', 'Nirmala UI', 'Mangal', Arial, sans-serif";
 
 interface ChartEditorProps {
   planId: string;

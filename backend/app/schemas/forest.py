@@ -210,13 +210,15 @@ class SubAreaCategory(str):
     TREE_STRATA = "tree_strata"
     WATER_HOLE = "water_hole"
     WILDLIFE_CORRIDOR = "wildlife_corridor"
+    ENCRACHED = "encroached"
 
     @classmethod
     def valid_categories(cls) -> List[str]:
         return [
             cls.PROTECTED, cls.PLANTATION, cls.PRO_POOR, cls.RELIGIOUS,
             cls.BIODIVERSITY, cls.TOURIST, cls.OFFICE, cls.PRIVATE_LAND,
-            cls.AGROFORESTRY, cls.TREE_STRATA, cls.WATER_HOLE, cls.WILDLIFE_CORRIDOR
+            cls.AGROFORESTRY, cls.TREE_STRATA, cls.WATER_HOLE, cls.WILDLIFE_CORRIDOR,
+            cls.ENCRACHED,
         ]
 
 

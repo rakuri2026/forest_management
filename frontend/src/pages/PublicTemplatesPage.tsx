@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Input, Tag, Typography, Space, Spin, Empty, Row, Col, Button, message, Modal, Descriptions, Collapse, Select, List, Alert } from 'antd';
 import { SearchOutlined, FileTextOutlined, EyeOutlined, TagsOutlined, AppstoreOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { operationalPlanApi, forestApi } from '../services/api';
 
 const { Text, Title } = Typography;
 const { Panel } = Collapse;
+const { TextArea } = Input;
 
 interface PublicTemplate {
   id: string;
@@ -17,6 +18,8 @@ interface PublicTemplate {
   created_by?: string | null;
   updated_at: string;
   template_category?: string | null;
+  version?: number;
+  is_active?: boolean;
 }
 
 interface Calculation {
@@ -26,22 +29,16 @@ interface Calculation {
   created_at: string;
 }
 
-const CATEGORIES = [
-  { value: '', label: 'All Categories' },
-  { value: 'normal_forest', label: 'Normal Forest' },
-  { value: 'leasehold', label: 'Leasehold Forest' },
-  { value: 'religious_forest', label: 'Religious Forest' },
-  { value: 'community_forest', label: 'Community Forest' },
-  { value: 'collaborative_forest', label: 'Collaborative Forest' },
-];
-
 const PublicTemplatesPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const preselectedCalcId = searchParams.get('calculation_id');
   const [templates, setTemplates] = useState<PublicTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTag, setActiveTag] = useState<string | undefined>(undefined);
   const [category, setCategory] = useState<string>('');
   const [allTags, setAllTags] = useState<string[]>([]);
+  const [categoriesList, setCategoriesList] = useState<any[]>([]);
   const [detailTemplate, setDetailTemplate] = useState<PublicTemplate | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [calcModalOpen, setCalcModalOpen] = useState(false);
@@ -49,23 +46,36 @@ const PublicTemplatesPage: React.FC = () => {
   const [calculations, setCalculations] = useState<Calculation[]>([]);
   const [loadingCalcs, setLoadingCalcs] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [customNotes, setCustomNotes] = useState('');
   const navigate = useNavigate();
+
+  const isNewVersionAvailable = (templateId: string, currentVersion?: number): boolean => {
+    try {
+      const key = `template_version_${templateId}`;
+      const usedVersion = localStorage.getItem(key);
+      if (!usedVersion) return false;
+      return currentVersion !== undefined && parseInt(usedVersion, 10) < currentVersion;
+    } catch {
+      return false;
+    }
+  };
 
   useEffect(() => {
     fetchTemplates();
+    operationalPlanApi.listTemplateCategories().then(data => {
+      setCategoriesList(data || []);
+    }).catch(() => {});
   }, [activeTag, category]);
 
   const fetchTemplates = async (searchTerm?: string) => {
     setLoading(true);
     try {
       const res = await operationalPlanApi.listPublicTemplates(activeTag, searchTerm || search || undefined);
-      const items = res.templates || [];
+      let items = res.templates || [];
       if (category) {
-        const filtered = items.filter((t: any) => t.tags?.includes(category));
-        setTemplates(filtered);
-      } else {
-        setTemplates(items);
+        items = items.filter((t: any) => t.template_category === category);
       }
+      setTemplates(items);
       const tags = new Set<string>();
       items.forEach((t: PublicTemplate) => (t.tags || []).forEach((tag: string) => tags.add(tag)));
       setAllTags(Array.from(tags).sort());
@@ -82,6 +92,10 @@ const PublicTemplatesPage: React.FC = () => {
 
   const handleUseTemplate = async (tmpl: PublicTemplate) => {
     setSelectedTemplate(tmpl);
+    if (preselectedCalcId) {
+      handleCreatePlan(preselectedCalcId, tmpl);
+      return;
+    }
     setLoadingCalcs(true);
     setCalcModalOpen(true);
     try {
@@ -96,11 +110,16 @@ const PublicTemplatesPage: React.FC = () => {
     }
   };
 
-  const handleCreatePlan = async (calcId: string) => {
-    if (!selectedTemplate) return;
+  const handleCreatePlan = async (calcId: string, tmplOverride?: PublicTemplate) => {
+    const tmpl = tmplOverride || selectedTemplate;
+    if (!tmpl) return;
     setCreating(true);
     try {
-      const plan = await operationalPlanApi.create(calcId, undefined, selectedTemplate.id);
+      const notes = preselectedCalcId ? '' : customNotes;
+      const plan = await operationalPlanApi.create(calcId, undefined, tmpl.id, notes);
+      try {
+        localStorage.setItem(`template_version_${tmpl.id}`, String(tmpl.version || 1));
+      } catch { /* localStorage not available */ }
       setCalcModalOpen(false);
       setCreating(false);
       message.success('Operational plan created from template');
@@ -139,9 +158,13 @@ const PublicTemplatesPage: React.FC = () => {
             value={category}
             onChange={(val) => setCategory(val)}
             style={{ width: 200 }}
-            options={CATEGORIES}
             placeholder="Filter by category"
-          />
+          >
+            <Select.Option value="">All Categories</Select.Option>
+            {categoriesList.map(c => (
+              <Select.Option key={c.key} value={c.key}>{c.label_en}</Select.Option>
+            ))}
+          </Select>
         </Space>
 
         {allTags.length > 0 && (
@@ -191,6 +214,10 @@ const PublicTemplatesPage: React.FC = () => {
                   title={
                     <Space wrap>
                       <Text strong ellipsis style={{ maxWidth: 160 }}>{tmpl.name}</Text>
+                      {tmpl.is_active && <Tag color="green" style={{ fontSize: 9 }}>v{tmpl.version || 1}</Tag>}
+                      {isNewVersionAvailable(tmpl.id, tmpl.version) && (
+                        <Tag color="orange" style={{ fontSize: 9 }}>New!</Tag>
+                      )}
                     </Space>
                   }
                   description={
@@ -199,8 +226,8 @@ const PublicTemplatesPage: React.FC = () => {
                         {tmpl.description || 'No description'}
                       </Text>
                       {tmpl.template_category && (
-                        <Tag color="purple" style={{ fontSize: 10, marginTop: 4 }}>
-                          {CATEGORIES.find(c => c.value === tmpl.template_category)?.label || tmpl.template_category}
+                        <Tag color={categoriesList.find(c => c.key === tmpl.template_category)?.color || 'purple'} style={{ fontSize: 10, marginTop: 4 }}>
+                          {categoriesList.find(c => c.key === tmpl.template_category)?.label_en || tmpl.template_category}
                         </Tag>
                       )}
                       {tmpl.tags?.length > 0 && (
@@ -240,11 +267,14 @@ const PublicTemplatesPage: React.FC = () => {
         {detailTemplate && (
           <div>
             <Title level={4}>{detailTemplate.name}</Title>
+            <Space style={{ marginBottom: 8 }}>
+              {detailTemplate.is_active && <Tag color="green">Published v{detailTemplate.version || 1}</Tag>}
+              {!detailTemplate.is_active && <Tag>Draft</Tag>}
+            </Space>
             <Text style={{ display: 'block', marginBottom: 12 }}>{detailTemplate.description || 'No description'}</Text>
             <Space wrap style={{ marginBottom: 12 }}>
               {detailTemplate.template_category && (
-                <Tag color="purple">{CATEGORIES.find(c => c.value === detailTemplate.template_category)?.label}</Tag>
-              )}
+                <Tag color={categoriesList.find(c => c.key === detailTemplate.template_category)?.color || 'purple'}>{categoriesList.find(c => c.key === detailTemplate.template_category)?.label_en || detailTemplate.template_category}</Tag>              )}
               {detailTemplate.tags?.map(t => <Tag key={t}>{t}</Tag>)}
             </Space>
             <Collapse ghost>
@@ -288,6 +318,15 @@ const PublicTemplatesPage: React.FC = () => {
             <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
               Choose which forest to apply "<strong>{selectedTemplate?.name}</strong>" to:
             </Text>
+            <div style={{ marginBottom: 12 }}>
+              <TextArea
+                placeholder="Optional: Add custom notes about your forest (e.g. local context, specific concerns). These will appear at the end of the generated document."
+                rows={2}
+                value={customNotes}
+                onChange={(e) => setCustomNotes(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+            </div>
             <List
               dataSource={calculations}
               loading={creating}

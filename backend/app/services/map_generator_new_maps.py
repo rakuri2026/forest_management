@@ -10,6 +10,7 @@ This file contains the implementations for 5 additional map types:
 
 These functions should be integrated into the MapGenerator class in map_generator.py
 """
+from app.utils.map_grid import compute_snapped_grid, apply_snapped_ticks
 
 def generate_topographic_map(
     self,
@@ -154,27 +155,12 @@ def generate_topographic_map(
         x, y = poly.exterior.xy
         ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-    # Set axis limits
-    x_range = max_x - min_x
-    y_range = max_y - min_y
-    padding = max(x_range, y_range) * 0.05
-    ax.set_xlim(min_x - padding, max_x + padding)
-    ax.set_ylim(min_y - padding, max_y + padding)
-
-    # Add grid
-    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+    # Snapped grid with clean coordinate labels
+    self._snap_axis(ax, min_x, max_x, min_y, max_y)
     ax.set_aspect('equal', adjustable='box')
-    ax.tick_params(axis='both', labelsize=8)
 
     # Add north arrow
     self.add_north_arrow(fig, ax)
-
-    # Add scale bar
-    x_range_wgs = max_x - min_x
-    avg_lat = (min_y + max_y) / 2
-    km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-    scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-    self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
     # Add metadata
     fig.text(
@@ -344,27 +330,12 @@ def generate_forest_type_map(
         x, y = poly.exterior.xy
         ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-    # Set axis limits
-    x_range = max_x - min_x
-    y_range = max_y - min_y
-    padding = max(x_range, y_range) * 0.05
-    ax.set_xlim(min_x - padding, max_x + padding)
-    ax.set_ylim(min_y - padding, max_y + padding)
-
-    # Add grid
-    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+    # Snapped grid with clean coordinate labels
+    self._snap_axis(ax, min_x, max_x, min_y, max_y)
     ax.set_aspect('equal', adjustable='box')
-    ax.tick_params(axis='both', labelsize=8)
 
     # Add north arrow
     self.add_north_arrow(fig, ax)
-
-    # Add scale bar
-    x_range_wgs = max_x - min_x
-    avg_lat = (min_y + max_y) / 2
-    km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-    scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-    self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
     # Add metadata
     fig.text(
@@ -547,27 +518,12 @@ def generate_canopy_height_map(
         x, y = poly.exterior.xy
         ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-    # Set axis limits
-    x_range = max_x - min_x
-    y_range = max_y - min_y
-    padding = max(x_range, y_range) * 0.05
-    ax.set_xlim(min_x - padding, max_x + padding)
-    ax.set_ylim(min_y - padding, max_y + padding)
-
-    # Add grid
-    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+    # Snapped grid with clean coordinate labels
+    self._snap_axis(ax, min_x, max_x, min_y, max_y)
     ax.set_aspect('equal', adjustable='box')
-    ax.tick_params(axis='both', labelsize=8)
 
     # Add north arrow
     self.add_north_arrow(fig, ax)
-
-    # Add scale bar
-    x_range_wgs = max_x - min_x
-    avg_lat = (min_y + max_y) / 2
-    km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-    scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-    self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
     # Add metadata
     fig.text(
@@ -758,27 +714,12 @@ def generate_soil_map(
         x, y = poly.exterior.xy
         ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-    # Set axis limits
-    x_range = max_x - min_x
-    y_range = max_y - min_y
-    padding = max(x_range, y_range) * 0.05
-    ax.set_xlim(min_x - padding, max_x + padding)
-    ax.set_ylim(min_y - padding, max_y + padding)
-
-    # Add grid
-    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+    # Snapped grid with clean coordinate labels
+    self._snap_axis(ax, min_x, max_x, min_y, max_y)
     ax.set_aspect('equal', adjustable='box')
-    ax.tick_params(axis='both', labelsize=8)
 
     # Add north arrow
     self.add_north_arrow(fig, ax)
-
-    # Add scale bar
-    x_range_wgs = max_x - min_x
-    avg_lat = (min_y + max_y) / 2
-    km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-    scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-    self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
     # Add metadata
     fig.text(
@@ -959,27 +900,12 @@ def generate_forest_health_map(
         x, y = poly.exterior.xy
         ax.plot(x, y, color='black', linewidth=2, label='Forest Boundary', zorder=10)
 
-    # Set axis limits
-    x_range = max_x - min_x
-    y_range = max_y - min_y
-    padding = max(x_range, y_range) * 0.05
-    ax.set_xlim(min_x - padding, max_x + padding)
-    ax.set_ylim(min_y - padding, max_y + padding)
-
-    # Add grid
-    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, zorder=8)
+    # Snapped grid with clean coordinate labels
+    self._snap_axis(ax, min_x, max_x, min_y, max_y)
     ax.set_aspect('equal', adjustable='box')
-    ax.tick_params(axis='both', labelsize=8)
 
     # Add north arrow
     self.add_north_arrow(fig, ax)
-
-    # Add scale bar
-    x_range_wgs = max_x - min_x
-    avg_lat = (min_y + max_y) / 2
-    km_per_degree = 111.0 * np.cos(np.radians(avg_lat))
-    scale_km = round(x_range_wgs * km_per_degree / 5, 1)
-    self.add_scale_bar(fig, ax, length_km=scale_km if scale_km > 0 else 1.0)
 
     # Add metadata
     fig.text(

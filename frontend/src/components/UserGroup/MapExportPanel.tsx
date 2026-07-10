@@ -198,7 +198,7 @@ export function MapExportPanel({
       ctx.fillStyle = '#f8f8f8';
       ctx.fillRect(0, 0, exportWidth, headerHeight);
       ctx.fillStyle = '#333';
-      ctx.font = 'bold 16px Arial';
+      ctx.font = 'bold 16px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(exportTitle || 'User Group Map', exportWidth / 2, 26);
       ctx.strokeStyle = '#333';
@@ -253,7 +253,7 @@ export function MapExportPanel({
           // Add longitude label at top (inside map area, white with black outline)
           const lon = west + (lonStep * i);
           const lonText = lon.toFixed(5) + '°E';
-          ctx.font = 'bold 10px Arial';
+          ctx.font = 'bold 10px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
           ctx.textAlign = 'center';
           ctx.strokeStyle = '#000000';
           ctx.lineWidth = 2;
@@ -276,7 +276,7 @@ export function MapExportPanel({
           // Add latitude label at left edge (white with black outline)
           const lat = north - (latStep * i);
           const latText = lat.toFixed(5) + '°N';
-          ctx.font = 'bold 11px Arial';
+          ctx.font = 'bold 11px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
           ctx.textAlign = 'right';
           ctx.strokeStyle = '#000000';
           ctx.lineWidth = 3;
@@ -286,7 +286,7 @@ export function MapExportPanel({
         }
         
         // Add axis labels
-        ctx.font = 'bold 11px Arial';
+        ctx.font = 'bold 11px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 2;
@@ -317,7 +317,7 @@ export function MapExportPanel({
       ctx.lineTo(arrowX + 10, arrowY + 30);
       ctx.closePath();
       ctx.fill();
-      ctx.font = 'bold 14px Arial';
+      ctx.font = 'bold 14px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('N', arrowX, arrowY + 42);
       
@@ -349,7 +349,7 @@ export function MapExportPanel({
       ctx.strokeStyle = '#333';
       ctx.lineWidth = 1;
       ctx.strokeRect(scaleX, scaleY, 180, 3);
-      ctx.font = '9px Arial';
+      ctx.font = '9px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText('0', scaleX, scaleY + 12);
       ctx.fillText('100m', scaleX + 60, scaleY + 12);
@@ -404,7 +404,7 @@ export function MapExportPanel({
           ctx.stroke();
           ctx.setLineDash([]);
         } else if (item.icon) {
-          ctx.font = '11px Arial';
+          ctx.font = '11px "Segoe UI Emoji", "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
           ctx.fillText(item.icon, currentX + 2, currentY + 13);
         } else {
           ctx.fillStyle = item.color;
@@ -413,7 +413,7 @@ export function MapExportPanel({
         
         // Draw label
         ctx.fillStyle = '#333';
-        ctx.font = '10px Arial';
+        ctx.font = '10px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(item.label, currentX + 23, currentY + 13);
         
@@ -421,15 +421,15 @@ export function MapExportPanel({
       });
       
       // Draw WGS 84 and Data Source (right side)
-      ctx.font = '10px Arial';
+      ctx.font = '10px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillStyle = '#333';
       ctx.fillText('Coordinate System: WGS 84', exportWidth - 15, footerY + 20);
       
-      ctx.font = '9px Arial';
+      ctx.font = '9px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
       ctx.fillStyle = '#555';
       ctx.fillText('Data Sources:', exportWidth - 15, footerY + 38);
-      ctx.font = '8px Arial';
+      ctx.font = '8px "Nirmala UI", "Mangal", "Noto Sans Devanagari", Arial, sans-serif';
       ctx.fillStyle = '#666';
       ctx.fillText('Forest Boundary: Community Forest Field Data', exportWidth - 15, footerY + 50);
       ctx.fillText('Buildings: OpenStreetMap', exportWidth - 15, footerY + 62);

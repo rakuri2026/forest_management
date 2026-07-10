@@ -1206,6 +1206,28 @@ class UserGroupAnalysisService:
                     "Please upload a forest boundary in the Analysis tab first."
                 )
 
+            # When user explicitly requests a re-analysis (force_refresh=True),
+            # also invalidate OP data cache & map cache so preview shows fresh data
+            if force_refresh:
+                logger.info(f"FORCE_REFRESH: clearing caches for calc={calculation_id}")
+                cid = UUID(calculation_id) if isinstance(calculation_id, str) else calculation_id
+                try:
+                    from app.models.op_data_cache import OpDataCache
+                    deleted = self.db.query(OpDataCache).filter(
+                        OpDataCache.calculation_id == cid
+                    ).delete(synchronize_session=False)
+                    self.db.commit()
+                    logger.info(f"FORCE_REFRESH: OpDataCache deleted count={deleted}")
+                except Exception as e:
+                    logger.warning(f"FORCE_REFRESH: OpDataCache delete error: {e}")
+                    self.db.rollback()
+                try:
+                    from app.services.management_plan_docx.plan_map_service import clear_map_cache
+                    clear_map_cache(calculation_id=cid, layer_name="usergroup")
+                    logger.info(f"FORCE_REFRESH: map cache cleared for usergroup")
+                except Exception as e:
+                    logger.warning(f"FORCE_REFRESH: map cache clear error: {e}")
+
             # Step 1.5: Check for cached results (unless force_refresh)
             if not force_refresh and calc.result_data and 'user_group_land_cover' in calc.result_data:
                 logger.info(f"Returning cached land cover results for calculation {calculation_id}")
@@ -1272,6 +1294,7 @@ class UserGroupAnalysisService:
                     user_group_area = float(row[0])
                     forest_overlap_area = float(row[1])
                     net_area = float(row[2])
+                    logger.info(f"PG_RESULT: user_group_area_ha={user_group_area}, forest_overlap_ha={forest_overlap_area}, net_area_ha={net_area}")
 
                 # Extract land cover class data
                 land_cover_classes.append({
@@ -1314,9 +1337,10 @@ class UserGroupAnalysisService:
             }
 
             # Cache results in database for future retrieval
-            if calc.result_data is None:
-                calc.result_data = {}
-            calc.result_data['user_group_land_cover'] = results
+            # NOTE: Must assign NEW dict to trigger SQLAlchemy JSONB change tracking
+            new_result_data = dict(calc.result_data or {})
+            new_result_data['user_group_land_cover'] = results
+            calc.result_data = new_result_data
             self.db.commit()
             logger.info(f"Cached land cover results in database for calculation {calculation_id}")
 

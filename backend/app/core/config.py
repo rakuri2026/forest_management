@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # JWT Authentication
     SECRET_KEY: str = "cf-forest-management-secret-key-2026-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours for mapping work
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days for development
 
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 50

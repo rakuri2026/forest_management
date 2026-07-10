@@ -17,13 +17,17 @@ logger = logging.getLogger(__name__)
 
 # ── Devanagari font fallback ──
 _DEVANAGARI_FONT_PATHS = [
+    "C:/Windows/Fonts/Nirmala.ttc",
     "C:/Windows/Fonts/Nirmala.ttf",
+    "C:/Windows/Fonts/mangal.ttf",
     "C:/Windows/Fonts/ARIALUNI.TTF",
     "C:/Windows/Fonts/arial.ttf",
 ]
 _DEVANAGARI_FONT = None
 for _fp in _DEVANAGARI_FONT_PATHS:
     try:
+        if not _fp:
+            continue
         _prop = fm.FontProperties(fname=_fp)
         if _prop.get_name():
             fm.fontManager.addfont(_fp)
@@ -37,6 +41,22 @@ if _DEVANAGARI_FONT:
     plt.rcParams['font.sans-serif'] = [_font_name] + plt.rcParams.get('font.sans-serif', [])
 else:
     logger.warning("No Devanagari font found - Nepali labels may not render")
+
+
+def _dev_fontprop(size: int = 14):
+    if _DEVANAGARI_FONT:
+        return fm.FontProperties(fname=_DEVANAGARI_FONT, size=size)
+    return fm.FontProperties(size=size)
+
+
+def _apply_dev_font(ax, title_size=14, label_size=11, tick_size=10):
+    if _DEVANAGARI_FONT:
+        ax.title.set_fontproperties(_dev_fontprop(title_size))
+        ax.xaxis.label.set_fontproperties(_dev_fontprop(label_size))
+        ax.yaxis.label.set_fontproperties(_dev_fontprop(label_size))
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontproperties(_dev_fontprop(tick_size))
+
 
 COLORS = {
     "forest": "#2e7d32", "forest_light": "#4caf50", "forest_pale": "#a5d6a7",
@@ -65,7 +85,7 @@ def chart_species_composition(data: Dict, forest_name: str = "") -> io.BytesIO:
     species = data.get("forest_wide", [])
     if not species:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     labels = [s.get("local_name", s.get("scientific_name", "")) for s in species]
@@ -78,10 +98,13 @@ def chart_species_composition(data: Dict, forest_name: str = "") -> io.BytesIO:
         colors=colors, textprops={'fontsize': 12, 'fontweight': 'bold'},
         pctdistance=0.75, wedgeprops={'edgecolor': 'white', 'linewidth': 1},
     )
+    for t in autotexts:
+        t.set_fontproperties(_dev_fontprop(12))
     ax.legend(wedges, labels, title="Species", loc="center left",
-              bbox_to_anchor=(1, 0, 0.5, 1), fontsize=10)
+              bbox_to_anchor=(1, 0, 0.5, 1), fontsize=10, prop=_dev_fontprop(10))
     title = f"{forest_name}\nप्रजाती संरचना (Species Composition)" if forest_name else "प्रजाती संरचना"
     ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=10)
     return _save_buffer(fig)
 
 
@@ -90,7 +113,7 @@ def chart_block_comparison(data: Dict, forest_name: str = "") -> io.BytesIO:
     ranked = data.get("ranked", [])
     if not ranked:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     names = [b.get("name", "") for b in ranked]
@@ -103,7 +126,8 @@ def chart_block_comparison(data: Dict, forest_name: str = "") -> io.BytesIO:
     bars = ax.barh(y_pos, gs, height=0.6, color=colors, edgecolor='white', linewidth=0.5)
     for i, (bar, aah) in enumerate(zip(bars, aah_t)):
         ax.text(bar.get_width() + 2, bar.get_y() + bar.get_height() / 2,
-                f"AAH: {aah:.1f} m³/yr", va='center', fontsize=9, color='#333')
+                f"AAH: {aah:.1f} m³/yr", va='center', fontsize=9, color='#333',
+                fontproperties=_dev_fontprop(9))
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(names, fontsize=11)
@@ -113,8 +137,9 @@ def chart_block_comparison(data: Dict, forest_name: str = "") -> io.BytesIO:
     ax.invert_yaxis()
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=11)
     legend_patches = [mpatches.Patch(color=c, label=l) for l, c in CONDITION_COLORS.items()]
-    ax.legend(handles=legend_patches, title="Condition", fontsize=9, loc='lower right')
+    ax.legend(handles=legend_patches, title="Condition", fontsize=9, loc='lower right', prop=_dev_fontprop(9))
     return _save_buffer(fig)
 
 
@@ -123,7 +148,7 @@ def chart_annual_harvest(data: Dict, forest_name: str = "") -> io.BytesIO:
     blocks = data.get("blocks", [])
     if not blocks:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     names = [b.get("name", "") for b in blocks]
@@ -139,20 +164,23 @@ def chart_annual_harvest(data: Dict, forest_name: str = "") -> io.BytesIO:
     for bar in bars1:
         h = bar.get_height()
         if h > 0:
-            ax.text(bar.get_x() + bar.get_width() / 2, h, f'{h:.1f}', ha='center', va='bottom', fontsize=8)
+            ax.text(bar.get_x() + bar.get_width() / 2, h, f'{h:.1f}', ha='center', va='bottom', fontsize=8,
+                    fontproperties=_dev_fontprop(8))
     for bar in bars2:
         h = bar.get_height()
         if h > 0:
-            ax.text(bar.get_x() + bar.get_width() / 2, h, f'{h:.1f}', ha='center', va='bottom', fontsize=8)
+            ax.text(bar.get_x() + bar.get_width() / 2, h, f'{h:.1f}', ha='center', va='bottom', fontsize=8,
+                    fontproperties=_dev_fontprop(8))
 
     ax.set_xticks(x)
     ax.set_xticklabels(names, fontsize=11)
     ax.set_ylabel("m³/yr", fontsize=11)
     title = f"{forest_name}\nवार्षिक फसल योजना (Annual Harvest Plan)" if forest_name else "वार्षिक फसल योजना"
     ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=10, prop=_dev_fontprop(10))
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=11)
     return _save_buffer(fig)
 
 
@@ -173,9 +201,13 @@ def chart_forest_condition(data: Dict, forest_name: str = "") -> io.BytesIO:
             colors=colors, textprops={'fontsize': 11, 'fontweight': 'bold'},
             wedgeprops={'edgecolor': 'white', 'linewidth': 1},
         )
+        for t in autotexts:
+            t.set_fontproperties(_dev_fontprop(11))
         ax1.legend(wedges, [f"{l} ({s:.0f} ha)" for l, s in zip(labels, sizes)],
-                   title="Forest Condition", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1), fontsize=9)
+                   title="Forest Condition", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1), fontsize=9,
+                   prop=_dev_fontprop(9))
     ax1.set_title("वन स्थिति (Forest Condition)", fontsize=12, fontweight='bold')
+    _apply_dev_font(ax1, title_size=12, label_size=10, tick_size=9)
 
     # Bar: regeneration
     if regen:
@@ -189,10 +221,11 @@ def chart_forest_condition(data: Dict, forest_name: str = "") -> io.BytesIO:
         ax2.set_xticks(x)
         ax2.set_xticklabels(r_names, fontsize=10)
         ax2.set_ylabel("N/ha", fontsize=10)
-        ax2.legend(fontsize=8)
+        ax2.legend(fontsize=8, prop=_dev_fontprop(8))
     ax2.set_title("पुनरुत्पादन (Regeneration)", fontsize=12, fontweight='bold')
     ax2.spines['top'].set_visible(False)
     ax2.spines['right'].set_visible(False)
+    _apply_dev_font(ax2, title_size=12, label_size=10, tick_size=10)
 
     fig.suptitle(forest_name, fontsize=14, fontweight='bold') if forest_name else None
     fig.tight_layout()
@@ -204,7 +237,7 @@ def chart_dbh_class_volume(data: Dict, forest_name: str = "") -> io.BytesIO:
     blocks = data.get("blocks", [])
     if not blocks:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     dbh_labels = ["10-20", "20-30", "30-40", "40-50", "50-60", "60+"]
@@ -228,9 +261,10 @@ def chart_dbh_class_volume(data: Dict, forest_name: str = "") -> io.BytesIO:
     ax.set_ylabel("Volume (m³/ha)", fontsize=11)
     title = f"{forest_name}\nDBH वर्ग आयतन वितरण (DBH Class Volume)" if forest_name else "DBH वर्ग आयतन वितरण"
     ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.legend(title="DBH Class (cm)", fontsize=9, loc='upper right')
+    ax.legend(title="DBH Class (cm)", fontsize=9, loc='upper right', prop=_dev_fontprop(9))
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=11)
     return _save_buffer(fig)
 
 
@@ -239,7 +273,7 @@ def chart_carbon_stock(data: Dict, forest_name: str = "") -> io.BytesIO:
     blocks = data.get("blocks", [])
     if not blocks:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     names = [b.get("block", "") for b in blocks]
@@ -256,16 +290,18 @@ def chart_carbon_stock(data: Dict, forest_name: str = "") -> io.BytesIO:
         for bar in bars:
             h = bar.get_height()
             if h > 0:
-                ax.text(bar.get_x() + bar.get_width() / 2, h, f'{h:.0f}', ha='center', va='bottom', fontsize=8)
+                ax.text(bar.get_x() + bar.get_width() / 2, h, f'{h:.0f}', ha='center', va='bottom', fontsize=8,
+                        fontproperties=_dev_fontprop(8))
 
     ax.set_xticks(x)
     ax.set_xticklabels(names, fontsize=11)
     ax.set_ylabel("t/ha", fontsize=11)
     title = f"{forest_name}\nकार्बन भण्डार (Carbon Stock)" if forest_name else "कार्बन भण्डार"
     ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=10, prop=_dev_fontprop(10))
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=11)
     return _save_buffer(fig)
 
 
@@ -274,7 +310,7 @@ def chart_growth_rate(data: Dict, forest_name: str = "") -> io.BytesIO:
     classes = data.get("classes", [])
     if not classes:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     labels = [c.get("rate", "") for c in classes]
@@ -287,13 +323,16 @@ def chart_growth_rate(data: Dict, forest_name: str = "") -> io.BytesIO:
         colors=colors, textprops={'fontsize': 13, 'fontweight': 'bold'},
         wedgeprops={'edgecolor': 'white', 'linewidth': 1},
     )
+    for t in autotexts:
+        t.set_fontproperties(_dev_fontprop(13))
     detail_labels = []
     for c in classes:
         detail_labels.append(f"{c.get('rate', '')} ({c.get('species_count', 0)} species)")
     ax.legend(wedges, detail_labels, title="Growth Rate", loc="center left",
-              bbox_to_anchor=(1, 0, 0.5, 1), fontsize=10)
+              bbox_to_anchor=(1, 0, 0.5, 1), fontsize=10, prop=_dev_fontprop(10))
     title = f"{forest_name}\nवृद्धि दर वर्गीकरण (Growth Rate)" if forest_name else "वृद्धि दर वर्गीकरण"
     ax.set_title(title, fontsize=14, fontweight='bold')
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=10)
     return _save_buffer(fig)
 
 
@@ -302,7 +341,7 @@ def chart_stand_structure(data: Dict, forest_name: str = "") -> io.BytesIO:
     blocks = data.get("blocks", [])
     if not blocks:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -325,15 +364,17 @@ def chart_stand_structure(data: Dict, forest_name: str = "") -> io.BytesIO:
     ax.set_ylabel("N/ha", fontsize=11)
     title = f"{forest_name}\nरुख संरचना प्रोफाइल (Stand Structure)" if forest_name else "रुख संरचना प्रोफाइल"
     ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.legend(fontsize=9, loc='upper right')
+    ax.legend(fontsize=9, loc='upper right', prop=_dev_fontprop(9))
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.grid(True, alpha=0.3)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=11)
 
     assessment = data.get("assessment", "")
     if assessment:
         ax.text(0.02, 0.02, f"Assessment: {assessment}", transform=ax.transAxes,
                 fontsize=10, style='italic', color='#555',
+                fontproperties=_dev_fontprop(10),
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     return _save_buffer(fig)
 
@@ -343,7 +384,7 @@ def chart_productivity(data: Dict, forest_name: str = "") -> io.BytesIO:
     classes = data.get("classes", [])
     if not classes:
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data", ha='center', va='center')
+        ax.text(0.5, 0.5, "No data", ha='center', va='center', fontproperties=_dev_fontprop(12))
         return _save_buffer(fig)
 
     prod_colors = {"High": COLORS["forest"], "Medium": COLORS["caution"], "Low": COLORS["danger"]}
@@ -357,11 +398,12 @@ def chart_productivity(data: Dict, forest_name: str = "") -> io.BytesIO:
     for bar, c in zip(bars, classes):
         label = f'{c.get("block_count", 0)} blocks, {c.get("volume_m3", 0):.0f} m³'
         ax.text(bar.get_width() + 1, bar.get_y() + bar.get_height() / 2, label,
-                va='center', fontsize=10, color='#333')
+                va='center', fontsize=10, color='#333', fontproperties=_dev_fontprop(10))
 
     ax.set_xlabel("Area (ha)", fontsize=11)
     title = f"{forest_name}\nउत्पादकता वर्गीकरण (Productivity)" if forest_name else "उत्पादकता वर्गीकरण"
     ax.set_title(title, fontsize=14, fontweight='bold')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    _apply_dev_font(ax, title_size=14, label_size=11, tick_size=11)
     return _save_buffer(fig)

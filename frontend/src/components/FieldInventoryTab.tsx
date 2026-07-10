@@ -283,6 +283,17 @@ export function FieldInventoryTab({ calculationId, blocks = [], forestName = 'Fo
         // Count columns
         if (lowerCol === 'regencount') autoMapping['regen_count'] = col;
         if (lowerCol === 'saplingcount') autoMapping['sapling_count'] = col;
+
+        // Yield columns (firewood, grass, bedding material per 100 sqm per year)
+        if (lowerCol === 'firewoodkgper100sqmperyear' || (lowerCol.includes('firewood') && lowerCol.includes('100sqm'))) {
+          autoMapping['firewood_kg_per_100sqm_per_year'] = col;
+        }
+        if (lowerCol === 'grasskgper100sqmperyear' || (lowerCol.includes('grass') && lowerCol.includes('100sqm'))) {
+          autoMapping['grass_kg_per_100sqm_per_year'] = col;
+        }
+        if (lowerCol === 'beddingmaterialkgper100sqmperyear' || (lowerCol.includes('bedding') && lowerCol.includes('100sqm'))) {
+          autoMapping['bedding_material_kg_per_100sqm_per_year'] = col;
+        }
       });
 
       // Step 2: Upload with mapping

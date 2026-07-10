@@ -228,7 +228,7 @@ def test_seed_data_structure():
     assert len(tree) > 0, "Seed tree should not be empty"
     assert any(n.type == "section" for n in tree), "Should have sections"
     assert any(n.type == "preamble" for n in tree), "Should have preambles"
-    assert any(n.type == "appendix" for n in tree), "Should have appendixes"
+    assert any("अनुसूची" in n.title_ne for n in tree), "Should have schedules"
 
 
 def test_seed_data_auto_number():

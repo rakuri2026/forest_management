@@ -60,7 +60,8 @@ _node("subsection", "समूहको परिचय", "Group Introduction",
                   _node("subsection", "वनको ऐतिहासिक पृष्ठभूमि", "Historical Background",
                         "{{forest_name}} सामुदायिक वनको स्थापना मिति {{cf_handover_date}} हो।"),
                   _node("subsection", "सिमाना (चारकिल्ला)", "Boundary",
-                        "यस वनको सिमाना: पूर्व {{boundary_features_east}}, पश्चिम {{boundary_features_south}}, उत्तर {{boundary_features_north}}, दक्षिण {{boundary_features_south}}।"),
+                        "यस वनको सिमाना: पूर्व {{boundary_features_east}}, पश्चिम {{boundary_features_west}}, उत्तर {{boundary_features_north}}, दक्षिण {{boundary_features_south}}।\n\n"
+                         "भौगोलिक विस्तार: उत्तर {{extent_n}}° N, दक्षिण {{extent_s}}° N, पूर्व {{extent_e}}° E, पश्चिम {{extent_w}}° E।"),
                   _node("subsection", "क्षेत्रफल र नक्सा", "Area and Map",
                         "कुल क्षेत्रफल {{total_area_hectares}} हेक्टर। प्रभावकारी क्षेत्रफल {{effective_area_hectares}} हेक्टर।\n\n"
                         "{{fieldbook_narration}}\n\n"
@@ -291,39 +292,35 @@ _node("subsection", "समूहको परिचय", "Group Introduction",
         _node("section", "सामुदायिक वनमा निषेधित कार्यहरू", "Prohibited Activities",
               "निम्न कार्यहरू निषेधित गरिएका छन्:"),
 
-        # ── Section १७: वन अपराध ──
-        _node("section", "वन अपराध र दण्ड जरिवाना", "Forest Crime and Penalties",
+        # ── Section १७: विविध (Miscellaneous) ──
+        _node("section", "विविध", "Miscellaneous",
               children=[
-                  _node("subsection", "अपराध र दण्ड जरिवाना", "Crime and Penalty", ""),
-                  _node("subsection", "दण्ड जरिवाना", "Penalties", ""),
+                  _node("subsection", "वन अपराध र दण्ड जरिवाना", "Forest Crime and Penalties",
+                        children=[
+                            _node("subsection", "अपराध र दण्ड जरिवाना", "Crime and Penalty", ""),
+                            _node("subsection", "दण्ड जरिवाना", "Penalties", ""),
+                        ]),
               ]),
 
-        # ── Section १८: विविध ──
-        _node("section", "विविध", "Miscellaneous",
+        # ── Section १८: अनुसूचीहरू (Schedules) ──
+        _node("section", "अनुसूचीहरू", "Schedules",
               children=[
                   _node("subsection", "विविध जानकारी", "Miscellaneous Information", ""),
                   _node("subsection", "सोच तालिका (Logical Framework)", "Logical Framework", ""),
+                  _node("subsection", "अनुसूची १: घरधुरी विवरण", "Schedule 1: Household Details", page_break_before=True),
+                  _node("subsection", "अनुसूची २: व्यवस्थापन कार्ययोजना तर्जुमा समिति", "Schedule 2: Management Committee", page_break_before=True),
+                  _node("subsection", "अनुसूची ३: बस्ती विवरण", "Schedule 3: Settlement Details", page_break_before=True),
+                  _node("subsection", "अनुसूची ४: नक्सा", "Schedule 4: Maps", page_break_before=True),
+                  _node("subsection", "अनुसूची ५: वन पैदावार विवरण", "Schedule 5: Forest Products", page_break_before=True),
+                  _node("subsection", "अनुसूची ६: बैठक मिनेट", "Schedule 6: Meeting Minutes", page_break_before=True),
+                  _node("subsection", "अनुसूची ७: लेखापरीक्षण प्रतिवेदन", "Schedule 7: Audit Report", page_break_before=True),
+                  _node("subsection", "अनुसूची ८: उपभोक्ता समिति निर्वाचन", "Schedule 8: Committee Election", page_break_before=True),
+                  _node("subsection", "अनुसूची ९: सार्वजनिक सुनुवाई", "Schedule 9: Public Hearing", page_break_before=True),
+                  _node("subsection", "अनुसूची १०: तालिका १-३२", "Schedule 10: Tables 1-32",
+                        content_type="table", table_id="tables_1_32", page_break_before=True),
               ]),
-    ]
-
-
-def get_appendix_seed_nodes() -> List[TreeNode]:
-    return [
-        _node("appendix", "अनुसूची १: घरधुरी विवरण", "Appendix 1: Household Details", is_locked=True),
-        _node("appendix", "अनुसूची २: व्यवस्थापन कार्ययोजना तर्जुमा समिति", "Appendix 2: Management Committee", is_locked=True),
-        _node("appendix", "अनुसूची ३: बस्ती विवरण", "Appendix 3: Settlement Details", is_locked=True),
-        _node("appendix", "अनुसूची ४: नक्सा", "Appendix 4: Maps", is_locked=True),
-        _node("appendix", "अनुसूची ५: वन पैदावार विवरण", "Appendix 5: Forest Products", is_locked=True),
-        _node("appendix", "अनुसूची ६: बैठक मिनेट", "Appendix 6: Meeting Minutes", is_locked=True),
-        _node("appendix", "अनुसूची ७: लेखापरीक्षण प्रतिवेदन", "Appendix 7: Audit Report", is_locked=True),
-        _node("appendix", "अनुसूची ८: उपभोक्ता समिति निर्वाचन", "Appendix 8: Committee Election", is_locked=True),
-        _node("appendix", "अनुसूची ९: सार्वजनिक सुनुवाई", "Appendix 9: Public Hearing", is_locked=True),
-        _node("appendix", "अनुसूची १०: तालिका १-३२", "Appendix 10: Tables 1-32", is_locked=True,
-              content_type="table", table_id="tables_1_32"),
     ]
 
 
 def get_full_seed_document() -> List[TreeNode]:
-    tree = get_default_seed_tree()
-    tree.extend(get_appendix_seed_nodes())
-    return tree
+    return get_default_seed_tree()

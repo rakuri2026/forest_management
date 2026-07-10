@@ -40,7 +40,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   'biodiversity': '#06b6d4',
   'tourist': '#ec4899',
   'office': '#6b7280',
-  'private_land': '#dc2626'
+  'private_land': '#dc2626',
+  'encroached': '#78350f'
 };
 
 const ActivityMapView: React.FC<ActivityMapViewProps> = ({ calculationId, selectedActivityId: externalActivityId, onActivitySelect }) => {

@@ -159,12 +159,16 @@ _reg("boundary_features_north", "A", "उत्तर सिमाना", "Nort
 _reg("boundary_features_east", "A", "पूर्व सिमाना", "East Boundary", var_type="list", source="boundary")
 _reg("boundary_features_south", "A", "दक्षिण सिमाना", "South Boundary", var_type="list", source="boundary")
 _reg("boundary_features_west", "A", "पश्चिम सिमाना", "West Boundary", var_type="list", source="boundary")
+_reg("extent_n", "A", "उत्तर अक्षांश", "North Latitude", precision=7, source="boundary")
+_reg("extent_s", "A", "दक्षिण अक्षांश", "South Latitude", precision=7, source="boundary")
+_reg("extent_e", "A", "पूर्व देशान्तर", "East Longitude", precision=7, source="boundary")
+_reg("extent_w", "A", "पश्चिम देशान्तर", "West Longitude", precision=7, source="boundary")
 
 # A7: Blocks & Sub-Areas (7)
 _reg("blocks_count", "A", "ब्लक सङ्ख्या", "Blocks Count", var_type="number", source="block", precision=0)
 _reg("sub_areas_by_category", "A", "उप-क्षेत्र प्रकार", "Sub-areas by Category", var_type="dict", source="block")
 _reg("sub_areas_total", "A", "कुल उप-क्षेत्र", "Total Sub-areas", var_type="number", source="block", precision=0)
-_reg("sub_area_categories", "A", "उप-क्षेत्र कोटीहरू", "Sub-area Categories", var_type="list", source="block")
+
 _reg("sub_areas_detail", "A",
      "उप-क्षेत्र विवरण",
      "Sub-Areas Detail",
@@ -418,6 +422,12 @@ _reg("section:household_narration", "A",
 _reg("section:committee_narration", "A",
      "समिति विवरण (स्वतः उत्पन्न)", "Committee Narration (Auto-generated)",
      var_type="string", source="section_generator", auto_populate=True)
+_reg("section:user_group_narration", "A",
+     "उपभोक्ता समूह विवरण (स्वतः उत्पन्न)", "User Group Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:demand_supply_narration", "A",
+     "माग/आपूर्ति विवरण (स्वतः उत्पन्न)", "Demand & Supply Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
 
 # A11: Sampling (14)
 _reg("sampling_available", "A", "नमूना योजना उपलब्ध", "Sampling Available", var_type="boolean", source="sampling")
@@ -457,6 +467,14 @@ _reg("chart:hh_prosperity_bar", "A",
 _reg("chart:hh_demand_supply_bar", "A",
      "माग र आपूर्ति तुलना (बार चार्ट)",
      "Demand & Supply Comparison Bar Chart",
+     var_type="dict", source="household")
+_reg("chart:demand_supply_bar", "A",
+     "माग र आपूर्ति ब्रेकडाउन (बार चार्ट)",
+     "Demand & Supply Breakdown Bar Chart",
+     var_type="dict", source="household")
+_reg("chart:demand_supply_deficit_bar", "A",
+     "बचत/कमी तुलना (बार चार्ट)",
+     "Surplus/Deficit Comparison Bar Chart",
      var_type="dict", source="household")
 _reg("hh_records", "A",
      "घरपरिवारको विस्तृत तालिका",
@@ -702,10 +720,11 @@ _reg("export_format", "F", "निर्यात ढाँचा", "Export Form
 _reg("plan_revision_number", "F", "संशोधन नं.", "Revision Number", var_type="number", auto_populate=True, resolver="resolve_template")
 
 # ═══════════════════════════════════════════════════════
-# Chart Variables (13) — special content_type="chart"
+# Chart Variables (14) — special content_type="chart"
 # ═══════════════════════════════════════════════════════
 _reg("chart:forest_type_pie", "A", "वन प्रकार पाई चार्ट", "Forest Type Pie Chart", var_type="dict", source="raster")
 _reg("chart:landcover_pie", "A", "भू-आवरण पाई चार्ट", "Landcover Pie Chart", var_type="dict", source="raster")
+_reg("chart:ug_land_cover_classes_chart", "A", "उपभोक्ता समूह भू-आवरण पाई चार्ट", "UG Land Cover Classes Pie Chart", var_type="dict", source="user_group")
 _reg("chart:slope_bar", "A", "भिरालो बार चार्ट", "Slope Bar Chart", var_type="dict", source="raster")
 _reg("chart:aspect_rose", "A", "दिशा रोज चार्ट", "Aspect Rose Chart", var_type="dict", source="raster")
 _reg("chart:soil_bar", "A", "माटो बार चार्ट", "Soil Bar Chart", var_type="dict", source="raster")
@@ -771,6 +790,8 @@ _MAP_TYPES = [
     ("map:fieldbook",               "फिल्डबुक बाटो नक्सा",             "Fieldbook Path Map"),
     ("map:usergroup",               "उपयोगकर्ता समूह नक्सा",            "User Group Map"),
     ("map:subarea",                 "उप-क्षेत्र नक्सा",                 "Sub-Area Map"),
+    ("map:compartment",             "कम्पार्टमेन्ट नक्सा",              "Compartment Map"),
+    ("map:sub_compartment",         "उप-कम्पार्टमेन्ट नक्सा",          "Sub-Compartment Map"),
 ]
 for _mkey, _mne, _men in _MAP_TYPES:
     _reg(_mkey, "A", _mne, _men, var_type="dict", source="maps")
@@ -793,7 +814,7 @@ _TABLE_LABELS = [
     ("table_10", "मुख्य प्रजाति", "Main Species"),
     ("table_11", "घरधुरी विवरण", "Household Details"),
     ("table_12", "जनसंख्या विवरण", "Population Details"),
-    ("table_13", "माग र आपूर्ति", "Demand and Supply"),
+    ("demand_supply", "माग र आपूर्ति", "Demand and Supply"),
     ("table_14", "समिति विवरण", "Committee Details"),
     ("table_15", "वार्षिक क्रियाकलाप", "Annual Activities"),
     ("table_16", "बजेट विवरण", "Budget Details"),

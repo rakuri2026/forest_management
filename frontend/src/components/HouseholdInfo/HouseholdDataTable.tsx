@@ -743,6 +743,8 @@ const HouseholdDataTable: React.FC<HouseholdDataTableProps> = ({
         </Space>
       </div>
 
+      <p className="text-xs text-gray-400 font-mono mb-1">{'{{hh_records}}'}</p>
+
       <Form form={form} component={false}>
         <Table
           components={{

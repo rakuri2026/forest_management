@@ -35,7 +35,7 @@ const TAB_VARIABLES: Record<HouseholdTabKey, string[]> = {
     'hh_total_male', 'hh_total_female', 'hh_prosperity_distribution',
     'hh_caste_distribution', 'hh_timber_demand_cft', 'hh_firewood_demand_bhari',
     'hh_forest_based_occupation', 'ug_total_settlements', 'ug_buildings',
-    'hh_records', 'section:household_narration',
+    'hh_records', 'section:household_narration', 'section:user_group_narration',
   ],
   summary: [
     'hh_total_households', 'hh_total_population', 'hh_total_male',
@@ -50,7 +50,7 @@ const TAB_VARIABLES: Record<HouseholdTabKey, string[]> = {
   ],
   demand: [
     'hh_timber_demand_cft', 'hh_firewood_demand_bhari',
-    'chart:hh_demand_supply_bar',
+    'chart:hh_demand_supply_bar', 'section:demand_supply_narration',
   ],
 };
 

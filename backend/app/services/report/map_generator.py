@@ -12,8 +12,46 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib import font_manager as fm
 from matplotlib.patches import Polygon as MplPolygon
 import numpy as np
+
+# ── Devanagari font fallback ──
+_DEV_FONT = None
+for _dev_name in ['Nirmala UI', 'Mangal', 'Noto Sans Devanagari', 'Arial Unicode MS']:
+    try:
+        _fp = fm.findfont(_dev_name, fallback_to_default=False)
+        if _fp:
+            fm.fontManager.addfont(_fp)
+            _DEV_FONT = _fp
+            break
+    except Exception:
+        continue
+if _DEV_FONT:
+    _font_name = fm.FontProperties(fname=_DEV_FONT).get_name()
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = [_font_name] + plt.rcParams.get('font.sans-serif', [])
+else:
+    import logging
+    logging.getLogger(__name__).warning("No Devanagari font found - Nepali labels may not render")
+
+def _dev_fontprop(size: int = 14):
+    if _DEV_FONT:
+        return fm.FontProperties(fname=_DEV_FONT, size=size)
+    return fm.FontProperties(size=size)
+
+
+def _apply_dev_font(ax, title_size=14, label_size=11, tick_size=10):
+    if not _DEV_FONT:
+        return
+    fp_title = _dev_fontprop(title_size)
+    fp_label = _dev_fontprop(label_size)
+    fp_tick = _dev_fontprop(tick_size)
+    ax.title.set_fontproperties(fp_title)
+    ax.xaxis.label.set_fontproperties(fp_label)
+    ax.yaxis.label.set_fontproperties(fp_label)
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontproperties(fp_tick)
 
 
 def _get_color(index: int) -> str:
@@ -50,6 +88,7 @@ def generate_boundary_map(
                             block.get('name', f'Block {i+1}'),
                             xy=(centroid.get('lon', 0), centroid.get('lat', 0)),
                             fontsize=8, fontweight='bold', ha='center',
+                            fontproperties=_dev_fontprop(8),
                             bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8)
                         )
     elif coords:
@@ -57,18 +96,14 @@ def generate_boundary_map(
         if x and y:
             ax.fill(x, y, color='#2ecc71', alpha=0.4, edgecolor='#27ae60', linewidth=2)
 
-    ax.set_xlabel('Longitude', fontsize=10)
-    ax.set_ylabel('Latitude', fontsize=10)
+    ax.set_xlabel('Longitude', fontsize=10, fontproperties=_dev_fontprop(10))
+    ax.set_ylabel('Latitude', fontsize=10, fontproperties=_dev_fontprop(10))
 
     if forest_name:
-        ax.set_title(f'{forest_name} - Forest Boundary', fontsize=14, fontweight='bold')
+        ax.set_title(f'{forest_name} - Forest Boundary', fontsize=14, fontweight='bold', fontproperties=_dev_fontprop(14))
 
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
-
-    # Add scale bar placeholder
-    ax.text(0.02, 0.02, 'Scale: Refer to coordinate grid', transform=ax.transAxes,
-            fontsize=8, va='bottom', bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
     plt.tight_layout()
 
@@ -79,10 +114,10 @@ def generate_boundary_map(
 
     # Return as base64
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
     plt.close()
     buf.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"
+    return f"data:image/svg+xml;base64,{base64.b64encode(buf.read()).decode()}"
 
 
 def generate_slope_map(slope_percentages: Dict, dominant: str, forest_name: str = "", output_path: str = None) -> str:
@@ -103,6 +138,7 @@ def generate_slope_map(slope_percentages: Dict, dominant: str, forest_name: str 
 
     title = f'{forest_name} - Slope Classification\n(Dominant: {dominant})' if forest_name else f'Slope Classification (Dominant: {dominant})'
     ax.set_title(title, fontsize=12, fontweight='bold')
+    _apply_dev_font(ax, title_size=12, label_size=10, tick_size=9)
 
     plt.tight_layout()
 
@@ -112,10 +148,10 @@ def generate_slope_map(slope_percentages: Dict, dominant: str, forest_name: str 
         return output_path
 
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
     plt.close()
     buf.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"
+    return f"data:image/svg+xml;base64,{base64.b64encode(buf.read()).decode()}"
 
 
 def generate_canopy_map(canopy_percentages: Dict, dominant: str, forest_name: str = "", output_path: str = None) -> str:
@@ -136,6 +172,7 @@ def generate_canopy_map(canopy_percentages: Dict, dominant: str, forest_name: st
 
     title = f'{forest_name} - Canopy Cover\n(Dominant: {dominant})' if forest_name else f'Canopy Cover (Dominant: {dominant})'
     ax.set_title(title, fontsize=12, fontweight='bold')
+    _apply_dev_font(ax, title_size=12, label_size=10, tick_size=9)
 
     plt.tight_layout()
 
@@ -145,10 +182,10 @@ def generate_canopy_map(canopy_percentages: Dict, dominant: str, forest_name: st
         return output_path
 
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
     plt.close()
     buf.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"
+    return f"data:image/svg+xml;base64,{base64.b64encode(buf.read()).decode()}"
 
 
 def generate_species_pie_chart(species_list: List[Dict], forest_name: str = "", top_n: int = 8, output_path: str = None) -> str:
@@ -170,6 +207,7 @@ def generate_species_pie_chart(species_list: List[Dict], forest_name: str = "", 
 
     title = f'{forest_name} - Species Composition (Top {top_n})' if forest_name else f'Species Composition (Top {top_n})'
     ax.set_title(title, fontsize=12, fontweight='bold')
+    _apply_dev_font(ax, title_size=12, label_size=10, tick_size=9)
 
     plt.tight_layout()
 
@@ -179,10 +217,10 @@ def generate_species_pie_chart(species_list: List[Dict], forest_name: str = "", 
         return output_path
 
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
     plt.close()
     buf.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"
+    return f"data:image/svg+xml;base64,{base64.b64encode(buf.read()).decode()}"
 
 
 def generate_block_area_bar(blocks: List[Dict], forest_name: str = "", output_path: str = None) -> str:
@@ -206,6 +244,7 @@ def generate_block_area_bar(blocks: List[Dict], forest_name: str = "", output_pa
     title = f'{forest_name} - Block-wise Area Distribution' if forest_name else 'Block-wise Area Distribution'
     ax.set_title(title, fontsize=12, fontweight='bold')
     ax.set_xlabel('Blocks', fontsize=11)
+    _apply_dev_font(ax, title_size=12, label_size=11, tick_size=10)
 
     ax.set_axisbelow(True)
     ax.yaxis.grid(True, alpha=0.3)
@@ -218,10 +257,10 @@ def generate_block_area_bar(blocks: List[Dict], forest_name: str = "", output_pa
         return output_path
 
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
     plt.close()
     buf.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"
+    return f"data:image/svg+xml;base64,{base64.b64encode(buf.read()).decode()}"
 
 
 def _extract_coords(geojson: Dict) -> List:

@@ -56,6 +56,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
               prefix={<HomeOutlined />}
               valueStyle={{ color: '#1890ff' }}
             />
+            <p className="text-xs text-gray-400 font-mono mt-1">{'{{hh_total_households}}'}</p>
           </Card>
         </Col>
         <Col xs={24} sm={12} md={8} lg={6}>
@@ -66,8 +67,13 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
               prefix={<TeamOutlined />}
               valueStyle={{ color: '#52c41a' }}
             />
+            <p className="text-xs text-gray-400 font-mono mt-1">{'{{hh_total_population}}'}</p>
             <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
               Male: {summary.total_male} | Female: {summary.total_female}
+            </div>
+            <div className="flex gap-2 mt-1">
+              <p className="text-xs text-gray-400 font-mono">{'{{hh_total_male}}'}</p>
+              <p className="text-xs text-gray-400 font-mono">{'{{hh_total_female}}'}</p>
             </div>
           </Card>
         </Col>
@@ -142,6 +148,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
               prefix={<FireOutlined />}
               valueStyle={{ color: '#ff4d4f' }}
             />
+            <p className="text-xs text-gray-400 font-mono mt-1">{'{{hh_firewood_demand_bhari}}'}</p>
             <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
               {(Number(summary.total_firewood_demand_bhari) * 25).toFixed(0)} kg
             </div>
@@ -181,6 +188,7 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
               suffix="cft"
               valueStyle={{ color: '#8b4513' }}
             />
+            <p className="text-xs text-gray-400 font-mono mt-1">{'{{hh_timber_demand_cft}}'}</p>
           </Card>
         </Col>
         <Col xs={24} sm={12} md={8}>
@@ -201,6 +209,8 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
         {/* Caste Distribution */}
         <Col xs={24} lg={12}>
           <Card title="Caste Classification Distribution" size="small">
+            <p className="text-xs text-gray-400 font-mono mb-1">{'{{chart:hh_caste_pie}}'}</p>
+            <p className="text-xs text-gray-400 font-mono mb-1">{'{{hh_caste_distribution}}'}</p>
             {casteData.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={300}>
@@ -248,6 +258,8 @@ const HouseholdSummaryDashboard: React.FC<HouseholdSummaryDashboardProps> = ({
         {/* Prosperity Distribution */}
         <Col xs={24} lg={12}>
           <Card title="Prosperity Level Distribution" size="small">
+            <p className="text-xs text-gray-400 font-mono mb-1">{'{{chart:hh_prosperity_bar}}'}</p>
+            <p className="text-xs text-gray-400 font-mono mb-1">{'{{hh_prosperity_distribution}}'}</p>
             {prosperityData.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={300}>

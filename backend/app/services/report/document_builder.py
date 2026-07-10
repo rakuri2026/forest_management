@@ -199,15 +199,15 @@ def add_image(doc: Document, image_path_or_data: str, caption: str = "", width: 
 
     try:
         if image_path_or_data.startswith('data:'):
-            # Base64 encoded image
-            from base64 import b64decode
-            data = image_path_or_data.split(',')[1]
-            image_bytes = b64decode(data)
-            image_stream = BytesIO(image_bytes)
-            doc.add_picture(image_stream, width=Inches(width))
+            # Base64 encoded image (SVG or PNG)
+            from app.utils.svg_to_png import add_svg_picture
+            add_svg_picture(doc, image_path_or_data, width_inches=width)
         else:
             # File path
-            doc.add_picture(image_path_or_data, width=Inches(width))
+            with open(image_path_or_data, "rb") as _f:
+                img_bytes = _f.read()
+            from app.utils.svg_to_png import add_svg_picture
+            add_svg_picture(doc, img_bytes, width_inches=width)
 
         if caption:
             cap = doc.add_paragraph()

@@ -70,6 +70,10 @@ _KEY_ALIAS: Dict[tuple, str] = {
     ("boundary", "boundary_features_north"): "features.north",
     ("boundary", "boundary_features_south"): "features.south",
     ("boundary", "boundary_forest_extent_data"): "whole_forest_extent",
+    ("boundary", "extent_n"): "whole_forest_extent.N",
+    ("boundary", "extent_s"): "whole_forest_extent.S",
+    ("boundary", "extent_e"): "whole_forest_extent.E",
+    ("boundary", "extent_w"): "whole_forest_extent.W",
 
     # block
     ("blocks", "blocks_count"): "total_blocks",
@@ -242,7 +246,10 @@ class VariableResolver:
 
     def resolve_all(self) -> Dict[str, Any]:
         for key, var_def in VARIABLE_REGISTRY.items():
-            self._resolved[key] = self._resolve_single(var_def)
+            try:
+                self._resolved[key] = self._resolve_single(var_def)
+            except Exception:
+                self._resolved[key] = None
         return self._resolved
 
     def resolve_node_content(self, content: str) -> str:
@@ -491,6 +498,12 @@ class VariableResolver:
             elif chart_key == "landcover_pie":
                 pcts = data.get("raster_analysis", {}).get("landcover", {}).get("percentages", {})
                 return _pct_data(pcts) if pcts else None
+            elif chart_key == "ug_land_cover_classes_chart":
+                lc_classes = data.get("user_group", {}).get("land_cover_classes", [])
+                if lc_classes:
+                    pcts = {c.get("class_name", f"Class {c.get('class_code', '')}"): c.get("percentage", 0) for c in lc_classes}
+                    return _pct_data(pcts)
+                return None
             elif chart_key == "slope_bar":
                 pcts = data.get("raster_analysis", {}).get("slope", {}).get("percentages", {})
                 if pcts:
@@ -563,13 +576,93 @@ class VariableResolver:
                     return _bar_data(list(dist.keys()), list(dist.values()), "घरधुरी")
                 return None
             elif chart_key == "hh_demand_supply_bar":
-                hh = data.get("households", {})
-                if hh.get("available"):
-                    return _bar_data(
-                        ["काठ (cft)", "दाउरा (भारी)"],
-                        [hh.get("timber_demand_cft", 0), hh.get("firewood_demand_bhari", 0)],
-                        "माग"
-                    )
+                ds = data.get("demand_supply", {})
+                if ds and ds.get("demand"):
+                    products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+                    ds_labels = {
+                        "firewood_bhari": "दाउरा भारी",
+                        "grass_bhari": "घाँस भारी",
+                        "bedding_bhari": "सोतर भारी",
+                        "timber_cft": "काठ क्यू.फि.",
+                        "poles_count": "खाँवा संख्या",
+                    }
+                    labels = [ds_labels.get(k, k) for k in products]
+                    demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+                    supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+                    colors = ["#dc2626", "#059669"]
+                    return {
+                        "type": "bar",
+                        "labels": labels,
+                        "datasets": [
+                            {"label": "माग", "data": demand_vals, "backgroundColor": colors[0]},
+                            {"label": "आपूर्ति", "data": supply_vals, "backgroundColor": colors[1]},
+                        ],
+                    }
+                return None
+            elif chart_key == "demand_supply_bar":
+                ds = data.get("demand_supply", {})
+                if ds and ds.get("demand"):
+                    products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+                    ds_labels = {
+                        "firewood_bhari": "दाउरा भारी",
+                        "grass_bhari": "घाँस भारी",
+                        "bedding_bhari": "सोतर भारी",
+                        "timber_cft": "काठ क्यू.फि.",
+                        "poles_count": "खाँवा संख्या",
+                    }
+                    labels = [ds_labels.get(k, k) for k in products]
+                    demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+                    cf_reg_vals = []
+                    for k in products:
+                        v = ds.get("supply_cf_regular", {}).get(k, 0)
+                        cf_reg_vals.append(v if isinstance(v, (int, float)) else 0)
+                    cf_aah_vals = []
+                    for k in products:
+                        v = ds.get("supply_cf_aah", {}).get(k, 0)
+                        cf_aah_vals.append(v if isinstance(v, (int, float)) else 0)
+                    private_vals = [ds.get("supply_private", {}).get(k, 0) or 0 for k in products]
+                    total_supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+                    return {
+                        "type": "bar",
+                        "labels": labels,
+                        "datasets": [
+                            {"label": "माग", "data": demand_vals, "backgroundColor": "#dc2626"},
+                            {"label": "सा.वन नियमित", "data": cf_reg_vals, "backgroundColor": "#059669"},
+                            {"label": "सा.वन AAH", "data": cf_aah_vals, "backgroundColor": "#3498db"},
+                            {"label": "निजि क्षेत्र", "data": private_vals, "backgroundColor": "#e67e22"},
+                            {"label": "जम्मा आपूर्ति", "data": total_supply_vals, "backgroundColor": "#9b59b6"},
+                        ],
+                    }
+                return None
+            elif chart_key == "demand_supply_deficit_bar":
+                ds = data.get("demand_supply", {})
+                if ds and ds.get("demand"):
+                    products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+                    ds_labels = {
+                        "firewood_bhari": "दाउरा भारी",
+                        "grass_bhari": "घाँस भारी",
+                        "bedding_bhari": "सोतर भारी",
+                        "timber_cft": "काठ क्यू.फि.",
+                        "poles_count": "खाँवा संख्या",
+                    }
+                    labels = [ds_labels.get(k, k) for k in products]
+                    deficit_vals = []
+                    deficit_labels = []
+                    for k in products:
+                        diff = (ds.get("total_supply", {}).get(k, 0) or 0) - (ds.get("demand", {}).get(k, 0) or 0)
+                        deficit_vals.append(diff)
+                        deficit_labels.append("बचत" if diff >= 0 else "कमी")
+                    bar_colors = ["#059669" if v >= 0 else "#dc2626" for v in deficit_vals]
+                    return {
+                        "type": "bar",
+                        "labels": labels,
+                        "datasets": [{
+                            "label": "बचत/कमी",
+                            "data": deficit_vals,
+                            "backgroundColor": bar_colors,
+                        }],
+                        "deficit_labels": deficit_labels,
+                    }
                 return None
             elif chart_key == "budget_bar":
                 activities = data.get("activities", {}).get("activities", [])
@@ -634,6 +727,139 @@ class VariableResolver:
             ).scalar_one_or_none()
             if tbl and tbl.rows:
                 return {"table_id": table_id, "rows": tbl.rows, "auto_populated": tbl.auto_populated}
+        except Exception:
+            pass
+        # Fallback: build from raw data_collector data if OPTableData is empty
+        try:
+            raw = self.get_raw_data()
+            if table_id == "demand_supply":
+                ds = raw.get("demand_supply", {})
+                if ds.get("demand"):
+                    ds_labels = {
+                        "firewood_bhari": "दाउरा भारी",
+                        "grass_bhari": "घाँस भारी",
+                        "bedding_bhari": "सोतर भारी",
+                        "timber_cft": "काठ क्यू.फि.",
+                        "poles_count": "खाँवा संख्या",
+                    }
+                    products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+                    rows = []
+                    for k in products:
+                        deficit = ds.get("deficit", {}).get(k, 0) or 0
+                        if isinstance(deficit, (int, float)):
+                            sign = "बचत" if deficit >= 0 else "कमी"
+                            deficit_str = f"{sign} {abs(deficit):.2f}"
+                        else:
+                            deficit_str = str(deficit) if deficit else "-"
+                        cf_reg = ds.get("supply_cf_regular", {})
+                        cf_aah = ds.get("supply_cf_aah", {})
+                        rows.append({
+                            "product": ds_labels.get(k, k),
+                            "demand": ds.get("demand", {}).get(k, 0) or 0,
+                            "cf_regular": cf_reg[k] if k in cf_reg else "-",
+                            "cf_aah": cf_aah[k] if k in cf_aah else "-",
+                            "private": ds.get("supply_private", {}).get(k, 0) or 0,
+                            "total_supply": ds.get("total_supply", {}).get(k, 0) or 0,
+                            "deficit": deficit_str,
+                        })
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+            if table_id in ("table_20", "table_33", "table_34", "table_35", "table_36", "table_37"):
+                bio = raw.get("biodiversity", {})
+                if not bio.get("available"):
+                    return None
+                if table_id == "table_20":
+                    rows = []
+                    idx = 0
+                    for rec in bio.get("vegetation", []):
+                        idx += 1
+                        rows.append({
+                            "sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""),
+                            "type": "वनस्पति", "sub_category": rec.get("sub_category", ""),
+                            "iucn_status": rec.get("iucn_status", ""),
+                            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                        })
+                    for rec in bio.get("animals", []):
+                        idx += 1
+                        rows.append({
+                            "sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""),
+                            "type": "जनावर", "sub_category": rec.get("sub_category", ""),
+                            "iucn_status": rec.get("iucn_status", ""),
+                            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                        })
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+                if table_id == "table_33":
+                    iucn_map = {"CR": "संकटग्रस्त", "EN": "लोपोन्मुख", "VU": "असुरक्षित",
+                                "NT": "नजिकै खतरा", "LC": "कम चासो", "DD": "अपर्याप्त"}
+                    iucn_order = ["CR", "EN", "VU", "NT", "LC", "DD"]
+                    breakdown = bio.get("iucn_breakdown", {})
+                    rows = []
+                    for code in iucn_order:
+                        cnt = breakdown.get(code, 0)
+                        if cnt:
+                            rows.append({"iucn_code": code, "nepali_label": iucn_map.get(code, code), "count": cnt})
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+                if table_id == "table_34":
+                    rows = []
+                    idx = 0
+                    for rec in bio.get("vegetation", []):
+                        if rec.get("is_protected"):
+                            idx += 1
+                            rows.append({"sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""), "sub_category": rec.get("sub_category", ""), "iucn_status": rec.get("iucn_status", "")})
+                    for rec in bio.get("animals", []):
+                        if rec.get("is_protected"):
+                            idx += 1
+                            rows.append({"sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""), "sub_category": rec.get("sub_category", ""), "iucn_status": rec.get("iucn_status", "")})
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+                if table_id == "table_35":
+                    rows = []
+                    idx = 0
+                    for rec in bio.get("vegetation", []):
+                        if rec.get("is_invasive"):
+                            idx += 1
+                            rows.append({"sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""), "sub_category": rec.get("sub_category", ""), "iucn_status": rec.get("iucn_status", "")})
+                    for rec in bio.get("animals", []):
+                        if rec.get("is_invasive"):
+                            idx += 1
+                            rows.append({"sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""), "sub_category": rec.get("sub_category", ""), "iucn_status": rec.get("iucn_status", "")})
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+                if table_id == "table_36":
+                    rows = []
+                    for idx, rec in enumerate(bio.get("vegetation", []), 1):
+                        rows.append({
+                            "sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""),
+                            "sub_category": rec.get("sub_category", ""), "iucn_status": rec.get("iucn_status", ""),
+                            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                            "primary_use": rec.get("primary_use", ""),
+                        })
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+                if table_id == "table_37":
+                    rows = []
+                    for idx, rec in enumerate(bio.get("animals", []), 1):
+                        rows.append({
+                            "sn": idx, "name": rec.get("name", ""), "scientific_name": rec.get("scientific_name", ""),
+                            "sub_category": rec.get("sub_category", ""), "iucn_status": rec.get("iucn_status", ""),
+                            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+                            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+                            "primary_use": rec.get("primary_use", ""),
+                        })
+                    if rows:
+                        return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
         except Exception:
             pass
         return None

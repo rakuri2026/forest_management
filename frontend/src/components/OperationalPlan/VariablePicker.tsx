@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Input, Tabs, List, Tag, Spin, Empty, Tooltip, Badge, Space } from 'antd';
-import { SearchOutlined, CheckCircleOutlined, CloseCircleOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { Input, Tabs, List, Tag, Spin, Empty, Tooltip, Badge, Space, Button, message } from 'antd';
+import { SearchOutlined, CheckCircleOutlined, CloseCircleOutlined, QuestionCircleOutlined, DownloadOutlined } from '@ant-design/icons';
 import { operationalPlanApi } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { downloadFromApi } from '../../utils/download';
 
 interface CatalogVariable {
   key: string;
@@ -13,6 +15,9 @@ interface CatalogVariable {
   auto_populate: boolean;
   data_status: string;
   sample_value: any;
+  description_ne?: string;
+  table_columns?: string[];
+  mock_rows?: Record<string, any>[];
 }
 
 interface VariablePickerProps {
@@ -44,11 +49,22 @@ const typeColors: Record<string, string> = {
 };
 
 const VariablePicker: React.FC<VariablePickerProps> = ({ onSelect, usedVariables = [], calculationId }) => {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [variables, setVariables] = useState<CatalogVariable[]>([]);
   const [filtered, setFiltered] = useState<CatalogVariable[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+
+  const handleExportCsv = async () => {
+    try {
+      await operationalPlanApi.exportVariablesCsv();
+      message.success('Variable registry CSV exported');
+    } catch (err: any) {
+      message.error(err?.message || 'Export failed');
+    }
+  };
 
   useEffect(() => {
     loadVariables();
@@ -123,7 +139,12 @@ const VariablePicker: React.FC<VariablePickerProps> = ({ onSelect, usedVariables
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', fontWeight: 600, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>Variable Picker</span>
-        <Badge count={`${availableCount}/${totalCount}`} style={{ backgroundColor: '#52c41a', fontSize: 10 }} />
+        <Space size={4}>
+          {isSuperAdmin && (
+            <Button icon={<DownloadOutlined />} size="small" type="text" onClick={handleExportCsv} title="Export CSV (superuser only)" />
+          )}
+          <Badge count={`${availableCount}/${totalCount}`} style={{ backgroundColor: '#52c41a', fontSize: 10 }} />
+        </Space>
       </div>
       <div style={{ padding: '8px 12px' }}>
         <Input
@@ -164,13 +185,40 @@ const VariablePicker: React.FC<VariablePickerProps> = ({ onSelect, usedVariables
               >
                 <Tooltip
                   title={
-                    <div style={{ maxWidth: 300 }}>
+                    <div style={{ maxWidth: v.mock_rows?.length ? 480 : 300 }}>
                       <div><strong>{v.key}</strong> <Tag color={typeColors[v.var_type]}>{v.var_type}</Tag></div>
                       <div style={{ fontSize: 11, margin: '4px 0' }}>{v.label_ne} / {v.label_en}</div>
                       <div style={{ fontSize: 11 }}>Source: {v.source}</div>
                       <div style={{ fontSize: 11 }}>Auto-populate: {v.auto_populate ? 'Yes' : 'No'}</div>
                       <div style={{ fontSize: 11 }}>Status: {v.data_status}</div>
-                      {v.sample_value !== null && v.sample_value !== undefined && (
+                      {v.description_ne && (
+                        <div style={{ fontSize: 11, marginTop: 4, color: '#aaa' }}>{v.description_ne}</div>
+                      )}
+                      {v.mock_rows && v.mock_rows.length > 0 && v.table_columns && v.table_columns.length > 0 && (
+                        <div style={{ marginTop: 6, overflowX: 'auto' }}>
+                          <table style={{ fontSize: 10, borderCollapse: 'collapse', width: '100%', minWidth: 280 }}>
+                            <thead>
+                              <tr style={{ background: '#1a1a1a' }}>
+                                {v.table_columns.map((col: string) => (
+                                  <th key={col} style={{ padding: '3px 5px', border: '1px solid #333', whiteSpace: 'nowrap', color: '#ccc' }}>{col}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {v.mock_rows.map((row: any, ri: number) => (
+                                <tr key={ri} style={{ background: ri % 2 === 0 ? '#222' : '#2a2a2a' }}>
+                                  {v.table_columns!.map((col: string) => (
+                                    <td key={col} style={{ padding: '2px 5px', border: '1px solid #333', whiteSpace: 'nowrap', color: '#a0d8a0' }}>
+                                      {row[col] !== undefined && row[col] !== null ? String(row[col]) : '—'}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {v.sample_value !== null && v.sample_value !== undefined && !(v.mock_rows?.length) && (
                         <div style={{ fontSize: 11, marginTop: 4, background: '#1a1a1a', padding: '4px 6px', borderRadius: 3, color: '#a0d8a0', wordBreak: 'break-all' }}>
                           <strong>Sample:</strong> {String(v.sample_value)}
                         </div>

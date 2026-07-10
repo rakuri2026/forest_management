@@ -2,12 +2,16 @@
 DOCX builder for Operational Plan export
 Walks the resolved tree and builds a .docx document with headings, text, charts, and tables.
 """
+import logging
 import os
+import time
 from typing import Dict, Any, Optional, List
 from io import BytesIO
 from uuid import UUID
 from unicodedata import normalize as _norm
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from docx import Document
 from docx.shared import Inches, Pt, Cm, RGBColor
@@ -27,16 +31,20 @@ from app.services.operational_plan.variable_resolver import VariableResolver
 from app.services.operational_plan.variable_registry import get_variable
 from app.utils.number_format import format_devanagari
 
-# ── Chart PNG cache ──
+# ── Chart SVG cache ──
 _CHART_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads", "charts_cache")
 
 def _chart_cache_path(calculation_id: UUID, chart_key: str) -> str:
     sub = os.path.join(_CHART_CACHE_DIR, str(calculation_id))
     os.makedirs(sub, exist_ok=True)
-    return os.path.join(sub, f"{chart_key}.png")
+    return os.path.join(sub, f"{chart_key}.svg")
 
 def _chart_cache_get(calculation_id: UUID, chart_key: str) -> Optional[BytesIO]:
     path = _chart_cache_path(calculation_id, chart_key)
+    if not os.path.exists(path):
+        old = path.replace(".svg", ".png")
+        if os.path.exists(old):
+            path = old
     if os.path.exists(path):
         try:
             with open(path, "rb") as f:
@@ -53,10 +61,32 @@ def _chart_cache_set(calculation_id: UUID, chart_key: str, buf: BytesIO):
     except Exception:
         pass
 
+def clear_chart_cache(calculation_id: UUID = None, chart_key: str = None):
+    """Clear chart SVG cache. If calculation_id is None, clears all charts.
+       If chart_key is also given, clears only that specific chart."""
+    import shutil
+    if calculation_id:
+        sub = os.path.join(_CHART_CACHE_DIR, str(calculation_id))
+        if chart_key:
+            path = os.path.join(sub, f"{chart_key}.svg")
+            if os.path.exists(path):
+                os.remove(path)
+            old = os.path.join(sub, f"{chart_key}.png")
+            if os.path.exists(old):
+                os.remove(old)
+        else:
+            if os.path.exists(sub):
+                shutil.rmtree(sub, ignore_errors=True)
+    else:
+        if os.path.exists(_CHART_CACHE_DIR):
+            shutil.rmtree(_CHART_CACHE_DIR, ignore_errors=True)
+            os.makedirs(_CHART_CACHE_DIR, exist_ok=True)
+
 # ── Nepali font setup for matplotlib ──
 _FONT_SETUP_DONE = False
+_DEV_FONT_PATH = None
 def _ensure_dev_font():
-    global _FONT_SETUP_DONE
+    global _FONT_SETUP_DONE, _DEV_FONT_PATH
     if _FONT_SETUP_DONE:
         return
     import matplotlib
@@ -69,11 +99,18 @@ def _ensure_dev_font():
             if fp:
                 fm.fontManager.addfont(fp)
                 plt.rcParams['font.family'] = name
+                _DEV_FONT_PATH = fp
                 _FONT_SETUP_DONE = True
                 return
         except Exception:
             continue
     _FONT_SETUP_DONE = True
+
+def _dev_fontprop(size: int = 14):
+    if _DEV_FONT_PATH:
+        import matplotlib.font_manager as fm
+        return fm.FontProperties(fname=_DEV_FONT_PATH, size=size)
+    return fm.FontProperties(size=size)
 
 # ── Chart color maps (consistent with frontend) ──
 _HEALTH_COLORS_MAP = {
@@ -91,19 +128,7 @@ _NASA_FOREST_QUALITY_COLORS = {
 }
 _SOIL_BAR_COLORS = ["#8B4513", "#A0522D", "#CD853F", "#D2691E", "#DEB887", "#D2B48C"]
 
-from app.services.report.chart_generator import (
-    generate_species_pie,
-    generate_forest_type_pie,
-    generate_block_area_bar,
-    generate_dbh_histogram,
-    generate_biomass_bar,
-    generate_slope_pie,
-    generate_canopy_pie,
-    generate_landcover_pie,
-)
-from app.services.report.map_generator import generate_boundary_map
-from geoalchemy2.shape import to_shape
-from shapely.geometry import mapping
+# Chart/map generators loaded lazily inside functions to avoid slow matplotlib import at module level
 
 
 _COVER_GREEN = RGBColor(0, 100, 0)
@@ -491,7 +516,23 @@ def _resolve_var_text(text: str, raw_data: dict) -> str:
 
 # Alias mapping to look up unresolved list/dict variables from raw_data
 _VAR_LOOKUP = {
+    # Boundary features
+    "boundary_features_north": ("boundary", "features.north"),
+    "boundary_features_east": ("boundary", "features.east"),
+    "boundary_features_south": ("boundary", "features.south"),
+    "boundary_features_west": ("boundary", "features.west"),
+    "extent_n": ("boundary", "whole_forest_extent.N"),
+    "extent_s": ("boundary", "whole_forest_extent.S"),
+    "extent_e": ("boundary", "whole_forest_extent.E"),
+    "extent_w": ("boundary", "whole_forest_extent.W"),
+
+    # User group
+    "ug_land_cover_classes": ("user_group", "land_cover_classes"),
+
     "uc_members": ("committees", "user_committee.members"),
+    "uc_gender_distribution": ("committees", "user_committee.gender_distribution"),
+    "uc_position_distribution": ("committees", "user_committee.position_distribution"),
+    "uc_caste_distribution": ("committees", "user_committee.caste_distribution"),
     "ac_members": ("committees", "advisory_committee.members"),
     "fc_members": ("committees", "financial_committee.members"),
     "species_list": ("species", "species_list"),
@@ -676,25 +717,98 @@ def _add_list_table(doc: Document, val: list, var_name: str = ""):
         tbl = doc.add_table(rows=num_rows, cols=num_cols)
         tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
         tbl.style = "Table Grid"
-        for ci, h in enumerate(headers):
-            cell = tbl.cell(0, ci)
-            cell.text = h.replace("_", " ").title()
-            for p in cell.paragraphs:
-                for r in p.runs:
-                    r.font.size = Pt(9)
-                    r.font.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-            _set_cell_shading(cell, "006400")
-        for ri, row in enumerate(val, 1):
-            for ci, h in enumerate(headers):
-                cell = tbl.cell(ri, ci)
-                cell.text = _fmt_value(row.get(h, ""), var_name)
-                for p in cell.paragraphs:
-                    for r in p.runs:
-                        r.font.size = Pt(9)
+        _tbl_fill_data(tbl, headers, val, var_name)
         doc.add_paragraph()
         return True
     return None
+
+
+def _tbl_fill_data(tbl, headers, rows_data, var_name=""):
+    """Fill table data using direct lxml for speed (avoids slow tbl.cell() O(N²))."""
+    tbl_elem = tbl._tbl
+    tr_elems = tbl_elem.findall(qn('w:tr'))
+    if not tr_elems:
+        return
+    # Header row
+    header_tr = tr_elems[0]
+    header_tcs = header_tr.findall(qn('w:tc'))
+    for ci, h in enumerate(headers):
+        if ci >= len(header_tcs):
+            break
+        tc = header_tcs[ci]
+        # Clear and set text
+        _tc_set_text(tc, h.replace("_", " ").title())
+        _tc_style(tc, bold=True, size=Pt(9), color=RGBColor(255, 255, 255), shading="006400")
+    # Data rows
+    for ri, row_val in enumerate(rows_data, 1):
+        if ri >= len(tr_elems):
+            break
+        tr = tr_elems[ri]
+        tcs = tr.findall(qn('w:tc'))
+        for ci, h in enumerate(headers):
+            if ci >= len(tcs):
+                break
+            tc = tcs[ci]
+            _tc_set_text(tc, _fmt_value(row_val.get(h, ""), var_name))
+            _tc_style(tc, bold=False, size=Pt(9))
+
+
+def _tc_set_text(tc, text):
+    """Set cell text via direct lxml (replaces all content)."""
+    for child in list(tc):
+        tc.remove(child)
+    p_elem = OxmlElement('w:p')
+    r_elem = OxmlElement('w:r')
+    t_elem = OxmlElement('w:t')
+    t_elem.set(qn('xml:space'), 'preserve')
+    t_elem.text = text
+    r_elem.append(t_elem)
+    p_elem.append(r_elem)
+    tc.append(p_elem)
+
+
+def _tc_style(tc, bold=False, size=None, color=None, shading=None):
+    """Style a table cell's runs via direct lxml."""
+    for p_elem in tc.findall(qn('w:p')):
+        for r_elem in p_elem.findall(qn('w:r')):
+            rPr = r_elem.find(qn('w:rPr'))
+            if rPr is None:
+                rPr = OxmlElement('w:rPr')
+                r_elem.insert(0, rPr)
+            if bold:
+                b_elem = rPr.find(qn('w:b'))
+                if b_elem is None:
+                    b_elem = OxmlElement('w:b')
+                    rPr.append(b_elem)
+            if size is not None:
+                sz_elem = rPr.find(qn('w:sz'))
+                if sz_elem is None:
+                    sz_elem = OxmlElement('w:sz')
+                    rPr.append(sz_elem)
+                sz_elem.set(qn('w:val'), str(int(size.pt * 2)) if hasattr(size, 'pt') else str(size))
+            if color is not None:
+                c_elem = rPr.find(qn('w:color'))
+                if c_elem is None:
+                    c_elem = OxmlElement('w:color')
+                    rPr.append(c_elem)
+                c_elem.set(qn('w:val'), str(color))
+    if shading:
+        _set_cell_shading_direct(tc, shading)
+
+
+def _set_cell_shading_direct(tc, color_hex):
+    """Apply cell shading via direct lxml (avoids python-docx overhead)."""
+    tcPr = tc.find(qn('w:tcPr'))
+    if tcPr is None:
+        tcPr = OxmlElement('w:tcPr')
+        tc.insert(0, tcPr)
+    shd = tcPr.find(qn('w:shd'))
+    if shd is None:
+        shd = OxmlElement('w:shd')
+        tcPr.append(shd)
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), color_hex)
 
 
 NP_HEADERS_ACTIVITY_PLAN = [
@@ -746,6 +860,16 @@ NP_HEADERS_HH_RECORDS = [
 ]
 
 NP_HEADERS_BIODIVERSITY: Dict[str, List[tuple]] = {
+    "table_20": [
+        ("sn", "सि.नं."),
+        ("name", "नाम"),
+        ("scientific_name", "वैज्ञानिक नाम"),
+        ("type", "प्रकार"),
+        ("sub_category", "उप-प्रकार"),
+        ("iucn_status", "IUCN स्थिति"),
+        ("is_protected", "संरक्षित"),
+        ("is_invasive", "मिचाहा"),
+    ],
     "table_33": [
         ("iucn_code", "IUCN कोड"),
         ("nepali_label", "संरक्षण स्थिति"),
@@ -784,6 +908,15 @@ NP_HEADERS_BIODIVERSITY: Dict[str, List[tuple]] = {
         ("is_protected", "संरक्षित"),
         ("is_invasive", "मिचाहा"),
         ("primary_use", "प्रमुख प्रयोग"),
+    ],
+    "demand_supply": [
+        ("product", "उत्पादन किसिम"),
+        ("demand", "माग"),
+        ("cf_regular", "झिँजा दाउरा तथा घाँस संकलन"),
+        ("cf_aah", "वार्षिक संकलन परिमाण"),
+        ("private", "निजि क्षेत्रबाट उत्पादन"),
+        ("total_supply", "जम्मा आपूर्ति"),
+        ("deficit", "बचत तथा कमी"),
     ],
 }
 
@@ -918,18 +1051,7 @@ def _add_hh_records_table(doc: Document, val: list, raw_data: dict = None):
     portrait.right_margin = Cm(2.5)
 
 
-# ── Field Inventory Measurement Table ──
-
-FI_HEADERS = [
-    ("block_name", "ब्लक", 2.5, "left", False),
-    ("plot_no", "प्लट नं.", 1.2, "center", False),
-    ("stand_type", "प्रकार", 1.5, "center", False),
-    ("species", "प्रजाति", 3.2, "left", False),
-    ("dbh", "DBH (से.मि.)", 1.0, "center", True),
-    ("height", "उचाइ (मि.)", 1.0, "center", True),
-    ("class", "वर्ग", 1.0, "center", True),
-    ("count", "गणना", 1.2, "center", False),
-]
+# ── Field Inventory Tables ──
 
 FI_YIELD_HEADERS = [
     ("block_name", "ब्लक", 2.5, "left"),
@@ -946,169 +1068,189 @@ ST_TYPE_MAP = {
     "Tree": "रूख",
 }
 
+ST_TYPE_SORT = {"Regeneration": 0, "Sapling": 1, "Pole": 2, "Tree": 3}
+
+
+def _start_two_column_section(doc: Document):
+    """Insert a continuous section break within the current page, then switch to 2-column layout."""
+    from docx.enum.section import WD_SECTION
+    doc.add_section(WD_SECTION.CONTINUOUS)
+    sect = doc.sections[-1]
+    sect.top_margin = doc.sections[0].top_margin
+    sect.bottom_margin = doc.sections[0].bottom_margin
+    sect.left_margin = doc.sections[0].left_margin
+    sect.right_margin = doc.sections[0].right_margin
+    sectPr = sect._sectPr
+    cols = OxmlElement("w:cols")
+    cols.set(qn("w:num"), "2")
+    cols.set(qn("w:space"), "480")
+    cols.set(qn("w:equalWidth"), "true")
+    sectPr.append(cols)
+
+
+def _end_two_column_section(doc: Document):
+    """Add a NEW_PAGE section break and strip any 2-column settings inherited from the prior section."""
+    from docx.enum.section import WD_SECTION
+    new_sect = doc.add_section(WD_SECTION.NEW_PAGE)
+    new_sect.top_margin = doc.sections[0].top_margin
+    new_sect.bottom_margin = doc.sections[0].bottom_margin
+    new_sect.left_margin = doc.sections[0].left_margin
+    new_sect.right_margin = doc.sections[0].right_margin
+    # doc.add_section() COPIES all children from the old sectPr (including our 2-column w:cols).
+    # Remove every w:cols element so this section defaults to single column.
+    sectPr = new_sect._sectPr
+    for child in list(sectPr):
+        if child.tag == qn('w:cols'):
+            sectPr.remove(child)
+
 
 def _add_field_inventory_tables(doc: Document, calculation_id: UUID, db: Session):
     fi_calc = db.query(FieldInventoryCalculation).filter(
         FieldInventoryCalculation.calculation_id == calculation_id
     ).first()
     if not fi_calc:
-        no_data = doc.add_paragraph()
-        run = no_data.add_run("[Table data not available: fieldinventory]")
-        run.font.size = Pt(9)
-        run.font.italic = True
-        run.font.color.rgb = RGBColor(200, 50, 50)
+        _add_no_data_para(doc)
         return
 
-    measurements = (
-        db.query(FieldInventoryMeasurement)
-        .options(joinedload(FieldInventoryMeasurement.sample_plot))
-        .join(FieldInventorySamplePlot)
-        .filter(FieldInventorySamplePlot.field_inventory_calculation_id == fi_calc.id)
-        .order_by(
-            FieldInventorySamplePlot.block_name,
-            FieldInventorySamplePlot.sample_plot_number,
-            FieldInventoryMeasurement.stand_type,
-            FieldInventoryMeasurement.sn,
-        )
-        .all()
-    )
-
+    measurements = _get_field_inventory_raw_data(db, fi_calc.id)
     if not measurements:
-        no_data = doc.add_paragraph()
-        run = no_data.add_run("[Table data not available: fieldinventory]")
-        run.font.size = Pt(9)
-        run.font.italic = True
-        run.font.color.rgb = RGBColor(200, 50, 50)
+        _add_no_data_para(doc)
         return
 
-    # Collect plots for resource yield data
-    seen_plots = set()
-    yield_rows = []
-    for m in measurements:
-        plot_key = (m.sample_plot.block_name, m.sample_plot.sample_plot_number)
-        if plot_key not in seen_plots:
-            seen_plots.add(plot_key)
-            sp = m.sample_plot
-            yield_rows.append({
-                "block_name": sp.block_name,
-                "plot_no": str(sp.sample_plot_number),
-                "firewood": sp.firewood_kg_per_100sqm_per_year,
-                "grass": sp.grass_kg_per_100sqm_per_year,
-                "bedding": sp.bedding_material_kg_per_100sqm_per_year,
-            })
-
-    # ── Title ──
+    # ── Page break before this table ──
+    doc.add_page_break()
     heading = doc.add_paragraph()
-    heading.paragraph_format.space_after = Pt(4)
-    run = heading.add_run(_fix("क्षेत्र सर्वेक्षण मापन तथ्याङ्क"))
-    run.font.size = Pt(13)
+    heading.paragraph_format.space_after = Pt(2)
+    run = heading.add_run(_fix("वन श्रोत मापन सर्वेक्षण फारम"))
+    run.font.size = Pt(11)
     run.font.bold = True
 
-    # ── Main Measurement Table ──
-    keys = [k for k, _, _, _, _ in FI_HEADERS]
-    headers = [h for _, h, _, _, _ in FI_HEADERS]
-    widths = [w for _, _, w, _, _ in FI_HEADERS]
-    vertical = [v for _, _, _, _, v in FI_HEADERS]
-    num_cols = len(keys)
-    num_rows = len(measurements) + 1
+    # ── Dash-separated values in two-column monospace layout ──
+    _start_two_column_section(doc)
 
-    tbl = doc.add_table(rows=num_rows, cols=num_cols)
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    tbl.style = "Table Grid"
-    tbl.autofit = False
+    sep = "-"
+    csv_headers = sep.join(["ब्लक", "प्लट", "प्रकार", "वैज्ञानिक नाम", "DBH", "उचाइ", "वर्ग", "गणना"])
+    csv_lines = [csv_headers]
 
-    for ci, np_header in enumerate(headers):
-        cell = tbl.cell(0, ci)
-        cell.width = Cm(widths[ci])
-        cell.text = ""
-        p = cell.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(np_header)
-        run.font.size = Pt(7)
+    for m in measurements:
+        vals = [
+            m.block_name or "",
+            str(m.plot_no or ""),
+            ST_TYPE_MAP.get(m.stand_type, m.stand_type or ""),
+            m.scientific_name or "",
+            _csv_num(m.dbh_cm),
+            _csv_num(m.height_m),
+            m.tree_class or "",
+            str(m.count) if m.count is not None else "1",
+        ]
+        csv_lines.append(sep.join(vals))
+
+    csv_text = "\n".join(csv_lines)
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0)
+    p.paragraph_format.line_spacing = Pt(9)
+    run = p.add_run(_fix(csv_text))
+    run.font.name = "Courier New"
+    run.font.size = Pt(7)
+
+    # ── Resource Yield (dash-separated, same two-column) ──
+    yield_rows = _get_resource_yield(db, fi_calc.id)
+    if yield_rows:
+        doc.add_paragraph()
+        sub_heading = doc.add_paragraph()
+        sub_heading.paragraph_format.space_after = Pt(2)
+        run = sub_heading.add_run(_fix("नमुना प्लटमा उपलब्ध झिजा दाउरा, सोतर तथा घाँसहरूको १०० वर्ग मि. क्षेत्रमा उपलब्धता के.जि.परिणाम"))
+        run.font.size = Pt(10)
         run.font.bold = True
-        run.font.color.rgb = RGBColor(255, 255, 255)
-        _set_cell_shading(cell, "006400")
-        if vertical[ci]:
-            tc = cell._tc
-            tcPr = tc.get_or_add_tcPr()
-            textDirection = OxmlElement("w:textDirection")
-            textDirection.set(qn("w:val"), "btLr")
-            tcPr.append(textDirection)
 
-    for ri, m in enumerate(measurements, 1):
-        stand_type_np = ST_TYPE_MAP.get(m.stand_type, m.stand_type)
-        species = m.species_scientific or ""
-        if len(species) > 25:
-            species = species[:24] + "…"
-        row_data = {
-            "block_name": m.sample_plot.block_name,
-            "plot_no": str(m.sample_plot.sample_plot_number),
-            "stand_type": stand_type_np,
-            "species": species,
-            "dbh": format_devanagari(m.dbh_cm, 1) if m.dbh_cm is not None else "—",
-            "height": format_devanagari(m.height_m, 1) if m.height_m is not None else "—",
-            "class": m.tree_class if m.tree_class else "—",
-            "count": format_devanagari(m.count, 0),
-        }
-        for ci, key in enumerate(keys):
-            cell = tbl.cell(ri, ci)
-            cell.width = Cm(widths[ci])
-            cell.text = ""
-            p = cell.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT
-            run = p.add_run(_fix(str(row_data[key])))
-            run.font.size = Pt(7)
+        y_csv = sep.join(["ब्लक", "प्लट नं.", "दाउरा", "घाँस", "सोतर"])
+        y_lines = [y_csv]
+        for row in yield_rows:
+            vals = [
+                row.get("block_name", ""),
+                row.get("plot_no", ""),
+                _csv_num(row.get("firewood")),
+                _csv_num(row.get("grass")),
+                _csv_num(row.get("bedding")),
+            ]
+            y_lines.append(sep.join(vals))
 
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.paragraph_format.line_spacing = Pt(9)
+        run = p.add_run(_fix("\n".join(y_lines)))
+        run.font.name = "Courier New"
+        run.font.size = Pt(7)
+
+    _end_two_column_section(doc)
     doc.add_paragraph()
 
-    # ── Resource Yield Table ──
-    if yield_rows:
-        sub_heading = doc.add_paragraph()
-        sub_heading.paragraph_format.space_after = Pt(4)
-        run = sub_heading.add_run(_fix("नमुना प्लटमा उपलब्ध स्रोत परिणाम"))
-        run.font.size = Pt(11)
-        run.font.bold = True
 
-        y_keys = [k for k, _, _, _ in FI_YIELD_HEADERS]
-        y_headers = [h for _, h, _, _ in FI_YIELD_HEADERS]
-        y_widths = [w for _, _, w, _ in FI_YIELD_HEADERS]
-        y_align = [a for _, _, _, a in FI_YIELD_HEADERS]
-        y_num_cols = len(y_keys)
-        y_num_rows = len(yield_rows) + 1
+def _add_no_data_para(doc: Document):
+    no_data = doc.add_paragraph()
+    run = no_data.add_run("[Table data not available: fieldinventory]")
+    run.font.size = Pt(9)
+    run.font.italic = True
+    run.font.color.rgb = RGBColor(200, 50, 50)
 
-        y_tbl = doc.add_table(rows=y_num_rows, cols=y_num_cols)
-        y_tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-        y_tbl.style = "Table Grid"
-        y_tbl.autofit = False
 
-        for ci, np_header in enumerate(y_headers):
-            cell = y_tbl.cell(0, ci)
-            cell.width = Cm(y_widths[ci])
-            cell.text = ""
-            p = cell.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run(np_header)
-            run.font.size = Pt(7)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 255, 255)
-            _set_cell_shading(cell, "006400")
+def _csv_num(val) -> str:
+    """Format a numeric value for CSV — empty string if None, Devanagari digits."""
+    if val is None:
+        return ""
+    return format_devanagari(val, 1) if isinstance(val, (int, float)) else str(val)
 
-        for ri, row in enumerate(yield_rows, 1):
-            for ci, key in enumerate(y_keys):
-                cell = y_tbl.cell(ri, ci)
-                cell.width = Cm(y_widths[ci])
-                cell.text = ""
-                val = row.get(key)
-                if key in ("firewood", "grass", "bedding"):
-                    val_str = format_devanagari(val, 1) if val is not None else "—"
-                else:
-                    val_str = str(val) if val is not None else "—"
-                p = cell.paragraphs[0]
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT if y_align[ci] == "left" else WD_ALIGN_PARAGRAPH.CENTER if y_align[ci] == "center" else WD_ALIGN_PARAGRAPH.RIGHT
-                run = p.add_run(_fix(val_str))
-                run.font.size = Pt(7)
 
-        doc.add_paragraph()
+def _get_field_inventory_raw_data(db: Session, fi_calc_id: int) -> list:
+    """Fetch raw measurement rows — only input columns, no calculated fields.
+    Uses raw SQL with namedtuple-like rows (no ORM overhead)."""
+    from sqlalchemy import text as sa_text
+    rows = db.execute(sa_text("""
+        SELECT
+            sp.block_name,
+            sp.sample_plot_number AS plot_no,
+            m.stand_type,
+            m.species_local AS local_name,
+            m.species_scientific AS scientific_name,
+            m.dbh_cm,
+            m.height_m,
+            m.tree_class,
+            m.count,
+            m.sn
+        FROM field_inventory_measurements m
+        JOIN field_inventory_sample_plots sp ON sp.id = m.sample_plot_id
+        WHERE sp.field_inventory_calculation_id = :fi_calc_id
+        ORDER BY sp.block_name, sp.sample_plot_number, m.stand_type, m.sn
+    """), {"fi_calc_id": fi_calc_id}).fetchall()
+    return rows
+
+
+def _get_resource_yield(db: Session, fi_calc_id: int) -> list:
+    """Return resource yield per plot — queried directly from sample plots."""
+    from sqlalchemy import text as sa_text
+    rows = db.execute(sa_text("""
+        SELECT
+            block_name,
+            sample_plot_number AS plot_no,
+            firewood_kg_per_100sqm_per_year AS firewood,
+            grass_kg_per_100sqm_per_year AS grass,
+            bedding_material_kg_per_100sqm_per_year AS bedding
+        FROM field_inventory_sample_plots
+        WHERE field_inventory_calculation_id = :fi_calc_id
+        ORDER BY block_name, sample_plot_number
+    """), {"fi_calc_id": fi_calc_id}).fetchall()
+    return [
+        {
+            "block_name": r.block_name,
+            "plot_no": str(r.plot_no),
+            "firewood": r.firewood,
+            "grass": r.grass,
+            "bedding": r.bedding,
+        }
+        for r in rows
+    ]
 
 
 def _add_text_content(doc: Document, text: str, calculation_id: UUID = None, db: Session = None, raw_data: dict = None, table_cache: dict = None):
@@ -1285,11 +1427,19 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
 
 
 def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calculation_id: UUID = None):
+    # Lazy import chart generators (matplotlib is heavy)
+    from app.services.report.chart_generator import (
+        generate_species_pie, generate_forest_type_pie, generate_block_area_bar,
+        generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
+        generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
+    )
+
     # Check cache first
     if calculation_id:
         cached = _chart_cache_get(calculation_id, chart_type)
         if cached:
-            doc.add_picture(cached, width=Inches(5.0))
+            from app.utils.svg_to_png import add_svg_picture
+            add_svg_picture(doc, cached.getvalue(), width_inches=5.0)
             cap_p = doc.add_paragraph()
             cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = cap_p.add_run(chart_type.replace("_", " ").title())
@@ -1352,6 +1502,10 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
         lc = ra.get("landcover", {}).get("percentages", {})
         dom = ra.get("landcover", {}).get("dominant_class", "")
         img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
+    elif chart_type == "ug_land_cover_classes_chart":
+        ug = raw_data.get("user_group", {})
+        lc_classes = ug.get("land_cover_classes", [])
+        img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
     elif chart_type == "forest_health_pie":
         ra = raw_data.get("raster_analysis", {})
         fh = ra.get("forest_health", {}).get("percentages", {})
@@ -1399,11 +1553,59 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
         if hh and isinstance(hh, dict):
             img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "समृद्धि वितरण (Prosperity Distribution)", is_pie=False)
     elif chart_type == "hh_demand_supply_bar":
-        hh = raw_data.get("households", {})
-        if hh and hh.get("available"):
-            labels = ["काठ (cft)", "दाउरा (भारी)"]
-            values = [hh.get("timber_demand_cft", 0), hh.get("firewood_demand_bhari", 0)]
-            img_data = _chart_from_data(labels, values, forest_name, "माग र आपूर्ति (Demand & Supply)", is_pie=False)
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+            supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+            img_data = _chart_from_data_grouped(
+                labels, {"माग": demand_vals, "आपूर्ति": supply_vals},
+                forest_name, "माग र आपूर्ति तुलना (Demand & Supply Comparison)",
+                colors=["#dc2626", "#059669"],
+            )
+    elif chart_type == "demand_supply_bar":
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+            cf_reg_vals = []
+            for k in products:
+                v = ds.get("supply_cf_regular", {}).get(k, 0)
+                cf_reg_vals.append(v if isinstance(v, (int, float)) else 0)
+            cf_aah_vals = []
+            for k in products:
+                v = ds.get("supply_cf_aah", {}).get(k, 0)
+                cf_aah_vals.append(v if isinstance(v, (int, float)) else 0)
+            private_vals = [ds.get("supply_private", {}).get(k, 0) or 0 for k in products]
+            total_supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+            img_data = _chart_from_data_grouped(
+                labels, {
+                    "माग": demand_vals,
+                    "सा.वन नियमित": cf_reg_vals,
+                    "सा.वन AAH": cf_aah_vals,
+                    "निजि क्षेत्र": private_vals,
+                    "जम्मा आपूर्ति": total_supply_vals,
+                },
+                forest_name, "माग र आपूर्ति ब्रेकडाउन (Demand & Supply Breakdown)",
+                colors=["#dc2626", "#059669", "#3498db", "#e67e22", "#9b59b6"],
+            )
+    elif chart_type == "demand_supply_deficit_bar":
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            deficit_vals = []
+            for k in products:
+                diff = (ds.get("total_supply", {}).get(k, 0) or 0) - (ds.get("demand", {}).get(k, 0) or 0)
+                deficit_vals.append(diff)
+            deficit_colors = ["#059669" if v >= 0 else "#dc2626" for v in deficit_vals]
+            img_data = _chart_from_data(
+                labels, deficit_vals, forest_name,
+                "बचत/कमी तुलना (Surplus/Deficit Comparison)",
+                is_pie=False, colors=deficit_colors,
+            )
     elif chart_type == "budget_bar":
         acts = raw_data.get("activities", {})
         activities = acts.get("activities", [])
@@ -1457,16 +1659,16 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
     if img_data:
         try:
             if img_data.startswith("data:"):
-                from base64 import b64decode
-                encoded = img_data.split(",")[1]
-                img_bytes = b64decode(encoded)
-                doc.add_picture(BytesIO(img_bytes), width=Inches(5.0))
+                from app.utils.svg_to_png import add_svg_picture, _decode_data_uri
+                add_svg_picture(doc, img_data, width_inches=5.0)
                 if calculation_id:
-                    _chart_cache_set(calculation_id, chart_type, BytesIO(img_bytes))
+                    raw_bytes, _ = _decode_data_uri(img_data)
+                    _chart_cache_set(calculation_id, chart_type, BytesIO(raw_bytes))
             else:
                 with open(img_data, "rb") as _f:
                     img_bytes = _f.read()
-                doc.add_picture(img_data, width=Inches(5.0))
+                from app.utils.svg_to_png import add_svg_picture
+                add_svg_picture(doc, img_bytes, width_inches=5.0)
                 if calculation_id:
                     _chart_cache_set(calculation_id, chart_type, BytesIO(img_bytes))
             cap_p = doc.add_paragraph()
@@ -1509,7 +1711,7 @@ def _chart_from_data(labels, values, forest_name, title, is_pie=True, colors=Non
         ax.legend(
             wedges, legend_labels, loc='lower center',
             bbox_to_anchor=(0.5, -0.18), ncol=min(legend_cols, len(labels)),
-            fontsize=7, frameon=False,
+            fontsize=7, frameon=False, prop=_dev_fontprop(7),
         )
         ax.set_title(f'{forest_name} - {title}', fontsize=11, fontweight='bold', pad=15)
     else:
@@ -1522,22 +1724,86 @@ def _chart_from_data(labels, values, forest_name, title, is_pie=True, colors=Non
             else:
                 label_text = format_devanagari(val, 1)
             ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + max(values)*0.01,
-                    label_text, ha='center', va='bottom', fontsize=7)
+                    label_text, ha='center', va='bottom', fontsize=7,
+                    fontproperties=_dev_fontprop(7))
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
         ax.set_ylabel('Value', fontsize=10)
         ax.set_title(f'{forest_name} - {title}', fontsize=11, fontweight='bold')
         ax.yaxis.grid(True, alpha=0.3)
 
+    if _DEV_FONT_PATH:
+        ax.title.set_fontproperties(_dev_fontprop(11))
+        ax.xaxis.label.set_fontproperties(_dev_fontprop(10))
+        ax.yaxis.label.set_fontproperties(_dev_fontprop(10))
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontproperties(_dev_fontprop(8))
+
     fig.tight_layout()
     if is_pie:
         fig.subplots_adjust(bottom=0.28)
     buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    fig.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
     plt.close(fig)
     buf.seek(0)
     from base64 import b64encode
-    return f"data:image/png;base64,{b64encode(buf.read()).decode()}"
+    return f"data:image/svg+xml;base64,{b64encode(buf.read()).decode()}"
+
+
+def _chart_from_data_grouped(labels, series_dict, forest_name, title, colors=None):
+    """Create a grouped bar chart with multiple series (e.g. demand vs supply)."""
+    _ensure_dev_font()
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    series_names = list(series_dict.keys())
+    series_values = list(series_dict.values())
+    n_series = len(series_names)
+
+    if colors is None:
+        colors = ['#dc2626', '#059669', '#3498db', '#e67e22', '#9b59b6']
+    colors = colors[:n_series]
+
+    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=150)
+
+    x = np.arange(len(labels))
+    width = 0.8 / max(n_series, 1)
+    max_val = max(max(v) for v in series_values) if series_values else 0
+
+    for i, (sname, svals) in enumerate(series_dict.items()):
+        offset = (i - (n_series - 1) / 2) * width
+        bars = ax.bar(x + offset, svals, width, label=sname, color=colors[i], edgecolor='white')
+        for bar, val in zip(bars, svals):
+            if val:
+                ax.text(bar.get_x() + bar.get_width() / 2.,
+                        bar.get_height() + max_val * 0.01,
+                        format_devanagari(val, 1),
+                        ha='center', va='bottom', fontsize=6,
+                        fontproperties=_dev_fontprop(6))
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel('Value', fontsize=10)
+    ax.set_title(f'{forest_name} - {title}', fontsize=11, fontweight='bold')
+    ax.legend(fontsize=8, prop=_dev_fontprop(8))
+    ax.yaxis.grid(True, alpha=0.3)
+
+    if _DEV_FONT_PATH:
+        ax.title.set_fontproperties(_dev_fontprop(11))
+        ax.xaxis.label.set_fontproperties(_dev_fontprop(10))
+        ax.yaxis.label.set_fontproperties(_dev_fontprop(10))
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontproperties(_dev_fontprop(8))
+
+    fig.tight_layout()
+    buf = BytesIO()
+    fig.savefig(buf, format='svg', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    from base64 import b64encode
+    return f"data:image/svg+xml;base64,{b64encode(buf.read()).decode()}"
 
 
 def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Session, forest_name: str = "CF"):
@@ -1545,7 +1811,7 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
 
     alias_map = {"boundary_map": "boundary"}
     layer_name = alias_map.get(map_type, map_type)
-    known_layers = {"boundary","forest_type","forest_health","slope","biomass","landcover","soil_texture","dem","aspect","canopy","sampling_plot","sampling_plot_topo","sampling_plot_satellite","fieldbook","usergroup","subarea"}
+    known_layers = {"boundary","forest_type","forest_health","slope","biomass","landcover","soil_texture","dem","aspect","canopy","sampling_plot","sampling_plot_topo","sampling_plot_satellite","fieldbook","usergroup","subarea","compartment","sub_compartment"}
 
     if layer_name not in known_layers:
         p = doc.add_paragraph()
@@ -1567,16 +1833,37 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
             run.font.color.rgb = RGBColor(200, 0, 0)
             return
 
+    if layer_name in ("compartment", "sub_compartment"):
+        from app.models.forest_block import ForestBlock
+        has_compartments = db.query(ForestBlock.id).filter(
+            ForestBlock.calculation_id == str(calculation_id),
+            ForestBlock.is_compartment == True,
+        ).first() is not None
+        if not has_compartments:
+            p = doc.add_paragraph()
+            run = p.add_run(f"[Map: {map_type}] - data not available (no compartments drawn)")
+            run.font.italic = True
+            run.font.color.rgb = RGBColor(200, 0, 0)
+            return
+
+    img_size = 0
     try:
         use_cache = True
         buf = generate_standard_map(db, calculation_id, layer_name, forest_name=forest_name, use_cache=use_cache)
+        buf.seek(0, 2)
+        img_size = buf.tell()
         buf.seek(0)
-        pic_width = Inches(5.83) if layer_name == "subarea" else Inches(5.5)
-        doc.add_picture(buf, width=pic_width)
-    except Exception:
+        if img_size < 5000:
+            logger.warning(f"Map too small ({img_size}B) for {layer_name} — generation likely failed")
+            buf = None
+        else:
+            logger.info(f"Map OK ({img_size}B) — adding {layer_name} to DOCX")
+    except Exception as e:
+        logger.error(f"Map generation exception for {layer_name}: {e}")
         buf = None
 
     if buf:
+        doc.add_picture(buf, width=Inches(5.83 if layer_name == "subarea" else 5.5))
         labels = LAYER_LABELS.get(layer_name, {"ne": layer_name, "en": layer_name})
         cap_p = doc.add_paragraph()
         cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1587,17 +1874,25 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
         doc.add_paragraph()
     else:
         p = doc.add_paragraph()
-        run = p.add_run(f"[Map: {map_type}] - data not available")
+        run = p.add_run(f"[Map: {map_type}] - map unavailable (PNG: {img_size}B)")
         run.font.italic = True
         run.font.color.rgb = RGBColor(200, 0, 0)
 
 
 def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any], calculation_id: UUID = None):
+    # Lazy import chart generators
+    from app.services.report.chart_generator import (
+        generate_species_pie, generate_forest_type_pie, generate_block_area_bar,
+        generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
+        generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
+    )
+
     # Check cache first
     if calculation_id and node.chart_type:
         cached = _chart_cache_get(calculation_id, node.chart_type)
         if cached:
-            doc.add_picture(cached, width=Inches(5.5))
+            from app.utils.svg_to_png import add_svg_picture
+            add_svg_picture(doc, cached.getvalue(), width_inches=5.5)
             cap_p = doc.add_paragraph()
             cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = cap_p.add_run(node.title_ne or "Chart")
@@ -1657,20 +1952,24 @@ def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any], calculat
         lc = ra.get("landcover", {}).get("percentages", {})
         dom = ra.get("landcover", {}).get("dominant_class", "")
         img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
+    elif node.chart_type == "ug_land_cover_classes_chart":
+        ug = raw_data.get("user_group", {})
+        lc_classes = ug.get("land_cover_classes", [])
+        img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
 
     if img_data:
         try:
             if img_data.startswith("data:"):
-                from base64 import b64decode
-                encoded = img_data.split(",")[1]
-                img_bytes = b64decode(encoded)
-                doc.add_picture(BytesIO(img_bytes), width=Inches(5.5))
+                from app.utils.svg_to_png import add_svg_picture, _decode_data_uri
+                add_svg_picture(doc, img_data, width_inches=5.5)
                 if calculation_id and node.chart_type:
-                    _chart_cache_set(calculation_id, node.chart_type, BytesIO(img_bytes))
+                    raw_bytes, _ = _decode_data_uri(img_data)
+                    _chart_cache_set(calculation_id, node.chart_type, BytesIO(raw_bytes))
             else:
                 with open(img_data, "rb") as _f:
                     img_bytes = _f.read()
-                doc.add_picture(img_data, width=Inches(5.5))
+                from app.utils.svg_to_png import add_svg_picture
+                add_svg_picture(doc, img_bytes, width_inches=5.5)
                 if calculation_id and node.chart_type:
                     _chart_cache_set(calculation_id, node.chart_type, BytesIO(img_bytes))
             cap_p = doc.add_paragraph()
@@ -1900,6 +2199,7 @@ def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
     data = node.static_table or {}
     columns = data.get("columns", [])
     rows = data.get("rows", [])
+    merges = data.get("merges", []) or []
     if not columns or not rows:
         p = doc.add_paragraph()
         run = p.add_run("[Static table — no data]")
@@ -1918,13 +2218,41 @@ def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
                 r.font.bold = True
                 r.font.color.rgb = RGBColor(255, 255, 255)
         _set_cell_shading(cell, "006400")
+    for m in merges:
+        mr, mc = m["row"], m["col"]
+        rs, cs = m["rowspan"], m["colspan"]
+        if rs > 1 or cs > 1:
+            master = tbl.cell(mr + 1, mc)
+            target = tbl.cell(mr + rs, mc + cs - 1)
+            merged = master.merge(target)
+            cell_text = str(rows[mr][mc]) if rows and mr < len(rows) and mc < len(rows[mr]) and rows[mr][mc] is not None else ""
+            if raw_data and cell_text.startswith("{{") and cell_text.endswith("}}"):
+                cell_text = _resolve_var_text(cell_text, raw_data)
+            merged.text = _fix(cell_text)
+            for p in merged.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9)
     for ri, row in enumerate(rows, 1):
         for ci, val in enumerate(row):
+            is_slave = any(
+                m["row"] <= ri - 1 < m["row"] + m["rowspan"]
+                and m["col"] <= ci < m["col"] + m["colspan"]
+                and not (ri - 1 == m["row"] and ci == m["col"])
+                for m in merges
+            )
+            if is_slave:
+                continue
+            is_merged_master = any(
+                ri - 1 == m["row"] and ci == m["col"] and (m["rowspan"] > 1 or m["colspan"] > 1)
+                for m in merges
+            )
+            if is_merged_master:
+                continue
             cell = tbl.cell(ri, ci)
             cell_text = str(val) if val is not None else ""
             if raw_data and cell_text.startswith("{{") and cell_text.endswith("}}"):
                 cell_text = _resolve_var_text(cell_text, raw_data)
-            cell.text = _fix( cell_text)
+            cell.text = _fix(cell_text)
             for p in cell.paragraphs:
                 for r in p.runs:
                     r.font.size = Pt(9)
@@ -1932,6 +2260,11 @@ def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
 
 
 def _add_map(doc: Document, node: TreeNode, calculation_id: UUID, db: Session, calc_cache: dict = None):
+    # Lazy imports (matplotlib + geoalchemy2 are heavy)
+    from app.services.report.map_generator import generate_boundary_map
+    from geoalchemy2.shape import to_shape
+    from shapely.geometry import mapping
+
     if node.map_type:
         forest_name = (calc_cache or {}).get("forest_name", "CF")
         _add_map_standard(doc, node.map_type, calculation_id, db, forest_name)
@@ -1981,11 +2314,20 @@ def _add_map(doc: Document, node: TreeNode, calculation_id: UUID, db: Session, c
     if img_data:
         try:
             if img_data.startswith("data:"):
-                from base64 import b64decode
-                encoded = img_data.split(",")[1]
-                doc.add_picture(BytesIO(b64decode(encoded)), width=Inches(5.5))
+                from app.utils.svg_to_png import add_svg_picture, _decode_data_uri
+                raw_bytes, _ = _decode_data_uri(img_data)
+                if len(raw_bytes) < 5000:
+                    logger.warning(f"Boundary map too small ({len(raw_bytes)}B) — skipping blank image")
+                    raise ValueError("Blank image")
+                add_svg_picture(doc, raw_bytes, width_inches=5.5)
             else:
-                doc.add_picture(img_data, width=Inches(5.5))
+                if not os.path.exists(img_data) or os.path.getsize(img_data) < 5000:
+                    logger.warning(f"Boundary map file too small or missing: {img_data}")
+                    raise ValueError("Blank or missing image file")
+                with open(img_data, "rb") as _f:
+                    img_bytes = _f.read()
+                from app.utils.svg_to_png import add_svg_picture
+                add_svg_picture(doc, img_bytes, width_inches=5.5)
             cap_p = doc.add_paragraph()
             cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = cap_p.add_run(node.title_ne or "Forest Boundary Map")
@@ -2006,6 +2348,10 @@ def _add_map(doc: Document, node: TreeNode, calculation_id: UUID, db: Session, c
 def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
                raw_data: Dict[str, Any], db: Session,
                table_cache: dict = None, calc_cache: dict = None):
+    _wt_timers = {"text": 0.0, "chart": 0.0, "table": 0.0, "static_table": 0.0, "map": 0.0, "heading": 0.0, "children": 0.0, "total": 0.0}
+    _wt_counts = {"text": 0, "chart": 0, "table": 0, "static_table": 0, "map": 0, "nodes": 0}
+    _wt_slow_nodes = []
+    _wt_start = time.time()
     for node in nodes:
         if node.hidden_in_export or node.deleted:
             continue
@@ -2016,50 +2362,456 @@ def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
         is_static_table = node.content_type == "static_table"
         is_map = node.content_type == "map"
         has_children = any((not c.hidden_in_export and not c.deleted) for c in node.children)
+        _wt_counts["nodes"] += 1
+        _node_start = time.time()
 
         if has_content or is_chart or is_table or is_static_table or is_map or has_children:
-            if node.type in ("section", "preamble", "appendix"):
+            if node.type in ("section", "preamble", "appendix") or node.page_break_before:
                 doc.add_page_break()
             _add_heading(doc, node)
 
         if has_content:
+            _t0 = time.time()
             _add_text_content(doc, node.content, calculation_id, db, raw_data, table_cache)
+            _wt_timers["text"] += time.time() - _t0
+            _wt_counts["text"] += 1
 
         if is_chart:
+            _t0 = time.time()
             _add_chart(doc, node, raw_data, calculation_id)
+            _wt_timers["chart"] += time.time() - _t0
+            _wt_counts["chart"] += 1
 
         if is_table:
+            _t0 = time.time()
             _add_table(doc, node, table_cache)
+            _wt_timers["table"] += time.time() - _t0
+            _wt_counts["table"] += 1
 
         if is_static_table:
+            _t0 = time.time()
             _add_static_table(doc, node, raw_data)
+            _wt_timers["static_table"] += time.time() - _t0
+            _wt_counts["static_table"] += 1
 
         if is_map:
+            _t0 = time.time()
             _add_map(doc, node, calculation_id, db, calc_cache)
+            _wt_timers["map"] += time.time() - _t0
+            _wt_counts["map"] += 1
 
         if has_children:
+            _t0 = time.time()
             _walk_tree(doc, node.children, calculation_id, raw_data, db, table_cache, calc_cache)
+            _wt_timers["children"] += time.time() - _t0
 
         if has_content or is_chart or is_table or is_static_table or is_map or has_children:
             doc.add_paragraph()
+
+        _node_elapsed = time.time() - _node_start
+        if _node_elapsed > 1.0:
+            _wt_slow_nodes.append(f"{node.title_en or node.title_ne or '?'}={_node_elapsed:.1f}s")
+
+    _wt_timers["total"] = time.time() - _wt_start
+    if _wt_slow_nodes:
+        logger.info("WT_SLOW: %s", " | ".join(_wt_slow_nodes))
+    logger.info(
+        "WT_PROFILE: nodes=%d text=%.2fs(%d) chart=%.2fs(%d) table=%.2fs(%d) static=%.2fs(%d) map=%.2fs(%d) heading=%.2fs children=%.2fs total=%.2fs",
+        _wt_counts["nodes"],
+        _wt_timers["text"], _wt_counts["text"],
+        _wt_timers["chart"], _wt_counts["chart"],
+        _wt_timers["table"], _wt_counts["table"],
+        _wt_timers["static_table"], _wt_counts["static_table"],
+        _wt_timers["map"], _wt_counts["map"],
+        _wt_timers["heading"],
+        _wt_timers["children"],
+        _wt_timers["total"],
+    )
 
 
 # ═══════════════════════════════════════════════════════
 # HTML Preview Functions
 # ═══════════════════════════════════════════════════════
 
-def _render_table_inline_replacement(table_id: str, table_cache: dict = None) -> str:
+def _render_table_inline_replacement(table_id: str, table_cache: dict = None,
+                                     calculation_id: UUID = None, db: Session = None) -> str:
     if table_id == "fieldinventory":
-        return '<div class="chart-placeholder">📋 क्षेत्र सर्वेक्षण मापन तथ्याङ्क<br><small>Rendered as table in DOCX</small></div>'
+        return _render_fieldinventory_html(calculation_id, db)
     parts = []
     _add_table_inline_html(parts, table_id, table_cache)
     return "".join(parts) if parts else f'<div class="chart-placeholder">📋 {table_id}<br><small>Rendered as table in DOCX</small></div>'
+
+
+def _render_fieldinventory_html(calculation_id: UUID, db: Session) -> str:
+    """Render {{table:fieldinventory}} as HTML for preview."""
+    if not calculation_id or not db:
+        return '<div class="chart-placeholder">📋 क्षेत्र सर्वेक्षण मापन तथ्याङ्क<br><small>Rendered as table in DOCX</small></div>'
+
+    fi_calc = db.query(FieldInventoryCalculation).filter(
+        FieldInventoryCalculation.calculation_id == calculation_id
+    ).first()
+    if not fi_calc:
+        return '<div class="chart-placeholder">📋 क्षेत्र सर्वेक्षण — no data</div>'
+
+    measurements = (
+        db.query(FieldInventoryMeasurement)
+        .options(joinedload(FieldInventoryMeasurement.sample_plot))
+        .join(FieldInventorySamplePlot)
+        .filter(FieldInventorySamplePlot.field_inventory_calculation_id == fi_calc.id)
+        .all()
+    )
+    if not measurements:
+        return '<div class="chart-placeholder">📋 क्षेत्र सर्वेक्षण — no data</div>'
+
+    measurements.sort(key=lambda m: (
+        m.sample_plot.block_name,
+        m.sample_plot.sample_plot_number,
+        ST_TYPE_SORT.get(m.stand_type, 99),
+        m.sn or 0,
+    ))
+
+    ST_TYPE_MAP_NP = {
+        "Regeneration": "पुनरुत्पादन", "Sapling": "लाथ्रा",
+        "Pole": "पोल", "Tree": "रूख",
+    }
+
+    h = _html_escape
+    parts = ['<div class="table-preview">']
+    parts.append('<h4 style="margin:12px 0 4px;font-size:14px;font-weight:700;">क्षेत्र सर्वेक्षण मापन तथ्याङ्क</h4>')
+    parts.append('<table class="data"><thead><tr>')
+    for np_h in ("ब्लक", "प्लट नं.", "प्रकार", "प्रजाति", "DBH (से.मि.)", "उचाइ (मि.)", "वर्ग", "गणना"):
+        parts.append(f'<th>{np_h}</th>')
+    parts.append('</tr></thead><tbody>')
+
+    for m in measurements:
+        sp = m.sample_plot
+        if not sp:
+            continue
+        stand_type_np = ST_TYPE_MAP_NP.get(m.stand_type, m.stand_type or "—")
+        species = (m.species_scientific or "")[:25]
+        dbh_str = format_devanagari(m.dbh_cm, 1) if m.dbh_cm is not None else "—"
+        ht_str = format_devanagari(m.height_m, 1) if m.height_m is not None else "—"
+        cls_str = h(str(m.tree_class)) if m.tree_class else "—"
+        cnt_str = format_devanagari(m.count, 0) if m.count else "1"
+        parts.append('<tr>')
+        parts.append(f'<td>{h(sp.block_name)}</td>')
+        parts.append(f'<td>{format_devanagari(sp.sample_plot_number, 0)}</td>')
+        parts.append(f'<td>{stand_type_np}</td>')
+        parts.append(f'<td>{h(species)}</td>')
+        parts.append(f'<td>{dbh_str}</td>')
+        parts.append(f'<td>{ht_str}</td>')
+        parts.append(f'<td>{cls_str}</td>')
+        parts.append(f'<td>{cnt_str}</td>')
+        parts.append('</tr>')
+    parts.append('</tbody></table>')
+
+    # Yield table
+    seen_plots = set()
+    yield_rows = []
+    for m in measurements:
+        sp = m.sample_plot
+        if not sp:
+            continue
+        key = (sp.block_name, sp.sample_plot_number)
+        if key not in seen_plots:
+            seen_plots.add(key)
+            yield_rows.append({
+                "block_name": sp.block_name,
+                "plot_no": format_devanagari(sp.sample_plot_number, 0),
+                "firewood": format_devanagari(sp.firewood_kg_per_100sqm_per_year, 1) if sp.firewood_kg_per_100sqm_per_year is not None else "—",
+                "grass": format_devanagari(sp.grass_kg_per_100sqm_per_year, 1) if sp.grass_kg_per_100sqm_per_year is not None else "—",
+                "bedding": format_devanagari(sp.bedding_material_kg_per_100sqm_per_year, 1) if sp.bedding_material_kg_per_100sqm_per_year is not None else "—",
+            })
+
+    if yield_rows:
+        parts.append('<h4 style="margin:12px 0 4px;font-size:14px;font-weight:700;">नमुना प्लटमा उपलब्ध स्रोत परिणाम</h4>')
+        parts.append('<table class="data"><thead><tr>')
+        for yh in ("ब्लक", "प्लट नं.", "दाउरा (के.जी.)", "घाँस (के.जी.)", "सोतर (के.जी.)"):
+            parts.append(f'<th>{yh}</th>')
+        parts.append('</tr></thead><tbody>')
+        for yr in yield_rows:
+            parts.append('<tr>')
+            parts.append(f'<td>{h(yr["block_name"])}</td>')
+            parts.append(f'<td>{yr["plot_no"]}</td>')
+            parts.append(f'<td>{yr["firewood"]}</td>')
+            parts.append(f'<td>{yr["grass"]}</td>')
+            parts.append(f'<td>{yr["bedding"]}</td>')
+            parts.append('</tr>')
+        parts.append('</tbody></table>')
+
+    parts.append('</div>')
+    return "\n".join(parts)
+
+
+def _render_chart_html(chart_type: str, raw_data: dict, calculation_id: UUID = None, forest_name: str = "") -> str:
+    """Render a chart as base64-embedded PNG for HTML preview."""
+    if calculation_id:
+        cached = _chart_cache_get(calculation_id, chart_type)
+        if cached:
+            import base64
+            b64 = base64.b64encode(cached.getvalue()).decode("utf-8")
+            return f'<div style="margin:12px 0;text-align:center;"><img src="data:image/svg+xml;base64,{b64}" style="max-width:100%;border:1px solid #ddd;border-radius:4px;" alt="{_html_escape(chart_type)}"><div style="font-size:9pt;color:#666;margin-top:4px;">{chart_type.replace("_", " ").title()}</div></div>'
+
+    from app.services.report.chart_generator import (
+        generate_species_pie, generate_forest_type_pie, generate_block_area_bar,
+        generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
+        generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
+    )
+
+    language = raw_data.get("basic_info", {}).get("language", "NP")
+    img_data = None
+
+    if chart_type == "species_pie" or chart_type == "species_composition_pie":
+        species = raw_data.get("species", {})
+        if isinstance(species, dict):
+            species = species.get("species_list", [])
+        if isinstance(species, dict):
+            species = species.get("species_list", [])
+        img_data = generate_species_pie(species, forest_name, top_n=8)
+    elif chart_type in ("species_composition_pie_fi",):
+        fi = raw_data.get("field_inventory", {})
+        comp = fi.get("fi_species_composition", {})
+        if comp and isinstance(comp, dict):
+            species_list = [
+                {"scientific_name": k, "local_name": "", "availability_rank": i}
+                for i, (k, _) in enumerate(
+                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
+                )
+            ]
+            img_data = generate_species_pie(species_list, forest_name, top_n=8)
+    elif chart_type == "forest_type_pie" or chart_type == "forest_type":
+        ra = raw_data.get("raster_analysis", {})
+        ft = ra.get("forest_type", {}).get("percentages", {})
+        img_data = generate_forest_type_pie(ft, forest_name, language=language)
+    elif chart_type == "block_area_bar":
+        blocks = raw_data.get("blocks", {}).get("blocks", [])
+        img_data = generate_block_area_bar(blocks, forest_name, language=language)
+    elif chart_type == "dbh_histogram":
+        inv = raw_data.get("inventory", {})
+        dbh = inv.get("dbh_summary", {}) or inv.get("dbh_distribution", {})
+        img_data = generate_dbh_histogram(dbh, forest_name)
+    elif chart_type == "biomass_bar":
+        bi = raw_data.get("basic_info", {})
+        agb = bi.get("above_ground_biomass_tons", 0) or bi.get("agb_total", 0)
+        carbon = bi.get("carbon_stock_tc", 0) or bi.get("carbon_stock", 0)
+        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
+    elif chart_type in ("slope_pie", "slope_bar"):
+        ra = raw_data.get("raster_analysis", {})
+        sp = ra.get("slope", {}).get("percentages", {})
+        dom = ra.get("slope", {}).get("dominant_class", "")
+        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
+    elif chart_type in ("canopy_pie", "canopy_bar"):
+        ra = raw_data.get("raster_analysis", {})
+        cp = ra.get("canopy", {}).get("percentages", {})
+        dom = ra.get("canopy", {}).get("dominant_class", "")
+        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
+    elif chart_type == "landcover_pie":
+        ra = raw_data.get("raster_analysis", {})
+        lc = ra.get("landcover", {}).get("percentages", {})
+        dom = ra.get("landcover", {}).get("dominant_class", "")
+        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
+    elif chart_type == "ug_land_cover_classes_chart":
+        ug = raw_data.get("user_group", {})
+        lc_classes = ug.get("land_cover_classes", [])
+        img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
+    elif chart_type == "forest_health_pie":
+        ra = raw_data.get("raster_analysis", {})
+        fh = ra.get("forest_health", {}).get("percentages", {})
+        if fh:
+            fh_colors = [_HEALTH_COLORS_MAP.get(k, "#95a5a6") for k in fh.keys()]
+            img_data = _chart_from_data(list(fh.keys()), list(fh.values()), forest_name, "Forest Health", colors=fh_colors, legend_cols=2)
+    elif chart_type == "aspect_rose":
+        ra = raw_data.get("raster_analysis", {})
+        ap = ra.get("aspect", {}).get("percentages", {})
+        if ap:
+            asp_colors = [_ASPECT_COLORS_MAP.get(k, "#95a5a6") for k in ap.keys()]
+            img_data = _chart_from_data(list(ap.keys()), list(ap.values()), forest_name, "Aspect Distribution", colors=asp_colors, legend_cols=4)
+    elif chart_type == "nasa_forest_2020_pie":
+        rd = raw_data.get("result_data", {})
+        pct = rd.get("whole_nasa_forest_2020_percentages", {})
+        if pct and isinstance(pct, dict):
+            items = {k: v for k, v in pct.items() if v > 0}
+            if items:
+                nasa_colors = [_NASA_FOREST_QUALITY_COLORS.get(k, "#95a5a6") for k in items.keys()]
+                img_data = _chart_from_data(list(items.keys()), list(items.values()), forest_name, "Forest Quality", colors=nasa_colors)
+    elif chart_type == "soil_bar":
+        ra = raw_data.get("raster_analysis", {})
+        sp = ra.get("soil", {}).get("percentages", {})
+        if not sp:
+            rd = raw_data.get("result_data", {})
+            props = rd.get("soil_properties", {})
+            if props and props.get("clay_pct") is not None:
+                sp = {"Clay": props["clay_pct"], "Sand": props["sand_pct"], "Silt": props["silt_pct"]}
+        if sp:
+            img_data = _chart_from_data(list(sp.keys()), list(sp.values()), forest_name, "Soil Distribution", is_pie=False, colors=_SOIL_BAR_COLORS[:len(sp)])
+    elif chart_type == "hh_prosperity_pie":
+        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Prosperity Distribution")
+    elif chart_type == "hh_caste_bar":
+        hh = raw_data.get("households", {}).get("caste_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Caste Distribution", is_pie=False)
+    elif chart_type == "hh_caste_pie":
+        hh = raw_data.get("households", {}).get("caste_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "जाति वितरण (Caste Distribution)")
+    elif chart_type == "hh_prosperity_bar":
+        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "समृद्धि वितरण (Prosperity Distribution)", is_pie=False)
+    elif chart_type == "hh_demand_supply_bar":
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+            supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+            img_data = _chart_from_data_grouped(
+                labels, {"माग": demand_vals, "आपूर्ति": supply_vals},
+                forest_name, "माग र आपूर्ति तुलना (Demand & Supply Comparison)",
+                colors=["#dc2626", "#059669"],
+            )
+    elif chart_type == "demand_supply_bar":
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+            cf_reg_vals = []
+            for k in products:
+                v = ds.get("supply_cf_regular", {}).get(k, 0)
+                cf_reg_vals.append(v if isinstance(v, (int, float)) else 0)
+            cf_aah_vals = []
+            for k in products:
+                v = ds.get("supply_cf_aah", {}).get(k, 0)
+                cf_aah_vals.append(v if isinstance(v, (int, float)) else 0)
+            private_vals = [ds.get("supply_private", {}).get(k, 0) or 0 for k in products]
+            total_supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+            img_data = _chart_from_data_grouped(
+                labels, {
+                    "माग": demand_vals,
+                    "सा.वन नियमित": cf_reg_vals,
+                    "सा.वन AAH": cf_aah_vals,
+                    "निजि क्षेत्र": private_vals,
+                    "जम्मा आपूर्ति": total_supply_vals,
+                },
+                forest_name, "माग र आपूर्ति ब्रेकडाउन (Demand & Supply Breakdown)",
+                colors=["#dc2626", "#059669", "#3498db", "#e67e22", "#9b59b6"],
+            )
+    elif chart_type == "demand_supply_deficit_bar":
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            deficit_vals = []
+            for k in products:
+                diff = (ds.get("total_supply", {}).get(k, 0) or 0) - (ds.get("demand", {}).get(k, 0) or 0)
+                deficit_vals.append(diff)
+            deficit_colors = ["#059669" if v >= 0 else "#dc2626" for v in deficit_vals]
+            img_data = _chart_from_data(
+                labels, deficit_vals, forest_name,
+                "बचत/कमी तुलना (Surplus/Deficit Comparison)",
+                is_pie=False, colors=deficit_colors,
+            )
+    elif chart_type == "budget_bar":
+        acts = raw_data.get("activities", {})
+        activities = acts.get("activities", [])
+        if activities:
+            labels = [f"Activity {a.get('activity_id', i+1)}" for i, a in enumerate(activities)]
+            values = [a.get("default_quantity", 0) or sum(yd.get("budget", 0) for yd in a.get("yearly_details", [])) for a in activities]
+            img_data = _chart_from_data(labels, values, forest_name, "Budget", is_pie=False)
+    elif chart_type == "ya_budget_year_bar":
+        yp = raw_data.get("yearly_plan", {})
+        trend = yp.get("budget_year_trend", {})
+        if trend and isinstance(trend, dict):
+            labels = [f"Year {k}" for k in sorted(trend.keys(), key=int)]
+            values = [trend[k] for k in sorted(trend.keys(), key=int)]
+            year_colors = ["#2ecc71", "#27ae60", "#1abc9c", "#16a085", "#3498db",
+                           "#2980b9", "#9b59b6", "#8e44ad", "#e67e22", "#d35400"]
+            img_data = _chart_from_data(labels, values, forest_name,
+                                         "वार्षिक बजेट वितरण (Year-wise Budget)",
+                                         is_pie=False, colors=year_colors[:len(labels)])
+    elif chart_type == "ya_program_pie":
+        yp = raw_data.get("yearly_plan", {})
+        pie_data = yp.get("program_pie_data", {})
+        if pie_data and isinstance(pie_data, dict):
+            prog_items = {k: v for k, v in pie_data.items() if v > 0}
+            if prog_items:
+                prog_colors = ["#27ae60", "#2980b9", "#e67e22", "#e74c3c",
+                               "#9b59b6", "#f1c40f", "#1abc9c", "#2c3e50"]
+                img_data = _chart_from_data(list(prog_items.keys()), list(prog_items.values()),
+                                             forest_name, "कार्यक्रम अनुसार बजेट (Program Budget)",
+                                             colors=prog_colors[:len(prog_items)])
+    elif chart_type == "dbh_class_bar":
+        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
+        if cd:
+            labels = [d["label"] for d in cd]
+            values = [d["count_per_ha"] for d in cd]
+            total = sum(values)
+            pcts = [v / total * 100 if total > 0 else 0 for v in values]
+            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
+            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)",
+                                         is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
+    elif chart_type == "dbh_class_count_bar":
+        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
+        if cd:
+            labels = [d["label"] for d in cd]
+            values = [d["count_per_ha"] for d in cd]
+            total = sum(values)
+            pcts = [v / total * 100 if total > 0 else 0 for v in values]
+            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
+            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)",
+                                         is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
+
+    if img_data:
+        try:
+            if img_data.startswith("data:"):
+                if calculation_id:
+                    from app.utils.svg_to_png import _decode_data_uri
+                    raw_bytes, _ = _decode_data_uri(img_data)
+                    _chart_cache_set(calculation_id, chart_type, BytesIO(raw_bytes))
+                return f'<div style="margin:12px 0;text-align:center;"><img src="{img_data}" style="max-width:100%;border:1px solid #ddd;border-radius:4px;" alt="{_html_escape(chart_type)}"><div style="font-size:9pt;color:#666;margin-top:4px;">{chart_type.replace("_", " ").title()}</div></div>'
+            else:
+                with open(img_data, "rb") as _f:
+                    img_bytes = _f.read()
+                if calculation_id:
+                    _chart_cache_set(calculation_id, chart_type, BytesIO(img_bytes))
+                import base64
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                return f'<div style="margin:12px 0;text-align:center;"><img src="data:image/svg+xml;base64,{b64}" style="max-width:100%;border:1px solid #ddd;border-radius:4px;" alt="{_html_escape(chart_type)}"><div style="font-size:9pt;color:#666;margin-top:4px;">{chart_type.replace("_", " ").title()}</div></div>'
+        except Exception:
+            pass
+
+    return f'<div class="chart-placeholder">📊 {chart_type}<br><small>Chart data not available</small></div>'
+
+
+def _render_map_html(calculation_id: UUID, db: Session, layer_name: str, forest_name: str = "CF") -> str:
+    """Render a map layer as base64-embedded PNG for HTML preview."""
+    if not calculation_id or not db:
+        return f'<div class="chart-placeholder">🗺️ {layer_name}<br><small>No data</small></div>'
+    try:
+        from app.services.management_plan_docx.plan_map_service import generate_standard_map
+        buf = generate_standard_map(db, calculation_id, layer_name, forest_name=forest_name, use_cache=True)
+        if buf and buf.getbuffer().nbytes > 5000:
+            import base64
+            buf.seek(0)
+            b64 = base64.b64encode(buf.read()).decode("utf-8")
+            return f'<div style="margin:12px 0;text-align:center;"><img src="data:image/png;base64,{b64}" style="max-width:100%;border:1px solid #ddd;border-radius:4px;" alt="{_html_escape(layer_name)}"></div>'
+    except Exception as e:
+        logger.warning(f"Map preview failed for {layer_name}: {e}")
+    return f'<div class="chart-placeholder">🗺️ {layer_name}<br><small>Maps are generated in DOCX/PDF export. No preview available.</small></div>'
 
 
 def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
                     raw_data: Dict[str, Any], db: Session,
                     table_cache: dict = None) -> str:
     parts = []
+    forest_name = ""
+    if raw_data:
+        bi = raw_data.get("basic_info", {})
+        if isinstance(bi, dict):
+            forest_name = bi.get("forest_name", "")
     for node in nodes:
         if node.hidden_in_export or node.deleted:
             continue
@@ -2074,24 +2826,27 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
 
         num = f"{node.number}. " if node.number else ""
         tag = "h2" if node.type in ("subsection",) else "h1"
-        parts.append(f'<div class="section" id="{node.id}">')
+        page_cls = " page-break" if node.page_break_before else ""
+        parts.append(f'<div class="section{page_cls}" id="{node.id}">')
+        if node.page_break_before:
+            parts.append('<hr class="pb-marker">')
         parts.append(f'<{tag}>{num}{node.title_ne}</{tag}>')
 
         if has_content:
             escaped = _html_escape(node.content)
             escaped = re.sub(
                 r'\{\{chart:(\w+)\}\}',
-                r'<div class="chart-placeholder">📊 \1<br><small>Rendered as PNG in DOCX</small></div>',
+                lambda m: _render_chart_html(m.group(1), raw_data, calculation_id, forest_name),
                 escaped
             )
             escaped = re.sub(
                 r'\{\{map:(\w+)\}\}',
-                r'<div class="chart-placeholder">🗺️ \1<br><small>Rendered as PNG in DOCX</small></div>',
+                lambda m: _render_map_html(calculation_id, db, m.group(1), forest_name),
                 escaped
             )
             escaped = re.sub(
                 r'\{\{table:(\w+)\}\}',
-                lambda m: _render_table_inline_replacement(m.group(1), table_cache),
+                lambda m: _render_table_inline_replacement(m.group(1), table_cache, calculation_id, db),
                 escaped
             )
             escaped = _render_html_list_vars(escaped, raw_data)
@@ -2103,22 +2858,11 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
             parts.append(f'<div class="section-content">{escaped}</div>')
 
         if is_chart:
-            chart_labels = {
-                "species_pie": "Species Composition Pie Chart",
-                "species_composition_pie_fi": "प्रजाति संरचना पाई चार्ट (क्षेत्र सर्वेक्षण)",
-                "forest_type_pie": "Forest Type Distribution Pie Chart",
-                "block_area_bar": "Block-wise Area Bar Chart",
-                "dbh_histogram": "DBH Class Distribution Histogram",
-                "biomass_bar": "Biomass & Carbon Stock Bar Chart",
-                "slope_pie": "Slope Classification Pie Chart",
-                "canopy_pie": "Canopy Cover Pie Chart",
-                "landcover_pie": "Landcover Distribution Pie Chart",
-            }
-            label = chart_labels.get(node.chart_type, "Chart")
-            parts.append(f'<div class="chart-placeholder">📊 {label}<br><small>Rendered as PNG in DOCX</small></div>')
+            parts.append(_render_chart_html(node.chart_type, raw_data, calculation_id, forest_name))
 
         if is_map:
-            parts.append(f'<div class="chart-placeholder">🗺️ {node.title_ne}<br><small>Rendered as PNG in DOCX</small></div>')
+            layer_name = node.map_type or "boundary"
+            parts.append(_render_map_html(calculation_id, db, layer_name, forest_name))
 
         if is_table:
             _add_table_html(parts, node, table_cache)
@@ -2196,20 +2940,46 @@ def _add_static_table_html(parts: List[str], node: TreeNode, raw_data: dict = No
     data = node.static_table or {}
     columns = data.get("columns", [])
     rows = data.get("rows", [])
+    merges = data.get("merges", []) or []
     if not columns or not rows:
         parts.append('<div class="chart-placeholder">📋 Static table — no data</div>')
         return
+
+    visible = {}
+    for m in merges:
+        mr, mc = m["row"], m["col"]
+        rs, cs = m["rowspan"], m["colspan"]
+        for r in range(mr, mr + rs):
+            for c in range(mc, mc + cs):
+                visible[(r, c)] = None if (r != mr or c != mc) else (rs, cs)
+
     parts.append('<div class="table-preview"><table class="data"><thead><tr>')
-    for h in columns:
-        parts.append(f'<th>{_html_escape(h)}</th>')
+    for ci, h in enumerate(columns):
+        key = (0, ci)
+        if key in visible:
+            if visible[key] is None:
+                continue
+            rs, cs = visible[key]
+            parts.append(f'<th rowspan="{rs}" colspan="{cs}">{_html_escape(h)}</th>')
+        else:
+            parts.append(f'<th>{_html_escape(h)}</th>')
     parts.append('</tr></thead><tbody>')
-    for row in rows:
+
+    for ri, row in enumerate(rows):
         parts.append('<tr>')
         for ci, val in enumerate(row):
+            key = (ri, ci)
+            if key in visible:
+                if visible[key] is None:
+                    continue
+                rs, cs = visible[key]
+            else:
+                rs, cs = 1, 1
             cell_text = str(val) if val is not None else ""
             if raw_data and cell_text.startswith("{{") and cell_text.endswith("}}"):
                 cell_text = _resolve_var_text(cell_text, raw_data)
-            parts.append(f'<td>{_html_escape(cell_text)}</td>')
+            attrs = f' rowspan="{rs}" colspan="{cs}"' if (rs > 1 or cs > 1) else ''
+            parts.append(f'<td{attrs}>{_html_escape(cell_text)}</td>')
         parts.append('</tr>')
     parts.append('</tbody></table></div>')
 
@@ -2266,10 +3036,7 @@ def _render_section_full_html(section_name: str, raw_data: dict, calculation_id)
     parts_html.append(f'<div class="section-full-narrative"><p>{_html_escape(narrative)}</p></div>')
     chart_type = _SECTION_CHARTS.get(section_name)
     if chart_type:
-        parts_html.append(
-            f'<div class="chart-placeholder">📊 {chart_type}'
-            f'<br><small>Rendered as PNG in DOCX</small></div>'
-        )
+        parts_html.append(_render_chart_html(chart_type, raw_data, calculation_id))
     parts_html.append('</div>')
     return "\n".join(parts_html)
 
@@ -2328,11 +3095,227 @@ def _render_html_list_vars(text: str, raw_data: dict) -> str:
 # DOCX Builder
 # ═══════════════════════════════════════════════════════
 
-def _build_table_cache(calculation_id: UUID, db: Session) -> dict:
+class _RawDataTableProxy:
+    """Wraps a dict as a fake OPTableData object for fallback table_cache entries."""
+    def __init__(self, table_id: str, rows: list):
+        self.table_id = table_id
+        self.rows = rows
+        self.auto_populated = True
+
+def _build_table_cache(calculation_id: UUID, db: Session, raw_data: dict = None) -> dict:
     all_tables = db.query(OPTableData).filter(
         OPTableData.calculation_id == calculation_id
     ).all()
-    return {t.table_id: t for t in all_tables}
+    cache = {t.table_id: t for t in all_tables}
+    # Supplement missing tables from data_collector raw data
+    if raw_data:
+        for t_id, rows_fn in _BUILD_FROM_RAW.items():
+            if t_id not in cache:
+                rows = rows_fn(raw_data)
+                if rows:
+                    cache[t_id] = _RawDataTableProxy(t_id, rows)
+    # Override demand_supply with raw data fallback to ensure chart/table consistency
+    # (auto-populated OPTableData may have stale/incomplete data from old code)
+    if raw_data and "demand_supply" in _BUILD_FROM_RAW:
+        rows = _BUILD_FROM_RAW["demand_supply"](raw_data)
+        if rows:
+            cache["demand_supply"] = _RawDataTableProxy("demand_supply", rows)
+    return cache
+
+
+_DS_PRODUCT_LABELS = {
+    "firewood_bhari": "दाउरा भारी",
+    "grass_bhari": "घाँस भारी",
+    "bedding_bhari": "सोतर भारी",
+    "timber_cft": "काठ क्यू.फि.",
+    "poles_count": "खाँवा संख्या",
+}
+
+def _build_demand_supply_rows(raw_data: dict) -> list:
+    ds = raw_data.get("demand_supply", {})
+    if not ds.get("demand"):
+        return []
+    products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+    rows = []
+    for k in products:
+        cf_reg = ds.get("supply_cf_regular", {})
+        cf_aah = ds.get("supply_cf_aah", {})
+        row = {
+            "product": _DS_PRODUCT_LABELS.get(k, k),
+            "demand": ds.get("demand", {}).get(k, 0) or 0,
+            "cf_regular": cf_reg[k] if k in cf_reg else "-",
+            "cf_aah": cf_aah[k] if k in cf_aah else "-",
+            "private": ds.get("supply_private", {}).get(k, 0) or 0,
+            "total_supply": ds.get("total_supply", {}).get(k, 0) or 0,
+        }
+        deficit = ds.get("deficit", {}).get(k, 0) or 0
+        if isinstance(deficit, (int, float)):
+            sign = "बचत" if deficit >= 0 else "कमी"
+            row["deficit"] = f"{sign} {abs(deficit):.2f}"
+        else:
+            row["deficit"] = str(deficit) if deficit else "-"
+        rows.append(row)
+    return rows
+
+
+def _build_biodiversity_table_rows(raw_data: dict) -> list:
+    bio = raw_data.get("biodiversity", {})
+    if not bio.get("available"):
+        return []
+    rows = []
+    idx = 0
+    for rec in bio.get("vegetation", []):
+        idx += 1
+        rows.append({
+            "sn": idx,
+            "name": rec.get("name", ""),
+            "scientific_name": rec.get("scientific_name", ""),
+            "type": "वनस्पति",
+            "sub_category": rec.get("sub_category", ""),
+            "iucn_status": rec.get("iucn_status", ""),
+            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+        })
+    for rec in bio.get("animals", []):
+        idx += 1
+        rows.append({
+            "sn": idx,
+            "name": rec.get("name", ""),
+            "scientific_name": rec.get("scientific_name", ""),
+            "type": "जनावर",
+            "sub_category": rec.get("sub_category", ""),
+            "iucn_status": rec.get("iucn_status", ""),
+            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+        })
+    return rows
+
+
+def _build_iucn_status_rows(raw_data: dict) -> list:
+    bio = raw_data.get("biodiversity", {})
+    if not bio.get("available"):
+        return []
+    iucn_map = {"CR": "संकटग्रस्त", "EN": "लोपोन्मुख", "VU": "असुरक्षित",
+                "NT": "नजिकै खतरा", "LC": "कम चासो", "DD": "अपर्याप्त"}
+    iucn_order = ["CR", "EN", "VU", "NT", "LC", "DD"]
+    breakdown = bio.get("iucn_breakdown", {})
+    rows = []
+    for code in iucn_order:
+        cnt = breakdown.get(code, 0)
+        if cnt:
+            rows.append({
+                "iucn_code": code,
+                "nepali_label": iucn_map.get(code, code),
+                "count": cnt,
+            })
+    return rows
+
+
+def _build_protected_species_rows(raw_data: dict) -> list:
+    bio = raw_data.get("biodiversity", {})
+    if not bio.get("available"):
+        return []
+    rows = []
+    idx = 0
+    for rec in bio.get("vegetation", []):
+        if rec.get("is_protected"):
+            idx += 1
+            rows.append({
+                "sn": idx,
+                "name": rec.get("name", ""),
+                "scientific_name": rec.get("scientific_name", ""),
+                "sub_category": rec.get("sub_category", ""),
+                "iucn_status": rec.get("iucn_status", ""),
+            })
+    for rec in bio.get("animals", []):
+        if rec.get("is_protected"):
+            idx += 1
+            rows.append({
+                "sn": idx,
+                "name": rec.get("name", ""),
+                "scientific_name": rec.get("scientific_name", ""),
+                "sub_category": rec.get("sub_category", ""),
+                "iucn_status": rec.get("iucn_status", ""),
+            })
+    return rows
+
+
+def _build_invasive_species_rows(raw_data: dict) -> list:
+    bio = raw_data.get("biodiversity", {})
+    if not bio.get("available"):
+        return []
+    rows = []
+    idx = 0
+    for rec in bio.get("vegetation", []):
+        if rec.get("is_invasive"):
+            idx += 1
+            rows.append({
+                "sn": idx,
+                "name": rec.get("name", ""),
+                "scientific_name": rec.get("scientific_name", ""),
+                "sub_category": rec.get("sub_category", ""),
+                "iucn_status": rec.get("iucn_status", ""),
+            })
+    for rec in bio.get("animals", []):
+        if rec.get("is_invasive"):
+            idx += 1
+            rows.append({
+                "sn": idx,
+                "name": rec.get("name", ""),
+                "scientific_name": rec.get("scientific_name", ""),
+                "sub_category": rec.get("sub_category", ""),
+                "iucn_status": rec.get("iucn_status", ""),
+            })
+    return rows
+
+
+def _build_vegetation_species_rows(raw_data: dict) -> list:
+    bio = raw_data.get("biodiversity", {})
+    if not bio.get("available"):
+        return []
+    rows = []
+    for idx, rec in enumerate(bio.get("vegetation", []), 1):
+        rows.append({
+            "sn": idx,
+            "name": rec.get("name", ""),
+            "scientific_name": rec.get("scientific_name", ""),
+            "sub_category": rec.get("sub_category", ""),
+            "iucn_status": rec.get("iucn_status", ""),
+            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+            "primary_use": rec.get("primary_use", ""),
+        })
+    return rows
+
+
+def _build_animal_species_rows(raw_data: dict) -> list:
+    bio = raw_data.get("biodiversity", {})
+    if not bio.get("available"):
+        return []
+    rows = []
+    for idx, rec in enumerate(bio.get("animals", []), 1):
+        rows.append({
+            "sn": idx,
+            "name": rec.get("name", ""),
+            "scientific_name": rec.get("scientific_name", ""),
+            "sub_category": rec.get("sub_category", ""),
+            "iucn_status": rec.get("iucn_status", ""),
+            "is_protected": "हो" if rec.get("is_protected") else "होइन",
+            "is_invasive": "हो" if rec.get("is_invasive") else "होइन",
+            "primary_use": rec.get("primary_use", ""),
+        })
+    return rows
+
+
+_BUILD_FROM_RAW = {
+    "demand_supply": _build_demand_supply_rows,
+    "table_20": _build_biodiversity_table_rows,
+    "table_33": _build_iucn_status_rows,
+    "table_34": _build_protected_species_rows,
+    "table_35": _build_invasive_species_rows,
+    "table_36": _build_vegetation_species_rows,
+    "table_37": _build_animal_species_rows,
+}
 
 
 def _build_calc_cache(calculation_id: UUID, db: Session) -> dict:
@@ -2354,6 +3337,7 @@ def build_op_document(
     calculation_id: UUID,
     db: Session,
 ) -> BytesIO:
+    t0 = time.time()
     doc = Document()
     style = doc.styles["Normal"]
     style.font.name = "Nirmala UI"
@@ -2370,15 +3354,31 @@ def build_op_document(
     metadata = plan.get("plan_metadata", {})
     _add_cover_page(doc, plan, metadata)
     _add_toc_field(doc)
+    t1 = time.time()
 
     raw_data = resolver.get_raw_data()
     raw_data["user_inputs"] = metadata.get("user_inputs", {})
-    table_cache = _build_table_cache(calculation_id, db)
+    table_cache = _build_table_cache(calculation_id, db, raw_data)
     calc_cache = _build_calc_cache(calculation_id, db)
+    t2 = time.time()
 
     _walk_tree(doc, tree, calculation_id, raw_data, db, table_cache, calc_cache)
+    t3 = time.time()
+
+    custom_notes = metadata.get("custom_notes")
+    if custom_notes:
+        doc.add_page_break()
+        doc.add_heading("Custom Notes", level=1)
+        for line in custom_notes.strip().split("\n"):
+            doc.add_paragraph(line.strip())
 
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
+    t4 = time.time()
+
+    logger.info(
+        "OP_BUILD: setup=%.2fs cache=%.2fs walk_tree=%.2fs save=%.2fs total=%.2fs",
+        t1 - t0, t2 - t1, t3 - t2, t4 - t3, t4 - t0,
+    )
     return buffer

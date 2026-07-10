@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
-import { Button, message, Spin, Tag, Tabs, Alert, Tooltip } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Button, message, Spin, Tag, Tabs, Tooltip } from 'antd';
 import {
   SaveOutlined,
   SettingOutlined,
@@ -11,7 +11,6 @@ import {
   EnvironmentOutlined,
   FileTextOutlined,
   PlusOutlined,
-  EyeOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,7 +36,7 @@ interface TreeNodeData {
   chart_type?: string | null;
   table_id?: string | null;
   map_type?: string | null;
-  static_table?: { columns: string[]; rows: string[][] } | null;
+  static_table?: { columns: string[]; rows: string[][]; merges?: { row: number; col: number; rowspan: number; colspan: number }[] } | null;
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
@@ -51,13 +50,13 @@ interface OperationalPlanPageProps {
   calculationId?: string;
 }
 
-type ViewMode = 'editor' | 'consumer';
-
 const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   const { id: routeId } = useParams<{ id: string }>();
   const calculationId = props.calculationId || routeId;
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
+  const isEditor = isSuperAdmin;
+  const navigate = useNavigate();
 
   const [plan, setPlan] = useState<any>(null);
   const [planId, setPlanId] = useState<string | null>(null);
@@ -68,29 +67,6 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   const [showMetadata, setShowMetadata] = useState(false);
   const [activeTab, setActiveTab] = useState<EditorTab>('editor');
   const [showTemplateManager, setShowTemplateManager] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('editor');
-  const [graceBanner, setGraceBanner] = useState(false);
-  const [editingStatusChecked, setEditingStatusChecked] = useState(false);
-
-  const determineViewMode = useCallback(async (planId: string) => {
-    if (isSuperAdmin) {
-      setViewMode('editor');
-      setEditingStatusChecked(true);
-      return;
-    }
-    try {
-      const status = await operationalPlanApi.getEditingStatus(planId);
-      if (status.can_edit) {
-        setViewMode('editor');
-        setGraceBanner(true);
-      } else {
-        setViewMode('consumer');
-      }
-    } catch {
-      setViewMode('consumer');
-    }
-    setEditingStatusChecked(true);
-  }, [isSuperAdmin]);
 
   useEffect(() => {
     if (calculationId) {
@@ -108,7 +84,6 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       if ((planData.tree || []).length > 0) {
         setActiveNodeId(planData.tree[0].id);
       }
-      await determineViewMode(planData.id);
     } catch (err: any) {
       if (err.response?.status === 404) {
         await createWithDefault(calcId);
@@ -121,6 +96,10 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
   };
 
   const createWithDefault = async (calcId: string) => {
+    if (!isSuperAdmin) {
+      navigate(`/templates?calculation_id=${calcId}`);
+      return;
+    }
     try {
       const newPlan = await operationalPlanApi.create(calcId);
       setPlan(newPlan);
@@ -129,8 +108,6 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       if ((newPlan.tree || []).length > 0) {
         setActiveNodeId(newPlan.tree[0].id);
       }
-      setViewMode(isSuperAdmin ? 'editor' : 'consumer');
-      setEditingStatusChecked(true);
     } catch {
       message.error('Failed to create operational plan');
     }
@@ -141,18 +118,9 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
     setSaving(true);
     try {
       const payload: any = { tree };
-      if (graceBanner) {
-        payload.plan_metadata = { ...(plan?.plan_metadata || {}), grace_period_used: true };
-      }
       const updated = await operationalPlanApi.update(planId, payload);
       setPlan(updated);
-      if (graceBanner) {
-        setGraceBanner(false);
-        setViewMode('consumer');
-        message.success('Plan saved. Editor is now locked for future sessions.');
-      } else {
-        message.success('Plan saved');
-      }
+      message.success('Plan saved');
     } catch {
       message.error('Failed to save plan');
     } finally {
@@ -352,15 +320,13 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       })()
     : null;
 
-  if (loading || !editingStatusChecked) {
+  if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
         <Spin size="large" />
       </div>
     );
   }
-
-  const isEditor = viewMode === 'editor';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#fff' }}>
@@ -389,25 +355,18 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
               <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
                 Metadata
               </Button>
-              {!graceBanner && (
-                <Button icon={<ThunderboltOutlined />} onClick={handleAutoPopulate} size="small" loading={loading}>
-                  Auto-Populate
-                </Button>
-              )}
+              <Button icon={<ThunderboltOutlined />} onClick={handleAutoPopulate} size="small" loading={loading}>
+                Auto-Populate
+              </Button>
               <Button icon={<SaveOutlined />} onClick={handleSave} size="small" type="primary" loading={saving}>
-                {graceBanner ? 'Save & Lock' : 'Save All'}
+                Save All
               </Button>
             </>
           )}
-          {!isEditor && (
-            <>
-              <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
-                Metadata
-              </Button>
-              <Tooltip title="Preview full document">
-                {planId && <PreviewDrawer planId={planId} forestName={plan?.forest_name} />}
-              </Tooltip>
-            </>
+          {planId && (
+            <Tooltip title="Preview full document">
+              <PreviewDrawer planId={planId} forestName={plan?.forest_name} />
+            </Tooltip>
           )}
           <Button icon={<DownloadOutlined />} size="small" type={isEditor ? 'default' : 'primary'} onClick={handleExport}>
             Export DOCX
@@ -415,105 +374,144 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
         </div>
       </div>
 
-      {graceBanner && (
-        <Alert
-          message="Final Edit Session"
-          description="This is your last opportunity to edit this document. After saving, the editor will be locked and you'll be able to view, preview, and download only."
-          type="warning"
-          showIcon
-          closable={false}
-          style={{ borderRadius: 0 }}
-        />
-      )}
-
-      <Tabs
-        activeKey={activeTab}
-        onChange={(k) => setActiveTab(k as EditorTab)}
-        items={[
-          { key: 'editor', label: <span><BranchesOutlined /> {isEditor ? 'Document Editor' : 'Document View'}</span> },
-          { key: 'tables', label: <span><PlusOutlined /> Tables 1-32</span> },
-          { key: 'charts', label: <span><PieChartOutlined /> Charts</span> },
-          { key: 'maps', label: <span><EnvironmentOutlined /> Maps</span> },
-        ]}
-        style={{ marginBottom: 0, padding: '0 16px' }}
-        tabBarStyle={{ marginBottom: 0 }}
-      />
-
-      {activeTab === 'editor' ? (
-        isEditor ? (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            <div style={{ width: 320, borderRight: '1px solid #f0f0f0', overflow: 'hidden', flexShrink: 0 }}>
-              <TreeSidebar
-                tree={tree}
-                activeNodeId={activeNodeId}
-                onSelectNode={setActiveNodeId}
-                onAddChild={handleAddChild}
-                onAddChartNode={handleAddChartNode}
-                onAddMapNode={handleAddMapNode}
-                onAddStaticTable={handleAddStaticTable}
-                onToggleDelete={handleToggleDelete}
-                onToggleHidden={handleToggleHidden}
-                onHardDelete={handleHardDelete}
-                onUpdateTitle={handleUpdateTitle}
-                onReorderNode={handleReorderNode}
-              />
+      {isEditor ? (
+        <>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(k) => setActiveTab(k as EditorTab)}
+            items={[
+              { key: 'editor', label: <span><BranchesOutlined /> Document Editor</span> },
+              { key: 'tables', label: <span><PlusOutlined /> Tables 1-32</span> },
+              { key: 'charts', label: <span><PieChartOutlined /> Charts</span> },
+              { key: 'maps', label: <span><EnvironmentOutlined /> Maps</span> },
+            ]}
+            style={{ marginBottom: 0, padding: '0 16px' }}
+            tabBarStyle={{ marginBottom: 0 }}
+          />
+          {activeTab === 'editor' ? (
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+              <div style={{ width: 320, borderRight: '1px solid #f0f0f0', overflow: 'hidden', flexShrink: 0 }}>
+                <TreeSidebar
+                  tree={tree}
+                  activeNodeId={activeNodeId}
+                  onSelectNode={setActiveNodeId}
+                  onAddChild={handleAddChild}
+                  onAddChartNode={handleAddChartNode}
+                  onAddMapNode={handleAddMapNode}
+                  onAddStaticTable={handleAddStaticTable}
+                  onToggleDelete={handleToggleDelete}
+                  onToggleHidden={handleToggleHidden}
+                  onHardDelete={handleHardDelete}
+                  onUpdateTitle={handleUpdateTitle}
+                  onReorderNode={handleReorderNode}
+                />
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {planId && <ContentPane node={activeNode} planId={planId} calculationId={calculationId} onContentChange={handleContentChange} />}
+              </div>
             </div>
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              {planId && <ContentPane node={activeNode} planId={planId} calculationId={calculationId} onContentChange={handleContentChange} />}
+          ) : activeTab === 'tables' ? (
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              {calculationId && <TableEditor calculationId={calculationId} />}
             </div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            <div style={{ width: 320, borderRight: '1px solid #f0f0f0', overflow: 'hidden', flexShrink: 0 }}>
+          ) : activeTab === 'charts' ? (
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              {planId && <ChartEditor planId={planId} />}
+            </div>
+          ) : (
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              {planId && <MapPreview planId={planId} calculationId={calculationId} />}
+            </div>
+          )}
+        </>
+      ) : (
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <div style={{ width: 280, borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '12px 14px', borderBottom: '1px solid #f0f0f0', fontWeight: 600, fontSize: 13 }}>
+              <FileTextOutlined style={{ marginRight: 6 }} />Contents
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
               <DocumentOutline
                 tree={tree}
                 activeNodeId={activeNodeId}
                 onSelectNode={setActiveNodeId}
               />
             </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-              {activeNode ? (
-                <div>
-                  <h3 style={{ marginBottom: 8 }}>
-                    {activeNode.number ? `${activeNode.number}. ` : ''}{activeNode.title_ne || activeNode.title_en}
-                  </h3>
-                  <div
-                    style={{
-                      background: '#fafafa',
-                      border: '1px solid #f0f0f0',
-                      borderRadius: 6,
-                      padding: 16,
-                      whiteSpace: 'pre-wrap',
-                      fontSize: 14,
-                      lineHeight: 1.6,
-                      minHeight: 200,
-                    }}
-                  >
-                    {activeNode.content || (
-                      <span style={{ color: '#bbb', fontStyle: 'italic' }}>No content</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
-                  <EyeOutlined style={{ fontSize: 48, display: 'block', marginBottom: 16 }} />
-                  Select a section from the outline to view its content
-                </div>
-              )}
-            </div>
           </div>
-        )
-      ) : activeTab === 'tables' ? (
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          {calculationId && <TableEditor calculationId={calculationId} />}
-        </div>
-      ) : activeTab === 'charts' ? (
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          {planId && <ChartEditor planId={planId} />}
-        </div>
-      ) : (
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          {planId && <MapPreview planId={planId} calculationId={calculationId} />}
+          <div style={{ flex: 1, overflow: 'auto', padding: '32px 48px' }}>
+            {activeNode ? (
+              <div style={{ maxWidth: 720 }}>
+                {activeNode.number && (
+                  <div style={{ color: '#1677ff', fontSize: 12, fontWeight: 500, marginBottom: 4, letterSpacing: '0.5px' }}>
+                    SECTION {activeNode.number}
+                  </div>
+                )}
+                <h2 style={{ margin: '0 0 4px 0', fontSize: 22, fontWeight: 700, color: '#1a1a1a' }}>
+                  {activeNode.title_ne || activeNode.title_en}
+                </h2>
+                {activeNode.title_ne && activeNode.title_en && activeNode.title_en !== activeNode.title_ne && (
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>{activeNode.title_en}</div>
+                )}
+                <hr style={{ border: 'none', borderTop: '2px solid #e8e8e8', margin: '16px 0' }} />
+                {activeNode.content_type === 'richtext' && (
+                  <div style={{
+                    fontSize: 15, lineHeight: 1.8, color: '#333',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {activeNode.content || <span style={{ color: '#bbb', fontStyle: 'italic' }}>No content</span>}
+                  </div>
+                )}
+                {activeNode.content_type === 'chart' && (
+                  <div style={{ textAlign: 'center', padding: 40, background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0' }}>
+                    <PieChartOutlined style={{ fontSize: 32, color: '#1677ff' }} />
+                    <div style={{ marginTop: 8, color: '#666' }}>Chart visualization</div>
+                  </div>
+                )}
+                {activeNode.content_type === 'map' && (
+                  <div style={{ textAlign: 'center', padding: 40, background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0' }}>
+                    <EnvironmentOutlined style={{ fontSize: 32, color: '#52c41a' }} />
+                    <div style={{ marginTop: 8, color: '#666' }}>Map visualization</div>
+                  </div>
+                )}
+                {activeNode.content_type === 'static_table' && activeNode.static_table && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr>
+                        {activeNode.static_table.columns.map((col: string, i: number) => (
+                          <th key={i} style={{ border: '1px solid #d9d9d9', padding: '8px 12px', background: '#fafafa', fontWeight: 600, textAlign: 'left' }}>{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeNode.static_table.rows.map((row: string[], ri: number) => (
+                        <tr key={ri}>
+                          {row.map((cell: string, ci: number) => (
+                            <td key={ci} style={{ border: '1px solid #d9d9d9', padding: '6px 12px' }}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <div style={{ marginTop: 40, paddingTop: 24, borderTop: '2px solid #e8e8e8', fontSize: 12, color: '#999' }}>
+                  Last updated: {plan?.updated_at ? new Date(plan.updated_at).toLocaleString() : 'N/A'}
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 80, color: '#bbb' }}>
+                <FileTextOutlined style={{ fontSize: 48, display: 'block', marginBottom: 16 }} />
+                <span style={{ fontSize: 16 }}>Select a section from the table of contents</span>
+              </div>
+            )}
+            {plan?.plan_metadata?.custom_notes && (
+              <div style={{ maxWidth: 720, marginTop: 32, padding: 20, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 8 }}>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: 14, fontWeight: 600, color: '#ad6800' }}>Custom Notes</h4>
+                <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6, color: '#666' }}>
+                  {plan.plan_metadata.custom_notes}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

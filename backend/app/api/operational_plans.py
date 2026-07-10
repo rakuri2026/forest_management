@@ -2,15 +2,17 @@
 Operational Plan API endpoints — Tree Document Model
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Dict, Any, Optional, List
 from uuid import UUID
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 import time
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ from ..core.database import get_db
 from ..models.user import User, UserRole
 from ..models.calculation import Calculation
 from ..models.operational_plan import OperationalPlan
-from ..models.op_template import OPTemplate
+from ..models.op_template import OPTemplate, OPTemplateVersion, OPTemplateCategory
 from ..models.forest_block import ForestBlock
 from ..models.op_table import OPTableData
 from ..schemas.operational_plan import (
@@ -33,9 +35,16 @@ from ..schemas.operational_plan import (
     VariableDefResponse,
     TemplateCreate,
     TemplateUpdate,
+    TemplatePublish,
+    TemplateClone,
     TemplateApprove,
     TemplateResponse,
     TemplateSummary,
+    TemplateVersionResponse,
+    TemplateRollbackRequest,
+    CategoryCreate,
+    CategoryUpdate,
+    CategoryResponse,
 )
 from ..schemas.metadata_form import MetadataFormUpdate
 from ..services.metadata.admin_location_service import (
@@ -66,6 +75,7 @@ from ..services.operational_plan.variable_registry import (
     VariableDef,
 )
 from ..services.operational_plan.variable_resolver import VariableResolver
+from ..services.operational_plan.variable_enrichment import get_enriched_variables, build_csv_string
 from ..services.operational_plan.op_docx_builder import build_op_document
 from ..utils.file_export import build_disposition
 from ..utils.number_format import format_devanagari
@@ -165,12 +175,16 @@ async def create_operational_plan(
 
     sections = {"tree": _tree_to_dict_list(tree_list)}
 
+    metadata = {"version": "2.0", "language": "NP", "auto_populated": False}
+    if plan_data.custom_notes:
+        metadata["custom_notes"] = plan_data.custom_notes
+
     plan = OperationalPlan(
         calculation_id=plan_data.calculation_id,
         forest_name=plan_data.forest_name or calculation.forest_name,
         created_by=current_user.id,
         sections=sections,
-        plan_metadata={"version": "2.0", "language": "NP", "auto_populated": False}
+        plan_metadata=metadata,
     )
 
     db.add(plan)
@@ -294,6 +308,7 @@ async def add_tree_node(
         content_type=node_data.content_type,
         chart_type=node_data.chart_type,
         table_id=node_data.table_id,
+        map_type=node_data.map_type,
         static_table=node_data.static_table,
     )
 
@@ -422,6 +437,8 @@ async def list_variables(
     else:
         vars_list = get_all_variables()
 
+    enriched = {v["key"]: v for v in get_enriched_variables()}
+
     return {
         "total": len(vars_list),
         "variables": [
@@ -434,6 +451,9 @@ async def list_variables(
                 source=v.source,
                 auto_populate=v.auto_populate,
                 description=v.description,
+                description_ne=enriched.get(v.key, {}).get("description_ne", ""),
+                table_columns=json.loads(enriched.get(v.key, {}).get("table_columns", "[]")),
+                mock_rows=json.loads(enriched.get(v.key, {}).get("mock_rows", "[]")),
             )
             for v in vars_list
         ],
@@ -445,6 +465,7 @@ async def get_variable_detail(key: str):
     var = get_variable(key)
     if not var:
         raise HTTPException(status_code=404, detail=f"Variable '{key}' not found")
+    enriched = next((v for v in get_enriched_variables() if v["key"] == key), {})
     return VariableDefResponse(
         key=var.key,
         category=var.category,
@@ -454,6 +475,26 @@ async def get_variable_detail(key: str):
         source=var.source,
         auto_populate=var.auto_populate,
         description=var.description,
+        description_ne=enriched.get("description_ne", ""),
+        table_columns=json.loads(enriched.get("table_columns", "[]")),
+        mock_rows=json.loads(enriched.get("mock_rows", "[]")),
+    )
+
+
+@router.get("/variables/export/csv")
+async def export_variables_csv(
+    current_user: User = Depends(get_current_active_user),
+):
+    """Superuser-only CSV export of enriched variable registry — 28 columns."""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can export the variable registry")
+    enriched = get_enriched_variables()
+    csv_content = build_csv_string(enriched)
+    filename, disposition = build_disposition("OP", "Variable", "Registry", "csv")
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": disposition},
     )
 
 
@@ -484,7 +525,11 @@ async def get_variable_catalog(
         )
 
     resolver = VariableResolver(db, calculation_id, plan)
-    all_resolved = resolver.resolve_all()
+    try:
+        all_resolved = resolver.resolve_all()
+    except Exception as e:
+        logger.warning("OP_VARIABLE_CATALOG: resolve_all failed for calc %s: %s", calculation_id, e)
+        all_resolved = {}
 
     if search:
         vars_list = search_variables(search)
@@ -492,6 +537,8 @@ async def get_variable_catalog(
         vars_list = get_variables_by_category(category.upper())
     else:
         vars_list = get_all_variables()
+
+    enriched = {v["key"]: v for v in get_enriched_variables()}
 
     catalog = []
     for var_def in vars_list:
@@ -517,6 +564,7 @@ async def get_variable_catalog(
         elif isinstance(resolved, bool):
             sample_value = str(resolved)
 
+        enc = enriched.get(var_def.key, {})
         catalog.append({
             "key": var_def.key,
             "category": var_def.category,
@@ -527,6 +575,9 @@ async def get_variable_catalog(
             "auto_populate": var_def.auto_populate,
             "data_status": data_status,
             "sample_value": sample_value,
+            "description_ne": enc.get("description_ne", ""),
+            "table_columns": json.loads(enc.get("table_columns", "[]")),
+            "mock_rows": json.loads(enc.get("mock_rows", "[]")),
         })
 
     return {"total": len(catalog), "variables": catalog}
@@ -809,10 +860,8 @@ async def preview_operational_plan(
     raw_data = resolver.get_raw_data()
     metadata = plan.plan_metadata or {}
     raw_data["user_inputs"] = metadata.get("user_inputs", {})
-    all_tables = db.query(OPTableData).filter(
-        OPTableData.calculation_id == plan.calculation_id
-    ).all()
-    table_cache = {t.table_id: t for t in all_tables}
+    from app.services.operational_plan.op_docx_builder import _build_table_cache
+    table_cache = _build_table_cache(plan.calculation_id, db, raw_data)
     body_html = _walk_tree_html(tree_list, plan.calculation_id, raw_data, db, table_cache)
     metadata = plan.plan_metadata or {}
     user_inputs = metadata.get("user_inputs", {})
@@ -879,6 +928,8 @@ async def preview_operational_plan(
   table.data td {{ padding: 4px 8px; border: 1px solid #ddd; }}
   table.data tr:nth-child(even) {{ background: #f9f9f9; }}
   .hidden {{ display: none; }}
+  .page-break {{ page-break-before: always; }}
+  hr.pb-marker {{ border: none; border-top: 2px dashed #006400; margin: 24px 0; }}
 </style>
 </head>
 <body>
@@ -924,6 +975,69 @@ async def preview_operational_plan(
 <h2>विषय सूची</h2>
 <div class="toc">{_build_toc_html(tree_list)}</div>
 <hr>
+{body_html}
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@router.get("/{plan_id}/preview/section/{node_id}")
+async def preview_operational_plan_section(
+    plan_id: UUID,
+    node_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Render a single section as HTML preview.
+    Used by the editor's inline preview tab for immediate feedback.
+    """
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = _dict_list_to_tree(sections.get("tree", []))
+    resolver = VariableResolver(db, plan.calculation_id, plan)
+
+    # Find the node by ID
+    target = None
+    for node in TreeOperations.flatten(tree_list):
+        if node.id == node_id:
+            target = node
+            break
+
+    if not target:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    # Resolve only this node's content
+    if target.content:
+        target.content = resolver.resolve_node_content(target.content)
+
+    raw_data = resolver.get_raw_data()
+    raw_data["user_inputs"] = (plan.plan_metadata or {}).get("user_inputs", {})
+    from app.services.operational_plan.op_docx_builder import _build_table_cache
+    table_cache = _build_table_cache(plan.calculation_id, db, raw_data)
+
+    body_html = _walk_tree_html([target], plan.calculation_id, raw_data, db, table_cache)
+
+    html = f"""<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8">
+<title>Section Preview</title>
+<style>
+  body {{ font-family: 'Noto Sans', 'Segoe UI', sans-serif; margin: 0; padding: 16px; line-height: 1.7; color: #222; }}
+  h1 {{ font-size: 18pt; font-weight: bold; color: #006400; margin: 0 0 8px; padding: 0; border: none; }}
+  h2 {{ font-size: 15pt; font-weight: bold; color: #006400; margin: 0 0 6px; padding: 0; border: none; }}
+  .section {{ margin-bottom: 8px; }}
+  .section-content {{ font-size: 14pt; line-height: 1.8; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 8px 0; }}
+  th, td {{ border: 1px solid #333; padding: 6px 10px; font-size: 12pt; }}
+  th {{ background: #e8f5e9; font-weight: 600; }}
+  .chart-placeholder {{ background: #f9f9f9; border: 1px dashed #ccc; padding: 24px; text-align: center; margin: 8px 0; }}
+  .page-break {{ page-break-before: always; }}
+  hr.pb-marker {{ border: none; border-top: 2px dashed #006400; margin: 24px 0; }}
+</style>
+</head>
+<body>
 {body_html}
 </body>
 </html>"""
@@ -1417,38 +1531,16 @@ async def clear_plan_map_cache(
     return {"message": f"Map cache cleared for {layer or 'all layers'}"}
 
 
-def _has_custom_content(plan: OperationalPlan) -> bool:
-    """Check if plan has user-authored content beyond initial template defaults."""
-    tree = plan.sections.get("tree", []) if plan.sections else []
-    if not tree:
-        return False
-    all_nodes = list(TreeOperations.flatten([TreeNode.from_dict(n) if isinstance(n, dict) else n for n in tree]))
-    has_modified = any(n.last_modified is not None for n in all_nodes)
-    if has_modified:
-        return True
-    grace_used = (plan.plan_metadata or {}).get("grace_period_used", False)
-    if grace_used:
-        return True
-    age = datetime.utcnow() - plan.created_at
-    if age > timedelta(hours=1) and plan.updated_at != plan.created_at:
-        return True
-    return False
-
-
 @router.get("/{plan_id}/editing-status")
 async def get_plan_editing_status(
     plan_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Check if plan has custom content and whether user can edit it."""
+    """Check whether user can edit the plan (super_admin only)."""
     plan = _check_plan_access(plan_id, current_user, db)
-    has_content = _has_custom_content(plan)
-    grace_used = (plan.plan_metadata or {}).get("grace_period_used", False)
     return {
-        "has_custom_content": has_content,
-        "grace_period_used": grace_used,
-        "can_edit": current_user.role == UserRole.SUPER_ADMIN or (has_content and not grace_used),
+        "can_edit": current_user.role == UserRole.SUPER_ADMIN,
         "plan_created": plan.created_at.isoformat() if plan.created_at else None,
         "plan_updated": plan.updated_at.isoformat() if plan.updated_at else None,
     }
@@ -1625,6 +1717,7 @@ async def create_template(
         tree=tree_dicts,
         visibility=tmpl_data.visibility or "private",
         tags=list(tmpl_data.tags) if tmpl_data.tags else [],
+        template_category=tmpl_data.template_category,
         sections_summary=summaries["sections_summary"],
         variables_summary=summaries["variables_summary"],
         is_system=False,
@@ -1677,6 +1770,20 @@ async def update_template(
         tmpl.description = tmpl_data.description
     if tmpl_data.tree is not None:
         tree_dicts = [n.model_dump() for n in tmpl_data.tree]
+        if tmpl.is_active and tmpl.version:
+            old_version = tmpl.version
+            old_snapshot = OPTemplateVersion(
+                template_id=tmpl.id,
+                version=old_version,
+                tree=tmpl.tree,
+                name=tmpl.name,
+                description=tmpl.description or "",
+                changelog=tmpl.changelog or "Version " + str(old_version),
+            )
+            db.add(old_snapshot)
+            tmpl.version = (tmpl.version or 1) + 1
+            if tmpl_data.changelog:
+                tmpl.changelog = tmpl_data.changelog
         tmpl.tree = tree_dicts
         summaries = generate_template_summaries(tree_dicts)
         tmpl.sections_summary = summaries["sections_summary"]
@@ -1693,7 +1800,160 @@ async def update_template(
         tmpl.visibility = tmpl_data.visibility
     if tmpl_data.tags is not None:
         tmpl.tags = list(tmpl_data.tags)
+    if tmpl_data.template_category is not None:
+        tmpl.template_category = tmpl_data.template_category
 
+    tmpl.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.put("/templates/{template_id}/publish", summary="Toggle template publish status")
+async def publish_template(
+    template_id: UUID,
+    publish_data: TemplatePublish,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can publish templates")
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.is_system:
+        raise HTTPException(status_code=400, detail="Cannot unpublish system templates")
+
+    tmpl.is_active = publish_data.is_active
+    if publish_data.is_active:
+        old_snapshot = OPTemplateVersion(
+            template_id=tmpl.id,
+            version=tmpl.version or 1,
+            tree=tmpl.tree,
+            name=tmpl.name,
+            description=tmpl.description or "",
+            changelog=tmpl.changelog or "Version " + str(tmpl.version or 1),
+        )
+        db.add(old_snapshot)
+        tmpl.version = (tmpl.version or 1) + 1
+    tmpl.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.post("/templates/{template_id}/clone", summary="Clone a template")
+async def clone_template(
+    template_id: UUID,
+    clone_data: Optional[TemplateClone] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can clone templates")
+    source = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    summaries = generate_template_summaries(source.tree)
+
+    clone_name = clone_data.name if clone_data and clone_data.name else f"{source.name} (Copy)"
+
+    tmpl = OPTemplate(
+        name=clone_name,
+        description=source.description,
+        tree=source.tree,
+        visibility="private",
+        tags=source.tags or [],
+        template_category=source.template_category,
+        sections_summary=summaries["sections_summary"],
+        variables_summary=summaries["variables_summary"],
+        is_system=False,
+        is_default=False,
+        is_active=False,
+        version=1,
+        source_template_id=source.id,
+        created_by=current_user.id,
+    )
+    db.add(tmpl)
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.get("/templates/{template_id}/versions", summary="Get template version history")
+async def get_template_versions(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    versions = db.execute(
+        select(OPTemplateVersion)
+        .where(OPTemplateVersion.template_id == template_id)
+        .order_by(OPTemplateVersion.version.desc())
+    ).scalars().all()
+
+    return [TemplateVersionResponse.model_validate(v) for v in versions]
+
+
+@router.post("/templates/{template_id}/rollback", summary="Rollback template to a previous version")
+async def rollback_template(
+    template_id: UUID,
+    rollback_data: TemplateRollbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can rollback templates")
+
+    tmpl = db.execute(
+        select(OPTemplate).where(OPTemplate.id == template_id)
+    ).scalar_one_or_none()
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.is_system:
+        raise HTTPException(status_code=400, detail="Cannot rollback system templates")
+
+    version_snapshot = db.execute(
+        select(OPTemplateVersion).where(
+            OPTemplateVersion.template_id == template_id,
+            OPTemplateVersion.version == rollback_data.version,
+        )
+    ).scalar_one_or_none()
+    if not version_snapshot:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    old_tree = tmpl.tree
+    if tmpl.is_active:
+        current_snapshot = OPTemplateVersion(
+            template_id=tmpl.id,
+            version=tmpl.version or 1,
+            tree=old_tree,
+            name=tmpl.name,
+            description=tmpl.description or "",
+            changelog=f"Pre-rollback state before reverting to v{rollback_data.version}",
+        )
+        db.add(current_snapshot)
+
+    tmpl.tree = version_snapshot.tree
+    summaries = generate_template_summaries(version_snapshot.tree)
+    tmpl.sections_summary = summaries["sections_summary"]
+    tmpl.variables_summary = summaries["variables_summary"]
+    tmpl.version = (tmpl.version or 1) + 1 if tmpl.is_active else tmpl.version
+    tmpl.changelog = f"Rolled back to version {rollback_data.version}"
     tmpl.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(tmpl)
@@ -1803,10 +2063,16 @@ async def save_plan_as_template(
     if not tree_list:
         raise HTTPException(status_code=400, detail="Plan has no document tree to save")
 
+    if tmpl_data.is_system and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can create system templates")
+
     if tmpl_data.is_default:
-        db.execute(
-            sa.update(OPTemplate).where(OPTemplate.created_by == current_user.id).values(is_default=False)
-        )
+        if tmpl_data.is_system:
+            db.execute(sa.update(OPTemplate).values(is_default=False))
+        else:
+            db.execute(
+                sa.update(OPTemplate).where(OPTemplate.created_by == current_user.id).values(is_default=False)
+            )
 
     summaries = generate_template_summaries(tree_list)
 
@@ -1816,9 +2082,10 @@ async def save_plan_as_template(
         tree=tree_list,
         visibility=tmpl_data.visibility or "private",
         tags=list(tmpl_data.tags) if tmpl_data.tags else [],
+        template_category=tmpl_data.template_category,
         sections_summary=summaries["sections_summary"],
         variables_summary=summaries["variables_summary"],
-        is_system=False,
+        is_system=tmpl_data.is_system,
         is_default=tmpl_data.is_default,
         source_calculation_id=plan.calculation_id,
         created_by=current_user.id,
@@ -1828,3 +2095,85 @@ async def save_plan_as_template(
     db.refresh(tmpl)
 
     return TemplateResponse.model_validate(tmpl)
+
+
+@router.get("/template-categories", summary="List all template categories")
+async def list_categories(db: Session = Depends(get_db)):
+    cats = db.execute(
+        select(OPTemplateCategory).order_by(OPTemplateCategory.sort_order)
+    ).scalars().all()
+    return [CategoryResponse.model_validate(c) for c in cats]
+
+
+@router.post("/template-categories", summary="Create a template category (super admin only)")
+async def create_category(
+    cat_data: CategoryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can manage categories")
+    existing = db.execute(
+        select(OPTemplateCategory).where(OPTemplateCategory.key == cat_data.key)
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="Category with this key already exists")
+    cat = OPTemplateCategory(
+        key=cat_data.key,
+        label_ne=cat_data.label_ne,
+        label_en=cat_data.label_en,
+        description=cat_data.description or "",
+        color=cat_data.color or "purple",
+        sort_order=cat_data.sort_order,
+    )
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return CategoryResponse.model_validate(cat)
+
+
+@router.put("/template-categories/{category_id}", summary="Update a template category (super admin only)")
+async def update_category(
+    category_id: UUID,
+    cat_data: CategoryUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can manage categories")
+    cat = db.execute(
+        select(OPTemplateCategory).where(OPTemplateCategory.id == category_id)
+    ).scalar_one_or_none()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if cat_data.label_ne is not None:
+        cat.label_ne = cat_data.label_ne
+    if cat_data.label_en is not None:
+        cat.label_en = cat_data.label_en
+    if cat_data.description is not None:
+        cat.description = cat_data.description
+    if cat_data.color is not None:
+        cat.color = cat_data.color
+    if cat_data.sort_order is not None:
+        cat.sort_order = cat_data.sort_order
+    db.commit()
+    db.refresh(cat)
+    return CategoryResponse.model_validate(cat)
+
+
+@router.delete("/template-categories/{category_id}", summary="Delete a template category (super admin only)")
+async def delete_category(
+    category_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can manage categories")
+    cat = db.execute(
+        select(OPTemplateCategory).where(OPTemplateCategory.id == category_id)
+    ).scalar_one_or_none()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    db.delete(cat)
+    db.commit()
+    return {"status": "ok", "message": "Category deleted"}

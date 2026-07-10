@@ -44,6 +44,7 @@ const SUB_AREA_CATEGORIES = [
   { value: 'tree_strata', label: 'धेरै ठुला रूख भएको क्षेत्र', color: '#15803d', isExcluded: false },
   { value: 'water_hole', label: 'पानी मूहान', color: '#0ea5e9', isExcluded: false },
   { value: 'wildlife_corridor', label: 'जैविक मार्ग', color: '#a855f7', isExcluded: false },
+  { value: 'encroached', label: 'अतीक्रमीत क्षेत्र', color: '#78350f', isExcluded: false },
 ];
 
 const MapEditor: React.FC<MapEditorProps> = ({

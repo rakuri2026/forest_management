@@ -455,3 +455,39 @@ async def download_all_tree_sample_plots(
         media_type="application/geopackage+sqlite3",
         headers={"Content-Disposition": disposition},
     )
+
+
+@router.post("/exports/cleanup")
+async def cleanup_old_exports(
+    retention_days: int = 7,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete old export files (GPKG, Excel, CSV) older than retention_days.
+    Also cleans up orphaned files with no matching DB record.
+    Only super_admin users can trigger this.
+    """
+    if current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can trigger export cleanup",
+        )
+
+    from ..services.export_cleanup import run_full_cleanup
+    export_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'exports')
+
+    results = run_full_cleanup(db, export_dir, retention_days)
+
+    total_cleaned = (
+        results["old_tree_exports_deleted"]
+        + results["old_tree_models_deleted"]
+        + results["orphan_files_deleted"]
+        + results["inventory_files_deleted"]
+    )
+
+    return {
+        "success": True,
+        "message": f"Cleanup complete: {total_cleaned} items removed",
+        "details": results,
+    }

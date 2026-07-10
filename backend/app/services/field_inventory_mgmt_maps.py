@@ -137,11 +137,12 @@ def generate_map_image(
 
     boundary_geom = _get_forest_geometry(db, calculation_id)
 
-    # Set axis limits for correct basemap extent
-    pad_x = lon_width * 0.05
-    pad_y = lat_height * 0.05
-    ax.set_xlim(min_lon - pad_x, max_lon + pad_x)
-    ax.set_ylim(min_lat - pad_y, max_lat + pad_y)
+    # Compute snapped grid and set axis limits (replaces 5% padding)
+    from app.utils.map_grid import compute_snapped_grid
+    lon_lines, lon_labels, lon_start, lon_end = compute_snapped_grid(min_lon, max_lon)
+    lat_lines, lat_labels, lat_start, lat_end = compute_snapped_grid(min_lat, max_lat)
+    ax.set_xlim(lon_start, lon_end)
+    ax.set_ylim(lat_start, lat_end)
 
     # OSM basemap (uses the axis limits from above)
     _add_basemap(ax, crs='EPSG:4326')
@@ -204,7 +205,8 @@ def generate_map_image(
         except Exception as e:
             logger.error(f"Raster overlay failed for {layer_name}: {e}")
 
-    _add_grid_5x5(ax, min_lon, max_lon, min_lat, max_lat)
+    _add_grid_snapped(ax, lon_lines, lat_lines, lon_labels, lat_labels,
+                      lon_start, lon_end, lat_start, lat_end)
     ax.axis('off')
 
     # Title
@@ -220,9 +222,6 @@ def generate_map_image(
                 xycoords='axes fraction', fontsize=14, fontweight='bold', ha='center', va='center',
                 arrowprops=dict(arrowstyle='->', color='#222222', lw=3),
                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='#cccccc', alpha=0.85))
-
-    # Scale bar (approximate)
-    _add_scale_bar(ax, center_lat=(min_lat + max_lat) / 2, min_lon=min_lon, max_lon=max_lon, fig_width=MAP_FIGURE_INCHES[0])
 
     # Legend for raster layers
     if layer_name != "boundary":
@@ -256,52 +255,22 @@ def _calc_zoom(lon_width_deg: float, target_inches: float, dpi: int = 200) -> in
     return 15
 
 
-def _add_grid_5x5(ax, min_lon: float, max_lon: float, min_lat: float, max_lat: float):
-    """5×5 thin grid lines with coordinate labels at 5 positions."""
-    lon_step = (max_lon - min_lon) / 5
-    lat_step = (max_lat - min_lat) / 5
-    lon_vals = [min_lon + i * lon_step for i in range(6)]
-    lat_vals = [min_lat + i * lat_step for i in range(6)]
-
-    for lon in lon_vals:
+def _add_grid_snapped(ax, lon_lines, lat_lines, lon_labels, lat_labels,
+                      lon_start, lon_end, lat_start, lat_end):
+    """Draw pre-computed snapped grid lines with coordinate labels."""
+    for lon in lon_lines:
         ax.axvline(lon, color='#888888', linewidth=0.3, linestyle='-', alpha=0.5, zorder=0)
-    for lat in lat_vals:
+    for lat in lat_lines:
         ax.axhline(lat, color='#888888', linewidth=0.3, linestyle='-', alpha=0.5, zorder=0)
 
     kw = dict(fontsize=7, color='#444444', alpha=0.7)
-    for lon in lon_vals:
-        ax.text(lon, min_lat, f'{lon:.3f}°', ha='center', va='top', **kw)
-    for lat in lat_vals:
-        ax.text(min_lon, lat, f'{lat:.4f}°', ha='right', va='center', **kw)
+    for lon, lab in zip(lon_lines, lon_labels):
+        ax.text(lon, lat_end, f'{lab}°', ha='center', va='bottom', **kw)
+    for lat, lab in zip(lat_lines, lat_labels):
+        ax.text(lon_start, lat, f'{lab}°', ha='right', va='center', **kw)
 
-
-def _add_scale_bar(ax, center_lat: float, min_lon: float, max_lon: float, fig_width: float):
-    """Add prominent scale bar with white background."""
-    lon_range = max_lon - min_lon
-    scale_km_options = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50]
-    m_per_deg = 111320 * math.cos(math.radians(center_lat))
-    available_width = fig_width * 0.3
-    best = scale_km_options[0]
-    for skm in scale_km_options:
-        px_needed = (skm * 1000 / m_per_deg) / lon_range * fig_width
-        if px_needed <= available_width * 100:
-            best = skm
-    km = best
-    deg_km = (km * 1000) / m_per_deg
-    frac = deg_km / lon_range
-    sb_x = 0.05
-    sb_y = 0.06
-
-    # White background box
-    bbox_props = dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#555555', alpha=0.85)
-    ax.text(sb_x + frac / 2, sb_y + 0.03, f'{km} km', transform=ax.transAxes,
-            fontsize=10, ha='center', va='bottom', color='#222222', fontweight='bold',
-            bbox=bbox_props)
-
-    # Thick scale bar line
-    ax.annotate('', xy=(sb_x + frac, sb_y + 0.01), xytext=(sb_x, sb_y + 0.01),
-                xycoords='axes fraction', fontsize=0,
-                arrowprops=dict(arrowstyle='-', color='#222222', lw=4))
+    ax.set_xlim(lon_start, lon_end)
+    ax.set_ylim(lat_start, lat_end)
 
 
 def _add_legend(ax, layer_name: str):
@@ -365,4 +334,5 @@ def _add_legend(ax, layer_name: str):
         framealpha=0.90,
         edgecolor='#555555',
         fancybox=True,
+        prop=_get_dev_fontprop(7),
     )

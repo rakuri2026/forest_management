@@ -1386,6 +1386,12 @@ async def upload_household_data(
             if committee_imported_count > 0:
                 try:
                     db.commit()
+                    # Invalidate OP data cache so {{uc_members}} etc. show fresh data
+                    from app.models.op_data_cache import OpDataCache
+                    db.query(OpDataCache).filter(
+                        OpDataCache.calculation_id == calculation_id
+                    ).delete(synchronize_session=False)
+                    db.commit()
                 except Exception as e:
                     db.rollback()
                     print(f"Error committing committee data: {str(e)}")

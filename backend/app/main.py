@@ -59,6 +59,17 @@ async def lifespan(app: FastAPI):
     Application lifespan events
     Startup and shutdown logic
     """
+    # ── Configure root logger so app modules' logger.info() messages appear ──
+    import logging
+    root = logging.getLogger()
+    if not root.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s"
+        ))
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+
     # Startup
     print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     print(f"Debug mode: {settings.DEBUG}")
@@ -71,6 +82,22 @@ async def lifespan(app: FastAPI):
     # Check database connection
     if check_db_connection():
         print("Database connection successful")
+
+        # Run startup cleanup of old exports (7-day retention)
+        try:
+            from .services.export_cleanup import run_full_cleanup
+            from .core.database import SessionLocal
+            db = SessionLocal()
+            export_dir = os.path.join(os.path.dirname(__file__), '..', 'exports')
+            results = run_full_cleanup(db, export_dir, retention_days=7)
+            total = sum(v for k, v in results.items() if k != "retention_days")
+            if total > 0:
+                print(f"Startup export cleanup: removed {total} items")
+            else:
+                print("Startup export cleanup: nothing to clean")
+            db.close()
+        except Exception as e:
+            print(f"Warning: Startup export cleanup failed (non-critical): {e}")
     else:
         print("Database connection failed")
 

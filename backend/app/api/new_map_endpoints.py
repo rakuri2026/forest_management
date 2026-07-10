@@ -46,11 +46,11 @@ async def generate_topographic_map_endpoint(
             orientation='auto'
         )
 
-        # Return as PNG image
+        # Return as SVG image (preserves text shaping for Devanagari)
         return StreamingResponse(
             io.BytesIO(buffer.getvalue()),
-            media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=topographic_map_{calculation_id}.png"}
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f"inline; filename=topographic_map_{calculation_id}.svg"}
         )
 
     except Exception as e:
@@ -107,11 +107,11 @@ async def generate_forest_type_map_endpoint(
             orientation='auto'
         )
 
-        # Return as PNG image
+        # Return as SVG image (preserves text shaping for Devanagari)
         return StreamingResponse(
             io.BytesIO(buffer.getvalue()),
-            media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=forest_type_map_{calculation_id}.png"}
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f"inline; filename=forest_type_map_{calculation_id}.svg"}
         )
 
     except Exception as e:
@@ -168,11 +168,11 @@ async def generate_canopy_height_map_endpoint(
             orientation='auto'
         )
 
-        # Return as PNG image
+        # Return as SVG image (preserves text shaping for Devanagari)
         return StreamingResponse(
             io.BytesIO(buffer.getvalue()),
-            media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=canopy_height_map_{calculation_id}.png"}
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f"inline; filename=canopy_height_map_{calculation_id}.svg"}
         )
 
     except Exception as e:
@@ -229,11 +229,11 @@ async def generate_soil_map_endpoint(
             orientation='auto'
         )
 
-        # Return as PNG image
+        # Return as SVG image (preserves text shaping for Devanagari)
         return StreamingResponse(
             io.BytesIO(buffer.getvalue()),
-            media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=soil_map_{calculation_id}.png"}
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f"inline; filename=soil_map_{calculation_id}.svg"}
         )
 
     except Exception as e:
@@ -290,11 +290,11 @@ async def generate_forest_health_map_endpoint(
             orientation='auto'
         )
 
-        # Return as PNG image
+        # Return as SVG image (preserves text shaping for Devanagari)
         return StreamingResponse(
             io.BytesIO(buffer.getvalue()),
-            media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=forest_health_map_{calculation_id}.png"}
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f"inline; filename=forest_health_map_{calculation_id}.svg"}
         )
 
     except Exception as e:

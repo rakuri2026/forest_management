@@ -158,7 +158,7 @@ async def upload_field_inventory(
     # Clean NaN values before JSON serialization
     validation_report = clean_nan_values(validation_report)
 
-    # If validation passed, create record
+    # If validation passed, create record and store raw rows immediately
     if validation_report['summary'].get('ready_for_processing'):
         field_inventory = FieldInventoryCalculation(
             user_id=current_user.id,
@@ -172,6 +172,12 @@ async def upload_field_inventory(
             status='validated'
         )
         db.add(field_inventory)
+        db.flush()  # get ID without committing
+
+        # Store raw rows immediately — {{table:fieldinventory}} works after this
+        service = FieldInventoryService(db)
+        service.store_raw_measurements(field_inventory.id, df, mapping_dict)
+
         db.commit()
         db.refresh(field_inventory)
 

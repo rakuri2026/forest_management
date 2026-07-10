@@ -459,12 +459,14 @@ async def delete_tree_model(
             detail="Permission denied"
         )
 
-    # Delete file if exists
-    if model.file_path and os.path.exists(model.file_path):
-        try:
-            os.remove(model.file_path)
-        except Exception as e:
-            print(f"Warning: Could not delete file {model.file_path}: {e}")
+    # Delete files (GPKG + Excel) if they exist
+    for path_attr in ['file_path', 'excel_path']:
+        filepath = getattr(model, path_attr, None)
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                print(f"Warning: Could not delete {filepath}: {e}")
 
     # Delete record
     db.delete(model)

@@ -19,6 +19,7 @@ import SamplingList from './pages/SamplingList';
 import DraftResume from './pages/DraftResume';
 import YearlyActivitiesPage from './components/YearlyActivities/YearlyActivitiesPage';
 import OperationalPlanPage from './pages/OperationalPlanPage';
+import TemplateDesignerPage from './pages/TemplateDesignerPage';
 import PublicTemplatesPage from './pages/PublicTemplatesPage';
 import AdminTemplatesPage from './pages/AdminTemplatesPage';
 
@@ -61,6 +62,11 @@ const App: React.FC = () => {
 
             {/* Template routes */}
             <Route path="templates" element={<PublicTemplatesPage />} />
+            <Route path="templates/designer/:templateId" element={
+              <ProtectedRoute allowedRoles={['super_admin']}>
+                <TemplateDesignerPage />
+              </ProtectedRoute>
+            } />
             <Route path="admin/templates" element={
               <ProtectedRoute allowedRoles={['super_admin']}>
                 <AdminTemplatesPage />
