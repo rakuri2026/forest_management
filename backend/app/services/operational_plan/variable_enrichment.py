@@ -78,6 +78,7 @@ SOURCE_TAB_MAP: Dict[str, Tuple[Optional[str], str]] = {
     "op_table": ("Operational Plan", "Data & Maps"),
     "section_generator": ("Operational Plan", "Data & Maps"),
     "template": ("Operational Plan", "Data & Maps"),
+    "tree_mapping_analysis": ("Tree Mapping", "Data & Maps"),
 }
 
 # Key prefix overrides — same source_module but different origin tab
@@ -354,6 +355,16 @@ SUB_GROUPS = {
     "section:committee_narration": "11e. Total Inventory — Narrations",
     "section:user_group_narration": "11e. Total Inventory — Narrations",
     "section:demand_supply_narration": "11e. Total Inventory — Narrations",
+
+    # Tree Mapping Analysis Narrations
+    "section:sm_hierarchy_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_species_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_dbh_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_stand_type_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_carbon_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_volume_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_mother_tree_narration": "19a. Tree Mapping — Narrations",
+    "section:sm_felling_narration": "19a. Tree Mapping — Narrations",
 
     # A11: Sampling
     "sampling_available": "12. Sampling Design",
@@ -1391,6 +1402,35 @@ DESCRIPTIONS: Dict[str, str] = {
     "section_16_prohibited": "Predefined text content for Section 16 listing prohibited activities not allowed in the forest",
     "section_17_penalties": "Predefined text content for Section 17 describing penalties and fines for forest law violations",
     "section_18_misc": "Predefined text content for Section 18 covering miscellaneous provisions not addressed in other sections",
+
+    # Tree Mapping Analysis (sm_* variables)
+    "sm_available": "Boolean flag indicating whether tree mapping analysis data is available for this forest",
+    "sm_total_blocks_analyzed": "Number of forest blocks that contain mapped tree data",
+    "sm_total_trees_analyzed": "Total number of individual trees in the mapping analysis",
+    "sm_total_carbon_tc": "Forest-wide total carbon stock in tonnes of carbon (tC) computed via IPCC Tier 2",
+    "sm_total_co2_tco2": "Forest-wide total CO2 equivalent in tonnes of CO2 (tCO2) computed via IPCC Tier 2",
+    "sm_hierarchy_summary": "Tree inventory across all spatial levels (sub-compartment, compartment, block, sub-area) with counts, volumes, and species",
+    "sm_species_by_hierarchy": "Species composition at each spatial level with volume contribution and percentage breakdown",
+    "sm_species_diversity": "Species diversity metrics (Shannon Index, Evenness, Richness) per forest block",
+    "sm_dbh_by_hierarchy": "DBH class distribution at each spatial level showing regeneration and harvest potential",
+    "sm_dbh_species_by_hierarchy": "Combined DBH class and species breakdown at each spatial level revealing size-class species dominance",
+    "sm_stand_type_by_hierarchy": "Forest stand type classification (Regeneration/Sapling/Pole/Tree) at each spatial level per Nepal Forest Regulation 2079",
+    "sm_forest_structure_status": "Overall forest structure health status based on regeneration percentage across all blocks",
+    "sm_carbon_by_hierarchy": "IPCC Tier 2 carbon metrics (AGB, BGB, Carbon, CO2e) at each spatial level from individual tree mapping data",
+    "sm_volume_by_hierarchy": "Volume composition (stem vs branch, timber vs firewood) at each spatial level",
+    "sm_top_species_by_volume": "Top species ranked by total volume contribution with percentage breakdown",
+    "sm_mother_tree_coverage": "Mother tree grid coverage summary showing selection effectiveness",
+    "sm_mother_tree_by_hierarchy": "Mother tree and felling tree distribution at each spatial level with grid coverage ratio",
+
+    # Tree Mapping Analysis Narrations
+    "section:sm_hierarchy_narration": "Auto-generated narrative summarizing spatial hierarchy tree distribution across blocks, compartments, and sub-areas",
+    "section:sm_species_narration": "Auto-generated narrative describing species composition, dominant species, and diversity metrics from tree mapping",
+    "section:sm_dbh_narration": "Auto-generated narrative reporting DBH class distribution and dominant size classes from tree mapping",
+    "section:sm_stand_type_narration": "Auto-generated narrative on forest stand type classification (Regeneration/Sapling/Pole/Tree) and structure status",
+    "section:sm_carbon_narration": "Auto-generated narrative summarizing IPCC Tier 2 carbon stock estimates (AGB, BGB, Carbon, CO2e) from tree mapping",
+    "section:sm_volume_narration": "Auto-generated narrative on volume distribution including stem/branch breakdown and top species by volume",
+    "section:sm_mother_tree_narration": "Auto-generated narrative describing mother tree grid coverage, spacing effectiveness, and selection summary",
+    "section:sm_felling_narration": "Auto-generated narrative analyzing felling trees (≥30cm DBH) by species, volume, and DBH class",
 }
 
 DESCRIPTION_NE: Dict[str, str] = {

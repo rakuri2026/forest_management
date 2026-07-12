@@ -1788,3 +1788,23 @@ async def get_grid_cells(
             "projection_epsg": inventory.projection_epsg,
         }
     }
+
+
+@router.get("/{inventory_id}/analysis")
+async def get_inventory_analysis(
+    inventory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get tree mapping analysis data for sm_* variables.
+    Returns spatial hierarchy summary, species composition, DBH distribution,
+    stand type, carbon stock, volume analysis, and mother tree coverage.
+    """
+    try:
+        service = InventoryService(db)
+        data = service.get_inventory_analysis(inventory_id)
+        return data
+    except Exception as e:
+        logger.error("Error getting inventory analysis: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))

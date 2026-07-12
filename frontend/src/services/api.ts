@@ -833,6 +833,12 @@ exportInventory: async (id: string, format: "csv" | "geojson" | "excel"): Promis
     });
     return response.data;
   },
+
+  // Get tree mapping analysis data
+  getInventoryAnalysis: async (inventoryId: string) => {
+    const response = await api.get(`/api/inventory/${inventoryId}/analysis`);
+    return response.data;
+  },
 };
 
 // Field Inventory endpoints
@@ -2473,6 +2479,11 @@ export const operationalPlanApi = {
 
   savePlanAsTemplate: async (planId: string, data: { name: string; description?: string; tree?: any[]; is_default?: boolean; is_system?: boolean; visibility?: string; tags?: string[] }): Promise<any> => {
     const response = await api.post(`/api/operational-plans/${planId}/save-as-template`, data);
+    return response.data;
+  },
+
+  updateDefaultTemplate: async (planId: string, data: { changelog?: string } = {}): Promise<any> => {
+    const response = await api.put(`/api/operational-plans/${planId}/update-default-template`, data);
     return response.data;
   },
 

@@ -1,5 +1,7 @@
 import logging
+import math
 import time
+from collections import Counter
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from datetime import datetime
@@ -21,7 +23,29 @@ from app.services.report.data_collector import (
 from app.services.operational_plan.section_generators import collect_section_content
 
 # Bump this when data_collector or any collector it calls changes schema/keys
-OP_DATA_CACHE_VERSION = 11
+OP_DATA_CACHE_VERSION = 14
+
+DBH_CLASS_NP = {
+    "Seedling (0-4)": "बिउ (०-४)",
+    "Sapling (4-10)": "रुखौटा (४-१०)",
+    "10-20 Sm.Pole": "१०-२० (सानो खाँवा)",
+    "20-30 Lg.Pole": "२०-३० (ठुलो खाँवा)",
+    "30-40 Sm.Tree": "३०-४० (सानो रूख)",
+    "40-50 Med.Tree": "४०-५० (मध्यम रूख)",
+    "50-60 Lg.Tree": "५०-६० (ठुलो रूख)",
+    "60+ V.Lg.Tree": ">६० (धेरै ठुलो रूख)",
+}
+
+DBH_CLASS_NP_CHART = {
+    "Seedling (0-4)": "०-४ से.मी.",
+    "Sapling (4-10)": "४-१० से.मी.",
+    "10-20 Sm.Pole": "१०-२० से.मी.",
+    "20-30 Lg.Pole": "२०-३० से.मी.",
+    "30-40 Sm.Tree": "३०-४० से.मी.",
+    "40-50 Med.Tree": "४०-५० से.मी.",
+    "50-60 Lg.Tree": "५०-६० से.मी.",
+    "60+ V.Lg.Tree": ">६० से.मी.",
+}
 
 
 def _fetch_species_block_breakdown(db: Session, fi_calc_id: str,
@@ -286,19 +310,11 @@ def _fetch_dbh_class_breakdown_np(db: Session, fi_calc_id: str, block_areas: Opt
 def _prepare_dbh_class_chart_data(db: Session, fi_calc_id: str, block_areas: dict) -> List[Dict[str, Any]]:
     """Forest-wide DBH class (pole+tree) per-hectare volume for bar chart, Nepali labels."""
     rows = _fetch_dbh_class_breakdown(db, fi_calc_id, block_areas)
-    np_labels = {
-        "10-20 Sm.Pole": "१०-२० से.मी.",
-        "20-30 Lg.Pole": "२०-३० से.मी.",
-        "30-40 Sm.Tree": "३०-४० से.मी.",
-        "40-50 Med.Tree": "४०-५० से.मी.",
-        "50-60 Lg.Tree": "५०-६० से.मी.",
-        "60+ V.Lg.Tree": ">६० से.मी.",
-    }
     result = []
     for r in rows:
         if r["block_name"] != "Grand Total (Weighted)":
             continue
-        label = np_labels.get(r["dbh_class"])
+        label = DBH_CLASS_NP_CHART.get(r["dbh_class"])
         if not label:
             continue
         result.append({
@@ -1361,14 +1377,7 @@ def _compute_total_inventory(fi_data: Dict[str, Any]) -> Dict[str, Any]:
 
     # ── T7: DBH क्लास अनुसार कुल मौज्दात (Absolute) ──
     dbh_raw = fi_data.get("fi_block_dbh_class_growing_stock", [])
-    _DBH_NP_LABEL = {
-        "10-20 Sm.Pole": "१०-२० (सानो खाँवा)",
-        "20-30 Lg.Pole": "२०-३० (ठुलो खाँवा)",
-        "30-40 Sm.Tree": "३०-४० (सानो रूख)",
-        "40-50 Med.Tree": "४०-५० (मध्यम रूख)",
-        "50-60 Lg.Tree": "५०-६० (ठुलो रूख)",
-        "60+ V.Lg.Tree": ">६० (धेरै ठुलो रूख)",
-    }
+    _DBH_NP_LABEL = DBH_CLASS_NP
     if dbh_raw and ti_block_rows:
         # Per-block DBH class absolute values
         dbh_abs_rows = []
@@ -2648,6 +2657,12 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
     # Fieldbook data — must be before section_generators so narration sees it
     raw["fieldbook"] = _fetch_fieldbook_data(db, calculation_id)
 
+    # Tree mapping analysis data for sm_* variables
+    t_sm = time.time()
+    sm_data = get_tree_mapping_analysis_data(db, calculation_id)
+    logger.info("OP_COLLECT: tree_mapping_analysis done in %.2fs", time.time() - t_sm)
+    raw["tree_mapping_analysis"] = sm_data
+
     # Demand-supply data for section:demand_supply_narration
     try:
         from app.services.demand_supply_service import (
@@ -2733,3 +2748,972 @@ def collect_all_op_data(db: Session, calculation_id: str) -> Dict[str, Any]:
         time.time() - t_start, calculation_id, "WRITTEN",
     )
     return raw
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Tree Mapping Analysis — sm_* variables
+# ═══════════════════════════════════════════════════════════════════
+
+def _safe_hierarchy(val: Any) -> str:
+    """Normalize hierarchy value: None, empty, whitespace → '-'"""
+    if val is None:
+        return '-'
+    s = str(val).strip()
+    return s if s else '-'
+
+
+def _compute_shannon_diversity(species_counts: Dict[str, int]) -> Dict[str, Any]:
+    """Compute Shannon Index and Evenness from species counts."""
+    total = sum(species_counts.values())
+    if total == 0:
+        return {"species_richness": 0, "shannon_index": 0.0, "evenness": 0.0}
+    richness = len(species_counts)
+    shannon = 0.0
+    for count in species_counts.values():
+        pi = count / total
+        if pi > 0:
+            shannon -= pi * math.log(pi)
+    evenness = shannon / math.log(richness) if richness > 1 else 0.0
+    return {
+        "species_richness": richness,
+        "shannon_index": round(shannon, 4),
+        "evenness": round(evenness, 4),
+    }
+
+
+def get_tree_mapping_analysis_data(db: Session, calculation_id: str) -> Dict[str, Any]:
+    """Collect tree mapping analysis data for sm_* variables.
+
+    Returns a dict keyed by sm_* variable names containing all data
+    needed for the Tree Mapping Analysis section.
+    """
+    from app.models.inventory import InventoryCalculation, InventoryTree, TreeSpeciesCoefficient
+    from app.models.forest_block import ForestBlock
+    from app.services.carbon_calculator import calculate_all as carbon_calculate_all
+
+    result: Dict[str, Any] = {}
+
+    # Find inventory_calculation for this calculation_id
+    calc_uuid = UUID(calculation_id) if isinstance(calculation_id, str) else calculation_id
+    inv_calc = db.query(InventoryCalculation).filter(
+        InventoryCalculation.calculation_id == calc_uuid
+    ).first()
+
+    if not inv_calc:
+        result["sm_available"] = False
+        return result
+
+    inv_id = inv_calc.id
+
+    # Check if there are any trees
+    tree_count = db.query(InventoryTree).filter(
+        InventoryTree.inventory_calculation_id == inv_id
+    ).count()
+
+    if tree_count == 0:
+        result["sm_available"] = False
+        return result
+
+    result["sm_available"] = True
+
+    # Load species coefficients for wood density lookup
+    species_coeffs = {}
+    for sc in db.query(TreeSpeciesCoefficient).filter(
+        TreeSpeciesCoefficient.is_active == True
+    ).all():
+        species_coeffs[sc.scientific_name] = {
+            "local_name": sc.local_name or "",
+            "wood_density": sc.wood_density_gm_cm3 or 0.6,
+        }
+
+    # Load block areas
+    block_areas: Dict[str, float] = {}
+    blocks = db.query(ForestBlock).filter(
+        ForestBlock.calculation_id == calc_uuid,
+        ForestBlock.is_compartment == False,
+        ForestBlock.division_level == 0,
+    ).all()
+    for b in blocks:
+        area = b.area_hectares
+        if area is None and b.area_sqm:
+            area = b.area_sqm / 10000.0
+        block_areas[b.name] = area or 0
+
+    # ── Core hierarchy aggregation query ──────────────────────────
+    # Uses division_level to correctly map:
+    #   compartment = parent compartment name (level 1)
+    #   sub_compartment = deepest block name (level 2) or '-' (level 1)
+    hierarchy_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.species, it.dia_cm, it.height_m, it.tree_volume, it.stem_volume,
+                it.branch_volume, it.gross_volume, it.net_volume, it.firewood_m3, it.firewood_chatta
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            MAX(block_name)                                         AS block_name,
+            COUNT(*)                                                 AS tree_count,
+            AVG(dia_cm)                                              AS avg_dbh,
+            AVG(height_m)                                            AS avg_height,
+            SUM(COALESCE(tree_volume, 0))                            AS total_volume,
+            SUM(COALESCE(stem_volume, 0))                            AS stem_volume,
+            SUM(COALESCE(branch_volume, 0))                          AS branch_volume,
+            SUM(COALESCE(gross_volume, 0))                           AS gross_volume,
+            SUM(COALESCE(net_volume, 0))                             AS net_volume,
+            SUM(COALESCE(firewood_m3, 0))                            AS firewood_m3,
+            SUM(COALESCE(firewood_chatta, 0))                        AS firewood_chatta,
+            MODE() WITHIN GROUP (ORDER BY species)                   AS dominant_species
+        FROM h
+        GROUP BY compartment, sub_compartment
+        ORDER BY
+            CASE WHEN compartment = '-' THEN 1 ELSE 0 END, compartment,
+            CASE WHEN sub_compartment = '-' THEN 1 ELSE 0 END, sub_compartment
+    """)
+    rows = db.execute(hierarchy_sql, {"inv_id": inv_id}).fetchall()
+
+    # Count distinct blocks with tree data
+    blocks_analyzed = len(set(r.block_name for r in rows if r.block_name != '-'))
+    result["sm_total_blocks_analyzed"] = blocks_analyzed
+    result["sm_total_trees_analyzed"] = tree_count
+
+    # ── Section 1: Spatial Hierarchy Summary ──────────────────────
+    hierarchy_summary = []
+    for r in rows:
+        block = r.block_name
+        area = block_areas.get(block, 0) if block != '-' else 0
+        tree_count_r = r.tree_count
+        trees_per_ha = round(tree_count_r / area, 2) if area > 0 else None
+        vol = float(r.total_volume or 0)
+        vol_per_ha = round(vol / area, 2) if area > 0 else None
+        hierarchy_summary.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(r.block_name),
+            "tree_count": tree_count_r,
+            "area_ha": round(area, 2) if area > 0 else "-",
+            "trees_per_ha": trees_per_ha if trees_per_ha else "-",
+            "total_volume_m3": round(vol, 2),
+            "volume_per_ha": vol_per_ha if vol_per_ha else "-",
+            "dominant_species": _safe_hierarchy(r.dominant_species),
+            "avg_dbh_cm": round(float(r.avg_dbh or 0), 1),
+            "avg_height_m": round(float(r.avg_height or 0), 1),
+        })
+    result["sm_hierarchy_summary"] = hierarchy_summary
+
+    # ── Section 2: Species by Hierarchy ───────────────────────────
+    species_hier_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.species,
+                COALESCE(NULLIF(TRIM(it.local_name), ''), '')  AS local_name,
+                it.dia_cm, it.tree_volume, it.stem_volume, it.firewood_m3, it.net_volume
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            MAX(block_name)                             AS block_name,
+            species, local_name,
+            COUNT(*)                                         AS tree_count,
+            SUM(COALESCE(stem_volume, 0))                   AS timber_m3,
+            SUM(COALESCE(firewood_m3, 0))                   AS firewood_m3,
+            SUM(COALESCE(tree_volume, 0))                   AS gross_volume_m3,
+            SUM(COALESCE(net_volume, 0))                    AS net_volume_m3,
+            AVG(dia_cm)                                     AS avg_dbh_cm,
+            ROUND((COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (
+                PARTITION BY compartment, sub_compartment
+            ))::numeric, 1)                                    AS hierarchy_percent,
+            ROUND((SUM(COALESCE(tree_volume, 0)) * 100.0 / NULLIF(SUM(SUM(COALESCE(tree_volume, 0))) OVER (), 0))::numeric, 1) AS volume_percent
+        FROM h
+        GROUP BY compartment, sub_compartment, species, local_name
+        ORDER BY
+            CASE WHEN compartment = '-' THEN 1 ELSE 0 END, compartment,
+            CASE WHEN sub_compartment = '-' THEN 1 ELSE 0 END, sub_compartment,
+            tree_count DESC
+    """)
+    sp_rows = db.execute(species_hier_sql, {"inv_id": inv_id}).fetchall()
+    species_by_hierarchy = []
+    for r in sp_rows:
+        species_by_hierarchy.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(r.block_name),
+            "species": r.species or "",
+            "local_name": r.local_name or "",
+            "tree_count": r.tree_count,
+            "hierarchy_percent": float(r.hierarchy_percent or 0),
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "firewood_m3": round(float(r.firewood_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "net_volume_m3": round(float(r.net_volume_m3 or 0), 2),
+            "volume_percent": float(r.volume_percent or 0),
+            "avg_dbh_cm": round(float(r.avg_dbh_cm or 0), 1),
+        })
+    result["sm_species_by_hierarchy"] = species_by_hierarchy
+
+    # ── Section 2b: Species Diversity by Block ────────────────────
+    diversity_sql = text("""
+        WITH h AS (
+            SELECT
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.species
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT block_name, species, COUNT(*) AS cnt
+        FROM h
+        GROUP BY block_name, species
+    """)
+    div_rows = db.execute(diversity_sql, {"inv_id": inv_id}).fetchall()
+    block_species: Dict[str, Dict[str, int]] = {}
+    for r in div_rows:
+        bn = _safe_hierarchy(r.block_name)
+        block_species.setdefault(bn, {})[r.species] = r.cnt
+
+    species_diversity = []
+    total_carbon_tc = 0.0
+    total_co2_tco2 = 0.0
+    for bn, sp_counts in sorted(block_species.items()):
+        div = _compute_shannon_diversity(sp_counts)
+        species_diversity.append({
+            "block_name": bn,
+            **div,
+        })
+    result["sm_species_diversity"] = species_diversity
+
+    # ── Section 3: DBH by Hierarchy ───────────────────────────────
+    dbh_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.dbh_class, it.stem_volume, it.firewood_m3, it.tree_volume, it.net_volume
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            MAX(block_name)                             AS block_name,
+            dbh_class,
+            COUNT(*)                                         AS tree_count,
+            SUM(COALESCE(stem_volume, 0))                   AS timber_m3,
+            SUM(COALESCE(firewood_m3, 0))                   AS firewood_m3,
+            SUM(COALESCE(tree_volume, 0))                   AS gross_volume_m3,
+            SUM(COALESCE(net_volume, 0))                    AS net_volume_m3,
+            ROUND((COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (
+                PARTITION BY compartment, sub_compartment
+            ))::numeric, 1)                                    AS hierarchy_percent
+        FROM h
+        GROUP BY compartment, sub_compartment, dbh_class
+        ORDER BY
+            CASE WHEN compartment = '-' THEN 1 ELSE 0 END, compartment,
+            CASE WHEN sub_compartment = '-' THEN 1 ELSE 0 END, sub_compartment,
+            dbh_class
+    """)
+    dbh_rows = db.execute(dbh_sql, {"inv_id": inv_id}).fetchall()
+    dbh_by_hierarchy = []
+    for r in dbh_rows:
+        dbh_by_hierarchy.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(r.block_name),
+            "dbh_class": DBH_CLASS_NP.get(r.dbh_class, r.dbh_class or "-"),
+            "tree_count": r.tree_count,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "firewood_m3": round(float(r.firewood_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "net_volume_m3": round(float(r.net_volume_m3 or 0), 2),
+            "hierarchy_percent": float(r.hierarchy_percent or 0),
+        })
+    result["sm_dbh_by_hierarchy"] = dbh_by_hierarchy
+
+    # ── Section 3.5: DBH × Species by Hierarchy ──────────────────
+    dbh_sp_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.dbh_class, it.species,
+                COALESCE(NULLIF(TRIM(it.local_name), ''), '')  AS local_name,
+                it.stem_volume, it.firewood_m3, it.tree_volume, it.net_volume
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            MAX(block_name)                             AS block_name,
+            dbh_class, species, local_name,
+            COUNT(*)                                         AS tree_count,
+            SUM(COALESCE(stem_volume, 0))                   AS timber_m3,
+            SUM(COALESCE(firewood_m3, 0))                   AS firewood_m3,
+            SUM(COALESCE(tree_volume, 0))                   AS gross_volume_m3,
+            SUM(COALESCE(net_volume, 0))                    AS net_volume_m3,
+            ROUND((COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (
+                PARTITION BY compartment, sub_compartment
+            ))::numeric, 1)                                    AS hierarchy_percent,
+            ROUND((COUNT(*) * 100.0 / SUM(COUNT(*)) OVER ())::numeric, 1) AS dbh_species_percent
+        FROM h
+        GROUP BY compartment, sub_compartment, dbh_class, species, local_name
+        ORDER BY
+            CASE WHEN compartment = '-' THEN 1 ELSE 0 END, compartment,
+            CASE WHEN sub_compartment = '-' THEN 1 ELSE 0 END, sub_compartment,
+            dbh_class, tree_count DESC
+    """)
+    dbh_sp_rows = db.execute(dbh_sp_sql, {"inv_id": inv_id}).fetchall()
+    dbh_species_by_hierarchy = []
+    for r in dbh_sp_rows:
+        dbh_species_by_hierarchy.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(r.block_name),
+            "dbh_class": DBH_CLASS_NP.get(r.dbh_class, r.dbh_class or "-"),
+            "species": r.species or "",
+            "local_name": r.local_name or "",
+            "tree_count": r.tree_count,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "firewood_m3": round(float(r.firewood_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "net_volume_m3": round(float(r.net_volume_m3 or 0), 2),
+            "hierarchy_percent": float(r.hierarchy_percent or 0),
+            "dbh_species_percent": float(r.dbh_species_percent or 0),
+        })
+    result["sm_dbh_species_by_hierarchy"] = dbh_species_by_hierarchy
+
+    # ── Section 4: Stand Type by Hierarchy ────────────────────────
+    stand_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.stand_type
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            MAX(block_name)                             AS block_name,
+            SUM(CASE WHEN stand_type = 'Regeneration' THEN 1 ELSE 0 END) AS regeneration,
+            SUM(CASE WHEN stand_type = 'Sapling' THEN 1 ELSE 0 END)      AS sapling,
+            SUM(CASE WHEN stand_type = 'Pole' THEN 1 ELSE 0 END)         AS pole,
+            SUM(CASE WHEN stand_type = 'Tree' THEN 1 ELSE 0 END)         AS tree_count,
+            COUNT(*) AS total
+        FROM h
+        GROUP BY compartment, sub_compartment
+        ORDER BY
+            CASE WHEN compartment = '-' THEN 1 ELSE 0 END, compartment,
+            CASE WHEN sub_compartment = '-' THEN 1 ELSE 0 END, sub_compartment
+    """)
+    stand_rows = db.execute(stand_sql, {"inv_id": inv_id}).fetchall()
+    stand_type_by_hierarchy = []
+    total_regen = 0
+    total_all = 0
+    for r in stand_rows:
+        regen_pct = round(r.regeneration * 100.0 / r.total, 1) if r.total > 0 else 0
+        if regen_pct > 20:
+            status = "राम्रो"
+        elif regen_pct >= 10:
+            status = "मध्यम"
+        else:
+            status = "कमजोर"
+        total_regen += r.regeneration
+        total_all += r.total
+        stand_type_by_hierarchy.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(r.block_name),
+            "regeneration": r.regeneration,
+            "sapling": r.sapling,
+            "pole": r.pole,
+            "tree": r.tree_count,
+            "total": r.total,
+            "regeneration_percent": regen_pct,
+            "structure_status": status,
+        })
+    result["sm_stand_type_by_hierarchy"] = stand_type_by_hierarchy
+
+    # Overall structure status
+    overall_regen_pct = round(total_regen * 100.0 / total_all, 1) if total_all > 0 else 0
+    if overall_regen_pct > 20:
+        overall_status = "राम्रो"
+    elif overall_regen_pct >= 10:
+        overall_status = "मध्यम"
+    else:
+        overall_status = "कमजोर"
+
+    good_blocks = sum(1 for s in stand_type_by_hierarchy if s["structure_status"] == "राम्रो")
+    moderate_blocks = sum(1 for s in stand_type_by_hierarchy if s["structure_status"] == "मध्यम")
+    weak_blocks = sum(1 for s in stand_type_by_hierarchy if s["structure_status"] == "कमजोर")
+
+    result["sm_forest_structure_status"] = {
+        "overall_status": overall_status,
+        "overall_regeneration_percent": overall_regen_pct,
+        "total_trees_analyzed": total_all,
+        "blocks_analyzed": blocks_analyzed,
+        "good_structure_blocks": good_blocks,
+        "moderate_structure_blocks": moderate_blocks,
+        "weak_structure_blocks": weak_blocks,
+    }
+
+    # ── Section 5: Carbon by Hierarchy ────────────────────────────
+    carbon_by_hierarchy = []
+    for r in rows:
+        bn = r.block_name
+        gross_vol = float(r.gross_volume or 0)
+        # Get weighted average wood density for this hierarchy group
+        avg_density = 0.6  # default (t/m³, same as g/cm³)
+        if bn and bn != '-':
+            # Simple average of species densities in this hierarchy group
+            block_trees_sql = text("""
+                SELECT it.species, COUNT(*) as cnt
+                FROM public.inventory_trees it
+                WHERE it.inventory_calculation_id = :inv_id
+                    AND (
+                        (COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                         AND COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-') = :comp
+                         AND '-' = :sub_comp)
+                        OR
+                        (COALESCE((it.extra_columns->>'division_level')::int, 0) > 1
+                         AND COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-') = :comp
+                         AND COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-') = :sub_comp)
+                    )
+                    AND COALESCE(NULLIF(TRIM(it.block_name), ''), '-') = :block
+                GROUP BY it.species
+            """)
+            sp_cnt = db.execute(block_trees_sql, {
+                "inv_id": inv_id,
+                "comp": _safe_hierarchy(r.compartment),
+                "sub_comp": _safe_hierarchy(r.sub_compartment),
+                "block": _safe_hierarchy(bn),
+            }).fetchall()
+            total_trees_in_group = sum(s.cnt for s in sp_cnt)
+            if total_trees_in_group > 0:
+                weighted_density = 0.0
+                for s in sp_cnt:
+                    coeff = species_coeffs.get(s.species, {})
+                    density = float(coeff.get("wood_density", 0.6))
+                    weighted_density += density * s.cnt / total_trees_in_group
+                avg_density = weighted_density
+
+        carbon = carbon_calculate_all(gross_vol, avg_density)  # g/cm³ = t/m³, no conversion needed
+        agb_t = carbon["agb_t_per_ha"]
+        bgb_t = carbon["bgb_t_per_ha"]
+        biomass_t = carbon["total_biomass_t_per_ha"]
+        carbon_tc = carbon["carbon_stock_tc_per_ha"]
+        co2_tco2 = carbon["co2_equivalent_tco2_per_ha"]
+
+        total_carbon_tc += carbon_tc
+        total_co2_tco2 += co2_tco2
+
+        carbon_by_hierarchy.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(bn),
+            "gross_volume_m3": round(gross_vol, 2),
+            "wood_density": round(avg_density, 1),
+            "agb_t": round(agb_t, 3),
+            "bgb_t": round(bgb_t, 3),
+            "biomass_t": round(biomass_t, 3),
+            "carbon_tc": round(carbon_tc, 3),
+            "co2_tco2": round(co2_tco2, 3),
+        })
+    result["sm_carbon_by_hierarchy"] = carbon_by_hierarchy
+    result["sm_total_carbon_tc"] = round(total_carbon_tc, 3)
+    result["sm_total_co2_tco2"] = round(total_co2_tco2, 3)
+
+    # ── Section 6: Volume by Hierarchy ────────────────────────────
+    result["sm_volume_by_hierarchy"] = [
+        {
+            "sub_compartment": h["sub_compartment"],
+            "compartment": h["compartment"],
+            "block_name": h["block_name"],
+            "stem_volume_m3": round(float(rows[idx].stem_volume or 0), 2),
+            "branch_volume_m3": round(float(rows[idx].branch_volume or 0), 2),
+            "total_volume_m3": h["total_volume_m3"],
+            "net_volume_m3": round(float(rows[idx].net_volume or 0), 2),
+            "firewood_m3": round(float(rows[idx].firewood_m3 or 0), 2),
+            "firewood_chatta": round(float(rows[idx].firewood_chatta or 0), 2),
+        }
+        for idx, h in enumerate(hierarchy_summary)
+    ]
+
+    # Top species by volume
+    vol_species_sql = text("""
+        SELECT
+            it.species,
+            COALESCE(NULLIF(TRIM(it.local_name), ''), '') AS local_name,
+            SUM(COALESCE(it.tree_volume, 0)) AS total_volume
+        FROM public.inventory_trees it
+        WHERE it.inventory_calculation_id = :inv_id
+        GROUP BY it.species, it.local_name
+        ORDER BY total_volume DESC
+    """)
+    vol_sp_rows = db.execute(vol_species_sql, {"inv_id": inv_id}).fetchall()
+    grand_total_vol = sum(float(r.total_volume or 0) for r in vol_sp_rows)
+    top_species_by_volume = []
+    for r in vol_sp_rows[:10]:
+        vol = float(r.total_volume or 0)
+        pct = round(vol * 100.0 / grand_total_vol, 1) if grand_total_vol > 0 else 0
+        top_species_by_volume.append({
+            "species": r.species or "",
+            "local_name": r.local_name or "",
+            "total_volume_m3": round(vol, 2),
+            "percent": pct,
+        })
+    result["sm_top_species_by_volume"] = top_species_by_volume
+
+    # ── Section 7: Mother Tree Coverage ───────────────────────────
+    mother_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                COALESCE(NULLIF(TRIM(it.block_name), ''), '-') AS block_name,
+                it.grid_cell_id, it.remark
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+                AND it.grid_cell_id IS NOT NULL
+        )
+        SELECT
+            compartment, sub_compartment,
+            MAX(block_name)                             AS block_name,
+            COUNT(DISTINCT grid_cell_id) AS grid_cells,
+            SUM(CASE WHEN remark = 'Mother Tree' THEN 1 ELSE 0 END) AS mother_trees,
+            SUM(CASE WHEN remark = 'Felling Tree' THEN 1 ELSE 0 END) AS felling_trees
+        FROM h
+        GROUP BY compartment, sub_compartment
+        ORDER BY
+            CASE WHEN compartment = '-' THEN 1 ELSE 0 END, compartment,
+            CASE WHEN sub_compartment = '-' THEN 1 ELSE 0 END, sub_compartment
+    """)
+    mother_rows = db.execute(mother_sql, {"inv_id": inv_id}).fetchall()
+
+    total_grid_cells = 0
+    total_mother = 0
+    mother_by_hierarchy = []
+    for r in mother_rows:
+        gc = r.grid_cells or 0
+        mt = r.mother_trees or 0
+        total_grid_cells += gc
+        total_mother += mt
+        mother_by_hierarchy.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "block_name": _safe_hierarchy(r.block_name),
+            "grid_cells": gc,
+            "mother_trees": mt,
+            "felling_trees": r.felling_trees or 0,
+            "coverage_ratio": round(mt / gc, 2) if gc > 0 else 0,
+        })
+
+    grid_spacing = inv_calc.grid_spacing_meters or 50
+    coverage_pct = round(total_mother * 100.0 / total_grid_cells, 1) if total_grid_cells > 0 else 0
+
+    result["sm_mother_tree_coverage"] = {
+        "grid_spacing_m": grid_spacing,
+        "total_grid_cells": total_grid_cells,
+        "cells_with_mother": total_mother,
+        "coverage_percent": coverage_pct,
+    }
+    result["sm_mother_tree_by_hierarchy"] = mother_by_hierarchy
+
+    # ── Section 8: Species-wise Mother Tree & Felling Tree ─────────
+    species_remark_sql = text("""
+        WITH h AS (
+            SELECT
+                it.species,
+                COALESCE(NULLIF(TRIM(it.local_name), ''), '') AS local_name,
+                it.remark,
+                it.stem_volume, it.tree_volume, it.dia_cm
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+                AND it.remark IN ('Mother Tree', 'Felling Tree')
+        )
+        SELECT
+            species, local_name, remark,
+            COUNT(*) AS tree_count,
+            SUM(COALESCE(stem_volume, 0)) AS timber_m3,
+            SUM(COALESCE(tree_volume, 0)) AS gross_volume_m3,
+            AVG(dia_cm) AS avg_dbh_cm
+        FROM h
+        GROUP BY species, local_name, remark
+        ORDER BY remark, tree_count DESC
+    """)
+    sr_rows = db.execute(species_remark_sql, {"inv_id": inv_id}).fetchall()
+
+    mother_by_species = []
+    felling_by_species = []
+    total_mother_trees = 0
+    total_felling_trees = 0
+    for r in sr_rows:
+        entry = {
+            "species": r.species or "",
+            "local_name": r.local_name or "",
+            "tree_count": r.tree_count,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "avg_dbh_cm": round(float(r.avg_dbh_cm or 0), 1),
+        }
+        if r.remark == 'Mother Tree':
+            total_mother_trees += r.tree_count
+            mother_by_species.append(entry)
+        elif r.remark == 'Felling Tree':
+            total_felling_trees += r.tree_count
+            felling_by_species.append(entry)
+
+    # Add percent to each entry
+    for entry in mother_by_species:
+        entry["percent"] = round(entry["tree_count"] * 100.0 / total_mother_trees, 1) if total_mother_trees > 0 else 0
+    for entry in felling_by_species:
+        entry["percent"] = round(entry["tree_count"] * 100.0 / total_felling_trees, 1) if total_felling_trees > 0 else 0
+
+    result["sm_mother_tree_by_species"] = mother_by_species
+    result["sm_felling_tree_by_species"] = felling_by_species
+    result["sm_mother_felling_summary"] = {
+        "total_mother_trees": total_mother_trees,
+        "total_felling_trees": total_felling_trees,
+        "total_trees": total_mother_trees + total_felling_trees,
+        "mother_percent": round(total_mother_trees * 100.0 / (total_mother_trees + total_felling_trees), 1) if (total_mother_trees + total_felling_trees) > 0 else 0,
+        "felling_percent": round(total_felling_trees * 100.0 / (total_mother_trees + total_felling_trees), 1) if (total_mother_trees + total_felling_trees) > 0 else 0,
+    }
+
+    # ── Section 9: Hierarchy + Remark breakdown (for table columns) ──
+    hier_remark_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                it.remark
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            SUM(CASE WHEN remark = 'Mother Tree' THEN 1 ELSE 0 END) AS mother_trees,
+            SUM(CASE WHEN remark = 'Felling Tree' THEN 1 ELSE 0 END) AS felling_trees,
+            COUNT(*) AS total_trees
+        FROM h
+        GROUP BY compartment, sub_compartment
+    """)
+    hr_rows = db.execute(hier_remark_sql, {"inv_id": inv_id}).fetchall()
+    hier_remark_map = {}
+    for r in hr_rows:
+        key = f"{_safe_hierarchy(r.compartment)}|{_safe_hierarchy(r.sub_compartment)}"
+        hier_remark_map[key] = {
+            "mother_trees": r.mother_trees or 0,
+            "felling_trees": r.felling_trees or 0,
+        }
+    result["sm_hierarchy_remark_breakdown"] = hier_remark_map
+
+    # ── Section 10: Species + Hierarchy + Remark breakdown ─────────
+    sp_hier_remark_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                it.species,
+                COALESCE(NULLIF(TRIM(it.local_name), ''), '') AS local_name,
+                it.remark, it.stem_volume, it.tree_volume, it.dia_cm
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            species, local_name, remark,
+            COUNT(*) AS tree_count,
+            SUM(COALESCE(stem_volume, 0)) AS timber_m3,
+            SUM(COALESCE(tree_volume, 0)) AS gross_volume_m3,
+            AVG(dia_cm) AS avg_dbh_cm
+        FROM h
+        GROUP BY compartment, sub_compartment, species, local_name, remark
+        ORDER BY compartment, sub_compartment, tree_count DESC
+    """)
+    shr_rows = db.execute(sp_hier_remark_sql, {"inv_id": inv_id}).fetchall()
+    species_hier_remark = []
+    for r in shr_rows:
+        species_hier_remark.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "species": r.species or "",
+            "local_name": r.local_name or "",
+            "remark": r.remark or "",
+            "tree_count": r.tree_count,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "avg_dbh_cm": round(float(r.avg_dbh_cm or 0), 1),
+        })
+    result["sm_species_hier_remark"] = species_hier_remark
+
+    # ── Section 11: DBH + Hierarchy + Remark breakdown ─────────────
+    dbh_hier_remark_sql = text("""
+        WITH h AS (
+            SELECT
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'parent_compartment_name'), ''), '-')
+                END AS compartment,
+                CASE
+                    WHEN COALESCE((it.extra_columns->>'division_level')::int, 0) <= 1
+                    THEN '-'
+                    ELSE COALESCE(NULLIF(TRIM(it.extra_columns->>'compartment_name'), ''), '-')
+                END AS sub_compartment,
+                it.dbh_class, it.remark, it.stem_volume, it.tree_volume
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+        )
+        SELECT
+            compartment, sub_compartment,
+            dbh_class, remark,
+            COUNT(*) AS tree_count,
+            SUM(COALESCE(stem_volume, 0)) AS timber_m3,
+            SUM(COALESCE(tree_volume, 0)) AS gross_volume_m3
+        FROM h
+        GROUP BY compartment, sub_compartment, dbh_class, remark
+        ORDER BY compartment, sub_compartment, dbh_class
+    """)
+    dhr_rows = db.execute(dbh_hier_remark_sql, {"inv_id": inv_id}).fetchall()
+    dbh_hier_remark = []
+    for r in dhr_rows:
+        dbh_hier_remark.append({
+            "sub_compartment": _safe_hierarchy(r.sub_compartment),
+            "compartment": _safe_hierarchy(r.compartment),
+            "dbh_class": DBH_CLASS_NP.get(r.dbh_class, r.dbh_class or "-"),
+            "remark": r.remark or "",
+            "tree_count": r.tree_count,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+        })
+    result["sm_dbh_hier_remark"] = dbh_hier_remark
+
+    # ── Section 12: Felling Tree Analysis (DBH >= 30cm only) ──────
+    felling_sql = text("""
+        WITH h AS (
+            SELECT
+                it.dbh_class, it.species,
+                COALESCE(NULLIF(TRIM(it.local_name), ''), '') AS local_name,
+                it.stem_volume, it.branch_volume, it.tree_volume, it.net_volume,
+                it.firewood_m3, it.firewood_chatta, it.dia_cm
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+                AND it.remark = 'Felling Tree'
+                AND it.dia_cm >= 30
+        )
+        SELECT
+            dbh_class,
+            COUNT(*) AS tree_count,
+            SUM(COALESCE(stem_volume, 0)) AS timber_m3,
+            SUM(COALESCE(branch_volume, 0)) AS firewood_m3,
+            SUM(COALESCE(tree_volume, 0)) AS gross_volume_m3,
+            SUM(COALESCE(net_volume, 0)) AS net_volume_m3,
+            SUM(COALESCE(firewood_m3, 0)) AS fuelwood_m3,
+            SUM(COALESCE(firewood_chatta, 0)) AS fuelwood_chatta,
+            AVG(dia_cm) AS avg_dbh_cm
+        FROM h
+        GROUP BY dbh_class
+        ORDER BY
+            CASE
+                WHEN dbh_class ~ '^[0-9]' THEN CAST(REGEXP_REPLACE(dbh_class, '[^0-9].*', '', 'g') AS INTEGER)
+                ELSE 9999
+            END
+    """)
+    felling_dbh_rows = db.execute(felling_sql, {"inv_id": inv_id}).fetchall()
+
+    # Species breakdown for felling trees (DBH >= 30)
+    felling_sp_sql = text("""
+        WITH h AS (
+            SELECT
+                it.species,
+                COALESCE(NULLIF(TRIM(it.local_name), ''), '') AS local_name,
+                it.stem_volume, it.branch_volume, it.tree_volume, it.net_volume,
+                it.firewood_m3, it.firewood_chatta, it.dia_cm
+            FROM public.inventory_trees it
+            WHERE it.inventory_calculation_id = :inv_id
+                AND it.remark = 'Felling Tree'
+                AND it.dia_cm >= 30
+        )
+        SELECT
+            species, local_name,
+            COUNT(*) AS tree_count,
+            SUM(COALESCE(stem_volume, 0)) AS timber_m3,
+            SUM(COALESCE(branch_volume, 0)) AS firewood_m3,
+            SUM(COALESCE(tree_volume, 0)) AS gross_volume_m3,
+            SUM(COALESCE(net_volume, 0)) AS net_volume_m3,
+            AVG(dia_cm) AS avg_dbh_cm
+        FROM h
+        GROUP BY species, local_name
+        ORDER BY tree_count DESC
+    """)
+    felling_sp_rows = db.execute(felling_sp_sql, {"inv_id": inv_id}).fetchall()
+
+    # Build felling DBH table
+    felling_dbh_summary = []
+    total_felling_eligible = 0
+    total_timber = 0.0
+    total_firewood = 0.0
+    total_gross = 0.0
+    total_net = 0.0
+    total_fuelwood = 0.0
+    total_chatta = 0.0
+    for r in felling_dbh_rows:
+        tc = r.tree_count or 0
+        total_felling_eligible += tc
+        total_timber += float(r.timber_m3 or 0)
+        total_firewood += float(r.firewood_m3 or 0)
+        total_gross += float(r.gross_volume_m3 or 0)
+        total_net += float(r.net_volume_m3 or 0)
+        total_fuelwood += float(r.fuelwood_m3 or 0)
+        total_chatta += float(r.fuelwood_chatta or 0)
+        felling_dbh_summary.append({
+            "dbh_class": DBH_CLASS_NP.get(r.dbh_class, r.dbh_class or "-"),
+            "tree_count": tc,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "firewood_m3": round(float(r.firewood_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "net_volume_m3": round(float(r.net_volume_m3 or 0), 2),
+            "fuelwood_m3": round(float(r.fuelwood_m3 or 0), 2),
+            "fuelwood_chatta": round(float(r.fuelwood_chatta or 0), 2),
+            "avg_dbh_cm": round(float(r.avg_dbh_cm or 0), 1),
+        })
+    for entry in felling_dbh_summary:
+        entry["percent"] = round(entry["tree_count"] * 100.0 / total_felling_eligible, 1) if total_felling_eligible > 0 else 0
+
+    # Build felling species table
+    felling_species_summary = []
+    for r in felling_sp_rows:
+        tc = r.tree_count or 0
+        felling_species_summary.append({
+            "species": r.species or "",
+            "local_name": r.local_name or "",
+            "tree_count": tc,
+            "timber_m3": round(float(r.timber_m3 or 0), 2),
+            "firewood_m3": round(float(r.firewood_m3 or 0), 2),
+            "gross_volume_m3": round(float(r.gross_volume_m3 or 0), 2),
+            "net_volume_m3": round(float(r.net_volume_m3 or 0), 2),
+            "avg_dbh_cm": round(float(r.avg_dbh_cm or 0), 1),
+        })
+    for entry in felling_species_summary:
+        entry["percent"] = round(entry["tree_count"] * 100.0 / total_felling_eligible, 1) if total_felling_eligible > 0 else 0
+
+    result["sm_felling_dbh_analysis"] = felling_dbh_summary
+    result["sm_felling_species_analysis"] = felling_species_summary
+    result["sm_felling_totals"] = {
+        "tree_count": total_felling_eligible,
+        "timber_m3": round(total_timber, 2),
+        "firewood_m3": round(total_firewood, 2),
+        "gross_volume_m3": round(total_gross, 2),
+        "net_volume_m3": round(total_net, 2),
+        "fuelwood_m3": round(total_fuelwood, 2),
+        "fuelwood_chatta": round(total_chatta, 2),
+    }
+
+    # --- Legend data for chart symbolization ---
+    from app.utils.number_format import format_devanagari as _fmt_num
+
+    def _build_hierarchy_legend(data_rows):
+        legend = []
+        for i, r in enumerate(data_rows, 1):
+            sub = (r.get("sub_compartment") or "-").strip()
+            comp = (r.get("compartment") or "-").strip()
+            label = sub if sub and sub != "-" else comp
+            if not label or label == "-":
+                label = "-"
+            legend.append({"symbol": _fmt_num(i, 0), "label": label})
+        return legend
+
+    result["sm_mf_hierarchy_legend"] = _build_hierarchy_legend(result.get("sm_hierarchy_summary", []))
+    result["sm_stand_type_legend"] = _build_hierarchy_legend(result.get("sm_stand_type_by_hierarchy", []))
+    result["sm_carbon_legend"] = _build_hierarchy_legend(result.get("sm_carbon_by_hierarchy", []))
+    result["sm_volume_legend"] = _build_hierarchy_legend(result.get("sm_volume_by_hierarchy", []))
+
+    mother_sp = result.get("sm_mother_tree_by_species", [])
+    felling_sp = result.get("sm_felling_tree_by_species", [])
+    all_species = list(dict.fromkeys(
+        [r.get("species", "") for r in mother_sp] +
+        [r.get("species", "") for r in felling_sp]
+    ))[:10]
+    result["sm_mf_species_legend"] = [
+        {"symbol": _fmt_num(i, 0), "label": sp} for i, sp in enumerate(all_species, 1)
+    ]
+
+    felling_sp_data = result.get("sm_felling_species_analysis", [])
+    result["sm_felling_species_legend"] = [
+        {"symbol": _fmt_num(i, 0), "label": r.get("species", "")}
+        for i, r in enumerate(felling_sp_data[:10], 1)
+    ]
+
+    return result

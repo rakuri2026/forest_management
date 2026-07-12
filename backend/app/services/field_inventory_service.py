@@ -728,7 +728,7 @@ class FieldInventoryService:
             net_volume_cft = volumes['net_volume'] * 35.3147
 
             # 8. Firewood in chatta
-            firewood_chatta = volumes['firewood_m3'] / 0.267
+            firewood_chatta = volumes['firewood_m3'] / 9.486
 
             # Update measurement
             measurement.stem_volume = round(volumes['stem_volume'], 6)

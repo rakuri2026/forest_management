@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, message, Spin, Tag, Tabs, Tooltip } from 'antd';
+import { Button, message, Spin, Tag, Tabs, Tooltip, Popconfirm } from 'antd';
 import {
   SaveOutlined,
   SettingOutlined,
@@ -11,6 +11,7 @@ import {
   EnvironmentOutlined,
   FileTextOutlined,
   PlusOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -149,6 +150,16 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
       message.success('DOCX exported');
     } catch (err: any) {
       message.error(err.message || 'Export failed');
+    }
+  };
+
+  const handleUpdateDefaultTemplate = async () => {
+    if (!planId) return;
+    try {
+      await operationalPlanApi.updateDefaultTemplate(planId);
+      message.success('Global template updated. New users will see this version.');
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to update global template');
     }
   };
 
@@ -351,6 +362,19 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
                 <Button icon={<FileTextOutlined />} onClick={() => setShowTemplateManager(true)} size="small">
                   Templates
                 </Button>
+              )}
+              {isSuperAdmin && planId && (
+                <Popconfirm
+                  title="Update the global template?"
+                  description="All new users will see this version when they create their operational plan."
+                  onConfirm={handleUpdateDefaultTemplate}
+                  okText="Update"
+                  cancelText="Cancel"
+                >
+                  <Button icon={<GlobalOutlined />} size="small">
+                    Update Global Template
+                  </Button>
+                </Popconfirm>
               )}
               <Button icon={<SettingOutlined />} onClick={() => setShowMetadata(true)} size="small">
                 Metadata

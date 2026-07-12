@@ -301,7 +301,11 @@ const MetadataForm: React.FC<MetadataFormProps> = ({ planId, visible, onClose })
     } catch (err: any) {
       if (err.errorFields) return;
       if (err.response?.data?.detail) {
-        message.error(Array.isArray(err.response.data.detail) ? err.response.data.detail.join(', ') : err.response.data.detail);
+        const detail = err.response.data.detail;
+        const msg = Array.isArray(detail)
+          ? detail.map((d: any) => typeof d === 'string' ? d : d.msg || JSON.stringify(d)).join(', ')
+          : typeof detail === 'string' ? detail : JSON.stringify(detail);
+        message.error(msg);
       } else {
         message.error('मेटाडाटा सुरक्षित गर्न असफल');
       }

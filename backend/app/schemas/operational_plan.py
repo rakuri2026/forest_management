@@ -199,6 +199,10 @@ class TemplateRollbackRequest(BaseModel):
     version: int
 
 
+class UpdateDefaultTemplateRequest(BaseModel):
+    changelog: Optional[str] = ""
+
+
 class CategoryCreate(BaseModel):
     key: str = Field(..., min_length=1, max_length=50)
     label_ne: str = Field(..., min_length=1, max_length=255)

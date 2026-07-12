@@ -17,6 +17,9 @@ import {
   CopyOutlined,
   StopOutlined,
   SettingOutlined,
+  HistoryOutlined,
+  RollbackOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { operationalPlanApi } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -87,6 +90,10 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
   const [saving, setSaving] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateData | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [versionHistoryTemplate, setVersionHistoryTemplate] = useState<TemplateData | null>(null);
+  const [versions, setVersions] = useState<any[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
 
   useEffect(() => {
     if (visible) fetchTemplates();
@@ -192,7 +199,46 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
       message.success('Template cloned');
       fetchTemplates();
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'Failed to clone template');
+      message.error('Failed to clone template');
+    }
+  };
+
+  const handleUpdateDefaultTemplate = async () => {
+    if (!planId) {
+      message.warning('No active plan to update from');
+      return;
+    }
+    try {
+      await operationalPlanApi.updateDefaultTemplate(planId);
+      message.success('Global template updated');
+      fetchTemplates();
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to update global template');
+    }
+  };
+
+  const handleShowVersionHistory = async (tmpl: TemplateData) => {
+    setVersionHistoryTemplate(tmpl);
+    setVersionHistoryOpen(true);
+    setVersionsLoading(true);
+    try {
+      const data = await operationalPlanApi.getTemplateVersions(tmpl.id);
+      setVersions(data || []);
+    } catch {
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const handleRollback = async (templateId: string, version: number) => {
+    try {
+      await operationalPlanApi.rollbackTemplate(templateId, version);
+      message.success(`Rolled back to version ${version}`);
+      setVersionHistoryOpen(false);
+      fetchTemplates();
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to rollback');
     }
   };
 
@@ -229,6 +275,18 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
             renderItem={(tmpl) => (
               <List.Item
                 actions={[
+                  tmpl.is_system && isSuperAdmin && planId && (
+                    <Popconfirm key="update" title="Update global template from current plan?" onConfirm={handleUpdateDefaultTemplate}>
+                      <Tooltip title="Update from Current Plan">
+                        <Button size="small" type="link" icon={<SyncOutlined />} style={{ color: '#1890ff' }} />
+                      </Tooltip>
+                    </Popconfirm>
+                  ),
+                  tmpl.is_system && (
+                    <Tooltip key="history" title="Version History">
+                      <Button size="small" type="link" icon={<HistoryOutlined />} onClick={() => handleShowVersionHistory(tmpl)} />
+                    </Tooltip>
+                  ),
                   <Tooltip key="detail" title="View details">
                     <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => handleShowDetail(tmpl)} />
                   </Tooltip>,
@@ -401,6 +459,58 @@ const TemplateManager: React.FC<TemplateManagerProps> = ({
             </div>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={<span><HistoryOutlined /> Version History — {versionHistoryTemplate?.name}</span>}
+        open={versionHistoryOpen}
+        onCancel={() => setVersionHistoryOpen(false)}
+        footer={null}
+        width={520}
+      >
+        {versionsLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : versions.length === 0 ? (
+          <Empty description="No version history yet" />
+        ) : (
+          <List
+            dataSource={versions}
+            renderItem={(v: any) => (
+              <List.Item
+                actions={[
+                  v.version !== versionHistoryTemplate?.version && (
+                    <Popconfirm
+                      key="rollback"
+                      title={`Rollback to version ${v.version}?`}
+                      onConfirm={() => handleRollback(versionHistoryTemplate!.id, v.version)}
+                    >
+                      <Button size="small" icon={<RollbackOutlined />} danger>
+                        Rollback
+                      </Button>
+                    </Popconfirm>
+                  ),
+                ].filter(Boolean)}
+              >
+                <List.Item.Meta
+                  avatar={<Tag color={v.version === versionHistoryTemplate?.version ? 'green' : 'default'}>v{v.version}</Tag>}
+                  title={v.name}
+                  description={
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {new Date(v.created_at).toLocaleString()}
+                      </Text>
+                      {v.changelog && (
+                        <div style={{ marginTop: 2 }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{v.changelog}</Text>
+                        </div>
+                      )}
+                    </div>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
       </Modal>
     </>
   );

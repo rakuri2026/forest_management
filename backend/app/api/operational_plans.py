@@ -42,6 +42,7 @@ from ..schemas.operational_plan import (
     TemplateSummary,
     TemplateVersionResponse,
     TemplateRollbackRequest,
+    UpdateDefaultTemplateRequest,
     CategoryCreate,
     CategoryUpdate,
     CategoryResponse,
@@ -1703,10 +1704,15 @@ async def create_template(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    is_system = tmpl_data.is_system and current_user.role == UserRole.SUPER_ADMIN
+
     if tmpl_data.is_default:
-        db.execute(
-            sa.update(OPTemplate).where(OPTemplate.created_by == current_user.id).values(is_default=False)
-        )
+        if is_system:
+            db.execute(sa.update(OPTemplate).values(is_default=False))
+        else:
+            db.execute(
+                sa.update(OPTemplate).where(OPTemplate.created_by == current_user.id).values(is_default=False)
+            )
 
     tree_dicts = [n.model_dump() for n in tmpl_data.tree]
     summaries = generate_template_summaries(tree_dicts)
@@ -1720,7 +1726,7 @@ async def create_template(
         template_category=tmpl_data.template_category,
         sections_summary=summaries["sections_summary"],
         variables_summary=summaries["variables_summary"],
-        is_system=False,
+        is_system=is_system,
         is_default=tmpl_data.is_default,
         created_by=current_user.id,
     )
@@ -1759,9 +1765,9 @@ async def update_template(
     ).scalar_one_or_none()
     if not tmpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    if tmpl.is_system:
-        raise HTTPException(status_code=400, detail="Cannot edit system templates")
-    if tmpl.created_by != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+    if tmpl.is_system and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can edit system templates")
+    if not tmpl.is_system and tmpl.created_by != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Access denied")
 
     if tmpl_data.name is not None:
@@ -1770,7 +1776,8 @@ async def update_template(
         tmpl.description = tmpl_data.description
     if tmpl_data.tree is not None:
         tree_dicts = [n.model_dump() for n in tmpl_data.tree]
-        if tmpl.is_active and tmpl.version:
+        should_snapshot = (tmpl.is_active and tmpl.version) or tmpl.is_system
+        if should_snapshot and tmpl.tree:
             old_version = tmpl.version
             old_snapshot = OPTemplateVersion(
                 template_id=tmpl.id,
@@ -1924,8 +1931,6 @@ async def rollback_template(
     ).scalar_one_or_none()
     if not tmpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    if tmpl.is_system:
-        raise HTTPException(status_code=400, detail="Cannot rollback system templates")
 
     version_snapshot = db.execute(
         select(OPTemplateVersion).where(
@@ -2091,6 +2096,71 @@ async def save_plan_as_template(
         created_by=current_user.id,
     )
     db.add(tmpl)
+    db.commit()
+    db.refresh(tmpl)
+
+    return TemplateResponse.model_validate(tmpl)
+
+
+@router.put("/{plan_id}/update-default-template", summary="Update the global system default template from current plan")
+async def update_default_template(
+    plan_id: UUID,
+    req: UpdateDefaultTemplateRequest = UpdateDefaultTemplateRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can update the global template")
+
+    plan = _check_plan_access(plan_id, current_user, db)
+    sections = plan.sections or {}
+    tree_list = sections.get("tree", [])
+    if not tree_list:
+        raise HTTPException(status_code=400, detail="Plan has no document tree")
+
+    existing = db.execute(
+        select(OPTemplate).where(OPTemplate.is_system == True, OPTemplate.is_default == True)
+    ).scalar_one_or_none()
+
+    if existing:
+        if existing.tree:
+            snapshot = OPTemplateVersion(
+                template_id=existing.id,
+                version=existing.version or 1,
+                tree=existing.tree,
+                name=existing.name,
+                description=existing.description or "",
+                changelog=req.changelog or f"Auto-saved before update v{existing.version or 1}",
+            )
+            db.add(snapshot)
+        existing.tree = tree_list
+        existing.version = (existing.version or 1) + 1
+        existing.changelog = req.changelog or ""
+        existing.source_calculation_id = plan.calculation_id
+        existing.updated_at = datetime.utcnow()
+        summaries = generate_template_summaries(tree_list)
+        existing.sections_summary = summaries["sections_summary"]
+        existing.variables_summary = summaries["variables_summary"]
+        tmpl = existing
+    else:
+        summaries = generate_template_summaries(tree_list)
+        tmpl = OPTemplate(
+            name="System Default Template",
+            description="Official operational plan template for all new users",
+            tree=tree_list,
+            visibility="shared",
+            is_system=True,
+            is_default=True,
+            is_active=True,
+            version=1,
+            changelog=req.changelog or "Initial system default template",
+            source_calculation_id=plan.calculation_id,
+            sections_summary=summaries["sections_summary"],
+            variables_summary=summaries["variables_summary"],
+            created_by=current_user.id,
+        )
+        db.add(tmpl)
+
     db.commit()
     db.refresh(tmpl)
 

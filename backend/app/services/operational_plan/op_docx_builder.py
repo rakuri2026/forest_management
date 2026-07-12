@@ -595,6 +595,52 @@ _VAR_LOOKUP = {
     "fieldbook_points": ("fieldbook", "points"),
     "fieldbook_block_summary": ("fieldbook", "block_summary"),
     "fieldbook_narration": ("section_generators", "section:fieldbook_narration"),
+
+    # Tree Mapping Analysis (sm_* variables)
+    "sm_available":                    ("tree_mapping_analysis", "sm_available"),
+    "sm_total_blocks_analyzed":        ("tree_mapping_analysis", "sm_total_blocks_analyzed"),
+    "sm_total_trees_analyzed":         ("tree_mapping_analysis", "sm_total_trees_analyzed"),
+    "sm_total_carbon_tc":             ("tree_mapping_analysis", "sm_total_carbon_tc"),
+    "sm_total_co2_tco2":             ("tree_mapping_analysis", "sm_total_co2_tco2"),
+    "sm_hierarchy_summary":            ("tree_mapping_analysis", "sm_hierarchy_summary"),
+    "sm_species_by_hierarchy":         ("tree_mapping_analysis", "sm_species_by_hierarchy"),
+    "sm_species_diversity":            ("tree_mapping_analysis", "sm_species_diversity"),
+    "sm_dbh_by_hierarchy":             ("tree_mapping_analysis", "sm_dbh_by_hierarchy"),
+    "sm_dbh_species_by_hierarchy":     ("tree_mapping_analysis", "sm_dbh_species_by_hierarchy"),
+    "sm_stand_type_by_hierarchy":      ("tree_mapping_analysis", "sm_stand_type_by_hierarchy"),
+    "sm_forest_structure_status":      ("tree_mapping_analysis", "sm_forest_structure_status"),
+    "sm_carbon_by_hierarchy":          ("tree_mapping_analysis", "sm_carbon_by_hierarchy"),
+    "sm_volume_by_hierarchy":          ("tree_mapping_analysis", "sm_volume_by_hierarchy"),
+    "sm_top_species_by_volume":        ("tree_mapping_analysis", "sm_top_species_by_volume"),
+    "sm_mother_tree_coverage":         ("tree_mapping_analysis", "sm_mother_tree_coverage"),
+    "sm_mother_tree_by_hierarchy":     ("tree_mapping_analysis", "sm_mother_tree_by_hierarchy"),
+    "sm_mother_tree_by_species":       ("tree_mapping_analysis", "sm_mother_tree_by_species"),
+    "sm_felling_tree_by_species":      ("tree_mapping_analysis", "sm_felling_tree_by_species"),
+    "sm_mother_felling_summary":       ("tree_mapping_analysis", "sm_mother_felling_summary"),
+    "sm_hierarchy_remark_breakdown":   ("tree_mapping_analysis", "sm_hierarchy_remark_breakdown"),
+    "sm_species_hier_remark":          ("tree_mapping_analysis", "sm_species_hier_remark"),
+    "sm_dbh_hier_remark":              ("tree_mapping_analysis", "sm_dbh_hier_remark"),
+    "sm_felling_dbh_analysis":         ("tree_mapping_analysis", "sm_felling_dbh_analysis"),
+    "sm_felling_species_analysis":     ("tree_mapping_analysis", "sm_felling_species_analysis"),
+    "sm_felling_totals":               ("tree_mapping_analysis", "sm_felling_totals"),
+
+    # Tree Mapping Analysis Narrations
+    "section:sm_hierarchy_narration":     ("section_generators", "section:sm_hierarchy_narration"),
+    "section:sm_species_narration":       ("section_generators", "section:sm_species_narration"),
+    "section:sm_dbh_narration":           ("section_generators", "section:sm_dbh_narration"),
+    "section:sm_stand_type_narration":    ("section_generators", "section:sm_stand_type_narration"),
+    "section:sm_carbon_narration":        ("section_generators", "section:sm_carbon_narration"),
+    "section:sm_volume_narration":        ("section_generators", "section:sm_volume_narration"),
+    "section:sm_mother_tree_narration":   ("section_generators", "section:sm_mother_tree_narration"),
+    "section:sm_felling_narration":       ("section_generators", "section:sm_felling_narration"),
+
+    # Tree Mapping Analysis Legend Variables
+    "sm_mf_hierarchy_legend":     ("tree_mapping_analysis", "sm_mf_hierarchy_legend"),
+    "sm_stand_type_legend":       ("tree_mapping_analysis", "sm_stand_type_legend"),
+    "sm_carbon_legend":           ("tree_mapping_analysis", "sm_carbon_legend"),
+    "sm_volume_legend":           ("tree_mapping_analysis", "sm_volume_legend"),
+    "sm_mf_species_legend":       ("tree_mapping_analysis", "sm_mf_species_legend"),
+    "sm_felling_species_legend":  ("tree_mapping_analysis", "sm_felling_species_legend"),
 }
 
 def _deep_get(data, path):
@@ -711,7 +757,14 @@ def _add_list_table(doc: Document, val: list, var_name: str = ""):
             run = p.add_run(vdef.label_ne)
             run.font.size = Pt(11)
             run.font.bold = True
-        headers = list(val[0].keys())
+        raw_keys = list(val[0].keys())
+        np_raw = NP_HEADERS_BIODIVERSITY.get(var_name)
+        if np_raw and isinstance(np_raw[0], tuple):
+            ordered = [k for k, _ in np_raw if k in raw_keys]
+            extra = [k for k in raw_keys if k not in ordered]
+            headers = ordered + extra
+        else:
+            headers = raw_keys
         num_cols = len(headers)
         num_rows = len(val) + 1
         tbl = doc.add_table(rows=num_rows, cols=num_cols)
@@ -732,12 +785,19 @@ def _tbl_fill_data(tbl, headers, rows_data, var_name=""):
     # Header row
     header_tr = tr_elems[0]
     header_tcs = header_tr.findall(qn('w:tc'))
+    np_raw = NP_HEADERS_BIODIVERSITY.get(var_name)
+    np_map = {}
+    if np_raw:
+        if np_raw and isinstance(np_raw[0], tuple):
+            np_map = {k: v for k, v in np_raw}
+        else:
+            np_map = {headers[i]: v for i, v in enumerate(np_raw) if i < len(headers)}
     for ci, h in enumerate(headers):
         if ci >= len(header_tcs):
             break
         tc = header_tcs[ci]
-        # Clear and set text
-        _tc_set_text(tc, h.replace("_", " ").title())
+        display = np_map.get(h, h.replace("_", " ").title())
+        _tc_set_text(tc, display)
         _tc_style(tc, bold=True, size=Pt(9), color=RGBColor(255, 255, 255), shading="006400")
     # Data rows
     for ri, row_val in enumerate(rows_data, 1):
@@ -918,6 +978,177 @@ NP_HEADERS_BIODIVERSITY: Dict[str, List[tuple]] = {
         ("total_supply", "जम्मा आपूर्ति"),
         ("deficit", "बचत तथा कमी"),
     ],
+
+    # Tree Mapping Analysis tables
+    "sm_hierarchy_summary": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("tree_count", "रूख गणना"),
+        ("total_volume_m3", "जम्मा आयतन"),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+        ("avg_height_m", "औसत उचाइ मि."),
+        ("area_ha", "क्षेत्रफल हे."),
+        ("trees_per_ha", "रूख गणना प्रति हेक्टर"),
+        ("volume_per_ha", "आयतन प्रति हेक्टर"),
+        ("dominant_species", "मुख्य प्रजाती"),
+    ],
+    "sm_species_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("tree_count", "रूख गणना"),
+        ("hierarchy_percent", "क्षेत्रमा रहेको रूखको प्रतिशत"),
+        ("timber_m3", "काठ घ.मी."),
+        ("firewood_m3", "दाउरा घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("net_volume_m3", "नेट आयतन घ.मी."),
+        ("volume_percent", "आयतन प्रतिशत"),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+    ],
+    "sm_species_diversity": [
+        ("block_name", "ब्लक"),
+        ("species_richness", "प्रजाति समृद्धि"),
+        ("shannon_index", "श्यानन सूचकांक"),
+        ("evenness", "समानता"),
+    ],
+    "sm_dbh_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("dbh_class", "डिबियच क्लास"),
+        ("tree_count", "रूख गणना"),
+        ("timber_m3", "काठ घ.मी."),
+        ("firewood_m3", "दाउरा घ.मी."),
+        ("net_volume_m3", "नेट आयतन घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("hierarchy_percent", "क्षेत्रमा रहेको रूखको प्रतिशत"),
+    ],
+    "sm_dbh_species_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("dbh_class", "डिबियच क्लास"),
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("tree_count", "रूख गणना"),
+        ("timber_m3", "काठ घ.मी."),
+        ("firewood_m3", "दाउरा घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("net_volume_m3", "नेट आयतन घ.मी."),
+        ("hierarchy_percent", "क्षेत्रमा रहेको रूखको प्रतिशत"),
+        ("dbh_species_percent", "डिबियच-प्रजाति प्रतिशत"),
+    ],
+    "sm_stand_type_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("regeneration", "पुनरुत्पादन"),
+        ("sapling", "लाथ्रा"),
+        ("pole", "पोल"),
+        ("tree", "रूख"),
+        ("total", "जम्मा"),
+        ("regeneration_percent", "पुनरुत्पादन प्रतिशत"),
+        ("structure_status", "अवस्था"),
+    ],
+    "sm_carbon_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("wood_density", "भारित काठ घनत्व"),
+        ("agb_t", "AGB (टन)"),
+        ("bgb_t", "BGB (टन)"),
+        ("biomass_t", "जैविक पदार्थ (टन)"),
+        ("carbon_tc", "कार्बन (tC)"),
+        ("co2_tco2", "CO₂e (tCO₂)"),
+    ],
+    "sm_volume_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("stem_volume_m3", "काण्डको आयतन घ.मी."),
+        ("branch_volume_m3", "हाँगा विँगाको आयतन घ.मी."),
+        ("total_volume_m3", "जम्मा आयतन घ.मी."),
+        ("net_volume_m3", "नेट आयतन घ.मी."),
+        ("firewood_m3", "दाउरा घ.मी."),
+        ("firewood_chatta", "दाउरा चट्टा"),
+    ],
+    "sm_top_species_by_volume": [
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("total_volume_m3", "जम्मा आयतन घ.मी."),
+        ("percent", "प्रतिशत"),
+    ],
+    "sm_mother_tree_by_hierarchy": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("grid_cells", "ग्रिड सेल"),
+        ("mother_trees", "माँउ रूख"),
+        ("felling_trees", "कटानी रूख"),
+        ("coverage_ratio", "कभरेज अनुपात"),
+    ],
+    "sm_mother_tree_by_species": [
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("tree_count", "रूख गणना"),
+        ("percent", "प्रतिशत"),
+        ("timber_m3", "काठ घ.मी."),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+    ],
+    "sm_felling_tree_by_species": [
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("tree_count", "रूख गणना"),
+        ("percent", "प्रतिशत"),
+        ("timber_m3", "काठ घ.मी."),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+    ],
+    "sm_species_hier_remark": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("remark", "टिप्पणी"),
+        ("tree_count", "रूख गणना"),
+        ("timber_m3", "काठ घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+    ],
+    "sm_dbh_hier_remark": [
+        ("compartment", "कम्पार्टमेन्ट"),
+        ("sub_compartment", "सब कम्पार्टमेन्ट"),
+        ("dbh_class", "डिबियच क्लास"),
+        ("remark", "टिप्पणी"),
+        ("tree_count", "रूख गणना"),
+        ("timber_m3", "काठ घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+    ],
+    "sm_felling_dbh_analysis": [
+        ("dbh_class", "डिबियच क्लास"),
+        ("tree_count", "रूख गणना"),
+        ("percent", "प्रतिशत"),
+        ("timber_m3", "काठ घ.मी."),
+        ("firewood_m3", "दाउरा घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("net_volume_m3", "नेट आयतन घ.मी."),
+        ("fuelwood_m3", "इन्धन घ.मी."),
+        ("fuelwood_chatta", "चट्टा घ.मी."),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+    ],
+    "sm_felling_species_analysis": [
+        ("species", "प्रजाति"),
+        ("local_name", "स्थानीय नाम"),
+        ("tree_count", "रूख गणना"),
+        ("percent", "प्रतिशत"),
+        ("timber_m3", "काठ घ.मी."),
+        ("firewood_m3", "दाउरा घ.मी."),
+        ("gross_volume_m3", "ग्रस आयतन घ.मी."),
+        ("net_volume_m3", "नेट आयतन घ.मी."),
+        ("avg_dbh_cm", "औसत ब्यास से.मी."),
+    ],
+    # --- Legend tables for chart symbolization ---
+    "sm_mf_hierarchy_legend": [("symbol", "प्रतीक"), ("label", "विवरण")],
+    "sm_stand_type_legend":   [("symbol", "प्रतीक"), ("label", "विवरण")],
+    "sm_carbon_legend":       [("symbol", "प्रतीक"), ("label", "विवरण")],
+    "sm_volume_legend":       [("symbol", "प्रतीक"), ("label", "विवरण")],
+    "sm_mf_species_legend":   [("symbol", "प्रतीक"), ("label", "विवरण")],
+    "sm_felling_species_legend": [("symbol", "प्रतीक"), ("label", "विवरण")],
 }
 
 def _add_activity_plan_detail_table(doc: Document, val: list):
@@ -1426,6 +1657,111 @@ def _add_table_inline(doc: Document, table_id: str, table_cache: dict = None):
     doc.add_paragraph()
 
 
+def _short_hierarchy(r: dict) -> str:
+    sub = (r.get("sub_compartment") or "-").strip()
+    comp = (r.get("compartment") or "-").strip()
+    label = sub if sub and sub != "-" else comp
+    return label if label and label != "-" else "-"
+
+
+def _render_sm_chart_internal(chart_type: str, raw_data: dict, forest_name: str = "") -> Optional[str]:
+    """Render a tree-mapping sm_* chart. Returns SVG data URI or None."""
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if chart_type == "sm_felling_dbh_pie":
+        fda = sm.get("sm_felling_dbh_analysis", [])
+        if fda:
+            labels = [r.get("dbh_class", str(i)) for i, r in enumerate(fda)]
+            values = [r.get("tree_count", 0) for r in fda]
+            pcts = [r.get("percent", 0) for r in fda]
+            return _chart_from_data(labels, values, forest_name, "DBH वर्ग अनुसार कटानी रूख", percentages=pcts)
+    elif chart_type == "sm_felling_species_bar":
+        fsa = sm.get("sm_felling_species_analysis", [])[:10]
+        if fsa:
+            labels = [format_devanagari(i, 0) for i in range(1, len(fsa) + 1)]
+            values = [r.get("tree_count", 0) for r in fsa]
+            pcts = [r.get("percent", 0) for r in fsa]
+            return _chart_from_data(labels, values, forest_name, "प्रजाति अनुसार कटानी रूख", is_pie=False, percentages=pcts)
+    elif chart_type == "sm_mother_felling_pie":
+        mfs = sm.get("sm_mother_felling_summary", {})
+        if mfs:
+            labels = ["माँउ रूख", "कटानी रूख"]
+            values = [mfs.get("total_mother_trees", 0), mfs.get("total_felling_trees", 0)]
+            return _chart_from_data(labels, values, forest_name, "माँउ रूख बनाम कटानी रूख", colors=["#22c55e", "#ef4444"])
+    elif chart_type == "sm_mother_felling_species_bar":
+        mbs = sm.get("sm_mother_tree_by_species", [])[:10]
+        fbs = sm.get("sm_felling_tree_by_species", [])[:10]
+        if mbs or fbs:
+            all_species = list(dict.fromkeys([r.get("species", "") for r in mbs] + [r.get("species", "") for r in fbs]))[:10]
+            labels = [format_devanagari(i, 0) for i in range(1, len(all_species) + 1)]
+            mother_map = {r.get("species", ""): r.get("tree_count", 0) for r in mbs}
+            felling_map = {r.get("species", ""): r.get("tree_count", 0) for r in fbs}
+            mother_vals = [mother_map.get(sp, 0) for sp in all_species]
+            felling_vals = [felling_map.get(sp, 0) for sp in all_species]
+            return _chart_from_data_grouped(
+                labels,
+                {"माँउ": mother_vals, "कटानी": felling_vals},
+                forest_name, "प्रजाति अनुसार माँउ बनाम कटानी",
+                colors=["#22c55e", "#ef4444"],
+            )
+    elif chart_type == "sm_stand_type_bar":
+        st = sm.get("sm_stand_type_by_hierarchy", [])
+        if st:
+            labels_short = [format_devanagari(i, 0) for i in range(1, len(st) + 1)]
+            regen = [r.get("regeneration", 0) for r in st]
+            sapling = [r.get("sapling", 0) for r in st]
+            pole = [r.get("pole", 0) for r in st]
+            tree = [r.get("tree", 0) for r in st]
+            return _chart_from_data_grouped(
+                labels_short,
+                {"पुनरुत्पादन": regen, "लाथ्रा": sapling, "पोल": pole, "रूख": tree},
+                forest_name, "स्तर अनुसार स्ट्यान्ड प्रकार",
+                colors=["#22c55e", "#3b82f6", "#f59e0b", "#ef4444"],
+            )
+    elif chart_type == "sm_carbon_bar":
+        cb = sm.get("sm_carbon_by_hierarchy", [])
+        if cb:
+            labels_short = [format_devanagari(i, 0) for i in range(1, len(cb) + 1)]
+            carbon_vals = [r.get("carbon_tc", 0) for r in cb]
+            co2_vals = [r.get("co2_tco2", 0) for r in cb]
+            return _chart_from_data_grouped(
+                labels_short,
+                {"कार्बन (tC)": carbon_vals, "CO₂e (tCO₂)": co2_vals},
+                forest_name, "स्तर अनुसार कार्बन मौज्दात",
+                colors=["#22c55e", "#3b82f6"],
+            )
+    elif chart_type == "sm_volume_bar":
+        vb = sm.get("sm_volume_by_hierarchy", [])
+        if vb:
+            labels_short = [format_devanagari(i, 0) for i in range(1, len(vb) + 1)]
+            stem = [r.get("stem_volume_m3", 0) for r in vb]
+            branch = [r.get("branch_volume_m3", 0) for r in vb]
+            return _chart_from_data_grouped(
+                labels_short,
+                {"काण्ड": stem, "हाँगा": branch},
+                forest_name, "स्तर अनुसार आयतन संरचना",
+                colors=["#22c55e", "#3b82f6"],
+            )
+    elif chart_type == "sm_mother_felling_hierarchy_bar":
+        hs = sm.get("sm_hierarchy_summary", [])
+        rbd = sm.get("sm_hierarchy_remark_breakdown", {})
+        if hs:
+            labels_short = [format_devanagari(i, 0) for i in range(1, len(hs) + 1)]
+            mother_vals = []
+            felling_vals = []
+            for r in hs:
+                key = f"{r.get('compartment','-')}|{r.get('sub_compartment','-')}"
+                breakdown = rbd.get(key, {})
+                mother_vals.append(breakdown.get("mother_trees", 0))
+                felling_vals.append(breakdown.get("felling_trees", 0))
+            return _chart_from_data_grouped(
+                labels_short,
+                {"माँउ": mother_vals, "कटानी": felling_vals},
+                forest_name, "माँउ बनाम कटानी",
+                colors=["#22c55e", "#ef4444"],
+            )
+    return None
+
+
 def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calculation_id: UUID = None):
     # Lazy import chart generators (matplotlib is heavy)
     from app.services.report.chart_generator import (
@@ -1433,6 +1769,22 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
         generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
         generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
     )
+
+    # Auto-append legend for sm_* hierarchy charts
+    _SM_LEGEND_MAP = {
+        "sm_mother_felling_hierarchy_bar": "sm_mf_hierarchy_legend",
+        "sm_stand_type_bar": "sm_stand_type_legend",
+        "sm_carbon_bar": "sm_carbon_legend",
+        "sm_volume_bar": "sm_volume_legend",
+        "sm_mother_felling_species_bar": "sm_mf_species_legend",
+        "sm_felling_species_bar": "sm_felling_species_legend",
+    }
+    def _append_sm_legend(doc, chart_type, raw_data):
+        legend_var = _SM_LEGEND_MAP.get(chart_type)
+        if legend_var and raw_data:
+            legend_data = _resolve_var_from_raw(legend_var, raw_data)
+            if isinstance(legend_data, list) and legend_data:
+                _add_list_table(doc, legend_data, legend_var)
 
     # Check cache first
     if calculation_id:
@@ -1447,11 +1799,15 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
             run.font.italic = True
             run.font.color.rgb = RGBColor(100, 100, 100)
             doc.add_paragraph()
+            _append_sm_legend(doc, chart_type, raw_data)
             return
 
     forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
     language = raw_data.get("basic_info", {}).get("language", "NP")
     img_data = None
+
+    if chart_type.startswith("sm_"):
+        img_data = _render_sm_chart_internal(chart_type, raw_data, forest_name)
 
     if chart_type == "species_pie" or chart_type == "species_composition_pie":
         species = raw_data.get("species", {})
@@ -1678,6 +2034,7 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
             run.font.italic = True
             run.font.color.rgb = RGBColor(100, 100, 100)
             doc.add_paragraph()
+            _append_sm_legend(doc, chart_type, raw_data)
             return
         except Exception:
             pass
@@ -1905,6 +2262,9 @@ def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any], calculat
     forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
     language = raw_data.get("basic_info", {}).get("language", "NP")
     img_data = None
+
+    if node.chart_type and node.chart_type.startswith("sm_"):
+        img_data = _render_sm_chart_internal(node.chart_type, raw_data, forest_name)
 
     if node.chart_type == "species_pie":
         species = raw_data.get("species", [])
@@ -2560,6 +2920,9 @@ def _render_chart_html(chart_type: str, raw_data: dict, calculation_id: UUID = N
 
     language = raw_data.get("basic_info", {}).get("language", "NP")
     img_data = None
+
+    if chart_type.startswith("sm_"):
+        img_data = _render_sm_chart_internal(chart_type, raw_data, forest_name)
 
     if chart_type == "species_pie" or chart_type == "species_composition_pie":
         species = raw_data.get("species", {})
@@ -3307,6 +3670,99 @@ def _build_animal_species_rows(raw_data: dict) -> list:
     return rows
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Tree Mapping Analysis builder functions
+# ═══════════════════════════════════════════════════════════════════
+
+def _build_sm_hierarchy_summary(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_hierarchy_summary", [])
+
+def _build_sm_species_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_species_by_hierarchy", [])
+
+def _build_sm_species_diversity(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_species_diversity", [])
+
+def _build_sm_dbh_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_dbh_by_hierarchy", [])
+
+def _build_sm_dbh_species_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_dbh_species_by_hierarchy", [])
+
+def _build_sm_stand_type_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_stand_type_by_hierarchy", [])
+
+def _build_sm_carbon_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_carbon_by_hierarchy", [])
+
+def _build_sm_volume_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_volume_by_hierarchy", [])
+
+def _build_sm_top_species_by_volume(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_top_species_by_volume", [])
+
+def _build_sm_mother_tree_by_hierarchy(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_mother_tree_by_hierarchy", [])
+
+def _build_sm_mother_tree_by_species(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_mother_tree_by_species", [])
+
+def _build_sm_felling_tree_by_species(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_felling_tree_by_species", [])
+
+def _build_sm_species_hier_remark(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_species_hier_remark", [])
+
+def _build_sm_dbh_hier_remark(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_dbh_hier_remark", [])
+
+def _build_sm_felling_dbh_analysis(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_felling_dbh_analysis", [])
+
+def _build_sm_felling_species_analysis(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_felling_species_analysis", [])
+
+def _build_sm_mf_hierarchy_legend(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_mf_hierarchy_legend", [])
+
+def _build_sm_stand_type_legend(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_stand_type_legend", [])
+
+def _build_sm_carbon_legend(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_carbon_legend", [])
+
+def _build_sm_volume_legend(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_volume_legend", [])
+
+def _build_sm_mf_species_legend(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_mf_species_legend", [])
+
+def _build_sm_felling_species_legend(raw_data: dict) -> list:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    return sm.get("sm_felling_species_legend", [])
+
+
 _BUILD_FROM_RAW = {
     "demand_supply": _build_demand_supply_rows,
     "table_20": _build_biodiversity_table_rows,
@@ -3315,6 +3771,28 @@ _BUILD_FROM_RAW = {
     "table_35": _build_invasive_species_rows,
     "table_36": _build_vegetation_species_rows,
     "table_37": _build_animal_species_rows,
+    "sm_hierarchy_summary": _build_sm_hierarchy_summary,
+    "sm_species_by_hierarchy": _build_sm_species_by_hierarchy,
+    "sm_species_diversity": _build_sm_species_diversity,
+    "sm_dbh_by_hierarchy": _build_sm_dbh_by_hierarchy,
+    "sm_dbh_species_by_hierarchy": _build_sm_dbh_species_by_hierarchy,
+    "sm_stand_type_by_hierarchy": _build_sm_stand_type_by_hierarchy,
+    "sm_carbon_by_hierarchy": _build_sm_carbon_by_hierarchy,
+    "sm_volume_by_hierarchy": _build_sm_volume_by_hierarchy,
+    "sm_top_species_by_volume": _build_sm_top_species_by_volume,
+    "sm_mother_tree_by_hierarchy": _build_sm_mother_tree_by_hierarchy,
+    "sm_mother_tree_by_species": _build_sm_mother_tree_by_species,
+    "sm_felling_tree_by_species": _build_sm_felling_tree_by_species,
+    "sm_species_hier_remark": _build_sm_species_hier_remark,
+    "sm_dbh_hier_remark": _build_sm_dbh_hier_remark,
+    "sm_felling_dbh_analysis": _build_sm_felling_dbh_analysis,
+    "sm_felling_species_analysis": _build_sm_felling_species_analysis,
+    "sm_mf_hierarchy_legend": _build_sm_mf_hierarchy_legend,
+    "sm_stand_type_legend": _build_sm_stand_type_legend,
+    "sm_carbon_legend": _build_sm_carbon_legend,
+    "sm_volume_legend": _build_sm_volume_legend,
+    "sm_mf_species_legend": _build_sm_mf_species_legend,
+    "sm_felling_species_legend": _build_sm_felling_species_legend,
 }
 
 

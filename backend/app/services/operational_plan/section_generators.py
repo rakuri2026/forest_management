@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+from collections import Counter
 from app.utils.number_format import format_devanagari as fmt
 from .household_section_generators import (
     generate_household_narration,
@@ -1005,6 +1006,217 @@ def generate_ti_sustainability_narration(raw_data: dict) -> Optional[str]:
     )
 
 
+# ─── 36. Tree Mapping: Hierarchy Narration ─────────────────────
+def generate_sm_hierarchy_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    blocks = sm.get("sm_total_blocks_analyzed", 0)
+    trees = sm.get("sm_total_trees_analyzed", 0)
+    h_data = sm.get("sm_hierarchy_summary", [])
+    levels = len(h_data)
+    if not blocks or not trees:
+        return None
+    return (
+        f"स्टेम म्यापिङ् गरिएको रूखहरू विभिन्न ब्लक, कम्पार्मेन्ट, "
+        f"सबकम्पार्टमेनट तथा उपक्षेत्रमा परेकोमा उक्त् रूखहरू जम्मा "
+        f"{fmt(blocks, 0)} गोटा ब्लकमा रहेका छन्। कुल रूखहरू "
+        f"{fmt(trees, 0)} गोटा रहेको देखिएको छ। रूखहरू परेका क्षेत्र "
+        f"जम्मा {fmt(levels, 0)} गोटा रहेका छन्। यी प्रत्येक स्थान "
+        f"बमोजिम रूखहरूको संख्या, तिनीहरूको आयतन प्रमुख प्रजाति, "
+        f"औसत डिवियच र उचाइ भएको तालिकामा समावेस गरीएको छ।"
+    )
+
+
+# ─── 37. Tree Mapping: Species Composition Narration ──────────
+def generate_sm_species_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    s_data = sm.get("sm_species_by_hierarchy", [])
+    d_data = sm.get("sm_species_diversity", [])
+    if not s_data:
+        return None
+    species_set = set(r.get("species", "") for r in s_data if r.get("species"))
+    sp_count = len(species_set)
+    # Top species by count
+    sp_counts = Counter(r.get("species", "") for r in s_data)
+    top = sp_counts.most_common(3)
+    top_str = ", ".join(f"{s} ({fmt(c, 0)})" for s, c in top) if top else "—"
+    # Diversity info
+    div_str = ""
+    if d_data:
+        avg_shannon = sum(float(r.get("shannon_index", 0) or 0) for r in d_data) / len(d_data)
+        div_str = f" श्यानन विविधता सूचकांक औसत {fmt(avg_shannon, 2)} रहेको छ।"
+    return (
+        f"रूख म्यापिङमा जम्मा {fmt(sp_count, 0)} प्रजातिहरू फेला परेका छन्। "
+        f"सबैभन्दा बढी पाइने प्रजातिहरू: {top_str}।{div_str}"
+    )
+
+
+# ─── 38. Tree Mapping: DBH Class Narration ───────────────────
+def generate_sm_dbh_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    d_data = sm.get("sm_dbh_by_hierarchy", [])
+    if not d_data:
+        return None
+    total = sum(int(r.get("tree_count", 0) or 0) for r in d_data)
+    # Find dominant DBH class
+    cls_counts = Counter()
+    for r in d_data:
+        cls = r.get("dbh_class", "")
+        cnt = int(r.get("tree_count", 0) or 0)
+        cls_counts[cls] += cnt
+    top = cls_counts.most_common(1)
+    dominant = f"{top[0][0]} ({fmt(top[0][1], 0)} रूख)" if top else "—"
+    return (
+        f"DBH वर्ग विश्लेषण अनुसार जम्मा {fmt(total, 0)} वटा रूखहरूको "
+        f"वर्गीकरण गरिएको छ। सबैभन्दा बढी रूख भएको DBH वर्ग: {dominant}। "
+        f"प्रत्येक स्थानिक स्तरमा DBH वर्ग अनुसार रूख सङ्ख्या, काठ आयतन, "
+        f"दाउरा आयतन र स्तर प्रतिशत विवरण तालिकामा समावेश गरिएको छ।"
+    )
+
+
+# ─── 39. Tree Mapping: Stand Type Narration ──────────────────
+def generate_sm_stand_type_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    st_data = sm.get("sm_stand_type_by_hierarchy", [])
+    status = sm.get("sm_forest_structure_status", {})
+    if not st_data:
+        return None
+    total_regen = sum(int(r.get("regeneration", 0) or 0) for r in st_data)
+    total_sapling = sum(int(r.get("sapling", 0) or 0) for r in st_data)
+    total_pole = sum(int(r.get("pole", 0) or 0) for r in st_data)
+    total_tree = sum(int(r.get("tree", 0) or 0) for r in st_data)
+    grand = total_regen + total_sapling + total_pole + total_tree
+    regen_pct = round(total_regen / grand * 100, 1) if grand else 0
+    overall = status.get("overall_status", "—")
+    return (
+        f"वन संरचना विश्लेषण अनुसार जम्मा {fmt(grand, 0)} वटा रूखहरूमध्ये "
+        f"पुनरुत्पादन {fmt(total_regen, 0)} ({fmt(regen_pct, 1)}%), "
+        f"लाथ्रा {fmt(total_sapling, 0)}, पोल {fmt(total_pole, 0)} र "
+        f"रूख {fmt(total_tree, 0)} वटा रहेको छ। समग्र वन संरचना अवस्था "
+        f"\"{overall}\" रहेको छ।"
+    )
+
+
+# ─── 40. Tree Mapping: Carbon Stock Narration ────────────────
+def generate_sm_carbon_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    c_data = sm.get("sm_carbon_by_hierarchy", [])
+    tc = sm.get("sm_total_carbon_tc", 0)
+    tco2 = sm.get("sm_total_co2_tco2", 0)
+    if not c_data:
+        return None
+    total_agb = sum(float(r.get("agb_t", 0) or 0) for r in c_data)
+    total_bgb = sum(float(r.get("bgb_t", 0) or 0) for r in c_data)
+    total_bio = sum(float(r.get("biomass_t", 0) or 0) for r in c_data)
+    return (
+        f"कार्बन मौज्दात विश्लेषण अनुसार कुल जमिन माथिको बायोमास (AGB) "
+        f"{fmt(total_agb, 2)} टन र जमिन मुनिको बायोमास (BGB) "
+        f"{fmt(total_bgb, 2)} टन (जम्मा {fmt(total_bio, 2)} टन) रहेको छ। "
+        f"कुल कार्बन मौज्दात {fmt(tc, 3)} tC र कार्बन डाइअक्साइड समतुल्य "
+        f"{fmt(tco2, 3)} tCO₂ रहेको छ। प्रत्येक स्थानिक स्तरको कार्बन "
+        f"विवरण तालिकामा समावेश गरिएको छ।"
+    )
+
+
+# ─── 41. Tree Mapping: Volume Distribution Narration ─────────
+def generate_sm_volume_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    v_data = sm.get("sm_volume_by_hierarchy", [])
+    top_sp = sm.get("sm_top_species_by_volume", [])
+    if not v_data:
+        return None
+    total_stem = sum(float(r.get("stem_volume_m3", 0) or 0) for r in v_data)
+    total_branch = sum(float(r.get("branch_volume_m3", 0) or 0) for r in v_data)
+    total_vol = sum(float(r.get("total_volume_m3", 0) or 0) for r in v_data)
+    total_net = sum(float(r.get("net_volume_m3", 0) or 0) for r in v_data)
+    # Top species info
+    top_str = ""
+    if top_sp:
+        top_entries = top_sp[:3]
+        top_str = "। आयतन अनुसार शीर्ष प्रजातिहरू: " + ", ".join(
+            f"{r.get('local_name', r.get('species', ''))} ({fmt(r.get('total_volume_m3', 0), 2)} m³)"
+            for r in top_entries
+        )
+    return (
+        f"आयतन वितरण विश्लेषण अनुसार जम्मा काण्ड आयतन {fmt(total_stem, 2)} m³, "
+        f"हाँगा आयतन {fmt(total_branch, 2)} m³ र कुल आयतन {fmt(total_vol, 2)} m³ "
+        f"रहेको छ। नेट आयतन {fmt(total_net, 2)} m³ रहेको छ।"
+        f"{top_str}"
+    )
+
+
+# ─── 42. Tree Mapping: Mother Tree Coverage Narration ────────
+def generate_sm_mother_tree_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    coverage = sm.get("sm_mother_tree_coverage", {})
+    mt_data = sm.get("sm_mother_tree_by_hierarchy", [])
+    summary = sm.get("sm_mother_felling_summary", {})
+    if not coverage and not mt_data and not summary:
+        return None
+    grid = coverage.get("grid_spacing_m", "—")
+    total_cells = coverage.get("total_grid_cells", 0)
+    with_mother = coverage.get("cells_with_mother", 0)
+    cov_pct = coverage.get("coverage_percent", 0)
+    total_mother = (
+        summary.get("total_mother_trees", 0)
+        or (sum(int(r.get("mother_trees", 0) or 0) for r in mt_data) if mt_data else 0)
+    )
+    total_felling = (
+        summary.get("total_felling_trees", 0)
+        or (sum(int(r.get("felling_trees", 0) or 0) for r in mt_data) if mt_data else 0)
+    )
+    return (
+        f"माँउ रूख कभरेज विश्लेषण: ग्रिड दूरी {grid} मि., कुल ग्रिड सेल "
+        f"{fmt(total_cells, 0)} मध्ये {fmt(with_mother, 0)} सेलमा माँउ रूख "
+        f"रहेको छ (कभरेज {fmt(cov_pct, 1)}%)। "
+        f"जम्मा {fmt(total_mother, 0)} वटा माँउ रूख र "
+        f"{fmt(total_felling, 0)} वटा कटानी रूख रहेको छ।"
+    )
+
+
+# ─── 43. Tree Mapping: Felling Tree Analysis Narration ───────
+def generate_sm_felling_narration(raw_data: dict) -> Optional[str]:
+    sm = raw_data.get("tree_mapping_analysis", {})
+    if not sm.get("sm_available"):
+        return None
+    totals = sm.get("sm_felling_totals", {})
+    f_dbh = sm.get("sm_felling_dbh_analysis", [])
+    f_sp = sm.get("sm_felling_species_analysis", [])
+    if not totals and not f_dbh:
+        return None
+    total_trees = totals.get("tree_count", 0) or sum(int(r.get("tree_count", 0) or 0) for r in f_dbh)
+    total_vol = totals.get("gross_volume_m3", 0) or sum(float(r.get("gross_volume_m3", 0) or 0) for r in f_dbh)
+    total_timber = totals.get("timber_m3", 0) or sum(float(r.get("timber_m3", 0) or 0) for r in f_dbh)
+    total_fw = totals.get("firewood_m3", 0) or sum(float(r.get("firewood_m3", 0) or 0) for r in f_dbh)
+    # Top species
+    top_str = ""
+    if f_sp:
+        top = sorted(f_sp, key=lambda r: float(r.get("gross_volume_m3", 0) or 0), reverse=True)[:3]
+        top_str = "। प्रजाति अनुसार: " + ", ".join(
+            f"{r.get('local_name', r.get('species', ''))} {fmt(r.get('gross_volume_m3', 0), 2)} m³"
+            for r in top
+        )
+    return (
+        f"कटानी रूख विश्लेषण (≥३० से.मी. DBH): जम्मा {fmt(total_trees, 0)} वटा "
+        f"कटानी रूखको कुल आयतन {fmt(total_vol, 2)} m³ (काठ {fmt(total_timber, 2)} m³, "
+        f"दाउरा {fmt(total_fw, 2)} m³) रहेको छ।"
+        f"{top_str}"
+    )
+
+
 SECTION_GENERATORS = {
     "section:forest_summary": generate_forest_summary,
     "section:slope_analysis": generate_slope_analysis,
@@ -1047,6 +1259,16 @@ SECTION_GENERATORS = {
     "section:ti_productivity_narration": generate_ti_productivity_narration,
     "section:ti_economic_narration": generate_ti_economic_narration,
     "section:ti_sustainability_narration": generate_ti_sustainability_narration,
+
+    # Tree Mapping Analysis Narrations
+    "section:sm_hierarchy_narration": generate_sm_hierarchy_narration,
+    "section:sm_species_narration": generate_sm_species_narration,
+    "section:sm_dbh_narration": generate_sm_dbh_narration,
+    "section:sm_stand_type_narration": generate_sm_stand_type_narration,
+    "section:sm_carbon_narration": generate_sm_carbon_narration,
+    "section:sm_volume_narration": generate_sm_volume_narration,
+    "section:sm_mother_tree_narration": generate_sm_mother_tree_narration,
+    "section:sm_felling_narration": generate_sm_felling_narration,
 }
 
 

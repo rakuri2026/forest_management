@@ -5,6 +5,7 @@ import { CorrectionPreviewDialog } from './CorrectionPreviewDialog';
 import ColumnMappingPreview from './ColumnMappingPreview';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { downloadFromApi } from '../utils/download';
+import { TreeMappingAnalysis } from './TreeMappingAnalysis';
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -623,6 +624,11 @@ export function TreeMappingTab({ calculationId }: TreeMappingTabProps) {
               </div>
             )}
           </div>
+        )}
+
+        {/* Tree Mapping Analysis */}
+        {summary && summary.total_trees > 0 && treeMapping?.id && (
+          <TreeMappingAnalysis mappingId={treeMapping.id} />
         )}
 
         {/* Tree Data Preview */}

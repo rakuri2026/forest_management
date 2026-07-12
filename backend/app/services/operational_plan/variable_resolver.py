@@ -207,6 +207,10 @@ _KEY_ALIAS: Dict[tuple, str] = {
     ("yearly_plan", "ya_program_pie_data"): "program_pie_data",
     ("yearly_plan", "ya_budget_year_trend"): "budget_year_trend",
     ("yearly_plan", "ya_activity_plan_detail"): "activity_plan_detail",
+
+    # tree_mapping_analysis
+    ("tree_mapping_analysis", "sm_forest_structure_status"): "sm_forest_structure_status",
+    ("tree_mapping_analysis", "sm_mother_tree_coverage"): "sm_mother_tree_coverage",
 }
 
 
@@ -325,6 +329,7 @@ class VariableResolver:
             "user_group": "user_group",
             "section_generator": "section_generators",
             "compartment": "compartment",
+            "tree_mapping_analysis": "tree_mapping_analysis",
         }
         section = source_map.get(var_def.source, "basic_info")
         section_data = data.get(section, {})
@@ -708,8 +713,95 @@ class VariableResolver:
                     values = [d["count_per_ha"] for d in chart_data]
                     return _bar_data(labels, values, "संख्या/हे.")
                 return None
+            elif chart_key.startswith("sm_"):
+                return self._resolve_sm_chart(chart_key, data)
         except Exception:
             return None
+        return None
+
+    def _resolve_sm_chart(self, chart_key: str, data: dict) -> Optional[Dict[str, Any]]:
+        sm = data.get("tree_mapping_analysis", {})
+        _colors = self._CHART_COLORS
+
+        # Helper functions
+        def _pct_data(labels, values, is_pie=True):
+            colors = _colors[:len(labels)]
+            return {"type": "pie" if is_pie else "bar", "labels": labels, "datasets": [{"data": values, "backgroundColor": colors}]}
+
+        def _grouped_bar(labels, datasets_dict):
+            return {
+                "type": "bar", "labels": labels,
+                "datasets": [
+                    {"label": k, "data": v, "backgroundColor": _colors[i % len(_colors)]}
+                    for i, (k, v) in enumerate(datasets_dict.items())
+                ],
+            }
+
+        if chart_key == "sm_felling_dbh_pie":
+            fda = sm.get("sm_felling_dbh_analysis", [])
+            if fda:
+                labels = [r.get("dbh_class", str(i)) for i, r in enumerate(fda)]
+                values = [r.get("tree_count", 0) for r in fda]
+                return _pct_data(labels, values)
+        elif chart_key == "sm_felling_species_bar":
+            fsa = sm.get("sm_felling_species_analysis", [])[:10]
+            if fsa:
+                labels = [format_devanagari(i, 0) for i in range(1, len(fsa) + 1)]
+                values = [r.get("tree_count", 0) for r in fsa]
+                return _pct_data(labels, values, is_pie=False)
+        elif chart_key == "sm_mother_felling_pie":
+            mfs = sm.get("sm_mother_felling_summary", {})
+            if mfs:
+                labels = ["माँउ रूख", "कटानी रूख"]
+                values = [mfs.get("total_mother_trees", 0), mfs.get("total_felling_trees", 0)]
+                return _pct_data(labels, values)
+        elif chart_key == "sm_mother_felling_species_bar":
+            mbs = sm.get("sm_mother_tree_by_species", [])[:10]
+            fbs = sm.get("sm_felling_tree_by_species", [])[:10]
+            if mbs or fbs:
+                all_species = list(dict.fromkeys([r.get("species", "") for r in mbs] + [r.get("species", "") for r in fbs]))[:10]
+                labels = [format_devanagari(i, 0) for i in range(1, len(all_species) + 1)]
+                mother_map = {r.get("species", ""): r.get("tree_count", 0) for r in mbs}
+                felling_map = {r.get("species", ""): r.get("tree_count", 0) for r in fbs}
+                mother_vals = [mother_map.get(sp, 0) for sp in all_species]
+                felling_vals = [felling_map.get(sp, 0) for sp in all_species]
+                return _grouped_bar(labels, {"माँउ": mother_vals, "कटानी": felling_vals})
+        elif chart_key == "sm_stand_type_bar":
+            st = sm.get("sm_stand_type_by_hierarchy", [])
+            if st:
+                labels = [format_devanagari(i, 0) for i in range(1, len(st) + 1)]
+                regen = [r.get("regeneration", 0) for r in st]
+                sapling = [r.get("sapling", 0) for r in st]
+                pole = [r.get("pole", 0) for r in st]
+                tree = [r.get("tree", 0) for r in st]
+                return _grouped_bar(labels, {"पुनरुत्पादन": regen, "लाथ्रा": sapling, "पोल": pole, "रूख": tree})
+        elif chart_key == "sm_carbon_bar":
+            cb = sm.get("sm_carbon_by_hierarchy", [])
+            if cb:
+                labels = [format_devanagari(i, 0) for i in range(1, len(cb) + 1)]
+                carbon_vals = [r.get("carbon_tc", 0) for r in cb]
+                co2_vals = [r.get("co2_tco2", 0) for r in cb]
+                return _grouped_bar(labels, {"कार्बन (tC)": carbon_vals, "CO₂e (tCO₂)": co2_vals})
+        elif chart_key == "sm_volume_bar":
+            vb = sm.get("sm_volume_by_hierarchy", [])
+            if vb:
+                labels = [format_devanagari(i, 0) for i in range(1, len(vb) + 1)]
+                stem = [r.get("stem_volume_m3", 0) for r in vb]
+                branch = [r.get("branch_volume_m3", 0) for r in vb]
+                return _grouped_bar(labels, {"काण्ड": stem, "हाँगा": branch})
+        elif chart_key == "sm_mother_felling_hierarchy_bar":
+            hs = sm.get("sm_hierarchy_summary", [])
+            rbd = sm.get("sm_hierarchy_remark_breakdown", {})
+            if hs:
+                labels = [format_devanagari(i, 0) for i in range(1, len(hs) + 1)]
+                mother_vals = []
+                felling_vals = []
+                for r in hs:
+                    key = f"{r.get('compartment','-')}|{r.get('sub_compartment','-')}"
+                    breakdown = rbd.get(key, {})
+                    mother_vals.append(breakdown.get("mother_trees", 0))
+                    felling_vals.append(breakdown.get("felling_trees", 0))
+                return _grouped_bar(labels, {"माँउ": mother_vals, "कटानी": felling_vals})
         return None
 
     def _resolve_table(self, var_def: VariableDef) -> Optional[Dict[str, Any]]:
@@ -764,6 +856,13 @@ class VariableResolver:
                         })
                     if rows:
                         return {"table_id": table_id, "rows": rows, "auto_populated": True}
+
+            # Tree mapping analysis tables (sm_* prefix)
+            if table_id.startswith("sm_"):
+                sm_data = raw.get("tree_mapping_analysis", {})
+                rows = sm_data.get(table_id, [])
+                if rows:
+                    return {"table_id": table_id, "rows": rows, "auto_populated": True}
 
             if table_id in ("table_20", "table_33", "table_34", "table_35", "table_36", "table_37"):
                 bio = raw.get("biodiversity", {})

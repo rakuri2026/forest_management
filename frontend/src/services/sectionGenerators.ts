@@ -900,6 +900,211 @@ export function generateFieldInventoryNarration(data: any): SectionContent | nul
   };
 }
 
+// ─── 22. Tree Mapping: Hierarchy Narration ──────────────────────
+export function generateSmHierarchyNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const blocks = sm.sm_total_blocks_analyzed || 0;
+  const trees = sm.sm_total_trees_analyzed || 0;
+  const levels = (sm.sm_hierarchy_summary || []).length;
+  if (!blocks || !trees) return null;
+  const narrative = `रूख म्यापिङ विश्लेषण अनुसार कुल ${toNepaliDigit(blocks, 0)} वटा ब्लकमा ${toNepaliDigit(trees, 0)} वटा रूखहरू विश्लेषण गरिएको छ। यी रूखहरू ${toNepaliDigit(levels, 0)} वटा स्थानिक स्तर संयोजनहरूमा वितरित छन्। प्रत्येक स्तरमा उप-कम्पार्टमेन्ट, कम्पार्टमेन्ट, ब्लक र उप-क्षेत्र अनुसार रूख सङ्ख्या, आयतन, प्रमुख प्रजाति, औसत डीबीएच र उचाइ समावेश गरिएको छ।`;
+  return {
+    titleNp: 'स्थानिक स्तर रूख सारांश विवरण',
+    titleEn: 'Hierarchy Summary Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 23. Tree Mapping: Species Composition Narration ────────────
+export function generateSmSpeciesNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const sData = sm.sm_species_by_hierarchy || [];
+  const dData = sm.sm_species_diversity || [];
+  if (!sData.length) return null;
+  const speciesSet = new Set(sData.map((r: any) => r.species).filter(Boolean));
+  const spCount = speciesSet.size;
+  const spCounts: Record<string, number> = {};
+  sData.forEach((r: any) => { if (r.species) spCounts[r.species] = (spCounts[r.species] || 0) + (r.tree_count || 0); });
+  const top = Object.entries(spCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topStr = top.map(([s, c]) => `${s} (${toNepaliDigit(c, 0)})`).join(', ');
+  let divStr = '';
+  if (dData.length) {
+    const avgShannon = dData.reduce((s: number, r: any) => s + Number(r.shannon_index || 0), 0) / dData.length;
+    divStr = ` श्यानन विविधता सूचकांक औसत ${toNepaliDigit(avgShannon, 2)} रहेको छ।`;
+  }
+  const narrative = `रूख म्यापिङमा जम्मा ${toNepaliDigit(spCount, 0)} प्रजातिहरू फेला परेका छन्। सबैभन्दा बढी पाइने प्रजातिहरू: ${topStr}।${divStr}`;
+  return {
+    titleNp: 'प्रजाति संरचना विवरण',
+    titleEn: 'Species Composition Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 24. Tree Mapping: DBH Class Narration ──────────────────────
+export function generateSmDbhNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const dData = sm.sm_dbh_by_hierarchy || [];
+  if (!dData.length) return null;
+  const total = dData.reduce((s: number, r: any) => s + Number(r.tree_count || 0), 0);
+  const clsCounts: Record<string, number> = {};
+  dData.forEach((r: any) => { if (r.dbh_class) clsCounts[r.dbh_class] = (clsCounts[r.dbh_class] || 0) + Number(r.tree_count || 0); });
+  const top = Object.entries(clsCounts).sort((a, b) => b[1] - a[1])[0];
+  const dominant = top ? `${top[0]} (${toNepaliDigit(top[1], 0)} रूख)` : '—';
+  const narrative = `DBH वर्ग विश्लेषण अनुसार जम्मा ${toNepaliDigit(total, 0)} वटा रूखहरूको वर्गीकरण गरिएको छ। सबैभन्दा बढी रूख भएको DBH वर्ग: ${dominant}। प्रत्येक स्थानिक स्तरमा DBH वर्ग अनुसार रूख सङ्ख्या, काठ आयतन, दाउरा आयतन र स्तर प्रतिशत विवरण तालिकामा समावेश गरिएको छ।`;
+  return {
+    titleNp: 'DBH वर्ग विवरण',
+    titleEn: 'DBH Class Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 25. Tree Mapping: Stand Type Narration ─────────────────────
+export function generateSmStandTypeNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const stData = sm.sm_stand_type_by_hierarchy || [];
+  const status = sm.sm_forest_structure_status || {};
+  if (!stData.length) return null;
+  const totalRegen = stData.reduce((s: number, r: any) => s + Number(r.regeneration || 0), 0);
+  const totalSapling = stData.reduce((s: number, r: any) => s + Number(r.sapling || 0), 0);
+  const totalPole = stData.reduce((s: number, r: any) => s + Number(r.pole || 0), 0);
+  const totalTree = stData.reduce((s: number, r: any) => s + Number(r.tree || 0), 0);
+  const grand = totalRegen + totalSapling + totalPole + totalTree;
+  const regenPct = grand ? ((totalRegen / grand) * 100).toFixed(1) : '0';
+  const overall = status.overall_status || '—';
+  const narrative = `वन संरचना विश्लेषण अनुसार जम्मा ${toNepaliDigit(grand, 0)} वटा रूखहरूमध्ये पुनरुत्पादन ${toNepaliDigit(totalRegen, 0)} (${toNepaliDigit(Number(regenPct), 1)}%), लाथ्रा ${toNepaliDigit(totalSapling, 0)}, पोल ${toNepaliDigit(totalPole, 0)} र रूख ${toNepaliDigit(totalTree, 0)} वटा रहेको छ। समग्र वन संरचना अवस्था "${overall}" रहेको छ।`;
+  return {
+    titleNp: 'स्ट्यान्ड प्रकार विवरण',
+    titleEn: 'Stand Type Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 26. Tree Mapping: Carbon Stock Narration ──────────────────
+export function generateSmCarbonNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const cData = sm.sm_carbon_by_hierarchy || [];
+  const tc = sm.sm_total_carbon_tc || 0;
+  const tco2 = sm.sm_total_co2_tco2 || 0;
+  if (!cData.length) return null;
+  const totalAgb = cData.reduce((s: number, r: any) => s + Number(r.agb_t || 0), 0);
+  const totalBgb = cData.reduce((s: number, r: any) => s + Number(r.bgb_t || 0), 0);
+  const totalBio = cData.reduce((s: number, r: any) => s + Number(r.biomass_t || 0), 0);
+  const narrative = `कार्बन मौज्दात विश्लेषण अनुसार कुल जमिन माथिको बायोमास (AGB) ${toNepaliDigit(totalAgb, 2)} टन र जमिन मुनिको बायोमास (BGB) ${toNepaliDigit(totalBgb, 2)} टन (जम्मा ${toNepaliDigit(totalBio, 2)} टन) रहेको छ। कुल कार्बन मौज्दात ${toNepaliDigit(tc, 3)} tC र कार्बन डाइअक्साइड समतुल्य ${toNepaliDigit(tco2, 3)} tCO₂ रहेको छ। प्रत्येक स्थानिक स्तरको कार्बन विवरण तालिकामा समावेश गरिएको छ।`;
+  return {
+    titleNp: 'कार्बन मौज्दात विवरण',
+    titleEn: 'Carbon Stock Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 27. Tree Mapping: Volume Distribution Narration ────────────
+export function generateSmVolumeNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const vData = sm.sm_volume_by_hierarchy || [];
+  const topSp = sm.sm_top_species_by_volume || [];
+  if (!vData.length) return null;
+  const totalStem = vData.reduce((s: number, r: any) => s + Number(r.stem_volume_m3 || 0), 0);
+  const totalBranch = vData.reduce((s: number, r: any) => s + Number(r.branch_volume_m3 || 0), 0);
+  const totalVol = vData.reduce((s: number, r: any) => s + Number(r.total_volume_m3 || 0), 0);
+  const totalNet = vData.reduce((s: number, r: any) => s + Number(r.net_volume_m3 || 0), 0);
+  let topStr = '';
+  if (topSp.length) {
+    const topEntries = topSp.slice(0, 3);
+    topStr = '। आयतन अनुसार शीर्ष प्रजातिहरू: ' + topEntries.map((r: any) => `${r.local_name || r.species} (${toNepaliDigit(Number(r.total_volume_m3 || 0), 2)} m³)`).join(', ');
+  }
+  const narrative = `आयतन वितरण विश्लेषण अनुसार जम्मा काण्ड आयतन ${toNepaliDigit(totalStem, 2)} m³, हाँगा आयतन ${toNepaliDigit(totalBranch, 2)} m³ र कुल आयतन ${toNepaliDigit(totalVol, 2)} m³ रहेको छ। नेट आयतन ${toNepaliDigit(totalNet, 2)} m³ रहेको छ।${topStr}`;
+  return {
+    titleNp: 'आयतन वितरण विवरण',
+    titleEn: 'Volume Distribution Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 28. Tree Mapping: Mother Tree Coverage Narration ──────────
+export function generateSmMotherTreeNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const coverage = sm.sm_mother_tree_coverage || {};
+  const mtData = sm.sm_mother_tree_by_hierarchy || [];
+  const summary = sm.sm_mother_felling_summary || {};
+  if (!coverage && !mtData.length && !Object.keys(summary).length) return null;
+  const grid = coverage.grid_spacing_m || '—';
+  const totalCells = coverage.total_grid_cells || 0;
+  const withMother = coverage.cells_with_mother || 0;
+  const covPct = coverage.coverage_percent || 0;
+  const totalMother = summary.total_mother_trees || mtData.reduce((s: number, r: any) => s + Number(r.mother_trees || 0), 0);
+  const totalFelling = summary.total_felling_trees || mtData.reduce((s: number, r: any) => s + Number(r.felling_trees || 0), 0);
+  const narrative = `माँउ रूख कभरेज विश्लेषण: ग्रिड दूरी ${grid} मि., कुल ग्रिड सेल ${toNepaliDigit(totalCells, 0)} मध्ये ${toNepaliDigit(withMother, 0)} सेलमा माँउ रूख रहेको छ (कभरेज ${toNepaliDigit(covPct, 1)}%)। जम्मा ${toNepaliDigit(totalMother, 0)} वटा माँउ रूख र ${toNepaliDigit(totalFelling, 0)} वटा कटानी रूख रहेको छ।`;
+  return {
+    titleNp: 'माँउ रूख कभरेज विवरण',
+    titleEn: 'Mother Tree Coverage Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
+// ─── 29. Tree Mapping: Felling Tree Analysis Narration ─────────
+export function generateSmFellingNarration(data: any): SectionContent | null {
+  const sm = data.tree_mapping_analysis || {};
+  if (!sm.sm_available) return null;
+  const totals = sm.sm_felling_totals || {};
+  const fDbh = sm.sm_felling_dbh_analysis || [];
+  const fSp = sm.sm_felling_species_analysis || [];
+  if (!totals && !fDbh.length) return null;
+  const totalTrees = totals.tree_count || fDbh.reduce((s: number, r: any) => s + Number(r.tree_count || 0), 0);
+  const totalVol = totals.gross_volume_m3 || fDbh.reduce((s: number, r: any) => s + Number(r.gross_volume_m3 || 0), 0);
+  const totalTimber = totals.timber_m3 || fDbh.reduce((s: number, r: any) => s + Number(r.timber_m3 || 0), 0);
+  const totalFw = totals.firewood_m3 || fDbh.reduce((s: number, r: any) => s + Number(r.firewood_m3 || 0), 0);
+  let topStr = '';
+  if (fSp.length) {
+    const top = [...fSp].sort((a: any, b: any) => Number(b.gross_volume_m3 || 0) - Number(a.gross_volume_m3 || 0)).slice(0, 3);
+    topStr = '। प्रजाति अनुसार: ' + top.map((r: any) => `${r.local_name || r.species} ${toNepaliDigit(Number(r.gross_volume_m3 || 0), 2)} m³`).join(', ');
+  }
+  const narrative = `कटानी रूख विश्लेषण (≥३० से.मी. DBH): जम्मा ${toNepaliDigit(totalTrees, 0)} वटा कटानी रूखको कुल आयतन ${toNepaliDigit(totalVol, 2)} m³ (काठ ${toNepaliDigit(totalTimber, 2)} m³, दाउरा ${toNepaliDigit(totalFw, 2)} m³) रहेको छ।${topStr}`;
+  return {
+    titleNp: 'कटानी रूख विश्लेषण विवरण',
+    titleEn: 'Felling Tree Analysis Narration',
+    narrative,
+    graphics: { type: 'none', data: [] },
+    legend: [],
+    variables: ['tree_mapping_analysis'],
+    source: 'tree_mapping_analysis',
+  };
+}
+
 // ─── REGISTRY ────────────────────────────────────────────────────
 export const SECTION_GENERATORS: Record<string, SectionGenerator> = {
   forest_summary: {
@@ -986,6 +1191,40 @@ export const SECTION_GENERATORS: Record<string, SectionGenerator> = {
     generatorFn: (data: any) => generateFieldInventoryNarration(data),
     variables: ['field_inventory'],
   },
+
+  // Tree Mapping Analysis Narrations
+  sm_hierarchy_narration: {
+    generatorFn: (data: any) => generateSmHierarchyNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_species_narration: {
+    generatorFn: (data: any) => generateSmSpeciesNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_dbh_narration: {
+    generatorFn: (data: any) => generateSmDbhNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_stand_type_narration: {
+    generatorFn: (data: any) => generateSmStandTypeNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_carbon_narration: {
+    generatorFn: (data: any) => generateSmCarbonNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_volume_narration: {
+    generatorFn: (data: any) => generateSmVolumeNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_mother_tree_narration: {
+    generatorFn: (data: any) => generateSmMotherTreeNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
+  sm_felling_narration: {
+    generatorFn: (data: any) => generateSmFellingNarration(data),
+    variables: ['tree_mapping_analysis'],
+  },
 };
 
 export const SECTION_TITLES: { key: string; titleNp: string; titleEn: string; icon: string }[] = [
@@ -1010,4 +1249,14 @@ export const SECTION_TITLES: { key: string; titleNp: string; titleEn: string; ic
   { key: 'species_distribution', titleNp: 'वन प्रजाति', titleEn: 'Species Distribution', icon: '🌳' },
   { key: 'accessible_forest', titleNp: 'पहुँचयोग्य वन क्षेत्र', titleEn: 'Accessible Forest Area', icon: '🚶' },
   { key: 'field_inventory_narration', titleNp: 'क्षेत्र सर्वेक्षण विवरण', titleEn: 'Field Inventory Narration', icon: '📋' },
+
+  // Tree Mapping Analysis Narrations
+  { key: 'sm_hierarchy_narration', titleNp: 'स्थानिक स्तर रूख सारांश विवरण', titleEn: 'Hierarchy Summary Narration', icon: '📋' },
+  { key: 'sm_species_narration', titleNp: 'प्रजाति संरचना विवरण', titleEn: 'Species Composition Narration', icon: '📋' },
+  { key: 'sm_dbh_narration', titleNp: 'DBH वर्ग विवरण', titleEn: 'DBH Class Narration', icon: '📋' },
+  { key: 'sm_stand_type_narration', titleNp: 'स्ट्यान्ड प्रकार विवरण', titleEn: 'Stand Type Narration', icon: '📋' },
+  { key: 'sm_carbon_narration', titleNp: 'कार्बन मौज्दात विवरण', titleEn: 'Carbon Stock Narration', icon: '📋' },
+  { key: 'sm_volume_narration', titleNp: 'आयतन वितरण विवरण', titleEn: 'Volume Distribution Narration', icon: '📋' },
+  { key: 'sm_mother_tree_narration', titleNp: 'माँउ रूख कभरेज विवरण', titleEn: 'Mother Tree Coverage Narration', icon: '📋' },
+  { key: 'sm_felling_narration', titleNp: 'कटानी रूख विश्लेषण विवरण', titleEn: 'Felling Tree Analysis Narration', icon: '📋' },
 ];

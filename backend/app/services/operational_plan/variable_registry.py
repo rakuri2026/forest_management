@@ -187,7 +187,7 @@ _reg("confirmed_species", "A", "पुष्टि गरिएका प्र�
 # A9: Tree Inventory (13)
 _reg("inventory_available", "A", "रूख गणना उपलब्ध", "Inventory Available", var_type="boolean", source="inventory")
 _reg("inventory_total_trees", "A", "कुल रूख सङ्ख्या", "Total Trees", var_type="number", source="inventory", precision=0)
-_reg("inventory_mother_trees", "A", "माता रूख सङ्ख्या", "Mother Trees", var_type="number", source="inventory", precision=0)
+_reg("inventory_mother_trees", "A", "माँउ रूख सङ्ख्या", "Mother Trees", var_type="number", source="inventory", precision=0)
 _reg("inventory_felling_trees", "A", "कटानी रूख सङ्ख्या", "Felling Trees", var_type="number", source="inventory", precision=0)
 _reg("inventory_seedling_count", "A", "बिरुवा सङ्ख्या", "Seedling Count", var_type="number", source="inventory", precision=0)
 _reg("inventory_volume_m3", "A", "कुल आयतन (m³)", "Total Volume (m3)", var_type="number", source="inventory")
@@ -427,6 +427,32 @@ _reg("section:user_group_narration", "A",
      var_type="string", source="section_generator", auto_populate=True)
 _reg("section:demand_supply_narration", "A",
      "माग/आपूर्ति विवरण (स्वतः उत्पन्न)", "Demand & Supply Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+
+# Tree Mapping Analysis Narrations
+_reg("section:sm_hierarchy_narration", "A",
+     "स्थानिक स्तर रूख सारांश विवरण (स्वतः उत्पन्न)", "Hierarchy Summary Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_species_narration", "A",
+     "प्रजाति संरचना विवरण (स्वतः उत्पन्न)", "Species Composition Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_dbh_narration", "A",
+     "DBH वर्ग विवरण (स्वतः उत्पन्न)", "DBH Class Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_stand_type_narration", "A",
+     "स्ट्यान्ड प्रकार विवरण (स्वतः उत्पन्न)", "Stand Type Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_carbon_narration", "A",
+     "कार्बन मौज्दात विवरण (स्वतः उत्पन्न)", "Carbon Stock Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_volume_narration", "A",
+     "आयतन वितरण विवरण (स्वतः उत्पन्न)", "Volume Distribution Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_mother_tree_narration", "A",
+     "माँउ रूख कभरेज विवरण (स्वतः उत्पन्न)", "Mother Tree Coverage Narration (Auto-generated)",
+     var_type="string", source="section_generator", auto_populate=True)
+_reg("section:sm_felling_narration", "A",
+     "कटानी रूख विश्लेषण विवरण (स्वतः उत्पन्न)", "Felling Tree Analysis Narration (Auto-generated)",
      var_type="string", source="section_generator", auto_populate=True)
 
 # A11: Sampling (14)
@@ -750,6 +776,40 @@ _reg("chart:dbh_class_count_bar", "A",
      "DBH Class Tree Count Bar Chart (Pole & Tree)",
      var_type="dict", source="field_inventory")
 
+# ── Tree Mapping (sm_*) chart variables ──
+_reg("chart:sm_felling_dbh_pie", "A",
+     "ब्यास वर्ग अनुसार कटानी रूख (पाई चार्ट)",
+     "DBH-wise Felling Trees (Pie Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_felling_species_bar", "A",
+     "प्रजाति अनुसार कटानी रूख (बार चार्ट)",
+     "Species-wise Felling Trees (Bar Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_mother_felling_pie", "A",
+     "माँउ रूख बनाम कटानी रूख (पाई चार्ट)",
+     "Mother vs Felling Trees (Pie Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_mother_felling_species_bar", "A",
+     "प्रजाति अनुसार माँउ बनाम कटानी (बार चार्ट)",
+     "Mother vs Felling by Species (Bar Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_stand_type_bar", "A",
+     "स्तर अनुसार वन प्रकार (बार चार्ट)",
+     "Stand Type by Hierarchy (Bar Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_carbon_bar", "A",
+     "स्तर अनुसार कार्बन (बार चार्ट)",
+     "Carbon by Hierarchy (Bar Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_volume_bar", "A",
+     "स्तर अनुसार आयतन (बार चार्ट)",
+     "Volume by Hierarchy (Bar Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("chart:sm_mother_felling_hierarchy_bar", "A",
+     "स्तर अनुसार माँउ बनाम कटानी (बार चार्ट)",
+     "Mother vs Felling by Hierarchy (Bar Chart)",
+     var_type="dict", source="tree_mapping_analysis")
+
 # ═══════════════════════════════════════════════════════
 # Fieldbook Variables
 # ═══════════════════════════════════════════════════════
@@ -860,6 +920,114 @@ for _alias, _tid in TABLE_ID_ALIAS.items():
     _entry = VARIABLE_REGISTRY.get(f"table:{_tid}")
     if _entry:
         _reg(f"table:{_alias}", "A", _entry.label_ne, _entry.label_en, var_type="dict", source="op_table")
+
+# ═══════════════════════════════════════════════════════════════════
+# Category A: Tree Mapping Analysis (source="tree_mapping_analysis")
+# ═══════════════════════════════════════════════════════════════════
+
+# Scalar variables
+_reg("sm_available", "A", "रूख म्यापिङ विश्लेषण उपलब्ध",
+     "Tree Mapping Analysis Available",
+     var_type="boolean", source="tree_mapping_analysis")
+_reg("sm_total_blocks_analyzed", "A", "विश्लेषित ब्लक सङ्ख्या",
+     "Blocks Analyzed",
+     var_type="number", source="tree_mapping_analysis", precision=0)
+_reg("sm_total_trees_analyzed", "A", "विश्लेषित कुल रूख सङ्ख्या",
+     "Total Trees Analyzed",
+     var_type="number", source="tree_mapping_analysis", precision=0)
+_reg("sm_total_carbon_tc", "A", "कुल कार्बन मौज्दात (tC)",
+     "Total Carbon Stock (tC)",
+     var_type="number", source="tree_mapping_analysis", precision=3)
+_reg("sm_total_co2_tco2", "A", "कुल CO₂ समतुल्य (tCO₂)",
+     "Total CO₂ Equivalent (tCO₂)",
+     var_type="number", source="tree_mapping_analysis", precision=3)
+
+# List variables (rendered as inline tables in DOCX)
+_reg("sm_hierarchy_summary", "A", "स्थानिक स्तर अनुसार रूख सारांश",
+     "Spatial Hierarchy Tree Summary",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_species_by_hierarchy", "A", "स्थानिक स्तर अनुसार प्रजाति विश्लेषण",
+     "Species Composition by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_species_diversity", "A", "ब्लक अनुसार प्रजाति विविधता",
+     "Species Diversity by Block",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_dbh_by_hierarchy", "A", "स्थानिक स्तर अनुसार DBH वर्ग विश्लेषण",
+     "DBH Class by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_dbh_species_by_hierarchy", "A", "स्थानिक स्तर अनुसार DBH-प्रजाति विश्लेषण",
+     "DBH × Species by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_stand_type_by_hierarchy", "A", "स्थानिक स्तर अनुसार स्ट्यान्ड प्रकार",
+     "Stand Type by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_carbon_by_hierarchy", "A", "स्थानिक स्तर अनुसार कार्बन मौज्दात",
+     "Carbon Stock by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_volume_by_hierarchy", "A", "स्थानिक स्तर अनुसार आयतन विश्लेषण",
+     "Volume Analysis by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_top_species_by_volume", "A", "आयतन अनुसार शीर्ष प्रजाति",
+     "Top Species by Volume",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_mother_tree_by_hierarchy", "A", "स्थानिक स्तर अनुसार माँउ रूख विश्लेषण",
+     "Mother Tree Analysis by Spatial Level",
+     var_type="list", source="tree_mapping_analysis")
+
+# Dict variables
+_reg("sm_forest_structure_status", "A", "वन संरचना अवस्था",
+     "Forest Structure Status",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("sm_mother_tree_coverage", "A", "माँउ रूख ग्रिड कभरेज",
+     "Mother Tree Grid Coverage",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("sm_mother_tree_by_species", "A", "प्रजाति अनुसार माँउ रूख",
+     "Mother Tree by Species",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_felling_tree_by_species", "A", "प्रजाति अनुसार कटानी रूख",
+     "Felling Tree by Species",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_mother_felling_summary", "A", "माँउ रूख बनाम कटानी रूख सारांश",
+     "Mother Tree vs Felling Tree Summary",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("sm_hierarchy_remark_breakdown", "A", "स्तर अनुसार माँउ/कटानी विभाजन",
+     "Hierarchy Remark Breakdown",
+     var_type="dict", source="tree_mapping_analysis")
+_reg("sm_species_hier_remark", "A", "स्तर र प्रजाति अनुसार माँउ/कटानी",
+     "Species by Hierarchy with Remark",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_dbh_hier_remark", "A", "स्तर र DBH अनुसार माँउ/कटानी",
+     "DBH by Hierarchy with Remark",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_felling_dbh_analysis", "A", "कटानी रूख DBH विश्लेषण (≥३० सेमी)",
+     "Felling Tree DBH Analysis (≥30cm)",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_felling_species_analysis", "A", "कटानी रूख प्रजाति विश्लेषण (≥३० सेमी)",
+     "Felling Tree Species Analysis (≥30cm)",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_felling_totals", "A", "कटानी रूख कुल योग (≥३० सेमी)",
+     "Felling Tree Totals (≥30cm)",
+     var_type="dict", source="tree_mapping_analysis")
+
+# --- Legend variables for chart symbolization ---
+_reg("sm_mf_hierarchy_legend", "A", "माँउ/कटानी स्तर चार्ट लिजेन्ड",
+     "Mother/Felling Hierarchy Chart Legend",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_stand_type_legend", "A", "स्ट्यान्ड प्रकार चार्ट लिजेन्ड",
+     "Stand Type Chart Legend",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_carbon_legend", "A", "कार्बन चार्ट लिजेन्ड",
+     "Carbon Chart Legend",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_volume_legend", "A", "आयतन चार्ट लिजेन्ड",
+     "Volume Chart Legend",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_mf_species_legend", "A", "माँउ/कटानी प्रजाति चार्ट लिजेन्ड",
+     "Mother/Felling Species Chart Legend",
+     var_type="list", source="tree_mapping_analysis")
+_reg("sm_felling_species_legend", "A", "कटानी प्रजाति चार्ट लिजेन्ड",
+     "Felling Species Chart Legend",
+     var_type="list", source="tree_mapping_analysis")
 
 
 def get_variable(key: str) -> Optional[VariableDef]:

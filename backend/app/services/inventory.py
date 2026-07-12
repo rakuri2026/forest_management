@@ -306,7 +306,7 @@ class InventoryService:
 
             # Additional conversions (cft, chatta)
             net_volume_cft = volumes['net_volume'] * 35.3147
-            firewood_chatta = volumes['firewood_m3'] / 0.267
+            firewood_chatta = volumes['firewood_m3'] / 9.486
 
             df.at[idx, 'stem_volume'] = volumes['stem_volume']
             df.at[idx, 'branch_volume'] = volumes['branch_volume']
@@ -1220,12 +1220,14 @@ class InventoryService:
                     THEN COALESCE(t.extra_columns, '{}'::jsonb) || jsonb_build_object(
                         'compartment_name', comp.name,
                         'sub_compartment_name', comp.sub_compartment_code,
-                        'parent_compartment_name', comp.parent_name
+                        'parent_compartment_name', comp.parent_name,
+                        'division_level', comp.effective_level
                     )
                     ELSE jsonb_build_object(
                         'compartment_name', comp.name,
                         'sub_compartment_name', comp.sub_compartment_code,
-                        'parent_compartment_name', comp.parent_name
+                        'parent_compartment_name', comp.parent_name,
+                        'division_level', comp.effective_level
                     )
                 END
                 FROM (
@@ -1233,14 +1235,20 @@ class InventoryService:
                         it.id AS tree_id,
                         fb.name,
                         fb.compartment_code AS sub_compartment_code,
-                        parent.name AS parent_name
+                        parent.name AS parent_name,
+                        parent.division_level AS parent_div_level,
+                        CASE
+                            WHEN COALESCE(parent.division_level, 0) >= 1
+                            THEN 2
+                            ELSE 1
+                        END AS effective_level
                     FROM public.inventory_trees it
                     JOIN public.forest_blocks fb ON ST_Intersects(it.location::geometry, fb.geometry)
                     LEFT JOIN public.forest_blocks parent ON fb.parent_block_id = parent.id
                     WHERE it.inventory_calculation_id = :inv_id
                       AND fb.calculation_id = :calc_id
                       AND fb.is_compartment = TRUE
-                    ORDER BY it.id, fb.division_level DESC
+                    ORDER BY it.id, COALESCE(parent.division_level, 0) DESC
                 ) comp
                 WHERE t.id = comp.tree_id
                   AND t.inventory_calculation_id = :inv_id
@@ -1252,6 +1260,31 @@ class InventoryService:
             print(f"[SPATIAL] Warning: compartment resolution failed: {e}")
         print(f"[SPATIAL] Updated {comps_updated} trees with compartment hierarchy info")
         total_updated += comps_updated
+
+        # 3b. Backfill hierarchy for existing trees missing division_level
+        try:
+            dl_result = self.db.execute(text("""
+                UPDATE public.inventory_trees t
+                SET extra_columns = t.extra_columns || jsonb_build_object(
+                    'compartment_name', fb.name,
+                    'parent_compartment_name', COALESCE(parent.name, fb.name),
+                    'division_level', CASE WHEN COALESCE(parent.division_level, 0) >= 1 THEN 2 ELSE 1 END
+                )
+                FROM public.forest_blocks fb
+                LEFT JOIN public.forest_blocks parent ON fb.parent_block_id = parent.id
+                WHERE t.inventory_calculation_id = :inv_id
+                  AND fb.calculation_id = :calc_id
+                  AND fb.is_compartment = TRUE
+                  AND ST_Intersects(t.location::geometry, fb.geometry)
+                  AND t.extra_columns IS NOT NULL
+                  AND t.extra_columns->>'division_level' IS NULL
+                ORDER BY COALESCE(parent.division_level, 0) DESC
+            """), {"inv_id": inv_id_str, "calc_id": calc_id_str})
+            self.db.commit()
+            print(f"[SPATIAL] Backfilled division_level for {dl_result.rowcount} trees")
+        except Exception as e:
+            self.db.rollback()
+            print(f"[SPATIAL] Warning: division_level backfill failed (non-critical): {e}")
 
         print(f"[SPATIAL] Spatial relationship update complete for inventory {inventory_id}")
         return total_updated
@@ -1437,3 +1470,16 @@ class InventoryService:
 
         else:
             raise ValueError(f"Unsupported export format: {export_format}")
+
+    def get_inventory_analysis(self, inventory_id: UUID) -> dict:
+        """Return tree mapping analysis data for sm_* variables."""
+        from app.services.operational_plan.data_collector import get_tree_mapping_analysis_data
+        from app.models.inventory import InventoryCalculation
+
+        inv_calc = self.db.query(InventoryCalculation).filter(
+            InventoryCalculation.id == inventory_id
+        ).first()
+        if not inv_calc or not inv_calc.calculation_id:
+            return {"sm_available": False}
+
+        return get_tree_mapping_analysis_data(self.db, str(inv_calc.calculation_id))
