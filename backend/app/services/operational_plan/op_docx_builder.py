@@ -1763,13 +1763,6 @@ def _render_sm_chart_internal(chart_type: str, raw_data: dict, forest_name: str 
 
 
 def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calculation_id: UUID = None):
-    # Lazy import chart generators (matplotlib is heavy)
-    from app.services.report.chart_generator import (
-        generate_species_pie, generate_forest_type_pie, generate_block_area_bar,
-        generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
-        generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
-    )
-
     # Auto-append legend for sm_* hierarchy charts
     _SM_LEGEND_MAP = {
         "sm_mother_felling_hierarchy_bar": "sm_mf_hierarchy_legend",
@@ -1803,214 +1796,7 @@ def _add_chart_from_type(doc: Document, chart_type: str, raw_data: dict, calcula
             return
 
     forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
-    language = raw_data.get("basic_info", {}).get("language", "NP")
-    img_data = None
-
-    if chart_type.startswith("sm_"):
-        img_data = _render_sm_chart_internal(chart_type, raw_data, forest_name)
-
-    if chart_type == "species_pie" or chart_type == "species_composition_pie":
-        species = raw_data.get("species", {})
-        if isinstance(species, dict):
-            species = species.get("species_list", [])
-        if isinstance(species, dict):
-            species = species.get("species_list", [])
-        img_data = generate_species_pie(species, forest_name, top_n=8)
-    elif chart_type in ("species_composition_pie_fi",):
-        fi = raw_data.get("field_inventory", {})
-        comp = fi.get("fi_species_composition", {})
-        if comp and isinstance(comp, dict):
-            species_list = [
-                {"scientific_name": k, "local_name": "", "availability_rank": i}
-                for i, (k, _) in enumerate(
-                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
-                )
-            ]
-            img_data = generate_species_pie(species_list, forest_name, top_n=8)
-    elif chart_type == "forest_type_pie" or chart_type == "forest_type":
-        ra = raw_data.get("raster_analysis", {})
-        ft = ra.get("forest_type", {}).get("percentages", {})
-        img_data = generate_forest_type_pie(ft, forest_name, language=language)
-    elif chart_type == "block_area_bar":
-        blocks = raw_data.get("blocks", {}).get("blocks", [])
-        img_data = generate_block_area_bar(blocks, forest_name, language=language)
-    elif chart_type == "dbh_histogram":
-        inv = raw_data.get("inventory", {})
-        dbh = inv.get("dbh_summary", {}) or inv.get("dbh_distribution", {})
-        img_data = generate_dbh_histogram(dbh, forest_name)
-    elif chart_type == "biomass_bar":
-        bi = raw_data.get("basic_info", {})
-        agb = bi.get("above_ground_biomass_tons", 0) or bi.get("agb_total", 0)
-        carbon = bi.get("carbon_stock_tc", 0) or bi.get("carbon_stock", 0)
-        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
-    elif chart_type in ("slope_pie", "slope_bar"):
-        ra = raw_data.get("raster_analysis", {})
-        sp = ra.get("slope", {}).get("percentages", {})
-        dom = ra.get("slope", {}).get("dominant_class", "")
-        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
-    elif chart_type in ("canopy_pie", "canopy_bar"):
-        ra = raw_data.get("raster_analysis", {})
-        cp = ra.get("canopy", {}).get("percentages", {})
-        dom = ra.get("canopy", {}).get("dominant_class", "")
-        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
-    elif chart_type == "landcover_pie":
-        ra = raw_data.get("raster_analysis", {})
-        lc = ra.get("landcover", {}).get("percentages", {})
-        dom = ra.get("landcover", {}).get("dominant_class", "")
-        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
-    elif chart_type == "ug_land_cover_classes_chart":
-        ug = raw_data.get("user_group", {})
-        lc_classes = ug.get("land_cover_classes", [])
-        img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
-    elif chart_type == "forest_health_pie":
-        ra = raw_data.get("raster_analysis", {})
-        fh = ra.get("forest_health", {}).get("percentages", {})
-        if fh:
-            fh_colors = [_HEALTH_COLORS_MAP.get(k, "#95a5a6") for k in fh.keys()]
-            img_data = _chart_from_data(list(fh.keys()), list(fh.values()), forest_name, "Forest Health", colors=fh_colors, legend_cols=2)
-    elif chart_type == "aspect_rose":
-        ra = raw_data.get("raster_analysis", {})
-        ap = ra.get("aspect", {}).get("percentages", {})
-        if ap:
-            asp_colors = [_ASPECT_COLORS_MAP.get(k, "#95a5a6") for k in ap.keys()]
-            img_data = _chart_from_data(list(ap.keys()), list(ap.values()), forest_name, "Aspect Distribution", colors=asp_colors, legend_cols=4)
-    elif chart_type == "nasa_forest_2020_pie":
-        rd = raw_data.get("result_data", {})
-        pct = rd.get("whole_nasa_forest_2020_percentages", {})
-        if pct and isinstance(pct, dict):
-            items = {k: v for k, v in pct.items() if v > 0}
-            if items:
-                nasa_colors = [_NASA_FOREST_QUALITY_COLORS.get(k, "#95a5a6") for k in items.keys()]
-                img_data = _chart_from_data(list(items.keys()), list(items.values()), forest_name, "Forest Quality", colors=nasa_colors)
-    elif chart_type == "soil_bar":
-        ra = raw_data.get("raster_analysis", {})
-        sp = ra.get("soil", {}).get("percentages", {})
-        if not sp:
-            rd = raw_data.get("result_data", {})
-            props = rd.get("soil_properties", {})
-            if props and props.get("clay_pct") is not None:
-                sp = {"Clay": props["clay_pct"], "Sand": props["sand_pct"], "Silt": props["silt_pct"]}
-        if sp:
-            img_data = _chart_from_data(list(sp.keys()), list(sp.values()), forest_name, "Soil Distribution", is_pie=False, colors=_SOIL_BAR_COLORS[:len(sp)])
-    elif chart_type == "hh_prosperity_pie":
-        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Prosperity Distribution")
-    elif chart_type == "hh_caste_bar":
-        hh = raw_data.get("households", {}).get("caste_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Caste Distribution", is_pie=False)
-    elif chart_type == "hh_caste_pie":
-        hh = raw_data.get("households", {}).get("caste_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "जाति वितरण (Caste Distribution)")
-    elif chart_type == "hh_prosperity_bar":
-        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "समृद्धि वितरण (Prosperity Distribution)", is_pie=False)
-    elif chart_type == "hh_demand_supply_bar":
-        ds = raw_data.get("demand_supply", {})
-        if ds and ds.get("demand"):
-            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
-            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
-            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
-            supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
-            img_data = _chart_from_data_grouped(
-                labels, {"माग": demand_vals, "आपूर्ति": supply_vals},
-                forest_name, "माग र आपूर्ति तुलना (Demand & Supply Comparison)",
-                colors=["#dc2626", "#059669"],
-            )
-    elif chart_type == "demand_supply_bar":
-        ds = raw_data.get("demand_supply", {})
-        if ds and ds.get("demand"):
-            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
-            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
-            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
-            cf_reg_vals = []
-            for k in products:
-                v = ds.get("supply_cf_regular", {}).get(k, 0)
-                cf_reg_vals.append(v if isinstance(v, (int, float)) else 0)
-            cf_aah_vals = []
-            for k in products:
-                v = ds.get("supply_cf_aah", {}).get(k, 0)
-                cf_aah_vals.append(v if isinstance(v, (int, float)) else 0)
-            private_vals = [ds.get("supply_private", {}).get(k, 0) or 0 for k in products]
-            total_supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
-            img_data = _chart_from_data_grouped(
-                labels, {
-                    "माग": demand_vals,
-                    "सा.वन नियमित": cf_reg_vals,
-                    "सा.वन AAH": cf_aah_vals,
-                    "निजि क्षेत्र": private_vals,
-                    "जम्मा आपूर्ति": total_supply_vals,
-                },
-                forest_name, "माग र आपूर्ति ब्रेकडाउन (Demand & Supply Breakdown)",
-                colors=["#dc2626", "#059669", "#3498db", "#e67e22", "#9b59b6"],
-            )
-    elif chart_type == "demand_supply_deficit_bar":
-        ds = raw_data.get("demand_supply", {})
-        if ds and ds.get("demand"):
-            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
-            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
-            deficit_vals = []
-            for k in products:
-                diff = (ds.get("total_supply", {}).get(k, 0) or 0) - (ds.get("demand", {}).get(k, 0) or 0)
-                deficit_vals.append(diff)
-            deficit_colors = ["#059669" if v >= 0 else "#dc2626" for v in deficit_vals]
-            img_data = _chart_from_data(
-                labels, deficit_vals, forest_name,
-                "बचत/कमी तुलना (Surplus/Deficit Comparison)",
-                is_pie=False, colors=deficit_colors,
-            )
-    elif chart_type == "budget_bar":
-        acts = raw_data.get("activities", {})
-        activities = acts.get("activities", [])
-        if activities:
-            labels = [f"Activity {a.get('activity_id', i+1)}" for i, a in enumerate(activities)]
-            values = [a.get("default_quantity", 0) or sum(yd.get("budget", 0) for yd in a.get("yearly_details", [])) for a in activities]
-            img_data = _chart_from_data(labels, values, forest_name, "Budget", is_pie=False)
-    elif chart_type == "ya_budget_year_bar":
-        yp = raw_data.get("yearly_plan", {})
-        trend = yp.get("budget_year_trend", {})
-        if trend and isinstance(trend, dict):
-            labels = [f"Year {k}" for k in sorted(trend.keys(), key=int)]
-            values = [trend[k] for k in sorted(trend.keys(), key=int)]
-            year_colors = ["#2ecc71", "#27ae60", "#1abc9c", "#16a085", "#3498db",
-                           "#2980b9", "#9b59b6", "#8e44ad", "#e67e22", "#d35400"]
-            img_data = _chart_from_data(labels, values, forest_name,
-                                         "वार्षिक बजेट वितरण (Year-wise Budget)",
-                                         is_pie=False, colors=year_colors[:len(labels)])
-    elif chart_type == "ya_program_pie":
-        yp = raw_data.get("yearly_plan", {})
-        pie_data = yp.get("program_pie_data", {})
-        if pie_data and isinstance(pie_data, dict):
-            prog_items = {k: v for k, v in pie_data.items() if v > 0}
-            if prog_items:
-                prog_colors = ["#27ae60", "#2980b9", "#e67e22", "#e74c3c",
-                               "#9b59b6", "#f1c40f", "#1abc9c", "#2c3e50"]
-                img_data = _chart_from_data(list(prog_items.keys()), list(prog_items.values()),
-                                             forest_name, "कार्यक्रम अनुसार बजेट (Program Budget)",
-                                             colors=prog_colors[:len(prog_items)])
-    elif chart_type == "dbh_class_bar":
-        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
-        if cd:
-            labels = [d["label"] for d in cd]
-            values = [d["count_per_ha"] for d in cd]
-            total = sum(values)
-            pcts = [v / total * 100 if total > 0 else 0 for v in values]
-            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
-            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)",
-                                         is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
-    elif chart_type == "dbh_class_count_bar":
-        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
-        if cd:
-            labels = [d["label"] for d in cd]
-            values = [d["count_per_ha"] for d in cd]
-            total = sum(values)
-            pcts = [v / total * 100 if total > 0 else 0 for v in values]
-            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
-            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)",
-                                         is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
+    img_data = _generate_chart(chart_type, raw_data, forest_name)
 
     if img_data:
         try:
@@ -2236,17 +2022,210 @@ def _add_map_standard(doc: Document, map_type: str, calculation_id: UUID, db: Se
         run.font.color.rgb = RGBColor(200, 0, 0)
 
 
-def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any], calculation_id: UUID = None):
-    # Lazy import chart generators
+def _generate_chart(chart_type: str, raw_data: dict, forest_name: str = "") -> str | None:
+    """Shared chart generation: returns img_data (data-URI string or file path) or None.
+
+    This function is the single source of truth for which chart_type maps to
+    which generator call.  Both ``_add_chart`` (DOCX) and ``_render_chart_html``
+    delegate the dispatch here and only handle the final rendering step.
+    """
     from app.services.report.chart_generator import (
         generate_species_pie, generate_forest_type_pie, generate_block_area_bar,
         generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
         generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
     )
 
+    language = raw_data.get("basic_info", {}).get("language", "NP")
+
+    # ---- helper lambdas (only for truly trivial extractions) ----
+    def _ra(section: str) -> dict:
+        return raw_data.get("raster_analysis", {}).get(section, {})
+
+    img_data = None
+
+    # ---------- species / forest ----------
+    if chart_type.startswith("sm_"):
+        img_data = _render_sm_chart_internal(chart_type, raw_data, forest_name)
+    elif chart_type in ("species_pie", "species_composition_pie"):
+        species = raw_data.get("species", {})
+        if isinstance(species, dict):
+            species = species.get("species_list", [])
+        if isinstance(species, dict):
+            species = species.get("species_list", [])
+        if species:
+            img_data = generate_species_pie(species, forest_name, top_n=8)
+    elif chart_type == "species_composition_pie_fi":
+        fi = raw_data.get("field_inventory", {})
+        comp = fi.get("fi_species_composition", {})
+        if comp and isinstance(comp, dict):
+            species_list = [
+                {"scientific_name": k, "local_name": "", "availability_rank": i}
+                for i, (k, _) in enumerate(
+                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
+                )
+            ]
+            img_data = generate_species_pie(species_list, forest_name, top_n=8)
+    elif chart_type in ("forest_type_pie", "forest_type"):
+        ft = _ra("forest_type").get("percentages", {})
+        img_data = generate_forest_type_pie(ft, forest_name, language=language)
+    elif chart_type == "block_area_bar":
+        blocks = raw_data.get("blocks", {}).get("blocks", [])
+        img_data = generate_block_area_bar(blocks, forest_name, language=language)
+
+    # ---------- inventory ----------
+    elif chart_type == "dbh_histogram":
+        inv = raw_data.get("inventory", {})
+        dbh = inv.get("dbh_summary", {}) or inv.get("dbh_distribution", {})
+        img_data = generate_dbh_histogram(dbh, forest_name)
+    elif chart_type == "biomass_bar":
+        bi = raw_data.get("basic_info", {})
+        agb = bi.get("above_ground_biomass_tons", 0) or bi.get("agb_total", 0)
+        carbon = bi.get("carbon_stock_tc", 0) or bi.get("carbon_stock", 0)
+        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
+
+    # ---------- raster analysis pies ----------
+    elif chart_type in ("slope_pie", "slope_bar"):
+        sp = _ra("slope").get("percentages", {})
+        dom = _ra("slope").get("dominant_class", "")
+        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
+    elif chart_type in ("canopy_pie", "canopy_bar"):
+        cp = _ra("canopy").get("percentages", {})
+        dom = _ra("canopy").get("dominant_class", "")
+        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
+    elif chart_type == "landcover_pie":
+        lc = _ra("landcover").get("percentages", {})
+        dom = _ra("landcover").get("dominant_class", "")
+        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
+    elif chart_type == "forest_health_pie":
+        fh = _ra("forest_health").get("percentages", {})
+        if fh:
+            fh_colors = [_HEALTH_COLORS_MAP.get(k, "#95a5a6") for k in fh.keys()]
+            img_data = _chart_from_data(list(fh.keys()), list(fh.values()), forest_name, "Forest Health", colors=fh_colors, legend_cols=2)
+    elif chart_type == "aspect_rose":
+        ap = _ra("aspect").get("percentages", {})
+        if ap:
+            asp_colors = [_ASPECT_COLORS_MAP.get(k, "#95a5a6") for k in ap.keys()]
+            img_data = _chart_from_data(list(ap.keys()), list(ap.values()), forest_name, "Aspect Distribution", colors=asp_colors, legend_cols=4)
+    elif chart_type == "nasa_forest_2020_pie":
+        rd = raw_data.get("result_data", {})
+        pct = rd.get("whole_nasa_forest_2020_percentages", {})
+        if pct and isinstance(pct, dict):
+            items = {k: v for k, v in pct.items() if v > 0}
+            if items:
+                nasa_colors = [_NASA_FOREST_QUALITY_COLORS.get(k, "#95a5a6") for k in items.keys()]
+                img_data = _chart_from_data(list(items.keys()), list(items.values()), forest_name, "Forest Quality", colors=nasa_colors)
+    elif chart_type == "soil_bar":
+        sp = _ra("soil").get("percentages", {})
+        if not sp:
+            rd = raw_data.get("result_data", {})
+            props = rd.get("soil_properties", {})
+            if props and props.get("clay_pct") is not None:
+                sp = {"Clay": props["clay_pct"], "Sand": props["sand_pct"], "Silt": props["silt_pct"]}
+        if sp:
+            img_data = _chart_from_data(list(sp.keys()), list(sp.values()), forest_name, "Soil Distribution", is_pie=False, colors=_SOIL_BAR_COLORS[:len(sp)])
+
+    # ---------- user group / households ----------
+    elif chart_type == "ug_land_cover_classes_chart":
+        ug = raw_data.get("user_group", {})
+        lc_classes = ug.get("land_cover_classes", [])
+        if lc_classes:
+            img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
+    elif chart_type == "hh_prosperity_pie":
+        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Prosperity Distribution")
+    elif chart_type == "hh_caste_bar":
+        hh = raw_data.get("households", {}).get("caste_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Caste Distribution", is_pie=False)
+    elif chart_type == "hh_caste_pie":
+        hh = raw_data.get("households", {}).get("caste_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "जाति वितरण (Caste Distribution)")
+    elif chart_type == "hh_prosperity_bar":
+        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
+        if hh and isinstance(hh, dict):
+            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "समृद्धि वितरण (Prosperity Distribution)", is_pie=False)
+
+    # ---------- demand & supply ----------
+    elif chart_type in ("hh_demand_supply_bar", "demand_supply_bar", "demand_supply_deficit_bar"):
+        ds = raw_data.get("demand_supply", {})
+        if ds and ds.get("demand"):
+            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
+            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
+            if chart_type == "hh_demand_supply_bar":
+                demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+                supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+                img_data = _chart_from_data_grouped(
+                    labels, {"माग": demand_vals, "आपूर्ति": supply_vals},
+                    forest_name, "माग र आपूर्ति तुलना (Demand & Supply Comparison)",
+                    colors=["#dc2626", "#059669"],
+                )
+            elif chart_type == "demand_supply_bar":
+                demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
+                cf_reg = [ds.get("supply_cf_regular", {}).get(k, 0) or 0 for k in products]
+                cf_aah = [ds.get("supply_cf_aah", {}).get(k, 0) or 0 for k in products]
+                private = [ds.get("supply_private", {}).get(k, 0) or 0 for k in products]
+                total = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
+                img_data = _chart_from_data_grouped(
+                    labels, {"माग": demand_vals, "सा.वन नियमित": cf_reg, "सा.वन AAH": cf_aah, "निजि क्षेत्र": private, "जम्मा आपूर्ति": total},
+                    forest_name, "माग र आपूर्ति ब्रेकडाउन (Demand & Supply Breakdown)",
+                    colors=["#dc2626", "#059669", "#3498db", "#e67e22", "#9b59b6"],
+                )
+            elif chart_type == "demand_supply_deficit_bar":
+                deficit = [(ds.get("total_supply", {}).get(k, 0) or 0) - (ds.get("demand", {}).get(k, 0) or 0) for k in products]
+                d_colors = ["#059669" if v >= 0 else "#dc2626" for v in deficit]
+                img_data = _chart_from_data(labels, deficit, forest_name, "बचत/कमी तुलना (Surplus/Deficit Comparison)", is_pie=False, colors=d_colors)
+
+    # ---------- activities / budget ----------
+    elif chart_type == "budget_bar":
+        acts = raw_data.get("activities", {})
+        activities = acts.get("activities", [])
+        if activities:
+            labels = [f"Activity {a.get('activity_id', i + 1)}" for i, a in enumerate(activities)]
+            values = [a.get("default_quantity", 0) or sum(yd.get("budget", 0) for yd in a.get("yearly_details", [])) for a in activities]
+            img_data = _chart_from_data(labels, values, forest_name, "Budget", is_pie=False)
+    elif chart_type == "ya_budget_year_bar":
+        yp = raw_data.get("yearly_plan", {})
+        trend = yp.get("budget_year_trend", {})
+        if trend and isinstance(trend, dict):
+            labels = [f"Year {k}" for k in sorted(trend.keys(), key=int)]
+            values = [trend[k] for k in sorted(trend.keys(), key=int)]
+            year_colors = ["#2ecc71", "#27ae60", "#1abc9c", "#16a085", "#3498db", "#2980b9", "#9b59b6", "#8e44ad", "#e67e22", "#d35400"]
+            img_data = _chart_from_data(labels, values, forest_name, "वार्षिक बजेट वितरण (Year-wise Budget)", is_pie=False, colors=year_colors[:len(labels)])
+    elif chart_type == "ya_program_pie":
+        yp = raw_data.get("yearly_plan", {})
+        pie_data = yp.get("program_pie_data", {})
+        if pie_data and isinstance(pie_data, dict):
+            prog_items = {k: v for k, v in pie_data.items() if v > 0}
+            if prog_items:
+                prog_colors = ["#27ae60", "#2980b9", "#e67e22", "#e74c3c", "#9b59b6", "#f1c40f", "#1abc9c", "#2c3e50"]
+                img_data = _chart_from_data(list(prog_items.keys()), list(prog_items.values()), forest_name, "कार्यक्रम अनुसार बजेट (Program Budget)", colors=prog_colors[:len(prog_items)])
+
+    # ---------- field inventory DBH bars ----------
+    elif chart_type in ("dbh_class_bar", "dbh_class_count_bar"):
+        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
+        if cd:
+            labels = [d["label"] for d in cd]
+            values = [d["count_per_ha"] for d in cd]
+            total = sum(values)
+            pcts = [v / total * 100 if total > 0 else 0 for v in values]
+            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
+            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)", is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
+
+    return img_data
+
+
+def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any], calculation_id: UUID = None):
+    chart_type = node.chart_type
+    if not chart_type:
+        return
+
+    forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
+
     # Check cache first
-    if calculation_id and node.chart_type:
-        cached = _chart_cache_get(calculation_id, node.chart_type)
+    if calculation_id:
+        cached = _chart_cache_get(calculation_id, chart_type)
         if cached:
             from app.utils.svg_to_png import add_svg_picture
             add_svg_picture(doc, cached.getvalue(), width_inches=5.5)
@@ -2259,79 +2238,23 @@ def _add_chart(doc: Document, node: TreeNode, raw_data: Dict[str, Any], calculat
             doc.add_paragraph()
             return
 
-    forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
-    language = raw_data.get("basic_info", {}).get("language", "NP")
-    img_data = None
-
-    if node.chart_type and node.chart_type.startswith("sm_"):
-        img_data = _render_sm_chart_internal(node.chart_type, raw_data, forest_name)
-
-    if node.chart_type == "species_pie":
-        species = raw_data.get("species", [])
-        if isinstance(species, dict):
-            species = species.get("species_list", [])
-        img_data = generate_species_pie(species, forest_name, top_n=8)
-    elif node.chart_type == "species_composition_pie_fi":
-        fi = raw_data.get("field_inventory", {})
-        comp = fi.get("fi_species_composition", {})
-        if comp and isinstance(comp, dict):
-            species_list = [
-                {"scientific_name": k, "local_name": "", "availability_rank": i}
-                for i, (k, _) in enumerate(
-                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
-                )
-            ]
-            img_data = generate_species_pie(species_list, forest_name, top_n=8)
-    elif node.chart_type == "forest_type_pie":
-        ra = raw_data.get("raster_analysis", {})
-        ft = ra.get("forest_type", {}).get("percentages", {})
-        img_data = generate_forest_type_pie(ft, forest_name, language=language)
-    elif node.chart_type == "block_area_bar":
-        blocks = raw_data.get("blocks", {}).get("blocks", [])
-        img_data = generate_block_area_bar(blocks, forest_name, language=language)
-    elif node.chart_type == "dbh_histogram":
-        inv = raw_data.get("inventory", {}).get("dbh_distribution", {})
-        img_data = generate_dbh_histogram(inv, forest_name)
-    elif node.chart_type == "biomass_bar":
-        bi = raw_data.get("basic_info", {})
-        agb = bi.get("above_ground_biomass_tons", 0)
-        carbon = bi.get("carbon_stock_tc", 0)
-        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
-    elif node.chart_type == "slope_pie":
-        ra = raw_data.get("raster_analysis", {})
-        sp = ra.get("slope", {}).get("percentages", {})
-        dom = ra.get("slope", {}).get("dominant_class", "")
-        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
-    elif node.chart_type == "canopy_pie":
-        ra = raw_data.get("raster_analysis", {})
-        cp = ra.get("canopy", {}).get("percentages", {})
-        dom = ra.get("canopy", {}).get("dominant_class", "")
-        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
-    elif node.chart_type == "landcover_pie":
-        ra = raw_data.get("raster_analysis", {})
-        lc = ra.get("landcover", {}).get("percentages", {})
-        dom = ra.get("landcover", {}).get("dominant_class", "")
-        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
-    elif node.chart_type == "ug_land_cover_classes_chart":
-        ug = raw_data.get("user_group", {})
-        lc_classes = ug.get("land_cover_classes", [])
-        img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
+    img_data = _generate_chart(chart_type, raw_data, forest_name)
 
     if img_data:
         try:
             if img_data.startswith("data:"):
                 from app.utils.svg_to_png import add_svg_picture, _decode_data_uri
                 add_svg_picture(doc, img_data, width_inches=5.5)
-                if calculation_id and node.chart_type:
+                if calculation_id:
                     raw_bytes, _ = _decode_data_uri(img_data)
-                    _chart_cache_set(calculation_id, node.chart_type, BytesIO(raw_bytes))
+                    _chart_cache_set(calculation_id, chart_type, BytesIO(raw_bytes))
             else:
                 with open(img_data, "rb") as _f:
                     img_bytes = _f.read()
                 from app.utils.svg_to_png import add_svg_picture
                 add_svg_picture(doc, img_bytes, width_inches=5.5)
-                if calculation_id and node.chart_type:
-                    _chart_cache_set(calculation_id, node.chart_type, BytesIO(img_bytes))
+                if calculation_id:
+                    _chart_cache_set(calculation_id, chart_type, BytesIO(img_bytes))
             cap_p = doc.add_paragraph()
             cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = cap_p.add_run(node.title_ne or "Chart")
@@ -2557,6 +2480,7 @@ def _add_activity_plan_detail_table_html(parts: list, val: list):
 
 def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
     data = node.static_table or {}
+    caption = data.get("caption", "")
     columns = data.get("columns", [])
     rows = data.get("rows", [])
     merges = data.get("merges", []) or []
@@ -2566,6 +2490,15 @@ def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
         run.font.italic = True
         run.font.color.rgb = RGBColor(200, 0, 0)
         return
+    if caption:
+        cap_para = doc.add_paragraph()
+        cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cap_para.paragraph_format.space_before = Pt(6)
+        cap_para.paragraph_format.space_after = Pt(4)
+        run = cap_para.add_run(_fix(caption))
+        run.font.size = Pt(10)
+        run.font.bold = True
+        run.font.name = "Nirmala UI"
     tbl = doc.add_table(rows=1 + len(rows), cols=len(columns))
     tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
     tbl.style = "Table Grid"
@@ -2617,6 +2550,16 @@ def _add_static_table(doc: Document, node: TreeNode, raw_data: dict = None):
                 for r in p.runs:
                     r.font.size = Pt(9)
     doc.add_paragraph()
+
+
+def _add_inline_tables(doc: Document, inline_tables: list, raw_data: dict = None):
+    """Render multiple inline tables from a richtext node's inline_tables array."""
+    for table_data in inline_tables:
+        class _TmpNode:
+            pass
+        tmp = _TmpNode()
+        tmp.static_table = table_data
+        _add_static_table(doc, tmp, raw_data)
 
 
 def _add_map(doc: Document, node: TreeNode, calculation_id: UUID, db: Session, calc_cache: dict = None):
@@ -2735,6 +2678,12 @@ def _walk_tree(doc: Document, nodes: List[TreeNode], calculation_id: UUID,
             _add_text_content(doc, node.content, calculation_id, db, raw_data, table_cache)
             _wt_timers["text"] += time.time() - _t0
             _wt_counts["text"] += 1
+
+            if node.inline_tables:
+                _t0 = time.time()
+                _add_inline_tables(doc, node.inline_tables, raw_data)
+                _wt_timers["static_table"] += time.time() - _t0
+                _wt_counts["static_table"] += 1
 
         if is_chart:
             _t0 = time.time()
@@ -2912,220 +2861,10 @@ def _render_chart_html(chart_type: str, raw_data: dict, calculation_id: UUID = N
             b64 = base64.b64encode(cached.getvalue()).decode("utf-8")
             return f'<div style="margin:12px 0;text-align:center;"><img src="data:image/svg+xml;base64,{b64}" style="max-width:100%;border:1px solid #ddd;border-radius:4px;" alt="{_html_escape(chart_type)}"><div style="font-size:9pt;color:#666;margin-top:4px;">{chart_type.replace("_", " ").title()}</div></div>'
 
-    from app.services.report.chart_generator import (
-        generate_species_pie, generate_forest_type_pie, generate_block_area_bar,
-        generate_dbh_histogram, generate_biomass_bar, generate_slope_pie,
-        generate_canopy_pie, generate_landcover_pie, generate_ug_landcover_pie,
-    )
+    if not forest_name:
+        forest_name = raw_data.get("basic_info", {}).get("forest_name", "")
 
-    language = raw_data.get("basic_info", {}).get("language", "NP")
-    img_data = None
-
-    if chart_type.startswith("sm_"):
-        img_data = _render_sm_chart_internal(chart_type, raw_data, forest_name)
-
-    if chart_type == "species_pie" or chart_type == "species_composition_pie":
-        species = raw_data.get("species", {})
-        if isinstance(species, dict):
-            species = species.get("species_list", [])
-        if isinstance(species, dict):
-            species = species.get("species_list", [])
-        img_data = generate_species_pie(species, forest_name, top_n=8)
-    elif chart_type in ("species_composition_pie_fi",):
-        fi = raw_data.get("field_inventory", {})
-        comp = fi.get("fi_species_composition", {})
-        if comp and isinstance(comp, dict):
-            species_list = [
-                {"scientific_name": k, "local_name": "", "availability_rank": i}
-                for i, (k, _) in enumerate(
-                    sorted(comp.items(), key=lambda x: x[1], reverse=True)
-                )
-            ]
-            img_data = generate_species_pie(species_list, forest_name, top_n=8)
-    elif chart_type == "forest_type_pie" or chart_type == "forest_type":
-        ra = raw_data.get("raster_analysis", {})
-        ft = ra.get("forest_type", {}).get("percentages", {})
-        img_data = generate_forest_type_pie(ft, forest_name, language=language)
-    elif chart_type == "block_area_bar":
-        blocks = raw_data.get("blocks", {}).get("blocks", [])
-        img_data = generate_block_area_bar(blocks, forest_name, language=language)
-    elif chart_type == "dbh_histogram":
-        inv = raw_data.get("inventory", {})
-        dbh = inv.get("dbh_summary", {}) or inv.get("dbh_distribution", {})
-        img_data = generate_dbh_histogram(dbh, forest_name)
-    elif chart_type == "biomass_bar":
-        bi = raw_data.get("basic_info", {})
-        agb = bi.get("above_ground_biomass_tons", 0) or bi.get("agb_total", 0)
-        carbon = bi.get("carbon_stock_tc", 0) or bi.get("carbon_stock", 0)
-        img_data = generate_biomass_bar(agb, carbon, forest_name, language=language)
-    elif chart_type in ("slope_pie", "slope_bar"):
-        ra = raw_data.get("raster_analysis", {})
-        sp = ra.get("slope", {}).get("percentages", {})
-        dom = ra.get("slope", {}).get("dominant_class", "")
-        img_data = generate_slope_pie(sp, dom, forest_name, language=language)
-    elif chart_type in ("canopy_pie", "canopy_bar"):
-        ra = raw_data.get("raster_analysis", {})
-        cp = ra.get("canopy", {}).get("percentages", {})
-        dom = ra.get("canopy", {}).get("dominant_class", "")
-        img_data = generate_canopy_pie(cp, dom, forest_name, language=language)
-    elif chart_type == "landcover_pie":
-        ra = raw_data.get("raster_analysis", {})
-        lc = ra.get("landcover", {}).get("percentages", {})
-        dom = ra.get("landcover", {}).get("dominant_class", "")
-        img_data = generate_landcover_pie(lc, dom, forest_name, language=language)
-    elif chart_type == "ug_land_cover_classes_chart":
-        ug = raw_data.get("user_group", {})
-        lc_classes = ug.get("land_cover_classes", [])
-        img_data = generate_ug_landcover_pie(lc_classes, forest_name, language=language)
-    elif chart_type == "forest_health_pie":
-        ra = raw_data.get("raster_analysis", {})
-        fh = ra.get("forest_health", {}).get("percentages", {})
-        if fh:
-            fh_colors = [_HEALTH_COLORS_MAP.get(k, "#95a5a6") for k in fh.keys()]
-            img_data = _chart_from_data(list(fh.keys()), list(fh.values()), forest_name, "Forest Health", colors=fh_colors, legend_cols=2)
-    elif chart_type == "aspect_rose":
-        ra = raw_data.get("raster_analysis", {})
-        ap = ra.get("aspect", {}).get("percentages", {})
-        if ap:
-            asp_colors = [_ASPECT_COLORS_MAP.get(k, "#95a5a6") for k in ap.keys()]
-            img_data = _chart_from_data(list(ap.keys()), list(ap.values()), forest_name, "Aspect Distribution", colors=asp_colors, legend_cols=4)
-    elif chart_type == "nasa_forest_2020_pie":
-        rd = raw_data.get("result_data", {})
-        pct = rd.get("whole_nasa_forest_2020_percentages", {})
-        if pct and isinstance(pct, dict):
-            items = {k: v for k, v in pct.items() if v > 0}
-            if items:
-                nasa_colors = [_NASA_FOREST_QUALITY_COLORS.get(k, "#95a5a6") for k in items.keys()]
-                img_data = _chart_from_data(list(items.keys()), list(items.values()), forest_name, "Forest Quality", colors=nasa_colors)
-    elif chart_type == "soil_bar":
-        ra = raw_data.get("raster_analysis", {})
-        sp = ra.get("soil", {}).get("percentages", {})
-        if not sp:
-            rd = raw_data.get("result_data", {})
-            props = rd.get("soil_properties", {})
-            if props and props.get("clay_pct") is not None:
-                sp = {"Clay": props["clay_pct"], "Sand": props["sand_pct"], "Silt": props["silt_pct"]}
-        if sp:
-            img_data = _chart_from_data(list(sp.keys()), list(sp.values()), forest_name, "Soil Distribution", is_pie=False, colors=_SOIL_BAR_COLORS[:len(sp)])
-    elif chart_type == "hh_prosperity_pie":
-        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Prosperity Distribution")
-    elif chart_type == "hh_caste_bar":
-        hh = raw_data.get("households", {}).get("caste_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "Caste Distribution", is_pie=False)
-    elif chart_type == "hh_caste_pie":
-        hh = raw_data.get("households", {}).get("caste_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "जाति वितरण (Caste Distribution)")
-    elif chart_type == "hh_prosperity_bar":
-        hh = raw_data.get("households", {}).get("prosperity_distribution", {})
-        if hh and isinstance(hh, dict):
-            img_data = _chart_from_data(list(hh.keys()), list(hh.values()), forest_name, "समृद्धि वितरण (Prosperity Distribution)", is_pie=False)
-    elif chart_type == "hh_demand_supply_bar":
-        ds = raw_data.get("demand_supply", {})
-        if ds and ds.get("demand"):
-            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
-            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
-            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
-            supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
-            img_data = _chart_from_data_grouped(
-                labels, {"माग": demand_vals, "आपूर्ति": supply_vals},
-                forest_name, "माग र आपूर्ति तुलना (Demand & Supply Comparison)",
-                colors=["#dc2626", "#059669"],
-            )
-    elif chart_type == "demand_supply_bar":
-        ds = raw_data.get("demand_supply", {})
-        if ds and ds.get("demand"):
-            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
-            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
-            demand_vals = [ds.get("demand", {}).get(k, 0) or 0 for k in products]
-            cf_reg_vals = []
-            for k in products:
-                v = ds.get("supply_cf_regular", {}).get(k, 0)
-                cf_reg_vals.append(v if isinstance(v, (int, float)) else 0)
-            cf_aah_vals = []
-            for k in products:
-                v = ds.get("supply_cf_aah", {}).get(k, 0)
-                cf_aah_vals.append(v if isinstance(v, (int, float)) else 0)
-            private_vals = [ds.get("supply_private", {}).get(k, 0) or 0 for k in products]
-            total_supply_vals = [ds.get("total_supply", {}).get(k, 0) or 0 for k in products]
-            img_data = _chart_from_data_grouped(
-                labels, {
-                    "माग": demand_vals,
-                    "सा.वन नियमित": cf_reg_vals,
-                    "सा.वन AAH": cf_aah_vals,
-                    "निजि क्षेत्र": private_vals,
-                    "जम्मा आपूर्ति": total_supply_vals,
-                },
-                forest_name, "माग र आपूर्ति ब्रेकडाउन (Demand & Supply Breakdown)",
-                colors=["#dc2626", "#059669", "#3498db", "#e67e22", "#9b59b6"],
-            )
-    elif chart_type == "demand_supply_deficit_bar":
-        ds = raw_data.get("demand_supply", {})
-        if ds and ds.get("demand"):
-            products = ["firewood_bhari", "grass_bhari", "bedding_bhari", "timber_cft", "poles_count"]
-            labels = [_DS_PRODUCT_LABELS.get(k, k) for k in products]
-            deficit_vals = []
-            for k in products:
-                diff = (ds.get("total_supply", {}).get(k, 0) or 0) - (ds.get("demand", {}).get(k, 0) or 0)
-                deficit_vals.append(diff)
-            deficit_colors = ["#059669" if v >= 0 else "#dc2626" for v in deficit_vals]
-            img_data = _chart_from_data(
-                labels, deficit_vals, forest_name,
-                "बचत/कमी तुलना (Surplus/Deficit Comparison)",
-                is_pie=False, colors=deficit_colors,
-            )
-    elif chart_type == "budget_bar":
-        acts = raw_data.get("activities", {})
-        activities = acts.get("activities", [])
-        if activities:
-            labels = [f"Activity {a.get('activity_id', i+1)}" for i, a in enumerate(activities)]
-            values = [a.get("default_quantity", 0) or sum(yd.get("budget", 0) for yd in a.get("yearly_details", [])) for a in activities]
-            img_data = _chart_from_data(labels, values, forest_name, "Budget", is_pie=False)
-    elif chart_type == "ya_budget_year_bar":
-        yp = raw_data.get("yearly_plan", {})
-        trend = yp.get("budget_year_trend", {})
-        if trend and isinstance(trend, dict):
-            labels = [f"Year {k}" for k in sorted(trend.keys(), key=int)]
-            values = [trend[k] for k in sorted(trend.keys(), key=int)]
-            year_colors = ["#2ecc71", "#27ae60", "#1abc9c", "#16a085", "#3498db",
-                           "#2980b9", "#9b59b6", "#8e44ad", "#e67e22", "#d35400"]
-            img_data = _chart_from_data(labels, values, forest_name,
-                                         "वार्षिक बजेट वितरण (Year-wise Budget)",
-                                         is_pie=False, colors=year_colors[:len(labels)])
-    elif chart_type == "ya_program_pie":
-        yp = raw_data.get("yearly_plan", {})
-        pie_data = yp.get("program_pie_data", {})
-        if pie_data and isinstance(pie_data, dict):
-            prog_items = {k: v for k, v in pie_data.items() if v > 0}
-            if prog_items:
-                prog_colors = ["#27ae60", "#2980b9", "#e67e22", "#e74c3c",
-                               "#9b59b6", "#f1c40f", "#1abc9c", "#2c3e50"]
-                img_data = _chart_from_data(list(prog_items.keys()), list(prog_items.values()),
-                                             forest_name, "कार्यक्रम अनुसार बजेट (Program Budget)",
-                                             colors=prog_colors[:len(prog_items)])
-    elif chart_type == "dbh_class_bar":
-        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
-        if cd:
-            labels = [d["label"] for d in cd]
-            values = [d["count_per_ha"] for d in cd]
-            total = sum(values)
-            pcts = [v / total * 100 if total > 0 else 0 for v in values]
-            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
-            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)",
-                                         is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
-    elif chart_type == "dbh_class_count_bar":
-        cd = raw_data.get("field_inventory", {}).get("fi_dbh_class_chart_data", [])
-        if cd:
-            labels = [d["label"] for d in cd]
-            values = [d["count_per_ha"] for d in cd]
-            total = sum(values)
-            pcts = [v / total * 100 if total > 0 else 0 for v in values]
-            dbh_colors = ["#1a6e34", "#2d8f4e", "#45b068", "#6fc48a", "#99d8ae", "#c2ebd0"]
-            img_data = _chart_from_data(labels, values, forest_name, "ब्यास क्लास अनुसार रूख संख्या (संख्या/हे.)",
-                                         is_pie=False, colors=dbh_colors[:len(labels)], percentages=pcts)
+    img_data = _generate_chart(chart_type, raw_data, forest_name)
 
     if img_data:
         try:
@@ -3194,9 +2933,12 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
         if node.page_break_before:
             parts.append('<hr class="pb-marker">')
         parts.append(f'<{tag}>{num}{node.title_ne}</{tag}>')
+        if node.title_en and node.title_en != node.title_ne:
+            parts.append(f'<p style="color:#666;font-style:italic;font-size:0.85em;margin:0 0 8px;">{_html_escape(node.title_en)}</p>')
 
         if has_content:
-            escaped = _html_escape(node.content)
+            content = _fix(node.content)
+            escaped = _html_escape(content)
             escaped = re.sub(
                 r'\{\{chart:(\w+)\}\}',
                 lambda m: _render_chart_html(m.group(1), raw_data, calculation_id, forest_name),
@@ -3219,6 +2961,10 @@ def _walk_tree_html(nodes: List[TreeNode], calculation_id: UUID,
                 escaped
             )
             parts.append(f'<div class="section-content">{escaped}</div>')
+
+            if node.inline_tables:
+                for table_data in node.inline_tables:
+                    _add_inline_table_html(parts, table_data, raw_data)
 
         if is_chart:
             parts.append(_render_chart_html(node.chart_type, raw_data, calculation_id, forest_name))
@@ -3269,6 +3015,8 @@ def _add_table_html(parts: List[str], node: TreeNode, table_cache: dict = None):
             parts.append(f'<td>{_html_escape(val)}</td>')
         parts.append('</tr>')
     parts.append('</tbody></table></div>')
+    if node.title_ne:
+        parts.append(f'<p style="text-align:center;font-style:italic;font-size:9pt;color:#666;margin:4px 0 12px;">{_html_escape(node.title_ne)}</p>')
 
 
 def _add_table_inline_html(parts: list, table_id: str, table_cache: dict = None):
@@ -3301,12 +3049,15 @@ def _add_table_inline_html(parts: list, table_id: str, table_cache: dict = None)
 
 def _add_static_table_html(parts: List[str], node: TreeNode, raw_data: dict = None):
     data = node.static_table or {}
+    caption = data.get("caption", "")
     columns = data.get("columns", [])
     rows = data.get("rows", [])
     merges = data.get("merges", []) or []
     if not columns or not rows:
         parts.append('<div class="chart-placeholder">📋 Static table — no data</div>')
         return
+    if caption:
+        parts.append(f'<p style="text-align:center;font-weight:bold;font-size:10pt;margin:8px 0 4px;">{_html_escape(caption)}</p>')
 
     visible = {}
     for m in merges:
@@ -3345,6 +3096,23 @@ def _add_static_table_html(parts: List[str], node: TreeNode, raw_data: dict = No
             parts.append(f'<td{attrs}>{_html_escape(cell_text)}</td>')
         parts.append('</tr>')
     parts.append('</tbody></table></div>')
+
+
+def _add_inline_table_html(parts: List[str], table_data: dict, raw_data: dict = None):
+    """Render a single inline table dict as HTML."""
+    caption = table_data.get("caption", "")
+    columns = table_data.get("columns", [])
+    rows = table_data.get("rows", [])
+    merges = table_data.get("merges", []) or []
+    if not columns or not rows:
+        return
+    if caption:
+        parts.append(f'<p style="text-align:center;font-weight:bold;font-size:10pt;margin:8px 0 4px;">{_html_escape(caption)}</p>')
+    class _TmpNode:
+        pass
+    tmp = _TmpNode()
+    tmp.static_table = table_data
+    _add_static_table_html(parts, tmp, raw_data)
 
 
 _SECTION_TITLES = {

@@ -244,6 +244,21 @@ if has_content:
 | Performance | `_generate_chart()` uses same cache — no overhead |
 | Regression in existing features | Test both preview and export for every section type |
 
+## Revert Instructions
+
+If anything goes wrong, revert to the pre-implementation snapshot:
+
+```bash
+git log --oneline -5          # find commit hash
+git revert ab9f04a            # safe revert (keeps history)
+# OR
+git reset --hard ab9f04a      # hard reset (discards all changes after)
+```
+
+Commit `ab9f04a` contains: global template system, metadata error fix, and all current working state.
+
+---
+
 ## Testing Checklist
 
 - [ ] English subtitles appear under headings in HTML preview

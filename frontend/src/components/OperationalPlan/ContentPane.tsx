@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Input, Button, message, Tag, Spin, Tooltip, Alert, InputNumber } from 'antd';
-import { SaveOutlined, CodeOutlined, EyeOutlined, EditOutlined, WarningOutlined, PlusOutlined, MinusOutlined, DeleteOutlined, ColumnHeightOutlined, ColumnWidthOutlined } from '@ant-design/icons';
+import { SaveOutlined, CodeOutlined, EyeOutlined, EditOutlined, WarningOutlined, PlusOutlined, MinusOutlined, DeleteOutlined, ColumnHeightOutlined, ColumnWidthOutlined, TableOutlined } from '@ant-design/icons';
 import { operationalPlanApi } from '../../services/api';
 import VariablePicker from './VariablePicker';
 
@@ -9,6 +9,13 @@ interface MergeEntry {
   col: number;
   rowspan: number;
   colspan: number;
+}
+
+interface InlineTableData {
+  caption?: string;
+  columns: string[];
+  rows: string[][];
+  merges?: MergeEntry[];
 }
 
 interface TreeNodeData {
@@ -23,6 +30,7 @@ interface TreeNodeData {
   chart_type?: string | null;
   table_id?: string | null;
   static_table?: { columns: string[]; rows: string[][]; merges?: MergeEntry[] } | null;
+  inline_tables?: InlineTableData[] | null;
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
@@ -69,6 +77,12 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
   tableRowsRef.current = tableRows;
   mergesRef.current = merges;
 
+  const [inlineTables, setInlineTables] = useState<InlineTableData[]>([]);
+  const [activeTableIndex, setActiveTableIndex] = useState<number | null>(null);
+  const [inlineActiveCell, setInlineActiveCell] = useState<{ tableIndex: number; row: number; col: number } | null>(null);
+  const inlineTablesRef = useRef(inlineTables);
+  inlineTablesRef.current = inlineTables;
+
   const isCellMerged = useCallback((ri: number, ci: number): { master: boolean; entry?: MergeEntry } => {
     for (const m of merges) {
       if (ri >= m.row && ri < m.row + m.rowspan && ci >= m.col && ci < m.col + m.colspan) {
@@ -111,10 +125,23 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
       setTableColumns(node.static_table.columns || ['Column 1']);
       setTableRows(node.static_table.rows || [['']]);
       setMerges(node.static_table.merges || []);
+      setInlineTables([]);
+      setActiveTableIndex(null);
+    } else if (node?.content_type === 'richtext' && node?.inline_tables && node.inline_tables.length > 0) {
+      setInlineTables(node.inline_tables);
+      setActiveTableIndex(0);
+      setTableColumns(['Column 1']);
+      setTableRows([['']]);
+      setMerges([]);
     } else {
+      setInlineTables([]);
+      setActiveTableIndex(null);
+      setTableColumns(['Column 1', 'Column 2', 'Column 3']);
+      setTableRows([['', '', ''], ['', '', ''], ['', '', '']]);
       setMerges([]);
     }
     setActiveCell(null);
+    setInlineActiveCell(null);
     setSelectionStart(null);
     setSelectionEnd(null);
     setDirty(false);
@@ -138,10 +165,14 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
           merges: mergesRef.current,
         }
       });
+    } else if (node?.content_type === 'richtext' && inlineTablesRef.current.length > 0) {
+      propagateToParent(content, {
+        inline_tables: inlineTablesRef.current,
+      });
     } else {
       propagateToParent(content);
     }
-  }, [content, tableColumns, tableRows, merges]);
+  }, [content, tableColumns, tableRows, merges, inlineTables]);
 
   const handleSave = useCallback(async () => {
     if (!node || !planId || !dirty) return;
@@ -152,6 +183,14 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
         await operationalPlanApi.updateNode(planId, node.id, staticTableData);
         setDirty(false);
         onContentChange?.(node.id, '', staticTableData);
+      } else if (node.content_type === 'richtext' && inlineTablesRef.current.length > 0) {
+        const payload = {
+          content,
+          inline_tables: inlineTablesRef.current,
+        };
+        await operationalPlanApi.updateNode(planId, node.id, payload);
+        setDirty(false);
+        onContentChange?.(node.id, content, { inline_tables: inlineTablesRef.current });
       } else {
         await operationalPlanApi.updateNode(planId, node.id, { content });
         setDirty(false);
@@ -336,6 +375,81 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
     setDirty(true);
   };
 
+  // --- Inline table helpers ---
+
+  const updateInlineTable = (index: number, updater: (table: InlineTableData) => InlineTableData) => {
+    setInlineTables(prev => {
+      const next = [...prev];
+      next[index] = updater(next[index]);
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const addInlineRow = (ti: number) => {
+    updateInlineTable(ti, t => ({ ...t, rows: [...t.rows, t.columns.map(() => '')] }));
+  };
+
+  const addInlineColumn = (ti: number) => {
+    updateInlineTable(ti, t => ({
+      ...t,
+      columns: [...t.columns, `Column ${t.columns.length + 1}`],
+      rows: t.rows.map(row => [...row, '']),
+    }));
+  };
+
+  const removeInlineRow = (ti: number, rowIndex: number) => {
+    updateInlineTable(ti, t => {
+      if (t.rows.length <= 1) return t;
+      return { ...t, rows: t.rows.filter((_, i) => i !== rowIndex) };
+    });
+  };
+
+  const removeInlineColumn = (ti: number, colIndex: number) => {
+    updateInlineTable(ti, t => {
+      if (t.columns.length <= 1) return t;
+      return {
+        ...t,
+        columns: t.columns.filter((_, i) => i !== colIndex),
+        rows: t.rows.map(row => row.filter((_, i) => i !== colIndex)),
+      };
+    });
+  };
+
+  const handleInlineCellChange = (ti: number, ri: number, ci: number, val: string) => {
+    updateInlineTable(ti, t => {
+      const rows = t.rows.map(row => [...row]);
+      rows[ri][ci] = val;
+      return { ...t, rows };
+    });
+  };
+
+  const handleInlineHeaderChange = (ti: number, ci: number, val: string) => {
+    updateInlineTable(ti, t => {
+      const columns = [...t.columns];
+      columns[ci] = val;
+      return { ...t, columns };
+    });
+  };
+
+  const handleInlineCaptionChange = (ti: number, val: string) => {
+    updateInlineTable(ti, t => ({ ...t, caption: val }));
+  };
+
+  const removeInlineTable = async (tableIndex: number) => {
+    if (!planId || !node) return;
+    const updated = inlineTables.filter((_, i) => i !== tableIndex);
+    try {
+      await operationalPlanApi.updateNode(planId, node.id, { inline_tables: updated.length > 0 ? updated : null });
+      setInlineTables(updated);
+      setActiveTableIndex(updated.length > 0 ? 0 : null);
+      onContentChange?.(node.id, content, { inline_tables: updated.length > 0 ? updated : null });
+      message.success('Table removed');
+    } catch {
+      message.error('Failed to remove table');
+    }
+  };
+
   const handleVariableSelect = (varKey: string) => {
     if (node?.content_type === 'static_table') {
       if (!activeCell) {
@@ -348,6 +462,17 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
         const r = prev.map(row => [...row]);
         r[targetRow][targetCol] = `{{${varKey}}}`;
         return r;
+      });
+      setDirty(true);
+    } else if (node?.content_type === 'richtext' && inlineActiveCell) {
+      const ti = inlineActiveCell.tableIndex;
+      const { row, col } = inlineActiveCell;
+      setInlineTables(prev => {
+        const next = [...prev];
+        const rows = next[ti].rows.map(r => [...r]);
+        rows[row][col] = `{{${varKey}}}`;
+        next[ti] = { ...next[ti], rows };
+        return next;
       });
       setDirty(true);
     } else {
@@ -507,23 +632,145 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
               )}
             </div>
           ) : node.content_type === 'richtext' ? (
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={e => handleChange(e.target.value)}
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                padding: 16,
-                fontSize: 14,
-                lineHeight: 1.7,
-                resize: 'none',
-                fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
-                width: '100%',
-              }}
-              placeholder="Type content here... Use the Variable Picker to insert {{variable_name}} placeholders."
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={e => handleChange(e.target.value)}
+                style={{
+                  flex: inlineTables.length > 0 ? '0 0 35%' : 1,
+                  border: 'none',
+                  outline: 'none',
+                  padding: 16,
+                  fontSize: 14,
+                  lineHeight: 1.7,
+                  resize: 'none',
+                  fontFamily: "'Noto Sans', 'Segoe UI', sans-serif",
+                  width: '100%',
+                  borderBottom: inlineTables.length > 0 ? '1px solid #f0f0f0' : 'none',
+                }}
+                placeholder="Type content here... Use the Variable Picker to insert {{variable_name}} placeholders."
+              />
+              <div style={{ padding: '4px 16px', borderTop: '1px solid #f0f0f0', display: 'flex', gap: 8, alignItems: 'center', background: '#fafafa' }}>
+                <Tooltip title="Insert a table below the text">
+                  <Button
+                    size="small"
+                    icon={<TableOutlined />}
+                    onClick={() => {
+                      const newTable: InlineTableData = {
+                        caption: '',
+                        columns: ['Column 1', 'Column 2', 'Column 3'],
+                        rows: [['', '', ''], ['', '', ''], ['', '', '']],
+                        merges: [],
+                      };
+                      setInlineTables(prev => [...prev, newTable]);
+                      setActiveTableIndex(inlineTables.length);
+                      setDirty(true);
+                    }}
+                    style={{ borderColor: '#722ed1', color: '#722ed1' }}
+                  >
+                    Add Table
+                  </Button>
+                </Tooltip>
+                {inlineTables.length > 0 && (
+                  <span style={{ fontSize: 11, color: '#999' }}>
+                    {inlineTables.length} table{inlineTables.length > 1 ? 's' : ''} in this section
+                  </span>
+                )}
+              </div>
+              {inlineTables.length > 0 && (
+                <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+                  {inlineTables.map((table, ti) => (
+                    <div key={ti} style={{
+                      marginBottom: 16,
+                      border: activeTableIndex === ti ? '2px solid #1677ff' : '1px solid #d9d9d9',
+                      borderRadius: 6,
+                      padding: 12,
+                      background: activeTableIndex === ti ? '#f6ffed' : '#fff',
+                    }}
+                    onClick={() => setActiveTableIndex(ti)}
+                    >
+                      <div style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Input
+                          size="small"
+                          value={table.caption || ''}
+                          onChange={e => handleInlineCaptionChange(ti, e.target.value)}
+                          placeholder={`Table ${ti + 1} caption (optional)`}
+                          style={{ width: 260, fontWeight: 600 }}
+                          onClick={e => e.stopPropagation()}
+                        />
+                        <span style={{ width: 1, height: 20, background: '#d9d9d9', margin: '0 4px' }} />
+                        <Button size="small" icon={<PlusOutlined />} onClick={(e) => { e.stopPropagation(); addInlineRow(ti); }}>Row</Button>
+                        <Button size="small" icon={<PlusOutlined />} onClick={(e) => { e.stopPropagation(); addInlineColumn(ti); }}>Col</Button>
+                        <div style={{ flex: 1 }} />
+                        {inlineActiveCell?.tableIndex === ti && (
+                          <span style={{ fontSize: 11, color: '#1890ff', background: '#e6f7ff', padding: '2px 6px', borderRadius: 4 }}>
+                            Cell: {inlineActiveCell.row + 1}x{inlineActiveCell.col + 1}
+                          </span>
+                        )}
+                        <Tooltip title="Remove this table">
+                          <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); removeInlineTable(ti); }}>
+                            Remove
+                          </Button>
+                        </Tooltip>
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                        <thead>
+                          <tr>
+                            {table.columns.map((col, ci) => (
+                              <th key={ci} style={{ border: '1px solid #d9d9d9', padding: 4, background: '#fafafa', position: 'relative' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <input
+                                    value={col}
+                                    onChange={e => handleInlineHeaderChange(ti, ci, e.target.value)}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontWeight: 600, textAlign: 'center', fontSize: 13 }}
+                                  />
+                                  <DeleteOutlined
+                                    style={{ color: '#ff4d4f', fontSize: 11, cursor: table.columns.length > 1 ? 'pointer' : 'not-allowed', opacity: table.columns.length > 1 ? 1 : 0.3 }}
+                                    onClick={(e) => { e.stopPropagation(); removeInlineColumn(ti, ci); }}
+                                  />
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {table.rows.map((row, ri) => (
+                            <tr key={ri}>
+                              <td style={{ textAlign: 'center', verticalAlign: 'top', paddingTop: 8, border: '1px solid #d9d9d9', width: 30 }}>
+                                <DeleteOutlined
+                                  style={{ color: '#ff4d4f', fontSize: 11, cursor: table.rows.length > 1 ? 'pointer' : 'not-allowed', opacity: table.rows.length > 1 ? 1 : 0.3 }}
+                                  onClick={(e) => { e.stopPropagation(); removeInlineRow(ti, ri); }}
+                                />
+                              </td>
+                              {row.map((cellVal, ci) => (
+                                <td key={ci} style={{
+                                  border: '1px solid #d9d9d9',
+                                  padding: 2,
+                                  background: inlineActiveCell?.tableIndex === ti && inlineActiveCell.row === ri && inlineActiveCell.col === ci ? '#e6f7ff' : undefined,
+                                }}>
+                                  <input
+                                    value={cellVal}
+                                    onChange={e => handleInlineCellChange(ti, ri, ci, e.target.value)}
+                                    onFocus={() => setInlineActiveCell({ tableIndex: ti, row: ri, col: ci })}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ width: '100%', border: 'none', outline: 'none', fontSize: 13, background: 'transparent', padding: '2px 4px' }}
+                                  />
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 4, color: '#999', fontSize: 11 }}>
+                    Use <code>{'{{variable_name}}'}</code> in cells to auto-populate data. Click "Add Table" to insert another table.
+                  </div>
+                </div>
+              )}
+            </div>
           ) : node.content_type === 'chart' ? (
             <div style={{ padding: 24, textAlign: 'center' }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
@@ -653,7 +900,9 @@ const ContentPane: React.FC<ContentPaneProps> = ({ node, planId, calculationId, 
               usedVariables={
                 node?.content_type === 'static_table'
                   ? Array.from(tableRows.flat().join(' ').matchAll(/\{\{(\w+:?\w+)\}\}/g)).map(m => m[1])
-                  : Array.from(content.matchAll(/\{\{(\w+:?\w+)\}\}/g)).map(m => m[1])
+                  : node?.content_type === 'richtext' && inlineTables.length > 0
+                    ? Array.from(inlineTables.flatMap(t => t.rows.flat()).join(' ').matchAll(/\{\{(\w+:?\w+)\}\}/g)).map(m => m[1])
+                    : Array.from(content.matchAll(/\{\{(\w+:?\w+)\}\}/g)).map(m => m[1])
               }
               calculationId={calculationId}
             />

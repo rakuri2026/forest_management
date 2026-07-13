@@ -977,6 +977,7 @@ async def preview_operational_plan(
 <div class="toc">{_build_toc_html(tree_list)}</div>
 <hr>
 {body_html}
+{_render_custom_notes_html(metadata)}
 </body>
 </html>"""
     return HTMLResponse(content=html)
@@ -1055,6 +1056,19 @@ def _build_toc_html(tree: List[TreeNode]) -> str:
         if node.children:
             lines.append(_build_toc_html(node.children))
     return "\n".join(lines)
+
+
+def _render_custom_notes_html(metadata: dict) -> str:
+    custom_notes = metadata.get("custom_notes")
+    if not custom_notes:
+        return ""
+    from app.services.operational_plan.op_docx_builder import _html_escape
+    parts = ['<div style="page-break-before:always;margin-top:24px;">']
+    parts.append('<h1>Custom Notes</h1>')
+    for line in custom_notes.strip().split("\n"):
+        parts.append(f'<p>{_html_escape(line.strip())}</p>')
+    parts.append('</div>')
+    return "\n".join(parts)
 
 
 # ═══════════════════════════════════════════════════════════

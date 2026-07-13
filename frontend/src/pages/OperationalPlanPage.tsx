@@ -38,6 +38,7 @@ interface TreeNodeData {
   table_id?: string | null;
   map_type?: string | null;
   static_table?: { columns: string[]; rows: string[][]; merges?: { row: number; col: number; rowspan: number; colspan: number }[] } | null;
+  inline_tables?: { caption?: string; columns: string[]; rows: string[][]; merges?: { row: number; col: number; rowspan: number; colspan: number }[] }[] | null;
   children: TreeNodeData[];
   is_locked: boolean;
   hidden_in_export: boolean;
@@ -177,6 +178,33 @@ const OperationalPlanPage: React.FC<OperationalPlanPageProps> = (props) => {
 
   const handleAddStaticTable = async (parentId: string | null) => {
     if (!planId) return;
+
+    if (activeNode && activeNode.content_type === 'richtext') {
+      const newTable = {
+        caption: '',
+        columns: ['Column 1', 'Column 2', 'Column 3'],
+        rows: [['', '', ''], ['', '', ''], ['', '', '']],
+        merges: [],
+      };
+      const existing = activeNode.inline_tables || [];
+      const updated = [...existing, newTable];
+      try {
+        await operationalPlanApi.updateNode(planId, activeNode.id, { inline_tables: updated });
+        setTree(prev => {
+          const update = (nodes: TreeNodeData[]): TreeNodeData[] =>
+            nodes.map(n => {
+              if (n.id === activeNode.id) return { ...n, inline_tables: updated };
+              return { ...n, children: update(n.children || []) };
+            });
+          return update(prev);
+        });
+        message.success('Table added to section');
+      } catch {
+        message.error('Failed to add table');
+      }
+      return;
+    }
+
     const val = window.prompt('Enter table title (Nepali):');
     if (!val) return;
     try {

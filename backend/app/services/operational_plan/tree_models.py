@@ -21,6 +21,7 @@ class TreeNode(BaseModel):
     table_id: Optional[str] = None
     map_type: Optional[str] = None
     static_table: Optional[dict] = None
+    inline_tables: Optional[list] = None
     children: List[TreeNode] = []
     is_locked: bool = False
     hidden_in_export: bool = False
